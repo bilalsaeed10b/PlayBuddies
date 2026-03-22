@@ -1709,7 +1709,7 @@ export default function Game({
                 >
                   <div className="text-4xl mb-2">🔥</div>
                   <div className="font-bold">FIREBOY</div>
-                  {Object.values(lobbyData?.players || {}).find((p: any) => p.role === 'fire') && (
+                  {Object.values(lobbyData?.players || {}).some((p: any) => p.role === 'fire') && (
                     <div className="absolute -top-2 -right-2 bg-orange-500 text-[10px] px-2 py-1 rounded-full">TAKEN</div>
                   )}
                 </button>
@@ -1723,7 +1723,7 @@ export default function Game({
                 >
                   <div className="text-4xl mb-2">💧</div>
                   <div className="font-bold">WATERGIRL</div>
-                  {Object.values(lobbyData?.players || {}).find((p: any) => p.role === 'water') && (
+                  {Object.values(lobbyData?.players || {}).some((p: any) => p.role === 'water') && (
                     <div className="absolute -top-2 -right-2 bg-cyan-500 text-[10px] px-2 py-1 rounded-full">TAKEN</div>
                   )}
                 </button>
