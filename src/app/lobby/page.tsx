@@ -1,8 +1,8 @@
 // Bilal Saeed xxxxx
 "use client";
 
-import { useState, useEffect } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useState, useEffect, Suspense } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
 import { useAuthStore } from "@/store/useAuthStore";
 import { GAMES } from "@/lib/games";
 import AuthGuard from "@/components/AuthGuard";
@@ -50,9 +50,9 @@ interface LobbyState {
   }[];
 }
 
-export default function LobbyPage() {
-  const params = useParams();
-  const roomId = params.id as string;
+function LobbyContent() {
+  const searchParams = useSearchParams();
+  const roomId = searchParams.get("room") || "";
   const router = useRouter();
   const { user } = useAuthStore();
 
@@ -451,6 +451,14 @@ export default function LobbyPage() {
         </div>
       </div>
     </AuthGuard>
+  );
+}
+
+export default function LobbyPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-background flex flex-col items-center justify-center text-white"><Loader2 size={48} className="animate-spin text-primary mb-4" /><h2 className="text-xl font-bold">Joining Lobby...</h2></div>}>
+      <LobbyContent />
+    </Suspense>
   );
 }
 // Bilal Saeed xxxxx

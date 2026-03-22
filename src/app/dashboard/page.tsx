@@ -77,7 +77,7 @@ export default function DashboardPage() {
         players: [],
         createdAt: serverTimestamp(),
       });
-      router.push(`/lobby/${roomId}`);
+      router.push(`/lobby?room=${roomId}`);
     } catch (e) {
       console.error("Error creating lobby", e);
       setIsCreating(false);
@@ -88,7 +88,7 @@ export default function DashboardPage() {
     e.preventDefault();
     if (!joinCode || joinCode.trim() === "") return;
     setIsJoining(true);
-    router.push(`/lobby/${joinCode.trim().toUpperCase()}`);
+    router.push(`/lobby?room=${joinCode.trim().toUpperCase()}`);
   };
 
   return (
