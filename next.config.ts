@@ -1,9 +1,11 @@
 import type { NextConfig } from "next";
 
+const isGithubActions = process.env.GITHUB_ACTIONS || false;
+
 const nextConfig: NextConfig = {
   /* config options here */
   output: "export",
-  basePath: "/PlayBuddies", // Adjusted for https://bilalsaeed10b.github.io/PlayBuddies/
+  basePath: isGithubActions ? "/PlayBuddies" : "", // Conditional for local dev vs GitHub Pages
   images: {
     unoptimized: true,
   },
