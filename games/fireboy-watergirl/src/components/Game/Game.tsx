@@ -1823,18 +1823,17 @@ export default function Game({
         )}
       </AnimatePresence>
 
-// Bilal Saeed xxxxx
       <div className="relative w-full h-full flex flex-col landscape:flex-row items-center justify-center gap-4 p-2">
         {/* Left Side Controls (Landscape) */}
         <div className="hidden landscape:flex flex-col gap-6 p-4 z-20">
-          <button 
+          <button
             onTouchStart={(e) => { e.preventDefault(); keys.current.add(role === 'water' ? 'ArrowLeft' : 'KeyA'); }}
             onTouchEnd={(e) => { e.preventDefault(); keys.current.delete(role === 'water' ? 'ArrowLeft' : 'KeyA'); }}
             className="w-20 h-20 bg-white/10 backdrop-blur-md rounded-full flex items-center justify-center border-2 border-white/20 active:bg-white/40 shadow-xl pointer-events-auto"
           >
             <span className="text-3xl text-white">←</span>
           </button>
-          <button 
+          <button
             onTouchStart={(e) => { e.preventDefault(); keys.current.add(role === 'water' ? 'ArrowRight' : 'KeyD'); }}
             onTouchEnd={(e) => { e.preventDefault(); keys.current.delete(role === 'water' ? 'ArrowRight' : 'KeyD'); }}
             className="w-20 h-20 bg-white/10 backdrop-blur-md rounded-full flex items-center justify-center border-2 border-white/20 active:bg-white/40 shadow-xl pointer-events-auto"
@@ -1845,231 +1844,229 @@ export default function Game({
 
         {/* Game Area */}
         <div className="relative w-full landscape:w-auto h-auto landscape:h-full max-h-[65vh] landscape:max-h-full aspect-[4/3] bg-zinc-900 rounded-2xl overflow-hidden border border-zinc-800 shadow-2xl flex items-center justify-center z-10">
-// Bilal Saeed xxxxx
 
-        <canvas
-          ref={canvasRef}
-          width={CANVAS_WIDTH}
-          height={CANVAS_HEIGHT}
-          className="w-full h-full"
-        />
+          <canvas
+            ref={canvasRef}
+            width={CANVAS_WIDTH}
+            height={CANVAS_HEIGHT}
+            className="w-full h-full"
+          />
 
-        {/* HUD */}
-        <div className="absolute top-0 left-0 right-0 p-6 flex justify-between items-start pointer-events-none bg-gradient-to-b from-black/80 to-transparent">
-          <div className="flex flex-col gap-1">
-            <div className="flex items-center gap-2">
-              <div className="w-1 h-3 bg-orange-500" />
-              <div className="text-[10px] text-zinc-500 uppercase tracking-[0.3em] font-bold">
-                {customLevel ? 'USER_DATA_ARCHive' : `SECTOR_0${levelIndex + 1}`}
-              </div>
-            </div>
-            <div className="text-2xl font-black tracking-tighter italic uppercase">{customLevel ? customLevel.name : levels[levelIndex].name}</div>
-
-            <div className="flex gap-6 mt-4">
-              <div className="flex flex-col">
-                <span className="text-[8px] text-zinc-500 uppercase font-bold mb-1">Mission Timer</span>
-                <span className="text-sm font-mono font-bold text-white">
-                  {engine ? Math.floor((Date.now() - engine.startTime) / 1000).toString().padStart(3, '0') : '000'}s
-                </span>
-              </div>
-              <div className="flex flex-col">
-                <span className="text-[8px] text-zinc-500 uppercase font-bold mb-1">Gems Recovered</span>
-                <div className="flex gap-3">
-                  <div className="flex items-center gap-1 text-orange-500 text-sm font-bold">
-                    <Gem size={12} /> {engine?.player1.score / 10}
-                  </div>
-                  <div className="flex items-center gap-1 text-cyan-500 text-sm font-bold">
-                    <Gem size={12} /> {engine?.player2.score / 10}
-                  </div>
+          {/* HUD */}
+          <div className="absolute top-0 left-0 right-0 p-6 flex justify-between items-start pointer-events-none bg-gradient-to-b from-black/80 to-transparent">
+            <div className="flex flex-col gap-1">
+              <div className="flex items-center gap-2">
+                <div className="w-1 h-3 bg-orange-500" />
+                <div className="text-[10px] text-zinc-500 uppercase tracking-[0.3em] font-bold">
+                  {customLevel ? 'USER_DATA_ARCHive' : `SECTOR_0${levelIndex + 1}`}
                 </div>
               </div>
-              <div className="flex flex-col">
-                <span className="text-[8px] text-zinc-500 uppercase font-bold mb-1">System Status</span>
-                <div className="flex items-center gap-2">
-                  <div className={`w-1.5 h-1.5 rounded-full ${engine?.player1.isDead || engine?.player2.isDead ? 'bg-red-500 animate-pulse' : 'bg-green-500'}`} />
-                  <span className={`text-[10px] font-bold ${engine?.player1.isDead || engine?.player2.isDead ? 'text-red-500' : 'text-green-500'}`}>
-                    {engine?.player1.isDead || engine?.player2.isDead ? 'CRITICAL_FAILURE' : 'NOMINAL'}
+              <div className="text-2xl font-black tracking-tighter italic uppercase">{customLevel ? customLevel.name : levels[levelIndex].name}</div>
+
+              <div className="flex gap-6 mt-4">
+                <div className="flex flex-col">
+                  <span className="text-[8px] text-zinc-500 uppercase font-bold mb-1">Mission Timer</span>
+                  <span className="text-sm font-mono font-bold text-white">
+                    {engine ? Math.floor((Date.now() - engine.startTime) / 1000).toString().padStart(3, '0') : '000'}s
                   </span>
                 </div>
+                <div className="flex flex-col">
+                  <span className="text-[8px] text-zinc-500 uppercase font-bold mb-1">Gems Recovered</span>
+                  <div className="flex gap-3">
+                    <div className="flex items-center gap-1 text-orange-500 text-sm font-bold">
+                      <Gem size={12} /> {engine?.player1.score / 10}
+                    </div>
+                    <div className="flex items-center gap-1 text-cyan-500 text-sm font-bold">
+                      <Gem size={12} /> {engine?.player2.score / 10}
+                    </div>
+                  </div>
+                </div>
+                <div className="flex flex-col">
+                  <span className="text-[8px] text-zinc-500 uppercase font-bold mb-1">System Status</span>
+                  <div className="flex items-center gap-2">
+                    <div className={`w-1.5 h-1.5 rounded-full ${engine?.player1.isDead || engine?.player2.isDead ? 'bg-red-500 animate-pulse' : 'bg-green-500'}`} />
+                    <span className={`text-[10px] font-bold ${engine?.player1.isDead || engine?.player2.isDead ? 'text-red-500' : 'text-green-500'}`}>
+                      {engine?.player1.isDead || engine?.player2.isDead ? 'CRITICAL_FAILURE' : 'NOMINAL'}
+                    </span>
+                  </div>
+                </div>
               </div>
+            </div>
+
+            {/* Progress Bar */}
+            <div className="absolute top-0 left-1/2 -translate-x-1/2 w-48 h-2 bg-black/40 rounded-full overflow-hidden border border-white/10">
+              <motion.div
+                initial={{ width: 0 }}
+                animate={{ width: `${((levelIndex + 1) / levels.length) * 100}%` }}
+                className="h-full bg-gradient-to-r from-orange-500 to-cyan-500"
+              />
+            </div>
+
+            <div className="flex gap-2 pointer-events-auto">
+              {onBack && (
+                <button
+                  onClick={onBack}
+                  className="p-2 bg-black/50 border border-white/10 rounded-lg hover:bg-white/10 transition-colors"
+                  title="Back to Menu"
+                >
+                  <ArrowLeft size={18} />
+                </button>
+              )}
+              <button
+                onClick={copyInviteLink}
+                className="px-3 py-2 bg-black/50 border border-white/10 rounded-lg hover:bg-white/10 transition-colors text-xs font-bold"
+              >
+                INVITE
+              </button>
+              <button
+                onClick={() => setUseTilt(!useTilt)}
+                className={`p-2 border rounded-lg transition-colors ${useTilt ? 'bg-cyan-500/20 border-cyan-500 text-cyan-500' : 'bg-black/50 border-white/10 text-white'}`}
+                title="Tilt Controls"
+              >
+                <Smartphone size={18} />
+              </button>
+              <button
+                onClick={() => setEngine(new GameEngine(levels[levelIndex]))}
+                className="p-2 bg-black/50 border border-white/10 rounded-lg hover:bg-white/10 transition-colors"
+              >
+                <RefreshCw size={18} />
+              </button>
+              <button
+                onClick={() => setShowSettings(!showSettings)}
+                className="p-2 bg-black/50 border border-white/10 rounded-lg hover:bg-white/10 transition-colors"
+                title="Settings"
+              >
+                <Settings size={18} />
+              </button>
+              <button
+                onClick={() => setShowChat(!showChat)}
+                className="p-2 bg-black/50 border border-white/10 rounded-lg hover:bg-white/10 transition-colors"
+              >
+                <MessageSquare size={18} />
+              </button>
             </div>
           </div>
 
-          {/* Progress Bar */}
-          <div className="absolute top-0 left-1/2 -translate-x-1/2 w-48 h-2 bg-black/40 rounded-full overflow-hidden border border-white/10">
-            <motion.div
-              initial={{ width: 0 }}
-              animate={{ width: `${((levelIndex + 1) / levels.length) * 100}%` }}
-              className="h-full bg-gradient-to-r from-orange-500 to-cyan-500"
-            />
-          </div>
-
-          <div className="flex gap-2 pointer-events-auto">
-            {onBack && (
-              <button
-                onClick={onBack}
-                className="p-2 bg-black/50 border border-white/10 rounded-lg hover:bg-white/10 transition-colors"
-                title="Back to Menu"
+          {/* Chat Overlay */}
+          <AnimatePresence>
+            {showChat && (
+              <motion.div
+                initial={{ x: 300 }}
+                animate={{ x: 0 }}
+                exit={{ x: 300 }}
+                className="absolute top-0 right-0 bottom-0 w-64 bg-black/80 backdrop-blur-md border-l border-white/10 p-4 flex flex-col"
               >
-                <ArrowLeft size={18} />
-              </button>
+                <div className="flex-1 overflow-y-auto space-y-2 mb-4">
+                  {chatMessages.map((msg, i) => (
+                    <div key={i} className={`text-sm ${msg.role === 'fire' ? 'text-orange-400' : 'text-cyan-400'}`}>
+                      <span className="font-bold opacity-50">{msg.role}: </span>
+                      {msg.message} {msg.emoji}
+                    </div>
+                  ))}
+                </div>
+                <div className="grid grid-cols-4 gap-2">
+                  {['🔥', '💧', '👍', '👎', '🏃', '🛑', '❓', '✨'].map(e => (
+                    <button
+                      key={e}
+                      onClick={() => sendChat('', e)}
+                      className="p-2 bg-white/5 rounded hover:bg-white/10 transition-colors text-xl"
+                    >
+                      {e}
+                    </button>
+                  ))}
+                </div>
+              </motion.div>
             )}
-            <button
-              onClick={copyInviteLink}
-              className="px-3 py-2 bg-black/50 border border-white/10 rounded-lg hover:bg-white/10 transition-colors text-xs font-bold"
-            >
-              INVITE
-            </button>
-            <button
-              onClick={() => setUseTilt(!useTilt)}
-              className={`p-2 border rounded-lg transition-colors ${useTilt ? 'bg-cyan-500/20 border-cyan-500 text-cyan-500' : 'bg-black/50 border-white/10 text-white'}`}
-              title="Tilt Controls"
-            >
-              <Smartphone size={18} />
-            </button>
-            <button
-              onClick={() => setEngine(new GameEngine(levels[levelIndex]))}
-              className="p-2 bg-black/50 border border-white/10 rounded-lg hover:bg-white/10 transition-colors"
-            >
-              <RefreshCw size={18} />
-            </button>
-            <button
-              onClick={() => setShowSettings(!showSettings)}
-              className="p-2 bg-black/50 border border-white/10 rounded-lg hover:bg-white/10 transition-colors"
-              title="Settings"
-            >
-              <Settings size={18} />
-            </button>
-            <button
-              onClick={() => setShowChat(!showChat)}
-              className="p-2 bg-black/50 border border-white/10 rounded-lg hover:bg-white/10 transition-colors"
-            >
-              <MessageSquare size={18} />
-            </button>
-          </div>
-        </div>
+          </AnimatePresence>
 
-        {/* Chat Overlay */}
-        <AnimatePresence>
-          {showChat && (
-            <motion.div
-              initial={{ x: 300 }}
-              animate={{ x: 0 }}
-              exit={{ x: 300 }}
-              className="absolute top-0 right-0 bottom-0 w-64 bg-black/80 backdrop-blur-md border-l border-white/10 p-4 flex flex-col"
-            >
-              <div className="flex-1 overflow-y-auto space-y-2 mb-4">
-                {chatMessages.map((msg, i) => (
-                  <div key={i} className={`text-sm ${msg.role === 'fire' ? 'text-orange-400' : 'text-cyan-400'}`}>
-                    <span className="font-bold opacity-50">{msg.role}: </span>
-                    {msg.message} {msg.emoji}
-                  </div>
-                ))}
-              </div>
-              <div className="grid grid-cols-4 gap-2">
-                {['🔥', '💧', '👍', '👎', '🏃', '🛑', '❓', '✨'].map(e => (
-                  <button
-                    key={e}
-                    onClick={() => sendChat('', e)}
-                    className="p-2 bg-white/5 rounded hover:bg-white/10 transition-colors text-xl"
-                  >
-                    {e}
-                  </button>
-                ))}
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* Settings Overlay */}
-        <AnimatePresence>
-          {showSettings && (
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="absolute inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4"
-            >
-              <div className="bg-zinc-900 border border-white/10 rounded-2xl p-6 w-full max-w-md shadow-2xl">
-                <div className="flex justify-between items-center mb-6">
-                  <h2 className="text-xl font-black uppercase tracking-widest text-white">Optimization Control</h2>
-                  <button
-                    onClick={() => setShowSettings(false)}
-                    className="p-2 hover:bg-white/10 rounded-lg transition-colors text-zinc-400 hover:text-white"
-                  >
-                    ✕
-                  </button>
-                </div>
-
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between p-4 bg-black/50 rounded-xl border border-white/5">
-                    <div>
-                      <div className="font-bold text-white uppercase tracking-wider text-sm">Animations</div>
-                      <div className="text-xs text-zinc-500 mt-1">Player movements, hazard effects, dynamic elements</div>
-                    </div>
+          {/* Settings Overlay */}
+          <AnimatePresence>
+            {showSettings && (
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.95 }}
+                className="absolute inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4"
+              >
+                <div className="bg-zinc-900 border border-white/10 rounded-2xl p-6 w-full max-w-md shadow-2xl">
+                  <div className="flex justify-between items-center mb-6">
+                    <h2 className="text-xl font-black uppercase tracking-widest text-white">Optimization Control</h2>
                     <button
-                      onClick={() => setSettings({ ...settings, animations: !settings.animations })}
-                      className={`w-12 h-6 rounded-full transition-colors relative ${settings.animations ? 'bg-cyan-500' : 'bg-zinc-700'}`}
+                      onClick={() => setShowSettings(false)}
+                      className="p-2 hover:bg-white/10 rounded-lg transition-colors text-zinc-400 hover:text-white"
                     >
-                      <div className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${settings.animations ? 'translate-x-6' : 'translate-x-0'}`} />
+                      ✕
                     </button>
                   </div>
 
-                  <div className="flex items-center justify-between p-4 bg-black/50 rounded-xl border border-white/5">
-                    <div>
-                      <div className="font-bold text-white uppercase tracking-wider text-sm">Particles</div>
-                      <div className="text-xs text-zinc-500 mt-1">Sparks, splashes, ambient dust, collection effects</div>
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between p-4 bg-black/50 rounded-xl border border-white/5">
+                      <div>
+                        <div className="font-bold text-white uppercase tracking-wider text-sm">Animations</div>
+                        <div className="text-xs text-zinc-500 mt-1">Player movements, hazard effects, dynamic elements</div>
+                      </div>
+                      <button
+                        onClick={() => setSettings({ ...settings, animations: !settings.animations })}
+                        className={`w-12 h-6 rounded-full transition-colors relative ${settings.animations ? 'bg-cyan-500' : 'bg-zinc-700'}`}
+                      >
+                        <div className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${settings.animations ? 'translate-x-6' : 'translate-x-0'}`} />
+                      </button>
                     </div>
-                    <button
-                      onClick={() => setSettings({ ...settings, particles: !settings.particles })}
-                      className={`w-12 h-6 rounded-full transition-colors relative ${settings.particles ? 'bg-orange-500' : 'bg-zinc-700'}`}
-                    >
-                      <div className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${settings.particles ? 'translate-x-6' : 'translate-x-0'}`} />
-                    </button>
+
+                    <div className="flex items-center justify-between p-4 bg-black/50 rounded-xl border border-white/5">
+                      <div>
+                        <div className="font-bold text-white uppercase tracking-wider text-sm">Particles</div>
+                        <div className="text-xs text-zinc-500 mt-1">Sparks, splashes, ambient dust, collection effects</div>
+                      </div>
+                      <button
+                        onClick={() => setSettings({ ...settings, particles: !settings.particles })}
+                        className={`w-12 h-6 rounded-full transition-colors relative ${settings.particles ? 'bg-orange-500' : 'bg-zinc-700'}`}
+                      >
+                        <div className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${settings.particles ? 'translate-x-6' : 'translate-x-0'}`} />
+                      </button>
+                    </div>
+
+                    <div className="flex items-center justify-between p-4 bg-black/50 rounded-xl border border-white/5">
+                      <div>
+                        <div className="font-bold text-white uppercase tracking-wider text-sm">Shadows</div>
+                        <div className="text-xs text-zinc-500 mt-1">Dynamic lighting, drop shadows, ambient occlusion</div>
+                      </div>
+                      <button
+                        onClick={() => setSettings({ ...settings, shadows: !settings.shadows })}
+                        className={`w-12 h-6 rounded-full transition-colors relative ${settings.shadows ? 'bg-green-500' : 'bg-zinc-700'}`}
+                      >
+                        <div className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${settings.shadows ? 'translate-x-6' : 'translate-x-0'}`} />
+                      </button>
+                    </div>
+
+                    <div className="flex items-center justify-between p-4 bg-black/50 rounded-xl border border-white/5">
+                      <div>
+                        <div className="font-bold text-white uppercase tracking-wider text-sm">Bloom</div>
+                        <div className="text-xs text-zinc-500 mt-1">Glow effects, light bleeding, neon highlights</div>
+                      </div>
+                      <button
+                        onClick={() => setSettings({ ...settings, bloom: !settings.bloom })}
+                        className={`w-12 h-6 rounded-full transition-colors relative ${settings.bloom ? 'bg-purple-500' : 'bg-zinc-700'}`}
+                      >
+                        <div className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${settings.bloom ? 'translate-x-6' : 'translate-x-0'}`} />
+                      </button>
+                    </div>
                   </div>
 
-                  <div className="flex items-center justify-between p-4 bg-black/50 rounded-xl border border-white/5">
-                    <div>
-                      <div className="font-bold text-white uppercase tracking-wider text-sm">Shadows</div>
-                      <div className="text-xs text-zinc-500 mt-1">Dynamic lighting, drop shadows, ambient occlusion</div>
-                    </div>
-                    <button
-                      onClick={() => setSettings({ ...settings, shadows: !settings.shadows })}
-                      className={`w-12 h-6 rounded-full transition-colors relative ${settings.shadows ? 'bg-green-500' : 'bg-zinc-700'}`}
-                    >
-                      <div className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${settings.shadows ? 'translate-x-6' : 'translate-x-0'}`} />
-                    </button>
-                  </div>
-
-                  <div className="flex items-center justify-between p-4 bg-black/50 rounded-xl border border-white/5">
-                    <div>
-                      <div className="font-bold text-white uppercase tracking-wider text-sm">Bloom</div>
-                      <div className="text-xs text-zinc-500 mt-1">Glow effects, light bleeding, neon highlights</div>
-                    </div>
-                    <button
-                      onClick={() => setSettings({ ...settings, bloom: !settings.bloom })}
-                      className={`w-12 h-6 rounded-full transition-colors relative ${settings.bloom ? 'bg-purple-500' : 'bg-zinc-700'}`}
-                    >
-                      <div className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${settings.bloom ? 'translate-x-6' : 'translate-x-0'}`} />
-                    </button>
+                  <div className="mt-6 pt-6 border-t border-white/10 text-center">
+                    <p className="text-xs text-zinc-500">Disable features to improve performance on older devices.</p>
                   </div>
                 </div>
-
-                <div className="mt-6 pt-6 border-t border-white/10 text-center">
-                  <p className="text-xs text-zinc-500">Disable features to improve performance on older devices.</p>
-                </div>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
+              </motion.div>
+            )}
+          </AnimatePresence>
 
 
-// Bilal Saeed xxxxx
         </div>
 
         {/* Right Side Control (Landscape) */}
         <div className="hidden landscape:flex p-4 z-20">
-          <button 
+          <button
             onTouchStart={(e) => { e.preventDefault(); keys.current.add(role === 'water' ? 'ArrowUp' : 'KeyW'); }}
             onTouchEnd={(e) => { e.preventDefault(); keys.current.delete(role === 'water' ? 'ArrowUp' : 'KeyW'); }}
             className="w-24 h-24 bg-white/20 backdrop-blur-md rounded-full flex items-center justify-center border-2 border-white/30 active:bg-white/50 shadow-xl pointer-events-auto"
@@ -2081,14 +2078,14 @@ export default function Game({
         {/* Bottom Controls (Portrait) */}
         <div className="flex landscape:hidden w-full items-center justify-between px-8 py-4 z-20 pointer-events-none">
           <div className="flex gap-6 pointer-events-auto">
-            <button 
+            <button
               onTouchStart={(e) => { e.preventDefault(); keys.current.add(role === 'water' ? 'ArrowLeft' : 'KeyA'); }}
               onTouchEnd={(e) => { e.preventDefault(); keys.current.delete(role === 'water' ? 'ArrowLeft' : 'KeyA'); }}
               className="w-20 h-20 bg-white/10 backdrop-blur-md rounded-full flex items-center justify-center border-2 border-white/20 active:bg-white/40 shadow-xl"
             >
               <span className="text-3xl text-white">←</span>
             </button>
-            <button 
+            <button
               onTouchStart={(e) => { e.preventDefault(); keys.current.add(role === 'water' ? 'ArrowRight' : 'KeyD'); }}
               onTouchEnd={(e) => { e.preventDefault(); keys.current.delete(role === 'water' ? 'ArrowRight' : 'KeyD'); }}
               className="w-20 h-20 bg-white/10 backdrop-blur-md rounded-full flex items-center justify-center border-2 border-white/20 active:bg-white/40 shadow-xl"
@@ -2097,7 +2094,7 @@ export default function Game({
             </button>
           </div>
           <div className="pointer-events-auto">
-            <button 
+            <button
               onTouchStart={(e) => { e.preventDefault(); keys.current.add(role === 'water' ? 'ArrowUp' : 'KeyW'); }}
               onTouchEnd={(e) => { e.preventDefault(); keys.current.delete(role === 'water' ? 'ArrowUp' : 'KeyW'); }}
               className="w-24 h-24 bg-white/20 backdrop-blur-md rounded-full flex items-center justify-center border-2 border-white/30 active:bg-white/50 shadow-xl"
@@ -2107,7 +2104,6 @@ export default function Game({
           </div>
         </div>
       </div>
-// Bilal Saeed xxxxx
 
       <div className="mt-8 flex gap-8 text-zinc-500 text-xs uppercase tracking-widest hidden">
         <div className="flex items-center gap-2">
@@ -2127,13 +2123,13 @@ export default function Game({
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 50 }}
             className={`fixed bottom-8 left-1/2 -translate-x-1/2 px-6 py-3 rounded-full font-bold shadow-2xl z-[100] flex items-center gap-3 border ${toast.type === 'success' ? 'bg-green-500/20 border-green-500 text-green-500' :
-                toast.type === 'error' ? 'bg-red-500/20 border-red-500 text-red-500' :
-                  'bg-cyan-500/20 border-cyan-500 text-cyan-500'
+              toast.type === 'error' ? 'bg-red-500/20 border-red-500 text-red-500' :
+                'bg-cyan-500/20 border-cyan-500 text-cyan-500'
               }`}
           >
             <div className={`w-2 h-2 rounded-full ${toast.type === 'success' ? 'bg-green-500' :
-                toast.type === 'error' ? 'bg-red-500' :
-                  'bg-cyan-500'
+              toast.type === 'error' ? 'bg-red-500' :
+                'bg-cyan-500'
               } animate-pulse`} />
             {toast.message}
           </motion.div>

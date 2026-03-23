@@ -1,6 +1,4 @@
-import { Level } from '../types';
-
-export const DEFAULT_LEVELS: Level[] = [
+[
   {
     "id": 1,
     "name": "The Beginning",
@@ -1795,9 +1793,4 @@ export const DEFAULT_LEVELS: Level[] = [
       }
     ]
   }
-];
-
-export function getLevels(): Level[] {
-  const overrides = JSON.parse(localStorage.getItem('main_level_overrides') || '{}');
-  return DEFAULT_LEVELS.map(level => overrides[level.id] || level);
-}
+]
