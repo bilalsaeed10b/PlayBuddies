@@ -1,13 +1,11 @@
-// Bilal Saeed xxxxx
 import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
-import { 
+import {
   auth, db, googleProvider
 } from '@/lib/firebase';
-import { 
-  doc, setDoc, getDoc, onSnapshot, updateDoc, arrayUnion, serverTimestamp 
+import {
+  doc, setDoc, getDoc, onSnapshot, updateDoc, arrayUnion, serverTimestamp
 } from 'firebase/firestore';
 import { signInAnonymously, onAuthStateChanged, signInWithPopup } from 'firebase/auth';
-// Bilal Saeed xxxxx
 import { GameEngine } from '../game/engine';
 import { Level } from '../types';
 import { getLevels } from '../game/levels';
@@ -15,7 +13,6 @@ import { MessageSquare, Smile, RefreshCw, Smartphone, Monitor, Gem, ArrowLeft, S
 import { motion, AnimatePresence } from 'framer-motion';
 import confetti from 'canvas-confetti';
 import { playJumpSound, playCollectSound, playDeathSound, playWinSound } from '../game/sounds';
-// Bilal Saeed xxxxx
 
 const CANVAS_WIDTH = 800;
 const CANVAS_HEIGHT = 600;
@@ -31,7 +28,6 @@ interface Particle {
   size: number;
 }
 
-// Bilal Saeed xxxxx
 export default function FireboyWatergirl({
   customLevel,
   startLevelIndex = 0,
@@ -53,7 +49,6 @@ export default function FireboyWatergirl({
   displayName?: string,
   photoURL?: string
 }) {
-// Bilal Saeed xxxxx
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [engine, setEngine] = useState<GameEngine | null>(null);
   const [screenShake, setScreenShake] = useState(0);
@@ -68,6 +63,17 @@ export default function FireboyWatergirl({
   const [showChat, setShowChat] = useState(false);
   const [toast, setToast] = useState<{ message: string, type: 'success' | 'error' | 'info' } | null>(null);
   const [isMobile, setIsMobile] = useState(false);
+  
+  useEffect(() => {
+    const checkMobile = () => {
+      const isTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+      const isSmall = window.innerWidth < 1024;
+      setIsMobile(isTouch || isSmall);
+    };
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
   const [useTilt, setUseTilt] = useState(false);
   const [isGameOver, setIsGameOver] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -90,6 +96,12 @@ export default function FireboyWatergirl({
   const rtcRef = useRef<RTCPeerConnection | null>(null);
   const dcRef = useRef<RTCDataChannel | null>(null);
   const [rtcConnected, setRtcConnected] = useState(false);
+  const [fps, setFps] = useState(0);
+  const [ping, setPing] = useState(0);
+  const lastTimeRef = useRef<number>(0);
+  const frameCountRef = useRef<number>(0);
+  const lastFpsUpdateRef = useRef<number>(0);
+  const lastPingSentRef = useRef<number>(0);
 
   const addParticles = useCallback((x: number, y: number, color: string, count: number = 10) => {
     if (!settingsRef.current.particles) return;
@@ -279,11 +291,9 @@ export default function FireboyWatergirl({
     console.log(`[Multiplayer] Setting up Firestore listeners for room [${roomId}]`);
     const roomRef = doc(db, 'rooms', roomId);
 
-// Bilal Saeed xxxxx
     const unsubscribeRoom = onSnapshot(roomRef, (docSnap: any) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
-// Bilal Saeed xxxxx
         console.log('[Multiplayer] Room update:', data);
         setLobbyData(data);
 
@@ -341,11 +351,9 @@ export default function FireboyWatergirl({
 
     otherPlayers.forEach(pid => {
       const pRef = doc(db, 'rooms', roomId, 'updates', pid);
-// Bilal Saeed xxxxx
       const unsub = onSnapshot(pRef, (snap: any) => {
         if (snap.exists()) {
           const state = snap.data();
-// Bilal Saeed xxxxx
           const currentEngine = engineRef.current;
           if (!currentEngine) return;
 
@@ -407,6 +415,10 @@ export default function FireboyWatergirl({
               const targetPlayer = data.role === 'fire' ? currentEngine.player1 : currentEngine.player2;
               Object.assign(targetPlayer, data.state);
               (targetPlayer as any).lastUpdate = data.lastUpdate || Date.now();
+            } else if (data.type === 'ping') {
+              dcRef.current?.send(JSON.stringify({ type: 'pong', timestamp: data.timestamp }));
+            } else if (data.type === 'pong') {
+              setPing(Date.now() - data.timestamp);
             }
           } catch (err) {
             console.error('[WebRTC] Error parsing message', err);
@@ -437,10 +449,8 @@ export default function FireboyWatergirl({
           console.error('[WebRTC] Error creating offer', err);
         }
 
-// Bilal Saeed xxxxx
         unsubRoom = onSnapshot(roomRef, (snap: any) => {
           const data = snap.data();
-// Bilal Saeed xxxxx
           if (data?.answer && pc.signalingState === 'have-local-offer') {
             pc.setRemoteDescription(new RTCSessionDescription(data.answer)).catch(console.error);
           }
@@ -469,10 +479,8 @@ export default function FireboyWatergirl({
           }
         };
 
-// Bilal Saeed xxxxx
         unsubRoom = onSnapshot(roomRef, async (snap: any) => {
           const data = snap.data();
-// Bilal Saeed xxxxx
           if (data?.offer && pc.signalingState === 'stable' && !pc.currentRemoteDescription) {
             try {
               await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
@@ -519,6 +527,24 @@ export default function FireboyWatergirl({
       const currentEngine = engineRef.current;
       if (!currentEngine || isGameOver) return;
 
+      const now = performance.now();
+      if (!lastTimeRef.current) lastTimeRef.current = now;
+      const dt = Math.min(3, (now - lastTimeRef.current) / (1000 / 60)); // Cap dt to avoid huge jumps
+      lastTimeRef.current = now;
+
+      // Update FPS every second
+      frameCountRef.current++;
+      if (now - lastFpsUpdateRef.current > 1000) {
+        setFps(Math.round((frameCountRef.current * 1000) / (now - lastFpsUpdateRef.current)));
+        frameCountRef.current = 0;
+        lastFpsUpdateRef.current = now;
+
+        // Send ping every second in multiplayer
+        if (gameMode === 'multi' && dcRef.current?.readyState === 'open') {
+          dcRef.current.send(JSON.stringify({ type: 'ping', timestamp: Date.now() }));
+        }
+      }
+
       // Chaos Mode logic
       if (currentEngine.level.worldSettings?.chaosMode) {
         if (Math.random() > 0.99) {
@@ -547,17 +573,17 @@ export default function FireboyWatergirl({
         if (keys.current.has('ArrowUp')) fireBoyKeys.add('KeyW');
         if (keys.current.has('ArrowLeft')) fireBoyKeys.add('KeyA');
         if (keys.current.has('ArrowRight')) fireBoyKeys.add('KeyD');
-        currentEngine.updatePlayer(currentEngine.player1, fireBoyKeys, 'KeyW', 'KeyA', 'KeyD', currentCollisions);
+        currentEngine.updatePlayer(currentEngine.player1, fireBoyKeys, 'KeyW', 'KeyA', 'KeyD', currentCollisions, dt);
       } else if (role === 'water') {
         const waterGirlKeys = new Set(keys.current);
         if (keys.current.has('KeyW')) waterGirlKeys.add('ArrowUp');
         if (keys.current.has('KeyA')) waterGirlKeys.add('ArrowLeft');
         if (keys.current.has('KeyD')) waterGirlKeys.add('ArrowRight');
-        currentEngine.updatePlayer(currentEngine.player2, waterGirlKeys, 'ArrowUp', 'ArrowLeft', 'ArrowRight', currentCollisions);
+        currentEngine.updatePlayer(currentEngine.player2, waterGirlKeys, 'ArrowUp', 'ArrowLeft', 'ArrowRight', currentCollisions, dt);
       } else {
 
         // Local co-op mode
-        currentEngine.update(keys.current);
+        currentEngine.update(keys.current, dt);
       }
 
 
@@ -569,10 +595,10 @@ export default function FireboyWatergirl({
         // Apply movement smoothing for remote player
         const remotePlayer = role === 'fire' ? currentEngine.player2 : currentEngine.player1;
         if (!remotePlayer.isDead && !remotePlayer.atDoor) {
-          remotePlayer.x += remotePlayer.vx;
-          remotePlayer.y += remotePlayer.vy;
+          remotePlayer.x += remotePlayer.vx * dt;
+          remotePlayer.y += remotePlayer.vy * dt;
           // Apply gravity if not on ground (simplified)
-          if (remotePlayer.vy < 15) remotePlayer.vy += currentEngine.gravity;
+          if (remotePlayer.vy < 15) remotePlayer.vy += currentEngine.gravity * dt;
         }
       }
 
@@ -597,16 +623,16 @@ export default function FireboyWatergirl({
           dcRef.current.send(JSON.stringify({ type: 'sync', role, state, lastUpdate: Date.now() }));
         }
 
-        const now = Date.now();
+        const syncNow = Date.now();
         const syncInterval = rtcConnected ? 200 : 50; // 5fps if WebRTC connected, 20fps otherwise
-        if (now - lastUpdateRef.current > syncInterval) {
+        if (syncNow - lastUpdateRef.current > syncInterval) {
           const pRef = doc(db, 'rooms', roomId, 'updates', userId);
-          setDoc(pRef, { ...state, role, lastUpdate: now }, { merge: true }).catch(console.error);
-          lastUpdateRef.current = now;
+          setDoc(pRef, { ...state, role, lastUpdate: syncNow }, { merge: true }).catch(console.error);
+          lastUpdateRef.current = syncNow;
         }
       }
 
-      currentEngine.updateEntities();
+      currentEngine.updateEntities(dt);
 
       draw(ctx, currentEngine, time);
 
@@ -1753,8 +1779,8 @@ export default function FireboyWatergirl({
                 >
                   <div className="text-4xl mb-2">🔥</div>
                   <div className="font-bold">FIREBOY</div>
-                  {Object.values(lobbyData?.players || {}).find((p: any) => p.role === 'fire') && (
-                    <div className="absolute -top-2 -right-2 bg-orange-500 text-[10px] px-2 py-1 rounded-full">TAKEN</div>
+                  {!!(Object.values(lobbyData?.players || {}).find((p: any) => p.role === 'fire')) && (
+                    <div className="absolute -top-2 -right-2 bg-orange-500 text-[10px] px-2 py-1 rounded-full text-white font-bold">TAKEN</div>
                   )}
                 </button>
 
@@ -1766,8 +1792,8 @@ export default function FireboyWatergirl({
                 >
                   <div className="text-4xl mb-2">💧</div>
                   <div className="font-bold">WATERGIRL</div>
-                  {Object.values(lobbyData?.players || {}).find((p: any) => p.role === 'water') && (
-                    <div className="absolute -top-2 -right-2 bg-cyan-500 text-[10px] px-2 py-1 rounded-full">TAKEN</div>
+                  {!!(Object.values(lobbyData?.players || {}).find((p: any) => p.role === 'water')) && (
+                    <div className="absolute -top-2 -right-2 bg-cyan-500 text-[10px] px-2 py-1 rounded-full text-white font-bold">TAKEN</div>
                   )}
                 </button>
               </div>
@@ -1839,291 +1865,340 @@ export default function FireboyWatergirl({
         )}
       </AnimatePresence>
 
-// Bilal Saeed xxxxx
       <div className="relative w-full h-full flex flex-col landscape:flex-row items-center justify-center gap-4 p-2">
         {/* Left Side Controls (Landscape) */}
-        <div className="hidden landscape:flex flex-col gap-6 p-4 z-20">
-          <button 
-            onTouchStart={(e) => { e.preventDefault(); keys.current.add(role === 'water' ? 'ArrowLeft' : 'KeyA'); }}
-            onTouchEnd={(e) => { e.preventDefault(); keys.current.delete(role === 'water' ? 'ArrowLeft' : 'KeyA'); }}
-            className="w-20 h-20 bg-white/10 backdrop-blur-md rounded-full flex items-center justify-center border-2 border-white/20 active:bg-white/40 shadow-xl pointer-events-auto"
-          >
-            <span className="text-3xl text-white">←</span>
-          </button>
-          <button 
-            onTouchStart={(e) => { e.preventDefault(); keys.current.add(role === 'water' ? 'ArrowRight' : 'KeyD'); }}
-            onTouchEnd={(e) => { e.preventDefault(); keys.current.delete(role === 'water' ? 'ArrowRight' : 'KeyD'); }}
-            className="w-20 h-20 bg-white/10 backdrop-blur-md rounded-full flex items-center justify-center border-2 border-white/20 active:bg-white/40 shadow-xl pointer-events-auto"
-          >
-            <span className="text-3xl text-white">→</span>
-          </button>
-        </div>
+        {isMobile && (
+          <div className="hidden landscape:flex flex-col gap-6 p-4 z-20">
+            <motion.button
+              drag
+              dragConstraints={{ left: 0, right: 200, top: -200, bottom: 200 }}
+              dragElastic={0.1}
+              dragMomentum={false}
+              whileDrag={{ scale: 1.1, cursor: "grabbing" }}
+              onTouchStart={(e) => { e.preventDefault(); keys.current.add(role === 'water' ? 'ArrowLeft' : 'KeyA'); }}
+              onTouchEnd={(e) => { e.preventDefault(); keys.current.delete(role === 'water' ? 'ArrowLeft' : 'KeyA'); }}
+              className="w-20 h-20 bg-white/10 backdrop-blur-md rounded-full flex items-center justify-center border-2 border-white/20 active:bg-white/40 shadow-xl pointer-events-auto touch-none"
+            >
+              <span className="text-3xl text-white">←</span>
+            </motion.button>
+            <motion.button
+              drag
+              dragConstraints={{ left: 0, right: 200, top: -200, bottom: 200 }}
+              dragElastic={0.1}
+              dragMomentum={false}
+              whileDrag={{ scale: 1.1, cursor: "grabbing" }}
+              onTouchStart={(e) => { e.preventDefault(); keys.current.add(role === 'water' ? 'ArrowRight' : 'KeyD'); }}
+              onTouchEnd={(e) => { e.preventDefault(); keys.current.delete(role === 'water' ? 'ArrowRight' : 'KeyD'); }}
+              className="w-20 h-20 bg-white/10 backdrop-blur-md rounded-full flex items-center justify-center border-2 border-white/20 active:bg-white/40 shadow-xl pointer-events-auto touch-none"
+            >
+              <span className="text-3xl text-white">→</span>
+            </motion.button>
+          </div>
+        )}
 
         {/* Game Area */}
         <div className="relative w-full landscape:w-auto h-auto landscape:h-full max-h-[65vh] landscape:max-h-full aspect-[4/3] bg-zinc-900 rounded-2xl overflow-hidden border border-zinc-800 shadow-2xl flex items-center justify-center z-10">
-// Bilal Saeed xxxxx
 
-        <canvas
-          ref={canvasRef}
-          width={CANVAS_WIDTH}
-          height={CANVAS_HEIGHT}
-          className="w-full h-full"
-        />
+          <canvas
+            ref={canvasRef}
+            width={CANVAS_WIDTH}
+            height={CANVAS_HEIGHT}
+            className="w-full h-full"
+          />
 
-        {/* HUD */}
-        <div className="absolute top-0 left-0 right-0 p-6 flex justify-between items-start pointer-events-none bg-gradient-to-b from-black/80 to-transparent">
-          <div className="flex flex-col gap-1">
-            <div className="flex items-center gap-2">
-              <div className="w-1 h-3 bg-orange-500" />
-              <div className="text-[10px] text-zinc-500 uppercase tracking-[0.3em] font-bold">
-                {customLevel ? 'USER_DATA_ARCHive' : `SECTOR_0${levelIndex + 1}`}
-              </div>
-            </div>
-            <div className="text-2xl font-black tracking-tighter italic uppercase">{customLevel ? customLevel.name : levels[levelIndex].name}</div>
-
-            <div className="flex gap-6 mt-4">
-              <div className="flex flex-col">
-                <span className="text-[8px] text-zinc-500 uppercase font-bold mb-1">Mission Timer</span>
-                <span className="text-sm font-mono font-bold text-white">
-                  {engine ? Math.floor((Date.now() - engine.startTime) / 1000).toString().padStart(3, '0') : '000'}s
-                </span>
-              </div>
-              <div className="flex flex-col">
-                <span className="text-[8px] text-zinc-500 uppercase font-bold mb-1">Gems Recovered</span>
-                <div className="flex gap-3">
-                  <div className="flex items-center gap-1 text-orange-500 text-sm font-bold">
-                    <Gem size={12} /> {(engine?.player1?.score ?? 0) / 10}
-                  </div>
-                  <div className="flex items-center gap-1 text-cyan-500 text-sm font-bold">
-                    <Gem size={12} /> {(engine?.player2?.score ?? 0) / 10}
-                  </div>
+          {/* HUD */}
+          <div className="absolute top-0 left-0 right-0 p-6 flex justify-between items-start pointer-events-none bg-gradient-to-b from-black/80 to-transparent">
+            <div className="flex flex-col gap-1">
+              <div className="flex items-center gap-2">
+                <div className="w-1 h-3 bg-orange-500" />
+                <div className="text-[10px] text-zinc-500 uppercase tracking-[0.3em] font-bold">
+                  {customLevel ? 'USER_DATA_ARCHive' : `SECTOR_0${levelIndex + 1}`}
                 </div>
               </div>
-              <div className="flex flex-col">
-                <span className="text-[8px] text-zinc-500 uppercase font-bold mb-1">System Status</span>
-                <div className="flex items-center gap-2">
-                  <div className={`w-1.5 h-1.5 rounded-full ${engine?.player1.isDead || engine?.player2.isDead ? 'bg-red-500 animate-pulse' : 'bg-green-500'}`} />
-                  <span className={`text-[10px] font-bold ${engine?.player1.isDead || engine?.player2.isDead ? 'text-red-500' : 'text-green-500'}`}>
-                    {engine?.player1.isDead || engine?.player2.isDead ? 'CRITICAL_FAILURE' : 'NOMINAL'}
+              <div className="text-2xl font-black tracking-tighter italic uppercase">{customLevel ? customLevel.name : levels[levelIndex].name}</div>
+
+              <div className="flex gap-6 mt-4">
+                <div className="flex flex-col">
+                  <span className="text-[8px] text-zinc-500 uppercase font-bold mb-1">Mission Timer</span>
+                  <span className="text-sm font-mono font-bold text-white">
+                    {engine ? Math.floor((Date.now() - engine.startTime) / 1000).toString().padStart(3, '0') : '000'}s
                   </span>
                 </div>
+                <div className="flex flex-col">
+                  <span className="text-[8px] text-zinc-500 uppercase font-bold mb-1">Gems Recovered</span>
+                  <div className="flex gap-3">
+                    <div className="flex items-center gap-1 text-orange-500 text-sm font-bold">
+                      <Gem size={12} /> {(engine?.player1?.score ?? 0) / 10}
+                    </div>
+                    <div className="flex items-center gap-1 text-cyan-500 text-sm font-bold">
+                      <Gem size={12} /> {(engine?.player2?.score ?? 0) / 10}
+                    </div>
+                  </div>
+                </div>
+                <div className="flex flex-col">
+                  <span className="text-[8px] text-zinc-500 uppercase font-bold mb-1">System Status</span>
+                  <div className="flex items-center gap-2">
+                    <div className={`w-1.5 h-1.5 rounded-full ${engine?.player1?.isDead || engine?.player2?.isDead ? 'bg-red-500 animate-pulse' : 'bg-green-500'}`} />
+                    <span className={`text-[10px] font-bold ${engine?.player1?.isDead || engine?.player2?.isDead ? 'text-red-500' : 'text-green-500'}`}>
+                      {engine?.player1?.isDead || engine?.player2?.isDead ? 'CRITICAL_FAILURE' : 'NOMINAL'}
+                    </span>
+                  </div>
+                </div>
+                <div className="flex flex-col">
+                  <span className="text-[8px] text-zinc-500 uppercase font-bold mb-1">Performance</span>
+                  <div className="flex gap-4">
+                    <div className="flex flex-col">
+                      <span className="text-[8px] text-zinc-400">FPS</span>
+                      <span className={`text-xs font-mono font-bold ${fps < 30 ? 'text-red-500' : 'text-green-500'}`}>{fps}</span>
+                    </div>
+                    {gameMode === 'multi' && (
+                      <div className="flex flex-col">
+                        <span className="text-[8px] text-zinc-400">PING</span>
+                        <span className={`text-xs font-mono font-bold ${ping > 200 ? 'text-red-500' : (ping > 100 ? 'text-orange-500' : 'text-green-500')}`}>
+                          {ping}ms
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
+            </div>
+
+            {/* Progress Bar */}
+            <div className="absolute top-0 left-1/2 -translate-x-1/2 w-48 h-2 bg-black/40 rounded-full overflow-hidden border border-white/10">
+              <motion.div
+                initial={{ width: 0 }}
+                animate={{ width: `${((levelIndex + 1) / levels.length) * 100}%` }}
+                className="h-full bg-gradient-to-r from-orange-500 to-cyan-500"
+              />
+            </div>
+
+            <div className="flex gap-2 pointer-events-auto">
+              {onBack && (
+                <button
+                  onClick={onBack}
+                  className="p-2 bg-black/50 border border-white/10 rounded-lg hover:bg-white/10 transition-colors"
+                  title="Back to Menu"
+                >
+                  <ArrowLeft size={18} />
+                </button>
+              )}
+              <button
+                onClick={copyInviteLink}
+                className="px-3 py-2 bg-black/50 border border-white/10 rounded-lg hover:bg-white/10 transition-colors text-xs font-bold"
+              >
+                INVITE
+              </button>
+              <button
+                onClick={() => setUseTilt(!useTilt)}
+                className={`p-2 border rounded-lg transition-colors ${useTilt ? 'bg-cyan-500/20 border-cyan-500 text-cyan-500' : 'bg-black/50 border-white/10 text-white'}`}
+                title="Tilt Controls"
+              >
+                <Smartphone size={18} />
+              </button>
+              <button
+                onClick={() => setEngine(new GameEngine(levels[levelIndex]))}
+                className="p-2 bg-black/50 border border-white/10 rounded-lg hover:bg-white/10 transition-colors"
+              >
+                <RefreshCw size={18} />
+              </button>
+              <button
+                onClick={() => setShowSettings(!showSettings)}
+                className="p-2 bg-black/50 border border-white/10 rounded-lg hover:bg-white/10 transition-colors"
+                title="Settings"
+              >
+                <Settings size={18} />
+              </button>
+              <button
+                onClick={() => setShowChat(!showChat)}
+                className="p-2 bg-black/50 border border-white/10 rounded-lg hover:bg-white/10 transition-colors"
+              >
+                <MessageSquare size={18} />
+              </button>
             </div>
           </div>
 
-          {/* Progress Bar */}
-          <div className="absolute top-0 left-1/2 -translate-x-1/2 w-48 h-2 bg-black/40 rounded-full overflow-hidden border border-white/10">
-            <motion.div
-              initial={{ width: 0 }}
-              animate={{ width: `${((levelIndex + 1) / levels.length) * 100}%` }}
-              className="h-full bg-gradient-to-r from-orange-500 to-cyan-500"
-            />
-          </div>
-
-          <div className="flex gap-2 pointer-events-auto">
-            {onBack && (
-              <button
-                onClick={onBack}
-                className="p-2 bg-black/50 border border-white/10 rounded-lg hover:bg-white/10 transition-colors"
-                title="Back to Menu"
+          {/* Chat Overlay */}
+          <AnimatePresence>
+            {showChat && (
+              <motion.div
+                initial={{ x: 300 }}
+                animate={{ x: 0 }}
+                exit={{ x: 300 }}
+                className="absolute top-0 right-0 bottom-0 w-64 bg-black/80 backdrop-blur-md border-l border-white/10 p-4 flex flex-col"
               >
-                <ArrowLeft size={18} />
-              </button>
+                <div className="flex-1 overflow-y-auto space-y-2 mb-4">
+                  {chatMessages.map((msg, i) => (
+                    <div key={i} className={`text-sm ${msg.role === 'fire' ? 'text-orange-400' : 'text-cyan-400'}`}>
+                      <span className="font-bold opacity-50">{msg.role}: </span>
+                      {msg.message} {msg.emoji}
+                    </div>
+                  ))}
+                </div>
+                <div className="grid grid-cols-4 gap-2">
+                  {['🔥', '💧', '👍', '👎', '🏃', '🛑', '❓', '✨'].map(e => (
+                    <button
+                      key={e}
+                      onClick={() => sendChat('', e)}
+                      className="p-2 bg-white/5 rounded hover:bg-white/10 transition-colors text-xl"
+                    >
+                      {e}
+                    </button>
+                  ))}
+                </div>
+              </motion.div>
             )}
-            <button
-              onClick={copyInviteLink}
-              className="px-3 py-2 bg-black/50 border border-white/10 rounded-lg hover:bg-white/10 transition-colors text-xs font-bold"
-            >
-              INVITE
-            </button>
-            <button
-              onClick={() => setUseTilt(!useTilt)}
-              className={`p-2 border rounded-lg transition-colors ${useTilt ? 'bg-cyan-500/20 border-cyan-500 text-cyan-500' : 'bg-black/50 border-white/10 text-white'}`}
-              title="Tilt Controls"
-            >
-              <Smartphone size={18} />
-            </button>
-            <button
-              onClick={() => setEngine(new GameEngine(levels[levelIndex]))}
-              className="p-2 bg-black/50 border border-white/10 rounded-lg hover:bg-white/10 transition-colors"
-            >
-              <RefreshCw size={18} />
-            </button>
-            <button
-              onClick={() => setShowSettings(!showSettings)}
-              className="p-2 bg-black/50 border border-white/10 rounded-lg hover:bg-white/10 transition-colors"
-              title="Settings"
-            >
-              <Settings size={18} />
-            </button>
-            <button
-              onClick={() => setShowChat(!showChat)}
-              className="p-2 bg-black/50 border border-white/10 rounded-lg hover:bg-white/10 transition-colors"
-            >
-              <MessageSquare size={18} />
-            </button>
-          </div>
-        </div>
+          </AnimatePresence>
 
-        {/* Chat Overlay */}
-        <AnimatePresence>
-          {showChat && (
-            <motion.div
-              initial={{ x: 300 }}
-              animate={{ x: 0 }}
-              exit={{ x: 300 }}
-              className="absolute top-0 right-0 bottom-0 w-64 bg-black/80 backdrop-blur-md border-l border-white/10 p-4 flex flex-col"
-            >
-              <div className="flex-1 overflow-y-auto space-y-2 mb-4">
-                {chatMessages.map((msg, i) => (
-                  <div key={i} className={`text-sm ${msg.role === 'fire' ? 'text-orange-400' : 'text-cyan-400'}`}>
-                    <span className="font-bold opacity-50">{msg.role}: </span>
-                    {msg.message} {msg.emoji}
-                  </div>
-                ))}
-              </div>
-              <div className="grid grid-cols-4 gap-2">
-                {['🔥', '💧', '👍', '👎', '🏃', '🛑', '❓', '✨'].map(e => (
-                  <button
-                    key={e}
-                    onClick={() => sendChat('', e)}
-                    className="p-2 bg-white/5 rounded hover:bg-white/10 transition-colors text-xl"
-                  >
-                    {e}
-                  </button>
-                ))}
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* Settings Overlay */}
-        <AnimatePresence>
-          {showSettings && (
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="absolute inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4"
-            >
-              <div className="bg-zinc-900 border border-white/10 rounded-2xl p-6 w-full max-w-md shadow-2xl">
-                <div className="flex justify-between items-center mb-6">
-                  <h2 className="text-xl font-black uppercase tracking-widest text-white">Optimization Control</h2>
-                  <button
-                    onClick={() => setShowSettings(false)}
-                    className="p-2 hover:bg-white/10 rounded-lg transition-colors text-zinc-400 hover:text-white"
-                  >
-                    ✕
-                  </button>
-                </div>
-
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between p-4 bg-black/50 rounded-xl border border-white/5">
-                    <div>
-                      <div className="font-bold text-white uppercase tracking-wider text-sm">Animations</div>
-                      <div className="text-xs text-zinc-500 mt-1">Player movements, hazard effects, dynamic elements</div>
-                    </div>
+          {/* Settings Overlay */}
+          <AnimatePresence>
+            {showSettings && (
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.95 }}
+                className="absolute inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4"
+              >
+                <div className="bg-zinc-900 border border-white/10 rounded-2xl p-6 w-full max-w-md shadow-2xl">
+                  <div className="flex justify-between items-center mb-6">
+                    <h2 className="text-xl font-black uppercase tracking-widest text-white">Optimization Control</h2>
                     <button
-                      onClick={() => setSettings({ ...settings, animations: !settings.animations })}
-                      className={`w-12 h-6 rounded-full transition-colors relative ${settings.animations ? 'bg-cyan-500' : 'bg-zinc-700'}`}
+                      onClick={() => setShowSettings(false)}
+                      className="p-2 hover:bg-white/10 rounded-lg transition-colors text-zinc-400 hover:text-white"
                     >
-                      <div className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${settings.animations ? 'translate-x-6' : 'translate-x-0'}`} />
+                      ✕
                     </button>
                   </div>
 
-                  <div className="flex items-center justify-between p-4 bg-black/50 rounded-xl border border-white/5">
-                    <div>
-                      <div className="font-bold text-white uppercase tracking-wider text-sm">Particles</div>
-                      <div className="text-xs text-zinc-500 mt-1">Sparks, splashes, ambient dust, collection effects</div>
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between p-4 bg-black/50 rounded-xl border border-white/5">
+                      <div>
+                        <div className="font-bold text-white uppercase tracking-wider text-sm">Animations</div>
+                        <div className="text-xs text-zinc-500 mt-1">Player movements, hazard effects, dynamic elements</div>
+                      </div>
+                      <button
+                        onClick={() => setSettings({ ...settings, animations: !settings.animations })}
+                        className={`w-12 h-6 rounded-full transition-colors relative ${settings.animations ? 'bg-cyan-500' : 'bg-zinc-700'}`}
+                      >
+                        <div className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${settings.animations ? 'translate-x-6' : 'translate-x-0'}`} />
+                      </button>
                     </div>
-                    <button
-                      onClick={() => setSettings({ ...settings, particles: !settings.particles })}
-                      className={`w-12 h-6 rounded-full transition-colors relative ${settings.particles ? 'bg-orange-500' : 'bg-zinc-700'}`}
-                    >
-                      <div className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${settings.particles ? 'translate-x-6' : 'translate-x-0'}`} />
-                    </button>
+
+                    <div className="flex items-center justify-between p-4 bg-black/50 rounded-xl border border-white/5">
+                      <div>
+                        <div className="font-bold text-white uppercase tracking-wider text-sm">Particles</div>
+                        <div className="text-xs text-zinc-500 mt-1">Sparks, splashes, ambient dust, collection effects</div>
+                      </div>
+                      <button
+                        onClick={() => setSettings({ ...settings, particles: !settings.particles })}
+                        className={`w-12 h-6 rounded-full transition-colors relative ${settings.particles ? 'bg-orange-500' : 'bg-zinc-700'}`}
+                      >
+                        <div className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${settings.particles ? 'translate-x-6' : 'translate-x-0'}`} />
+                      </button>
+                    </div>
+
+                    <div className="flex items-center justify-between p-4 bg-black/50 rounded-xl border border-white/5">
+                      <div>
+                        <div className="font-bold text-white uppercase tracking-wider text-sm">Shadows</div>
+                        <div className="text-xs text-zinc-500 mt-1">Dynamic lighting, drop shadows, ambient occlusion</div>
+                      </div>
+                      <button
+                        onClick={() => setSettings({ ...settings, shadows: !settings.shadows })}
+                        className={`w-12 h-6 rounded-full transition-colors relative ${settings.shadows ? 'bg-green-500' : 'bg-zinc-700'}`}
+                      >
+                        <div className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${settings.shadows ? 'translate-x-6' : 'translate-x-0'}`} />
+                      </button>
+                    </div>
+
+                    <div className="flex items-center justify-between p-4 bg-black/50 rounded-xl border border-white/5">
+                      <div>
+                        <div className="font-bold text-white uppercase tracking-wider text-sm">Bloom</div>
+                        <div className="text-xs text-zinc-500 mt-1">Glow effects, light bleeding, neon highlights</div>
+                      </div>
+                      <button
+                        onClick={() => setSettings({ ...settings, bloom: !settings.bloom })}
+                        className={`w-12 h-6 rounded-full transition-colors relative ${settings.bloom ? 'bg-purple-500' : 'bg-zinc-700'}`}
+                      >
+                        <div className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${settings.bloom ? 'translate-x-6' : 'translate-x-0'}`} />
+                      </button>
+                    </div>
                   </div>
 
-                  <div className="flex items-center justify-between p-4 bg-black/50 rounded-xl border border-white/5">
-                    <div>
-                      <div className="font-bold text-white uppercase tracking-wider text-sm">Shadows</div>
-                      <div className="text-xs text-zinc-500 mt-1">Dynamic lighting, drop shadows, ambient occlusion</div>
-                    </div>
-                    <button
-                      onClick={() => setSettings({ ...settings, shadows: !settings.shadows })}
-                      className={`w-12 h-6 rounded-full transition-colors relative ${settings.shadows ? 'bg-green-500' : 'bg-zinc-700'}`}
-                    >
-                      <div className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${settings.shadows ? 'translate-x-6' : 'translate-x-0'}`} />
-                    </button>
-                  </div>
-
-                  <div className="flex items-center justify-between p-4 bg-black/50 rounded-xl border border-white/5">
-                    <div>
-                      <div className="font-bold text-white uppercase tracking-wider text-sm">Bloom</div>
-                      <div className="text-xs text-zinc-500 mt-1">Glow effects, light bleeding, neon highlights</div>
-                    </div>
-                    <button
-                      onClick={() => setSettings({ ...settings, bloom: !settings.bloom })}
-                      className={`w-12 h-6 rounded-full transition-colors relative ${settings.bloom ? 'bg-purple-500' : 'bg-zinc-700'}`}
-                    >
-                      <div className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${settings.bloom ? 'translate-x-6' : 'translate-x-0'}`} />
-                    </button>
+                  <div className="mt-6 pt-6 border-t border-white/10 text-center">
+                    <p className="text-xs text-zinc-500">Disable features to improve performance on older devices.</p>
                   </div>
                 </div>
-
-                <div className="mt-6 pt-6 border-t border-white/10 text-center">
-                  <p className="text-xs text-zinc-500">Disable features to improve performance on older devices.</p>
-                </div>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
+              </motion.div>
+            )}
+          </AnimatePresence>
 
 
-// Bilal Saeed xxxxx
         </div>
 
         {/* Right Side Control (Landscape) */}
-        <div className="hidden landscape:flex p-4 z-20">
-          <button 
-            onTouchStart={(e) => { e.preventDefault(); keys.current.add(role === 'water' ? 'ArrowUp' : 'KeyW'); }}
-            onTouchEnd={(e) => { e.preventDefault(); keys.current.delete(role === 'water' ? 'ArrowUp' : 'KeyW'); }}
-            className="w-24 h-24 bg-white/20 backdrop-blur-md rounded-full flex items-center justify-center border-2 border-white/30 active:bg-white/50 shadow-xl pointer-events-auto"
-          >
-            <span className="text-4xl text-white">↑</span>
-          </button>
-        </div>
-
-        {/* Bottom Controls (Portrait) */}
-        <div className="flex landscape:hidden w-full items-center justify-between px-8 py-4 z-20 pointer-events-none">
-          <div className="flex gap-6 pointer-events-auto">
-            <button 
-              onTouchStart={(e) => { e.preventDefault(); keys.current.add(role === 'water' ? 'ArrowLeft' : 'KeyA'); }}
-              onTouchEnd={(e) => { e.preventDefault(); keys.current.delete(role === 'water' ? 'ArrowLeft' : 'KeyA'); }}
-              className="w-20 h-20 bg-white/10 backdrop-blur-md rounded-full flex items-center justify-center border-2 border-white/20 active:bg-white/40 shadow-xl"
-            >
-              <span className="text-3xl text-white">←</span>
-            </button>
-            <button 
-              onTouchStart={(e) => { e.preventDefault(); keys.current.add(role === 'water' ? 'ArrowRight' : 'KeyD'); }}
-              onTouchEnd={(e) => { e.preventDefault(); keys.current.delete(role === 'water' ? 'ArrowRight' : 'KeyD'); }}
-              className="w-20 h-20 bg-white/10 backdrop-blur-md rounded-full flex items-center justify-center border-2 border-white/20 active:bg-white/40 shadow-xl"
-            >
-              <span className="text-3xl text-white">→</span>
-            </button>
-          </div>
-          <div className="pointer-events-auto">
-            <button 
+        {isMobile && (
+          <div className="hidden landscape:flex p-4 z-20">
+            <motion.button
+              drag
+              dragConstraints={{ left: -200, right: 0, top: -200, bottom: 200 }}
+              dragElastic={0.1}
+              dragMomentum={false}
+              whileDrag={{ scale: 1.1, cursor: "grabbing" }}
               onTouchStart={(e) => { e.preventDefault(); keys.current.add(role === 'water' ? 'ArrowUp' : 'KeyW'); }}
               onTouchEnd={(e) => { e.preventDefault(); keys.current.delete(role === 'water' ? 'ArrowUp' : 'KeyW'); }}
-              className="w-24 h-24 bg-white/20 backdrop-blur-md rounded-full flex items-center justify-center border-2 border-white/30 active:bg-white/50 shadow-xl"
+              className="w-24 h-24 bg-white/20 backdrop-blur-md rounded-full flex items-center justify-center border-2 border-white/30 active:bg-white/50 shadow-xl pointer-events-auto touch-none"
             >
               <span className="text-4xl text-white">↑</span>
-            </button>
+            </motion.button>
           </div>
-        </div>
+        )}
+
+        {/* Bottom Controls (Portrait) */}
+        {isMobile && (
+          <div className="flex landscape:hidden w-full items-center justify-between px-8 py-4 z-20 pointer-events-none">
+            <div className="flex gap-6 pointer-events-auto">
+              <motion.button
+                drag
+                dragConstraints={{ left: 0, right: 200, top: -200, bottom: 0 }}
+                dragElastic={0.1}
+                dragMomentum={false}
+                whileDrag={{ scale: 1.1, cursor: "grabbing" }}
+                onTouchStart={(e) => { e.preventDefault(); keys.current.add(role === 'water' ? 'ArrowLeft' : 'KeyA'); }}
+                onTouchEnd={(e) => { e.preventDefault(); keys.current.delete(role === 'water' ? 'ArrowLeft' : 'KeyA'); }}
+                className="w-20 h-20 bg-white/10 backdrop-blur-md rounded-full flex items-center justify-center border-2 border-white/20 active:bg-white/40 shadow-xl touch-none"
+              >
+                <span className="text-3xl text-white">←</span>
+              </motion.button>
+              <motion.button
+                drag
+                dragConstraints={{ left: -100, right: 100, top: -200, bottom: 0 }}
+                dragElastic={0.1}
+                dragMomentum={false}
+                whileDrag={{ scale: 1.1, cursor: "grabbing" }}
+                onTouchStart={(e) => { e.preventDefault(); keys.current.add(role === 'water' ? 'ArrowRight' : 'KeyD'); }}
+                onTouchEnd={(e) => { e.preventDefault(); keys.current.delete(role === 'water' ? 'ArrowRight' : 'KeyD'); }}
+                className="w-20 h-20 bg-white/10 backdrop-blur-md rounded-full flex items-center justify-center border-2 border-white/20 active:bg-white/40 shadow-xl touch-none"
+              >
+                <span className="text-3xl text-white">→</span>
+              </motion.button>
+            </div>
+            <div className="pointer-events-auto">
+              <motion.button
+                drag
+                dragConstraints={{ left: -200, right: 0, top: -200, bottom: 0 }}
+                dragElastic={0.1}
+                dragMomentum={false}
+                whileDrag={{ scale: 1.1, cursor: "grabbing" }}
+                onTouchStart={(e) => { e.preventDefault(); keys.current.add(role === 'water' ? 'ArrowUp' : 'KeyW'); }}
+                onTouchEnd={(e) => { e.preventDefault(); keys.current.delete(role === 'water' ? 'ArrowUp' : 'KeyW'); }}
+                className="w-24 h-24 bg-white/20 backdrop-blur-md rounded-full flex items-center justify-center border-2 border-white/30 active:bg-white/50 shadow-xl touch-none"
+              >
+                <span className="text-4xl text-white">↑</span>
+              </motion.button>
+            </div>
+          </div>
+        )}
       </div>
-// Bilal Saeed xxxxx
 
       <div className="mt-8 flex gap-8 text-zinc-500 text-xs uppercase tracking-widest hidden">
         <div className="flex items-center gap-2">
@@ -2143,13 +2218,13 @@ export default function FireboyWatergirl({
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 50 }}
             className={`fixed bottom-8 left-1/2 -translate-x-1/2 px-6 py-3 rounded-full font-bold shadow-2xl z-[100] flex items-center gap-3 border ${toast.type === 'success' ? 'bg-green-500/20 border-green-500 text-green-500' :
-                toast.type === 'error' ? 'bg-red-500/20 border-red-500 text-red-500' :
-                  'bg-cyan-500/20 border-cyan-500 text-cyan-500'
+              toast.type === 'error' ? 'bg-red-500/20 border-red-500 text-red-500' :
+                'bg-cyan-500/20 border-cyan-500 text-cyan-500'
               }`}
           >
             <div className={`w-2 h-2 rounded-full ${toast.type === 'success' ? 'bg-green-500' :
-                toast.type === 'error' ? 'bg-red-500' :
-                  'bg-cyan-500'
+              toast.type === 'error' ? 'bg-red-500' :
+                'bg-cyan-500'
               } animate-pulse`} />
             {toast.message}
           </motion.div>

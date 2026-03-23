@@ -30,10 +30,8 @@ import {
   Maximize2,
   Send,
 } from "lucide-react";
-// Bilal Saeed xxxxx
 import { motion, AnimatePresence } from "framer-motion";
 import FireboyWatergirl from "@/games/fireboy-watergirl/components/FireboyWatergirl";
-// Bilal Saeed xxxxx
 
 interface LobbyState {
   hostId: string;
@@ -371,12 +369,11 @@ function LobbyContent() {
 
             {lobby.status === "playing" ? (
               /* The Game Container! */
-// Bilal Saeed xxxxx
               <div className={`${isPseudoFull ? 'fixed inset-0 z-[100] bg-black' : 'flex-1 relative'
                 } w-full flex flex-col`}>
                 {/* The actual game running natively */}
                 {lobby.gameId === 'fireboy-watergirl' ? (
-                  <FireboyWatergirl 
+                  <FireboyWatergirl
                     initialRoomId={roomId}
                     isHost={isHost}
                     displayName={user?.displayName || "Player"}
@@ -399,7 +396,6 @@ function LobbyContent() {
                     allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
                   />
                 )}
-// Bilal Saeed xxxxx
 
 
 
