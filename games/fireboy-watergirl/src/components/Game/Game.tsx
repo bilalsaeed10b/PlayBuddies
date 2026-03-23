@@ -524,21 +524,42 @@ export default function Game({
 
       const currentCollisions = new Set<string>();
 
+// Bilal Saeed xxxxx
       // Update local player
       if (role === 'fire') {
-        currentEngine.updatePlayer(currentEngine.player1, keys.current, 'KeyW', 'KeyA', 'KeyD', currentCollisions);
+        const fireBoyKeys = new Set(keys.current);
+        if (keys.current.has('ArrowUp')) fireBoyKeys.add('KeyW');
+        if (keys.current.has('ArrowLeft')) fireBoyKeys.add('KeyA');
+        if (keys.current.has('ArrowRight')) fireBoyKeys.add('KeyD');
+        currentEngine.updatePlayer(currentEngine.player1, fireBoyKeys, 'KeyW', 'KeyA', 'KeyD', currentCollisions);
       } else if (role === 'water') {
-        currentEngine.updatePlayer(currentEngine.player2, keys.current, 'ArrowUp', 'ArrowLeft', 'ArrowRight', currentCollisions);
+        const waterGirlKeys = new Set(keys.current);
+        if (keys.current.has('KeyW')) waterGirlKeys.add('ArrowUp');
+        if (keys.current.has('KeyA')) waterGirlKeys.add('ArrowLeft');
+        if (keys.current.has('KeyD')) waterGirlKeys.add('ArrowRight');
+        currentEngine.updatePlayer(currentEngine.player2, waterGirlKeys, 'ArrowUp', 'ArrowLeft', 'ArrowRight', currentCollisions);
       } else {
+// Bilal Saeed xxxxx
         // Local co-op mode
         currentEngine.update(keys.current);
       }
       
+// Bilal Saeed xxxxx
       // Update engine's collision memory for levers
       if (role !== 'both') {
         // @ts-ignore - accessing private for sync
         currentEngine.collidingEntities = currentCollisions;
+
+        // Apply movement smoothing for remote player
+        const remotePlayer = role === 'fire' ? currentEngine.player2 : currentEngine.player1;
+        if (!remotePlayer.isDead && !remotePlayer.atDoor) {
+          remotePlayer.x += remotePlayer.vx;
+          remotePlayer.y += remotePlayer.vy;
+          // Apply gravity if not on ground (simplified)
+          if (remotePlayer.vy < 15) remotePlayer.vy += currentEngine.gravity;
+        }
       }
+// Bilal Saeed xxxxx
 
       // Sync player state
       if (gameMode === 'multi' && roomId && userId && role && role !== 'both') {
@@ -1804,7 +1825,9 @@ export default function Game({
         )}
       </AnimatePresence>
 
-      <div className="relative w-full max-w-[calc((100vh-120px)*4/3)] aspect-[4/3] fullscreen:max-w-none fullscreen:aspect-none bg-zinc-900 rounded-2xl fullscreen:rounded-none overflow-hidden border border-zinc-800 fullscreen:border-none shadow-2xl mx-auto">
+// Bilal Saeed xxxxx
+      <div className="relative w-full max-w-5xl aspect-[4/3] bg-zinc-900 rounded-2xl overflow-hidden border border-zinc-800 shadow-2xl mx-auto h-auto min-h-[300px]">
+// Bilal Saeed xxxxx
         <canvas 
           ref={canvasRef} 
           width={CANVAS_WIDTH} 
@@ -2021,34 +2044,36 @@ export default function Game({
           )}
         </AnimatePresence>
 
+// Bilal Saeed xxxxx
         {/* Mobile Controls */}
-        <div className="absolute bottom-4 left-4 right-4 flex justify-between pointer-events-none md:hidden">
-          <div className="flex gap-2 pointer-events-auto">
+        <div className="absolute bottom-6 left-6 right-6 flex justify-between pointer-events-none md:hidden">
+          <div className="flex gap-4 pointer-events-auto">
             <button 
-              onTouchStart={() => keys.current.add('KeyA')}
-              onTouchEnd={() => keys.current.delete('KeyA')}
-              className="w-16 h-16 bg-white/10 backdrop-blur-md rounded-full flex items-center justify-center border border-white/20"
+              onTouchStart={(e) => { e.preventDefault(); keys.current.add(role === 'water' ? 'ArrowLeft' : 'KeyA'); }}
+              onTouchEnd={(e) => { e.preventDefault(); keys.current.delete(role === 'water' ? 'ArrowLeft' : 'KeyA'); }}
+              className="w-20 h-20 bg-white/20 backdrop-blur-md rounded-full flex items-center justify-center border-2 border-white/30 active:bg-white/40 shadow-xl"
             >
-              ←
+              <span className="text-3xl text-white">←</span>
             </button>
             <button 
-              onTouchStart={() => keys.current.add('KeyD')}
-              onTouchEnd={() => keys.current.delete('KeyD')}
-              className="w-16 h-16 bg-white/10 backdrop-blur-md rounded-full flex items-center justify-center border border-white/20"
+              onTouchStart={(e) => { e.preventDefault(); keys.current.add(role === 'water' ? 'ArrowRight' : 'KeyD'); }}
+              onTouchEnd={(e) => { e.preventDefault(); keys.current.delete(role === 'water' ? 'ArrowRight' : 'KeyD'); }}
+              className="w-20 h-20 bg-white/20 backdrop-blur-md rounded-full flex items-center justify-center border-2 border-white/30 active:bg-white/40 shadow-xl"
             >
-              →
+              <span className="text-3xl text-white">→</span>
             </button>
           </div>
           <div className="pointer-events-auto">
             <button 
-              onTouchStart={() => keys.current.add('KeyW')}
-              onTouchEnd={() => keys.current.delete('KeyW')}
-              className="w-16 h-16 bg-white/10 backdrop-blur-md rounded-full flex items-center justify-center border border-white/20"
+              onTouchStart={(e) => { e.preventDefault(); keys.current.add(role === 'water' ? 'ArrowUp' : 'KeyW'); }}
+              onTouchEnd={(e) => { e.preventDefault(); keys.current.delete(role === 'water' ? 'ArrowUp' : 'KeyW'); }}
+              className="w-24 h-24 bg-white/20 backdrop-blur-md rounded-full flex items-center justify-center border-2 border-white/30 active:bg-white/40 shadow-xl"
             >
-              ↑
+              <span className="text-3xl text-white">↑</span>
             </button>
           </div>
         </div>
+// Bilal Saeed xxxxx
       </div>
 
       <div className="mt-8 flex gap-8 text-zinc-500 text-xs uppercase tracking-widest hidden">

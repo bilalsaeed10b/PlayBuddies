@@ -213,7 +213,9 @@ function LobbyContent() {
 
   return (
     <AuthGuard>
-      <div className="min-h-screen bg-background flex flex-col">
+// Bilal Saeed xxxxx
+      <div className="h-screen bg-background flex flex-col overflow-hidden">
+// Bilal Saeed xxxxx
         {/* Navbar Simplified */}
         <nav className="glass border-b border-white/5 px-6 py-4 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-3">
@@ -251,46 +253,54 @@ function LobbyContent() {
           {/* Left Column: Players & Chat */}
           <div className="w-full lg:w-80 flex flex-col border-r border-white/5 bg-black/20">
             {/* Players List */}
-            <div className="p-6 shrink-0">
+// Bilal Saeed xxxxx
+            <div className="p-6 flex flex-col min-h-0 h-[40%] border-b border-white/5">
+// Bilal Saeed xxxxx
               <h2 className="text-sm font-bold text-text-muted uppercase tracking-wider mb-4 flex items-center gap-2">
                 <Users size={16} /> Crew ({lobby.players?.length || 0}/8)
               </h2>
-              <div className="space-y-3">
-                <AnimatePresence>
-                  {lobby.players?.map((player) => (
-                    <motion.div
-                      key={player.uid}
-                      initial={{ opacity: 0, x: -20 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      exit={{ opacity: 0, x: -20 }}
-                      className="flex items-center justify-between p-3 rounded-xl glass border border-white/5"
-                    >
-                      <div className="flex items-center gap-3">
-                        <img
-                          src={player.photoURL}
-                          alt={player.displayName}
-                          className="w-10 h-10 rounded-full border-2 border-primary/50"
-                        />
-                        <div>
-                          <p className="text-sm font-bold text-white flex items-center gap-1">
-                            {player.displayName}
-                            {player.uid === lobby.hostId && (
-                              <Crown size={14} className="text-yellow-400" />
-                            )}
-                          </p>
-                          <p className="text-xs text-text-muted">
-                            {player.uid === user?.uid ? "You" : "In Lobby"}
-                          </p>
+// Bilal Saeed xxxxx
+              <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar">
+                <div className="space-y-3">
+                  <AnimatePresence>
+                    {lobby.players?.map((player) => (
+                      <motion.div
+                        key={player.uid}
+                        initial={{ opacity: 0, x: -20 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        exit={{ opacity: 0, x: -20 }}
+                        className="flex items-center justify-between p-3 rounded-xl glass border border-white/5"
+                      >
+                        <div className="flex items-center gap-3">
+                          <img
+                            src={player.photoURL}
+                            alt={player.displayName}
+                            className="w-10 h-10 rounded-full border-2 border-primary/50"
+                          />
+                          <div>
+                            <p className="text-sm font-bold text-white flex items-center gap-1">
+                              {player.displayName}
+                              {player.uid === lobby.hostId && (
+                                <Crown size={14} className="text-yellow-400" />
+                              )}
+                            </p>
+                            <p className="text-xs text-text-muted">
+                              {player.uid === user?.uid ? "You" : "In Lobby"}
+                            </p>
+                          </div>
                         </div>
-                      </div>
-                    </motion.div>
-                  ))}
-                </AnimatePresence>
+                      </motion.div>
+                    ))}
+                  </AnimatePresence>
+                </div>
               </div>
             </div>
+// Bilal Saeed xxxxx
 
+// Bilal Saeed xxxxx
             {/* Chat Area */}
-            <div className="flex-1 flex flex-col border-t border-white/5 p-4 bg-black/40">
+            <div className="flex-1 flex flex-col min-h-0 p-4 bg-black/40">
+// Bilal Saeed xxxxx
               <div className="flex-1 overflow-y-auto mb-4 p-2 space-y-4 flex flex-col-reverse">
                 <div className="space-y-4">
                   {lobby.messages?.map((msg, i) => (
@@ -344,7 +354,7 @@ function LobbyContent() {
                 {/* The actual game running locally */}
                 <iframe 
                   id="game-iframe"
-                  src={`${process.env.NEXT_PUBLIC_BASE_PATH || ""}/games/${lobby.gameId}/index.html?room=${roomId}&host=${isHost}&displayName=${encodeURIComponent(user?.displayName || "Player")}&photoURL=${encodeURIComponent(user?.photoURL || "")}`} 
+                  src={`${process.env.NEXT_PUBLIC_BASE_PATH || ""}/games/fireboy-watergirl/index.html?room=${roomId}&host=${isHost}&displayName=${encodeURIComponent(user?.displayName || "Player")}&photoURL=${encodeURIComponent(user?.photoURL || "")}`} 
                   className="flex-1 w-full h-full border-none z-10"
                   title={selectedGameObj?.name || "Game Window"}
                   allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"

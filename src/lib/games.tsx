@@ -28,28 +28,5 @@ export const GAMES = [
     featured: true,
     available: true,
   },
-  {
-    id: "fish-eat-fish",
-    name: "Fish Eat Fish",
-    subtitle: "Survival of the Fittest",
-    description:
-      "Grow your fish by eating smaller ones and avoiding predators in this vibrant underwater 2D survival game.",
-    category: "Survival / Arcade",
-    players: "1-8",
-    color: "from-blue-500 to-emerald-500",
-    bgColor: "rgba(59, 130, 246, 0.08)",
-    borderColor: "rgba(59, 130, 246, 0.4)",
-    icon: (
-      <div className="w-full h-full flex items-center justify-center">
-        <img
-          src={`${process.env.NEXT_PUBLIC_BASE_PATH || ""}/games/fish-eat-fish/assets/player_fish_body.png`} 
-          alt="Fish Eat Fish"
-          className="w-full h-full object-contain scale-110 drop-shadow-2xl"
-        />
-      </div>
-    ),
-    featured: true,
-    available: true,
-  },
 ];
 // Bilal Saeed xxxxx
