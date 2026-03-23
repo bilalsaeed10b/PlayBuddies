@@ -9,7 +9,7 @@ import { signInAnonymously, onAuthStateChanged, signInWithPopup } from 'firebase
 import { GameEngine } from '../game/engine';
 import { Level } from '../types';
 import { getLevels } from '../game/levels';
-import { MessageSquare, Smile, RefreshCw, Smartphone, Monitor, Gem, ArrowLeft, Settings, Users, Maximize2, LogOut } from 'lucide-react';
+import { MessageSquare, Smile, RefreshCw, Smartphone, Monitor, Gem, ArrowLeft, Settings, Users, Maximize2, LogOut, Eye, EyeOff } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import confetti from 'canvas-confetti';
 import { playJumpSound, playCollectSound, playDeathSound, playWinSound } from '../game/sounds';
@@ -61,6 +61,8 @@ export default function FireboyWatergirl({
   const [lobbyData, setLobbyData] = useState<any>(null);
   const [chatMessages, setChatMessages] = useState<any[]>([]);
   const [showChat, setShowChat] = useState(false);
+  const [showHud, setShowHud] = useState(false);
+  const [showTitle, setShowTitle] = useState(true);
   const [toast, setToast] = useState<{ message: string, type: 'success' | 'error' | 'info' } | null>(null);
   const [isMobile, setIsMobile] = useState(false);
   
@@ -76,6 +78,15 @@ export default function FireboyWatergirl({
   }, []);
   const [useTilt, setUseTilt] = useState(false);
   const [isGameOver, setIsGameOver] = useState(false);
+
+  useEffect(() => {
+    if (gameStarted && !isGameOver) {
+      setShowTitle(true);
+      const timer = setTimeout(() => setShowTitle(false), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [gameStarted, levelIndex, isGameOver]);
+
   const [showSettings, setShowSettings] = useState(false);
   const [settings, setSettingsState] = useState({
     animations: true,
@@ -1906,63 +1917,91 @@ export default function FireboyWatergirl({
             className="w-full h-full"
           />
 
-          {/* HUD */}
-          <div className="absolute top-0 left-0 right-0 p-6 flex justify-between items-start pointer-events-none bg-gradient-to-b from-black/80 to-transparent">
-            <div className="flex flex-col gap-1">
-              <div className="flex items-center gap-2">
-                <div className="w-1 h-3 bg-orange-500" />
-                <div className="text-[10px] text-zinc-500 uppercase tracking-[0.3em] font-bold">
+          <AnimatePresence>
+            {showTitle && (
+              <motion.div
+                initial={{ opacity: 0, scale: 0.8 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 1.1 }}
+                className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none z-20"
+              >
+                <div className="text-sm text-orange-500 uppercase tracking-[0.5em] font-bold mb-2">
                   {customLevel ? 'USER_DATA_ARCHive' : `SECTOR_0${levelIndex + 1}`}
                 </div>
-              </div>
-              <div className="text-2xl font-black tracking-tighter italic uppercase">{customLevel ? customLevel.name : levels[levelIndex].name}</div>
+                <div className="text-6xl font-black tracking-tighter italic uppercase text-white drop-shadow-[0_0_15px_rgba(255,255,255,0.5)]">
+                  {customLevel ? customLevel.name : levels[levelIndex].name}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
 
-              <div className="flex gap-6 mt-4">
-                <div className="flex flex-col">
-                  <span className="text-[8px] text-zinc-500 uppercase font-bold mb-1">Mission Timer</span>
-                  <span className="text-sm font-mono font-bold text-white">
-                    {engine ? Math.floor((Date.now() - engine.startTime) / 1000).toString().padStart(3, '0') : '000'}s
-                  </span>
-                </div>
-                <div className="flex flex-col">
-                  <span className="text-[8px] text-zinc-500 uppercase font-bold mb-1">Gems Recovered</span>
-                  <div className="flex gap-3">
-                    <div className="flex items-center gap-1 text-orange-500 text-sm font-bold">
-                      <Gem size={12} /> {(engine?.player1?.score ?? 0) / 10}
-                    </div>
-                    <div className="flex items-center gap-1 text-cyan-500 text-sm font-bold">
-                      <Gem size={12} /> {(engine?.player2?.score ?? 0) / 10}
-                    </div>
-                  </div>
-                </div>
-                <div className="flex flex-col">
-                  <span className="text-[8px] text-zinc-500 uppercase font-bold mb-1">System Status</span>
+          {/* HUD Overlay */}
+          <div className="absolute top-0 left-0 right-0 p-6 flex justify-between items-start pointer-events-none bg-gradient-to-b from-black/80 to-transparent z-10">
+            <AnimatePresence>
+              {showHud && (
+                <motion.div 
+                  initial={{ opacity: 0, y: -20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -20 }}
+                  className="flex flex-col gap-1 pointer-events-auto"
+                >
                   <div className="flex items-center gap-2">
-                    <div className={`w-1.5 h-1.5 rounded-full ${engine?.player1?.isDead || engine?.player2?.isDead ? 'bg-red-500 animate-pulse' : 'bg-green-500'}`} />
-                    <span className={`text-[10px] font-bold ${engine?.player1?.isDead || engine?.player2?.isDead ? 'text-red-500' : 'text-green-500'}`}>
-                      {engine?.player1?.isDead || engine?.player2?.isDead ? 'CRITICAL_FAILURE' : 'NOMINAL'}
-                    </span>
-                  </div>
-                </div>
-                <div className="flex flex-col">
-                  <span className="text-[8px] text-zinc-500 uppercase font-bold mb-1">Performance</span>
-                  <div className="flex gap-4">
-                    <div className="flex flex-col">
-                      <span className="text-[8px] text-zinc-400">FPS</span>
-                      <span className={`text-xs font-mono font-bold ${fps < 30 ? 'text-red-500' : 'text-green-500'}`}>{fps}</span>
+                    <div className="w-1 h-3 bg-orange-500" />
+                    <div className="text-[10px] text-zinc-500 uppercase tracking-[0.3em] font-bold">
+                      {customLevel ? 'USER_DATA_ARCHive' : `SECTOR_0${levelIndex + 1}`}
                     </div>
-                    {gameMode === 'multi' && (
-                      <div className="flex flex-col">
-                        <span className="text-[8px] text-zinc-400">PING</span>
-                        <span className={`text-xs font-mono font-bold ${ping > 200 ? 'text-red-500' : (ping > 100 ? 'text-orange-500' : 'text-green-500')}`}>
-                          {ping}ms
+                  </div>
+                  <div className="text-2xl font-black tracking-tighter italic uppercase">{customLevel ? customLevel.name : levels[levelIndex].name}</div>
+
+                  <div className="flex gap-6 mt-4">
+                    <div className="flex flex-col">
+                      <span className="text-[8px] text-zinc-500 uppercase font-bold mb-1">Mission Timer</span>
+                      <span className="text-sm font-mono font-bold text-white">
+                        {engine ? Math.floor((Date.now() - engine.startTime) / 1000).toString().padStart(3, '0') : '000'}s
+                      </span>
+                    </div>
+                    <div className="flex flex-col">
+                      <span className="text-[8px] text-zinc-500 uppercase font-bold mb-1">Gems Recovered</span>
+                      <div className="flex gap-3">
+                        <div className="flex items-center gap-1 text-orange-500 text-sm font-bold">
+                          <Gem size={12} /> {(engine?.player1?.score ?? 0) / 10}
+                        </div>
+                        <div className="flex items-center gap-1 text-cyan-500 text-sm font-bold">
+                          <Gem size={12} /> {(engine?.player2?.score ?? 0) / 10}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex flex-col">
+                      <span className="text-[8px] text-zinc-500 uppercase font-bold mb-1">System Status</span>
+                      <div className="flex items-center gap-2">
+                        <div className={`w-1.5 h-1.5 rounded-full ${engine?.player1?.isDead || engine?.player2?.isDead ? 'bg-red-500 animate-pulse' : 'bg-green-500'}`} />
+                        <span className={`text-[10px] font-bold ${engine?.player1?.isDead || engine?.player2?.isDead ? 'text-red-500' : 'text-green-500'}`}>
+                          {engine?.player1?.isDead || engine?.player2?.isDead ? 'CRITICAL_FAILURE' : 'NOMINAL'}
                         </span>
                       </div>
-                    )}
+                    </div>
+                    <div className="flex flex-col">
+                      <span className="text-[8px] text-zinc-500 uppercase font-bold mb-1">Performance</span>
+                      <div className="flex gap-4">
+                        <div className="flex flex-col">
+                          <span className="text-[8px] text-zinc-400">FPS</span>
+                          <span className={`text-xs font-mono font-bold ${fps < 30 ? 'text-red-500' : 'text-green-500'}`}>{fps}</span>
+                        </div>
+                        {gameMode === 'multi' && (
+                          <div className="flex flex-col">
+                            <span className="text-[8px] text-zinc-400">PING</span>
+                            <span className={`text-xs font-mono font-bold ${ping > 200 ? 'text-red-500' : (ping > 100 ? 'text-orange-500' : 'text-green-500')}`}>
+                              {ping}ms
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                </div>
-              </div>
-            </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
 
             {/* Progress Bar */}
             <div className="absolute top-0 left-1/2 -translate-x-1/2 w-48 h-2 bg-black/40 rounded-full overflow-hidden border border-white/10">
@@ -1973,7 +2012,15 @@ export default function FireboyWatergirl({
               />
             </div>
 
-            <div className="flex gap-2 pointer-events-auto">
+            {/* Right Tools - HUD Toggle, Back, etc */}
+            <div className="absolute top-6 right-6 flex gap-2 pointer-events-auto z-20">
+              <button
+                onClick={() => setShowHud(!showHud)}
+                className="p-2 bg-black/50 border border-white/10 rounded-lg hover:bg-white/10 transition-colors"
+                title="Toggle HUD"
+              >
+                {showHud ? <EyeOff size={18} /> : <Eye size={18} />}
+              </button>
               {onBack && (
                 <button
                   onClick={onBack}
@@ -2016,7 +2063,6 @@ export default function FireboyWatergirl({
                 <MessageSquare size={18} />
               </button>
             </div>
-          </div>
 
           {/* Chat Overlay */}
           <AnimatePresence>

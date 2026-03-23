@@ -65,6 +65,15 @@ function LobbyContent() {
   const [showSidebar, setShowSidebar] = useState(false);
   const [isPseudoFull, setIsPseudoFull] = useState(false);
 
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      if (!document.fullscreenElement) {
+        setIsPseudoFull(false);
+      }
+    };
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+  }, []);
 
   const isHost = lobby?.hostId === user?.uid;
 
@@ -191,14 +200,24 @@ function LobbyContent() {
   };
 
   const toggleFullScreen = () => {
-    const iframe = document.getElementById("game-iframe");
-    if (iframe) {
-      if (iframe.requestFullscreen) {
-        iframe.requestFullscreen();
-      } else if ((iframe as any).webkitRequestFullscreen) {
-        (iframe as any).webkitRequestFullscreen();
-      } else if ((iframe as any).msRequestFullscreen) {
-        (iframe as any).msRequestFullscreen();
+    const isTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+    const isSmall = window.innerWidth < 1024;
+    const isDeviceMobile = isTouch || isSmall;
+    
+    if (isDeviceMobile) {
+      setIsPseudoFull(!isPseudoFull);
+    } else {
+      if (!document.fullscreenElement) {
+        document.documentElement.requestFullscreen().catch(err => {
+          console.error(`Error attempting to enable fullscreen: ${err.message}`);
+          setIsPseudoFull(true);
+        });
+        setIsPseudoFull(true);
+      } else {
+        if (document.exitFullscreen) {
+          document.exitFullscreen();
+        }
+        setIsPseudoFull(false);
       }
     }
   };
@@ -403,7 +422,7 @@ function LobbyContent() {
                 {/* Overlay Controls */}
                 <div className="absolute top-4 right-4 z-[110] flex gap-2">
                   <motion.button
-                    onClick={() => setIsPseudoFull(!isPseudoFull)}
+                    onClick={toggleFullScreen}
                     whileHover={{ scale: 1.05 }}
                     whileTap={{ scale: 0.95 }}
                     className={`p-2 rounded-xl border border-white/20 shadow-2xl backdrop-blur-md transition-colors ${isPseudoFull ? 'bg-primary text-white border-primary/50' : 'bg-black/60 hover:bg-black text-white'
