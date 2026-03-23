@@ -56,10 +56,14 @@ function LobbyContent() {
   const router = useRouter();
   const { user } = useAuthStore();
 
+// Bilal Saeed xxxxx
   const [lobby, setLobby] = useState<LobbyState | null>(null);
   const [copied, setCopied] = useState(false);
   const [isReady, setIsReady] = useState(false);
   const [chatMessage, setChatMessage] = useState("");
+  const [showSidebar, setShowSidebar] = useState(false);
+  const [isPseudoFull, setIsPseudoFull] = useState(false);
+// Bilal Saeed xxxxx
 
   const isHost = lobby?.hostId === user?.uid;
 
@@ -248,10 +252,22 @@ function LobbyContent() {
           </div>
         </nav>
 
+// Bilal Saeed xxxxx
         {/* Main Split Layout */}
-        <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
-          {/* Left Column: Players & Chat */}
-          <div className="w-full lg:w-80 flex flex-col border-r border-white/5 bg-black/20">
+        <div className="flex-1 flex flex-row overflow-hidden relative">
+          {/* Mobile Sidebar Toggle */}
+          <button 
+            onClick={() => setShowSidebar(!showSidebar)}
+            className="lg:hidden fixed bottom-6 right-6 z-[60] w-14 h-14 bg-primary text-white rounded-full shadow-2xl flex items-center justify-center border-2 border-white/20 active:scale-95 transition-all"
+          >
+            {showSidebar ? <LogOut size={24} /> : <MessageSquare size={24} />}
+          </button>
+
+          {/* Left Column: Players & Chat (Sidebar) */}
+          <div className={`${
+            showSidebar ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
+          } fixed lg:relative inset-y-0 left-0 w-80 flex flex-col border-r border-white/5 bg-black/90 lg:bg-black/20 z-50 transition-transform duration-300 ease-in-out`}>
+// Bilal Saeed xxxxx
             {/* Players List */}
 
             <div className="p-6 flex flex-col min-h-0 h-[40%] border-b border-white/5">
@@ -339,17 +355,24 @@ function LobbyContent() {
             </div>
           </div>
 
+// Bilal Saeed xxxxx
           {/* Right Column: Game Selection / Central Container */}
           <div
-            className={`flex-1 relative flex flex-col ${lobby.status === "playing" ? "p-0 overflow-hidden" : "p-6 lg:p-12 overflow-y-auto"}`}
+            className={`flex-1 relative flex flex-col ${
+              lobby.status === "playing" ? "p-0" : "p-6 lg:p-12 overflow-y-auto"
+            }`}
+// Bilal Saeed xxxxx
             style={{ backgroundImage: `url(${process.env.NEXT_PUBLIC_BASE_PATH || ''}/noise.png)` }}
           >
             {/* Ambient Glow */}
             <div className="absolute inset-0 bg-gradient-to-br from-primary/5 via-transparent to-accent/5 pointer-events-none" />
 
+// Bilal Saeed xxxxx
             {lobby.status === "playing" ? (
               /* The Game Container! */
-              <div className="flex-1 w-full relative z-10 flex flex-col bg-black">
+              <div className={`${
+                isPseudoFull ? 'fixed inset-0 z-[100] bg-black' : 'flex-1 relative'
+              } w-full flex flex-col`}>
                 {/* The actual game running locally */}
                 <iframe
                   id="game-iframe"
@@ -358,18 +381,23 @@ function LobbyContent() {
                   title={selectedGameObj?.name || "Game Window"}
                   allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
                 />
+// Bilal Saeed xxxxx
 
+// Bilal Saeed xxxxx
                 {/* Overlay Controls */}
-                <div className="absolute top-4 right-4 z-20 flex gap-2">
+                <div className="absolute top-4 right-4 z-[110] flex gap-2">
                   <motion.button
-                    onClick={toggleFullScreen}
+                    onClick={() => setIsPseudoFull(!isPseudoFull)}
                     whileHover={{ scale: 1.05 }}
                     whileTap={{ scale: 0.95 }}
-                    className="glass p-2 bg-black/60 hover:bg-black text-white rounded-xl border border-white/20 shadow-2xl backdrop-blur-md"
-                    title="Full Screen"
+                    className={`p-2 rounded-xl border border-white/20 shadow-2xl backdrop-blur-md transition-colors ${
+                      isPseudoFull ? 'bg-primary text-white border-primary/50' : 'bg-black/60 hover:bg-black text-white'
+                    }`}
+                    title={isPseudoFull ? "Close Full Screen" : "Full Screen"}
                   >
                     <Maximize2 size={18} />
                   </motion.button>
+// Bilal Saeed xxxxx
 
                   {isHost && (
                     <motion.button
