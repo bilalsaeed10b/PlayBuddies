@@ -19,7 +19,7 @@ export const GAMES = [
     icon: (
       <div className="w-full h-full flex items-center justify-center">
         <img
-          src="/games/fireboy-watergirl/icon.png" 
+          src={`${process.env.NEXT_PUBLIC_BASE_PATH || ""}/games/fireboy-watergirl/icon.png`} 
           alt="Neon Elements"
           className="w-full h-full object-cover shadow-2xl"
         />

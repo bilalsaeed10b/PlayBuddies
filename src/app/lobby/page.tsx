@@ -331,7 +331,10 @@ function LobbyContent() {
           </div>
 
           {/* Right Column: Game Selection / Central Container */}
-          <div className={`flex-1 relative bg-[url('/noise.png')] flex flex-col ${lobby.status === "playing" ? "p-0 overflow-hidden" : "p-6 lg:p-12 overflow-y-auto"}`}>
+          <div 
+            className={`flex-1 relative flex flex-col ${lobby.status === "playing" ? "p-0 overflow-hidden" : "p-6 lg:p-12 overflow-y-auto"}`}
+            style={{ backgroundImage: `url(${process.env.NEXT_PUBLIC_BASE_PATH || ''}/noise.png)` }}
+          >
             {/* Ambient Glow */}
             <div className="absolute inset-0 bg-gradient-to-br from-primary/5 via-transparent to-accent/5 pointer-events-none" />
 
@@ -341,7 +344,7 @@ function LobbyContent() {
                 {/* The actual game running locally */}
                 <iframe 
                   id="game-iframe"
-                  src={`/games/fireboy-watergirl/index.html?room=${roomId}&host=${isHost}&displayName=${encodeURIComponent(user?.displayName || "Player")}&photoURL=${encodeURIComponent(user?.photoURL || "")}`} 
+                  src={`${process.env.NEXT_PUBLIC_BASE_PATH || ""}/games/fireboy-watergirl/index.html?room=${roomId}&host=${isHost}&displayName=${encodeURIComponent(user?.displayName || "Player")}&photoURL=${encodeURIComponent(user?.photoURL || "")}`} 
                   className="flex-1 w-full h-full border-none z-10"
                   title={selectedGameObj?.name || "Game Window"}
                   allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
