@@ -344,7 +344,7 @@ function LobbyContent() {
                 {/* The actual game running locally */}
                 <iframe 
                   id="game-iframe"
-                  src={`${process.env.NEXT_PUBLIC_BASE_PATH || ""}/games/fireboy-watergirl/index.html?room=${roomId}&host=${isHost}&displayName=${encodeURIComponent(user?.displayName || "Player")}&photoURL=${encodeURIComponent(user?.photoURL || "")}`} 
+                  src={`${process.env.NEXT_PUBLIC_BASE_PATH || ""}/games/${lobby.gameId}/index.html?room=${roomId}&host=${isHost}&displayName=${encodeURIComponent(user?.displayName || "Player")}&photoURL=${encodeURIComponent(user?.photoURL || "")}`} 
                   className="flex-1 w-full h-full border-none z-10"
                   title={selectedGameObj?.name || "Game Window"}
                   allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
