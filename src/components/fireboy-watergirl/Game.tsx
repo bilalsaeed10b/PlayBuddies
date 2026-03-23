@@ -2015,7 +2015,7 @@ export default function Game({
 
         {/* Mobile Controls */}
         <div className="absolute bottom-4 left-4 right-4 flex justify-between pointer-events-none md:hidden">
-          <div className="flex gap-2 pointer-events-auto" >
+          <div className="flex gap-2 pointer-events-auto">
             <button 
               onTouchStart={() => keys.current.add('KeyA')}
               onTouchEnd={() => keys.current.delete('KeyA')}

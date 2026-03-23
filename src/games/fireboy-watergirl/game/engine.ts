@@ -9,6 +9,7 @@ export const STOPPING_POWER = 0.75; // 1 means instant stop, 0 means infinite sl
 export const AIR_RESISTANCE = 0.95;
 
 export class GameEngine {
+// Bilal Saeed xxxxx
   level: Level;
   player1: PlayerState;
   player2: PlayerState;
@@ -16,6 +17,7 @@ export class GameEngine {
   gravity: number = GRAVITY;
   projectiles: { x: number, y: number, vx: number, vy: number, radius: number }[] = [];
   onEvent?: (event: 'jump' | 'collect' | 'death' | 'win', data?: any) => void;
+// Bilal Saeed xxxxx
   private collidingEntities: Set<string> = new Set();
   private lastFireTime: Record<string, number> = {};
   private fireCounters: Record<string, number> = {};
@@ -53,7 +55,7 @@ export class GameEngine {
     };
   }
 
-  update(keys: Set<string>, dt: number = 1) {
+  update(keys: Set<string>) {
     if (this.player1.isDead || this.player2.isDead) return;
 
     // Reset pressure plates at the start of update
@@ -64,16 +66,16 @@ export class GameEngine {
     }
 
     const currentCollisions = new Set<string>();
-    this.updatePlayer(this.player1, keys, 'KeyW', 'KeyA', 'KeyD', currentCollisions, dt);
-    this.updatePlayer(this.player2, keys, 'ArrowUp', 'ArrowLeft', 'ArrowRight', currentCollisions, dt);
-
+    this.updatePlayer(this.player1, keys, 'KeyW', 'KeyA', 'KeyD', currentCollisions);
+    this.updatePlayer(this.player2, keys, 'ArrowUp', 'ArrowLeft', 'ArrowRight', currentCollisions);
+    
     // Update collidingEntities for next frame
     this.collidingEntities = currentCollisions;
 
     // Update projectiles
     this.projectiles = this.projectiles.filter(p => {
-      p.x += p.vx * dt;
-      p.y += p.vy * dt;
+      p.x += p.vx;
+      p.y += p.vy;
 
       // Check collision with players
       const players = [this.player1, this.player2];
@@ -95,8 +97,8 @@ export class GameEngine {
     for (const entity of this.level.entities) {
       if (entity.type === 'pressure-plate') {
         // Check if any box is on this plate
-        const boxOnPlate = this.level.entities.some(e =>
-          e.type === 'box' &&
+        const boxOnPlate = this.level.entities.some(e => 
+          e.type === 'box' && 
           e.x < entity.x + entity.width &&
           e.x + e.width > entity.x &&
           e.y < entity.y + entity.height &&
@@ -114,10 +116,10 @@ export class GameEngine {
       }
     }
 
-    this.updateEntities(dt);
+    this.updateEntities();
   }
 
-  updatePlayer(player: PlayerState, keys: Set<string>, up: string, left: string, right: string, currentCollisions: Set<string>, dt: number = 1) {
+  updatePlayer(player: PlayerState, keys: Set<string>, up: string, left: string, right: string, currentCollisions: Set<string>) {
     const world = this.level.worldSettings;
     const speedMult = world?.speedMultiplier || 1;
     const jumpMult = world?.jumpMultiplier || 1;
@@ -127,31 +129,31 @@ export class GameEngine {
 
     // Movement
     if (keys.has(left)) {
-      player.vx -= ACCELERATION * speedMult * dt;
+      player.vx -= ACCELERATION * speedMult;
       if (player.vx < -MOVE_SPEED * speedMult) player.vx = -MOVE_SPEED * speedMult;
       player.facing = 'left';
     }
     else if (keys.has(right)) {
-      player.vx += ACCELERATION * speedMult * dt;
+      player.vx += ACCELERATION * speedMult;
       if (player.vx > MOVE_SPEED * speedMult) player.vx = MOVE_SPEED * speedMult;
       player.facing = 'right';
     }
     else {
       if (player.isGrounded) {
-        player.vx *= Math.pow(1 - STOPPING_POWER, dt);
+        player.vx *= (1 - STOPPING_POWER);
       } else {
-        player.vx *= Math.pow(AIR_RESISTANCE, dt);
+        player.vx *= AIR_RESISTANCE;
       }
       if (Math.abs(player.vx) < 0.1) player.vx = 0;
     }
 
     // Apply wind
-    player.vx += windX * dt;
-    player.vy += windY * dt;
+    player.vx += windX;
+    player.vy += windY;
 
     // Jump
     if (keys.has(up) && player.isGrounded) {
-      player.vy = JUMP_FORCE * jumpMult; // Force is instant
+      player.vy = JUMP_FORCE * jumpMult;
       player.isGrounded = false;
       if (this.onEvent) this.onEvent('jump', player);
     }
@@ -166,13 +168,13 @@ export class GameEngine {
     }
 
     // Frame counter
-    player.animFrame += 0.15 * dt;
+    player.animFrame += 0.15;
     if (player.animFrame >= 4) player.animFrame = 0;
 
     // Gravity
-    player.vy += GRAVITY * gravMult * dt;
-    player.x += player.vx * dt;
-    player.y += player.vy * dt;
+    player.vy += GRAVITY * gravMult;
+    player.x += player.vx;
+    player.y += player.vy;
 
     // Collisions
     player.isGrounded = false;
@@ -187,8 +189,8 @@ export class GameEngine {
           if (entity.hazardType === 'fire' && player.role === 'water') { player.isDead = true; if (this.onEvent) this.onEvent('death', player); }
           if (entity.hazardType === 'water' && player.role === 'fire') { player.isDead = true; if (this.onEvent) this.onEvent('death', player); }
         } else if (entity.type === 'door') {
-          if ((entity.color === '#ff4400' && player.role === 'fire') ||
-            (entity.color === '#00ccff' && player.role === 'water')) {
+          if ((entity.color === '#ff4400' && player.role === 'fire') || 
+              (entity.color === '#00ccff' && player.role === 'water')) {
             player.atDoor = true;
           }
         } else if (entity.type === 'pressure-plate') {
@@ -196,14 +198,14 @@ export class GameEngine {
         } else if (entity.type === 'lever') {
           const collisionKey = `${player.role}-${entity.id}`;
           currentCollisions.add(collisionKey);
-
+          
           // Toggle on initial touch
           if (!this.collidingEntities.has(collisionKey)) {
             entity.active = !entity.active;
           }
         } else if (entity.type === 'gem' && !entity.collected) {
-          if ((entity.color === '#ff4400' && player.role === 'fire') ||
-            (entity.color === '#00ccff' && player.role === 'water')) {
+          if ((entity.color === '#ff4400' && player.role === 'fire') || 
+              (entity.color === '#00ccff' && player.role === 'water')) {
             entity.collected = true;
             player.score += 10;
             if (this.onEvent) this.onEvent('collect', entity);
@@ -223,14 +225,14 @@ export class GameEngine {
     }
   }
 
-  updateEntities(dt: number = 1) {
+  updateEntities() {
     const now = Date.now();
     for (const entity of this.level.entities) {
       // Handle cannon firing
       if (entity.type === 'cannon') {
         let angle = (entity.rotation || 0) * Math.PI / 180;
         let maxDist = 1200;
-
+        
         // If it has a target position and is NOT automatically rotating, use the target
         if (entity.endPos && !entity.rotating) {
           const centerX = entity.x + entity.width / 2;
@@ -250,14 +252,14 @@ export class GameEngine {
           const step = 5;
           let hit = false;
           let currentDist = 0;
-
+          
           for (let i = 0; i < maxDist; i += step) {
             lx += dx * step;
             ly += dy * step;
             currentDist += step;
-
+            
             if (lx < 0 || lx > 800 || ly < 0 || ly > 600) break;
-
+            
             // Check collision with solid entities
             for (const ent of this.level.entities) {
               if (ent.id !== entity.id && (ent.type === 'platform' || ent.type === 'box' || ent.type === 'moving-platform')) {
@@ -267,9 +269,9 @@ export class GameEngine {
                 }
               }
             }
-
+            
             if (hit) break;
-
+            
             // Check collision with players
             const pWidth = 30;
             const pHeight = 40;
@@ -286,14 +288,14 @@ export class GameEngine {
               break;
             }
           }
-
+          
           entity.laserEnd = { x: lx, y: ly };
         } else {
           const fireRate = entity.fireRate || 60;
           if (!this.fireCounters[entity.id]) this.fireCounters[entity.id] = 0;
-
-          this.fireCounters[entity.id] += dt;
-
+          
+          this.fireCounters[entity.id]++;
+          
           if (this.fireCounters[entity.id] >= fireRate) {
             this.fireCounters[entity.id] = 0;
             const speed = (entity.projectileSpeed || 5) * 0.2;
@@ -311,7 +313,7 @@ export class GameEngine {
       // Handle automatic rotation
       if (entity.rotating) {
         const speed = (entity.rotationSpeed || 1) * 0.2;
-        entity.rotation = (entity.rotation || 0) + speed * dt;
+        entity.rotation = (entity.rotation || 0) + speed;
         if (entity.rotation >= 360) entity.rotation -= 360;
         if (entity.rotation < 0) entity.rotation += 360;
       }
@@ -321,14 +323,14 @@ export class GameEngine {
         const dx = target.x - entity.x;
         const dy = target.y - entity.y;
         const dist = Math.sqrt(dx * dx + dy * dy);
-
+        
         if (dist > 1) {
           const speed = (entity.speed || 2) * 0.2;
           const vx = (dx / dist) * speed;
           const vy = (dy / dist) * speed;
-
-          entity.x += vx * dt;
-          entity.y += vy * dt;
+          
+          entity.x += vx;
+          entity.y += vy;
           entity.vx = vx;
           entity.vy = vy;
         } else {
@@ -391,13 +393,13 @@ export class GameEngine {
   resolvePlatformCollision(player: PlayerState, entity: Entity) {
     const pWidth = 30;
     const pHeight = 40;
-
+    
     if (entity.shape === 'triangle') {
       // Slope logic
       const relX = (player.x + pWidth / 2) - entity.x;
       const normalizedX = Math.max(0, Math.min(1, relX / entity.width));
       const slopeY = entity.y + (Math.abs(normalizedX - 0.5) * 2) * entity.height;
-
+      
       if (player.y + pHeight > slopeY && player.vy >= 0) {
         player.y = slopeY - pHeight;
         player.vy = 0;
