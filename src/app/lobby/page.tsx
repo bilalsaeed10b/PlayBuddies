@@ -376,6 +376,7 @@ function LobbyContent() {
                   <FireboyWatergirl
                     initialRoomId={roomId}
                     isHost={isHost}
+                    initialGameMode="multi"
                     displayName={user?.displayName || "Player"}
                     photoURL={user?.photoURL || ""}
                     onBack={async () => {
