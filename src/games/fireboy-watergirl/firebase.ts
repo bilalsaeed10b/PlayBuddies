@@ -1,7 +1,15 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged, GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
 import { getFirestore, doc, setDoc, getDoc, onSnapshot, updateDoc, arrayUnion, serverTimestamp, getDocFromServer } from 'firebase/firestore';
-import firebaseConfig from '../firebase-applet-config.json';
+const firebaseConfig = {
+  projectId: "playbuddies-556cd",
+  appId: "1:741516901024:web:6ee715ebc6438dfb1f27c5",
+  apiKey: "AIzaSyCPdgiF18VF7MyAtVa6r1kRCJaKKqrZsJg",
+  authDomain: "playbuddies-556cd.firebaseapp.com",
+  storageBucket: "playbuddies-556cd.firebasestorage.app",
+  messagingSenderId: "741516901024",
+  measurementId: "G-96MQE1FVP8"
+};
 
 // Initialize Firebase SDK
 const app = initializeApp(firebaseConfig);
