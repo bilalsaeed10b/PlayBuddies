@@ -1823,8 +1823,10 @@ export default function Game({
         )}
       </AnimatePresence>
 
-
-      <div className="relative w-full max-w-5xl aspect-[4/3] bg-zinc-900 rounded-2xl overflow-hidden border border-zinc-800 shadow-2xl mx-auto h-auto min-h-[300px]">
+// Bilal Saeed xxxxx
+      <div className="relative w-full h-full flex flex-col landscape:flex-row items-center justify-center p-2 lg:p-4">
+        <div className="relative w-full max-h-[70vh] landscape:max-h-full aspect-[4/3] bg-zinc-900 rounded-2xl overflow-hidden border border-zinc-800 shadow-2xl mx-auto flex items-center justify-center">
+// Bilal Saeed xxxxx
 
         <canvas
           ref={canvasRef}
@@ -2043,36 +2045,42 @@ export default function Game({
         </AnimatePresence>
 
 
-        {/* Mobile Controls */}
-        <div className="absolute bottom-6 left-6 right-6 flex justify-between pointer-events-none md:hidden">
-          <div className="flex gap-4 pointer-events-auto">
-            <button
+// Bilal Saeed xxxxx
+        </div>
+
+        {/* Mobile Controls Overlay/Container */}
+        <div className="fixed bottom-4 left-0 right-0 px-6 flex justify-between pointer-events-none md:hidden z-[150] landscape:bottom-10">
+          {/* Movement Controls (Left) */}
+          <div className="flex gap-4 pointer-events-auto landscape:ml-4">
+            <button 
               onTouchStart={(e) => { e.preventDefault(); keys.current.add(role === 'water' ? 'ArrowLeft' : 'KeyA'); }}
               onTouchEnd={(e) => { e.preventDefault(); keys.current.delete(role === 'water' ? 'ArrowLeft' : 'KeyA'); }}
-              className="w-20 h-20 bg-white/20 backdrop-blur-md rounded-full flex items-center justify-center border-2 border-white/30 active:bg-white/40 shadow-xl"
+              className="w-16 h-16 landscape:w-20 landscape:h-20 bg-white/10 backdrop-blur-md rounded-full flex items-center justify-center border-2 border-white/20 active:bg-white/40 shadow-xl"
             >
-              <span className="text-3xl text-white">←</span>
+              <span className="text-2xl landscape:text-3xl text-white">←</span>
             </button>
-            <button
+            <button 
               onTouchStart={(e) => { e.preventDefault(); keys.current.add(role === 'water' ? 'ArrowRight' : 'KeyD'); }}
               onTouchEnd={(e) => { e.preventDefault(); keys.current.delete(role === 'water' ? 'ArrowRight' : 'KeyD'); }}
-              className="w-20 h-20 bg-white/20 backdrop-blur-md rounded-full flex items-center justify-center border-2 border-white/30 active:bg-white/40 shadow-xl"
+              className="w-16 h-16 landscape:w-20 landscape:h-20 bg-white/10 backdrop-blur-md rounded-full flex items-center justify-center border-2 border-white/20 active:bg-white/40 shadow-xl"
             >
-              <span className="text-3xl text-white">→</span>
+              <span className="text-2xl landscape:text-3xl text-white">→</span>
             </button>
           </div>
-          <div className="pointer-events-auto">
-            <button
+          
+          {/* Action Controls (Right) */}
+          <div className="pointer-events-auto landscape:mr-4">
+            <button 
               onTouchStart={(e) => { e.preventDefault(); keys.current.add(role === 'water' ? 'ArrowUp' : 'KeyW'); }}
               onTouchEnd={(e) => { e.preventDefault(); keys.current.delete(role === 'water' ? 'ArrowUp' : 'KeyW'); }}
-              className="w-24 h-24 bg-white/20 backdrop-blur-md rounded-full flex items-center justify-center border-2 border-white/30 active:bg-white/40 shadow-xl"
+              className="w-20 h-20 landscape:w-24 landscape:h-24 bg-white/20 backdrop-blur-md rounded-full flex items-center justify-center border-2 border-white/30 active:bg-white/40 shadow-xl"
             >
               <span className="text-3xl text-white">↑</span>
             </button>
           </div>
         </div>
-
       </div>
+// Bilal Saeed xxxxx
 
       <div className="mt-8 flex gap-8 text-zinc-500 text-xs uppercase tracking-widest hidden">
         <div className="flex items-center gap-2">
