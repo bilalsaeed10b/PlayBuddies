@@ -1,4 +1,4 @@
-// Bilal Saeed xxxxx
+
 "use client";
 
 // IMPORTANT: This file uses JSX so it must stay as .tsx
@@ -19,7 +19,7 @@ export const GAMES = [
     icon: (
       <div className="w-full h-full flex items-center justify-center">
         <img
-          src={`${process.env.NEXT_PUBLIC_BASE_PATH || ""}/games/fireboy-watergirl/icon.png`} 
+          src={`${process.env.NEXT_PUBLIC_BASE_PATH || ""}/games/fireboy-watergirl/icon.png`}
           alt="Neon Elements"
           className="w-full h-full object-cover shadow-2xl"
         />
@@ -29,4 +29,4 @@ export const GAMES = [
     available: true,
   },
 ];
-// Bilal Saeed xxxxx
+

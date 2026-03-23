@@ -1,4 +1,4 @@
-// Bilal Saeed xxxxx
+
 import { create } from 'zustand';
 import { User } from 'firebase/auth';
 
@@ -15,4 +15,4 @@ export const useAuthStore = create<AuthState>((set) => ({
   setUser: (user) => set({ user }),
   setLoading: (loading) => set({ loading }),
 }));
-// Bilal Saeed xxxxx
+

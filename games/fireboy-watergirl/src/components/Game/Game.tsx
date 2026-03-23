@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
-import { 
+import {
   auth, db, signInAnonymously, onAuthStateChanged, signInWithPopup, googleProvider,
-  doc, setDoc, getDoc, onSnapshot, updateDoc, arrayUnion, serverTimestamp 
+  doc, setDoc, getDoc, onSnapshot, updateDoc, arrayUnion, serverTimestamp
 } from '../../firebase';
 import { GameEngine } from '../../game/engine';
 import { Level } from '../../types';
@@ -25,18 +25,18 @@ interface Particle {
   size: number;
 }
 
-export default function Game({ 
-  customLevel, 
-  startLevelIndex = 0, 
-  onBack, 
+export default function Game({
+  customLevel,
+  startLevelIndex = 0,
+  onBack,
   onComplete,
   initialGameMode = 'single',
   initialRoomId,
   isHost = false,
   displayName,
   photoURL
-}: { 
-  customLevel?: Level | null, 
+}: {
+  customLevel?: Level | null,
   startLevelIndex?: number,
   onBack?: () => void,
   onComplete?: (levelId: number) => void,
@@ -226,7 +226,7 @@ export default function Game({
         return;
       }
       setRoomId(room);
-      
+
       const roomRef = doc(db, 'rooms', room);
       const roomSnap = await getDoc(roomRef);
 
@@ -254,7 +254,7 @@ export default function Game({
           showToast("Game already in progress", "error");
           return;
         }
-        
+
         await updateDoc(roomRef, {
           [`players.${uid}`]: { id: uid, role: null, ready: false, displayName: displayName || 'Player', photoURL: photoURL || '' }
         });
@@ -270,18 +270,18 @@ export default function Game({
 
     console.log(`[Multiplayer] Setting up Firestore listeners for room [${roomId}]`);
     const roomRef = doc(db, 'rooms', roomId);
-    
+
     const unsubscribeRoom = onSnapshot(roomRef, (doc) => {
       if (doc.exists()) {
         const data = doc.data();
         console.log('[Multiplayer] Room update:', data);
         setLobbyData(data);
-        
+
         const myPlayer = data.players[userId];
         if (myPlayer && myPlayer.role) {
           setRole(myPlayer.role);
         }
-        
+
         // Sync level
         if (data.level !== undefined) {
           setLevelIndex(prev => {
@@ -293,7 +293,7 @@ export default function Game({
             return prev;
           });
         }
-        
+
         if (data.status === 'playing') {
           setGameStarted(true);
         } else {
@@ -338,7 +338,7 @@ export default function Game({
           if (!currentEngine) return;
 
           const targetPlayer = state.role === 'fire' ? currentEngine.player1 : currentEngine.player2;
-          
+
           // Only update if the Firestore state is newer than what we have, 
           // or if WebRTC isn't connected
           if (!rtcConnected || (state.lastUpdate && state.lastUpdate > ((targetPlayer as any).lastUpdate || 0))) {
@@ -358,7 +358,7 @@ export default function Game({
 
   useEffect(() => {
     if (gameMode !== 'multi' || !roomId || !userId || !hasTwoPlayers) return;
-    
+
     if (rtcRef.current) return;
 
     let unsubRoom: (() => void) | null = null;
@@ -437,7 +437,7 @@ export default function Game({
               try {
                 const c = JSON.parse(cStr);
                 pc.addIceCandidate(new RTCIceCandidate(c)).catch(console.error);
-              } catch (e) {}
+              } catch (e) { }
             });
           }
         });
@@ -474,7 +474,7 @@ export default function Game({
               try {
                 const c = JSON.parse(cStr);
                 pc.addIceCandidate(new RTCIceCandidate(c)).catch(console.error);
-              } catch (e) {}
+              } catch (e) { }
             });
           }
         });
@@ -524,7 +524,7 @@ export default function Game({
 
       const currentCollisions = new Set<string>();
 
-// Bilal Saeed xxxxx
+
       // Update local player
       if (role === 'fire') {
         const fireBoyKeys = new Set(keys.current);
@@ -539,12 +539,12 @@ export default function Game({
         if (keys.current.has('KeyD')) waterGirlKeys.add('ArrowRight');
         currentEngine.updatePlayer(currentEngine.player2, waterGirlKeys, 'ArrowUp', 'ArrowLeft', 'ArrowRight', currentCollisions);
       } else {
-// Bilal Saeed xxxxx
+
         // Local co-op mode
         currentEngine.update(keys.current);
       }
-      
-// Bilal Saeed xxxxx
+
+
       // Update engine's collision memory for levers
       if (role !== 'both') {
         // @ts-ignore - accessing private for sync
@@ -559,7 +559,7 @@ export default function Game({
           if (remotePlayer.vy < 15) remotePlayer.vy += currentEngine.gravity;
         }
       }
-// Bilal Saeed xxxxx
+
 
       // Sync player state
       if (gameMode === 'multi' && roomId && userId && role && role !== 'both') {
@@ -591,7 +591,7 @@ export default function Game({
       }
 
       currentEngine.updateEntities();
-      
+
       draw(ctx, currentEngine, time);
 
       if (currentEngine.player1.atDoor && currentEngine.player2.atDoor) {
@@ -655,7 +655,7 @@ export default function Game({
         if (gameMode === 'multi' && roomId) {
           if (isHost) {
             const roomRef = doc(db, 'rooms', roomId);
-            updateDoc(roomRef, { 
+            updateDoc(roomRef, {
               level: winLevelIndex + 1,
               collectedGems: {} // Reset gems for next level
             });
@@ -667,7 +667,7 @@ export default function Game({
         }
       } else {
         showToast("All levels complete!", "success");
-        setTimeout(onBack || (() => {}), 2000);
+        setTimeout(onBack || (() => { }), 2000);
       }
     }, 2000);
   };
@@ -677,18 +677,18 @@ export default function Game({
     setIsGameOver(true);
 
     playDeathSound();
-    
+
     // Immediately sync death if in multiplayer
     if (gameMode === 'multi' && roomId && userId && role && role !== 'both') {
       const pRef = doc(db, 'rooms', roomId, 'updates', userId);
       updateDoc(pRef, { isDead: true }).catch(console.error);
-      
+
       if (dcRef.current?.readyState === 'open') {
         const p = role === 'fire' ? engineRef.current?.player1 : engineRef.current?.player2;
         if (p) {
-          dcRef.current.send(JSON.stringify({ 
-            type: 'sync', 
-            role, 
+          dcRef.current.send(JSON.stringify({
+            type: 'sync',
+            role,
             state: { ...p, isDead: true },
             lastUpdate: Date.now()
           }));
@@ -702,7 +702,7 @@ export default function Game({
       newEngine.onEvent = handleGameEvent;
       engineRef.current = newEngine;
       setEngine(newEngine);
-      
+
       // Reset Firestore state for this player to prevent immediate re-death sync
       if (gameMode === 'multi' && roomId && userId && role && role !== 'both') {
         const pRef = doc(db, 'rooms', roomId, 'updates', userId);
@@ -718,32 +718,32 @@ export default function Game({
           lastUpdate: Date.now()
         }, { merge: true });
       }
-      
+
       setIsGameOver(false);
     }, 1500);
   };
 
   const drawParticles = (ctx: CanvasRenderingContext2D) => {
     if (!settingsRef.current.particles) return;
-    
+
     // Disable shadow blur for particles to drastically improve performance
     ctx.shadowBlur = 0;
-    
+
     for (let i = particlesRef.current.length - 1; i >= 0; i--) {
       const p = particlesRef.current[i];
       p.x += p.vx;
       p.y += p.vy;
       p.life++;
-      
+
       if (p.life >= p.maxLife) {
         particlesRef.current.splice(i, 1);
         continue;
       }
-      
+
       const alpha = 1 - (p.life / p.maxLife);
       ctx.globalAlpha = alpha;
       ctx.fillStyle = p.color;
-      
+
       ctx.beginPath();
       ctx.arc(p.x, p.y, p.size * alpha, 0, Math.PI * 2);
       ctx.fill();
@@ -753,11 +753,11 @@ export default function Game({
 
   const drawBackground = (ctx: CanvasRenderingContext2D, time: number) => {
     const theme = engine?.level.worldSettings?.backgroundTheme || 'default';
-    
+
     if (theme === 'void') {
       ctx.fillStyle = '#050505';
       ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-      
+
       // Draw some floating particles
       ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
       for (let i = 0; i < 50; i++) {
@@ -774,7 +774,7 @@ export default function Game({
     if (theme === 'matrix') {
       ctx.fillStyle = '#000';
       ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-      
+
       ctx.fillStyle = '#0f0';
       ctx.font = '10px monospace';
       for (let i = 0; i < 40; i++) {
@@ -791,7 +791,7 @@ export default function Game({
       bgGradient.addColorStop(1, '#000000');
       ctx.fillStyle = bgGradient;
       ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-      
+
       // Neon grid
       ctx.strokeStyle = 'rgba(255, 0, 255, 0.1)';
       ctx.lineWidth = 1;
@@ -807,7 +807,7 @@ export default function Game({
     if (theme === 'cyberpunk') {
       ctx.fillStyle = '#0a0a12';
       ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-      
+
       // Perspective grid
       ctx.strokeStyle = 'rgba(0, 255, 255, 0.15)';
       ctx.lineWidth = 1;
@@ -825,7 +825,7 @@ export default function Game({
         ctx.lineTo(CANVAS_WIDTH, y);
         ctx.stroke();
       }
-      
+
       // Distant buildings
       ctx.fillStyle = 'rgba(255, 0, 255, 0.05)';
       for (let i = 0; i < 10; i++) {
@@ -843,18 +843,18 @@ export default function Game({
       sunsetGrad.addColorStop(1, '#ed8f03');
       ctx.fillStyle = sunsetGrad;
       ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-      
+
       // Sun
       const sunY = CANVAS_HEIGHT * 0.6 + Math.sin(time * 0.0001) * 20;
-      const sunGrad = ctx.createRadialGradient(CANVAS_WIDTH/2, sunY, 0, CANVAS_WIDTH/2, sunY, 150);
+      const sunGrad = ctx.createRadialGradient(CANVAS_WIDTH / 2, sunY, 0, CANVAS_WIDTH / 2, sunY, 150);
       sunGrad.addColorStop(0, '#fff700');
       sunGrad.addColorStop(0.2, '#ff8c00');
       sunGrad.addColorStop(1, 'transparent');
       ctx.fillStyle = sunGrad;
       ctx.beginPath();
-      ctx.arc(CANVAS_WIDTH/2, sunY, 150, 0, Math.PI * 2);
+      ctx.arc(CANVAS_WIDTH / 2, sunY, 150, 0, Math.PI * 2);
       ctx.fill();
-      
+
       // Scanlines
       ctx.fillStyle = 'rgba(0, 0, 0, 0.1)';
       for (let i = 0; i < CANVAS_HEIGHT; i += 4) {
@@ -866,7 +866,7 @@ export default function Game({
     if (theme === 'nebula') {
       ctx.fillStyle = '#000';
       ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-      
+
       for (let i = 0; i < 3; i++) {
         const x = (Math.sin(time * 0.0002 + i) * 0.5 + 0.5) * CANVAS_WIDTH;
         const y = (Math.cos(time * 0.0003 + i) * 0.5 + 0.5) * CANVAS_HEIGHT;
@@ -878,7 +878,7 @@ export default function Game({
         ctx.fillStyle = grad;
         ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
       }
-      
+
       // Twinkling stars
       ctx.fillStyle = '#fff';
       for (let i = 0; i < 100; i++) {
@@ -897,18 +897,18 @@ export default function Game({
     if (theme === 'glitch') {
       ctx.fillStyle = '#111';
       ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-      
+
       if (Math.random() > 0.9) {
         ctx.fillStyle = Math.random() > 0.5 ? 'rgba(255, 0, 0, 0.2)' : 'rgba(0, 255, 255, 0.2)';
         ctx.fillRect(Math.random() * CANVAS_WIDTH, 0, Math.random() * 100, CANVAS_HEIGHT);
       }
-      
+
       ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
       for (let i = 0; i < 20; i++) {
         const y = (time * 0.5 + i * 50) % CANVAS_HEIGHT;
         ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(CANVAS_WIDTH, y); ctx.stroke();
       }
-      
+
       // Static
       for (let i = 0; i < 1000; i++) {
         const x = Math.random() * CANVAS_WIDTH;
@@ -925,7 +925,7 @@ export default function Game({
       waterGrad.addColorStop(1, '#363795');
       ctx.fillStyle = waterGrad;
       ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-      
+
       // Light rays
       ctx.fillStyle = 'rgba(255, 255, 255, 0.05)';
       for (let i = 0; i < 5; i++) {
@@ -941,7 +941,7 @@ export default function Game({
         ctx.fill();
         ctx.restore();
       }
-      
+
       // Bubbles
       ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
       for (let i = 0; i < 20; i++) {
@@ -968,10 +968,10 @@ export default function Game({
       const x = (Math.sin(i * 123.45) * 10000) % CANVAS_WIDTH;
       const y = (Math.cos(i * 678.9) * 10000) % CANVAS_HEIGHT;
       const size = Math.abs(Math.sin(i)) * 1.5 + 0.5;
-      
+
       const px = x < 0 ? x + CANVAS_WIDTH : x;
       const py = y < 0 ? y + CANVAS_HEIGHT : y;
-      
+
       ctx.beginPath();
       ctx.arc(px, py, size, 0, Math.PI * 2);
       ctx.fill();
@@ -980,13 +980,13 @@ export default function Game({
 
   const draw = (ctx: CanvasRenderingContext2D, engine: GameEngine, time: number) => {
     const world = engine.level.worldSettings;
-    
+
     ctx.save();
-    
+
     // Screen Shake
     const shake = (world?.screenShake || 0) + screenShake;
     if (shake > 0) {
-      ctx.translate(Math.random() * shake - shake/2, Math.random() * shake - shake/2);
+      ctx.translate(Math.random() * shake - shake / 2, Math.random() * shake - shake / 2);
     }
 
     ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
@@ -1011,7 +1011,7 @@ export default function Game({
       ctx.translate(-(entity.x + entity.width / 2), -(entity.y + entity.height / 2));
 
       ctx.shadowBlur = 15;
-      
+
       const drawShape = () => {
         if (entity.shape === 'circle') {
           ctx.beginPath();
@@ -1048,7 +1048,7 @@ export default function Game({
           ctx.shadowBlur = 10;
         }
         drawShape();
-        
+
         // Draw crate details
         ctx.strokeStyle = '#5C2E0B';
         ctx.lineWidth = 2;
@@ -1067,14 +1067,14 @@ export default function Game({
             ctx.shadowBlur = 10;
           }
           drawShape();
-          
+
           // Flames
           ctx.fillStyle = '#ffcc00';
           for (let i = 0; i < entity.width; i += 10) {
             ctx.beginPath();
             ctx.moveTo(entity.x + i, entity.y + entity.height);
-            const flameHeight = settingsRef.current.animations 
-              ? 15 + Math.sin(time * 0.01 + i) * 5 
+            const flameHeight = settingsRef.current.animations
+              ? 15 + Math.sin(time * 0.01 + i) * 5
               : 15;
             ctx.lineTo(entity.x + i + 5, entity.y + entity.height - flameHeight);
             ctx.lineTo(entity.x + i + 10, entity.y + entity.height);
@@ -1087,7 +1087,7 @@ export default function Game({
             ctx.shadowBlur = 10;
           }
           drawShape();
-          
+
           // Surface
           ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
           if (settingsRef.current.animations) {
@@ -1110,7 +1110,7 @@ export default function Game({
             ctx.shadowBlur = 10;
           }
           drawShape();
-          
+
           // Surface
           ctx.fillStyle = 'rgba(200, 255, 200, 0.4)';
           if (settingsRef.current.animations) {
@@ -1136,7 +1136,7 @@ export default function Game({
         }
         ctx.lineWidth = 3;
         ctx.strokeRect(entity.x, entity.y, entity.width, entity.height);
-        
+
         // Inner glowing grid for doors
         ctx.fillStyle = doorColor;
         ctx.globalAlpha = 0.2;
@@ -1145,13 +1145,13 @@ export default function Game({
 
         ctx.lineWidth = 1;
         ctx.beginPath();
-        for(let i = 10; i < entity.width; i += 10) {
-           ctx.moveTo(entity.x + i, entity.y);
-           ctx.lineTo(entity.x + i, entity.y + entity.height);
+        for (let i = 10; i < entity.width; i += 10) {
+          ctx.moveTo(entity.x + i, entity.y);
+          ctx.lineTo(entity.x + i, entity.y + entity.height);
         }
-        for(let i = 10; i < entity.height; i += 10) {
-           ctx.moveTo(entity.x, entity.y + i);
-           ctx.lineTo(entity.x + entity.width, entity.y + i);
+        for (let i = 10; i < entity.height; i += 10) {
+          ctx.moveTo(entity.x, entity.y + i);
+          ctx.lineTo(entity.x + entity.width, entity.y + i);
         }
         ctx.stroke();
       } else if (entity.type === 'lever') {
@@ -1160,7 +1160,7 @@ export default function Game({
         ctx.fillRect(entity.x, entity.y + entity.height - 10, entity.width, 10);
         ctx.fillStyle = '#444';
         ctx.fillRect(entity.x + 2, entity.y + entity.height - 10, entity.width - 4, 2);
-        
+
         // Draw handle
         const glowColor = entity.active ? '#00ff00' : '#ff0000';
         ctx.strokeStyle = glowColor;
@@ -1178,7 +1178,7 @@ export default function Game({
           ctx.lineTo(entity.x + 8, entity.y + 5);
         }
         ctx.stroke();
-        
+
         // Handle knob
         ctx.fillStyle = glowColor;
         ctx.beginPath();
@@ -1191,7 +1191,7 @@ export default function Game({
         ctx.shadowBlur = 0;
       } else if (entity.type === 'pressure-plate') {
         const glowColor = entity.active ? '#00ff00' : '#ff0000';
-        
+
         // Draw base
         ctx.fillStyle = '#222';
         ctx.fillRect(entity.x, entity.y + entity.height - 5, entity.width, 5);
@@ -1204,7 +1204,7 @@ export default function Game({
         }
         const height = entity.active ? 2 : 6;
         ctx.fillRect(entity.x + 4, entity.y + entity.height - 5 - height, entity.width - 8, height);
-        
+
         // Inner bright core
         ctx.fillStyle = '#fff';
         ctx.globalAlpha = 0.5;
@@ -1226,7 +1226,7 @@ export default function Game({
           ctx.shadowBlur = 10;
         }
         drawShape();
-        
+
         // Add some technical detail to moving platforms
         ctx.strokeStyle = 'rgba(0, 204, 255, 0.6)';
         ctx.lineWidth = 2;
@@ -1237,21 +1237,21 @@ export default function Game({
           ctx.shadowBlur = 10;
           ctx.shadowColor = '#000';
         }
-        
+
         // Draw base
         ctx.beginPath();
-        ctx.arc(entity.x + entity.width/2, entity.y + entity.height/2, entity.width/2, 0, Math.PI * 2);
+        ctx.arc(entity.x + entity.width / 2, entity.y + entity.height / 2, entity.width / 2, 0, Math.PI * 2);
         ctx.fill();
-        
+
         // Draw barrel
         ctx.save();
         ctx.translate(entity.x + entity.width / 2, entity.y + entity.height / 2);
         // No second rotation here, it's already rotated at the entity level
         ctx.fillStyle = entity.cannonType === 'laser' ? '#ff0044' : '#ff8800';
-        ctx.fillRect(0, -6, entity.width/2 + 10, 12);
+        ctx.fillRect(0, -6, entity.width / 2 + 10, 12);
         ctx.strokeStyle = '#222';
         ctx.lineWidth = 2;
-        ctx.strokeRect(0, -6, entity.width/2 + 10, 12);
+        ctx.strokeRect(0, -6, entity.width / 2 + 10, 12);
         ctx.restore();
       } else if (entity.type === 'gem' && !entity.collected) {
         const gemY = entity.y;
@@ -1261,7 +1261,7 @@ export default function Game({
           ctx.shadowColor = entity.color || '#fff';
           ctx.shadowBlur = 10;
         }
-        
+
         // Draw diamond shape
         ctx.beginPath();
         ctx.moveTo(entity.x + entity.width / 2, gemY);
@@ -1270,7 +1270,7 @@ export default function Game({
         ctx.lineTo(entity.x, gemY + entity.height / 2);
         ctx.closePath();
         ctx.fill();
-        
+
         // Inner bright core
         ctx.fillStyle = '#fff';
         ctx.beginPath();
@@ -1294,12 +1294,12 @@ export default function Game({
         ctx.beginPath();
         ctx.moveTo(entity.x + entity.width / 2, entity.y + entity.height / 2);
         ctx.lineTo(entity.laserEnd.x, entity.laserEnd.y);
-        
+
         // Core
         ctx.strokeStyle = '#fff';
         ctx.lineWidth = 2;
         ctx.stroke();
-        
+
         // Glow
         ctx.strokeStyle = '#ff0000';
         ctx.lineWidth = 6;
@@ -1309,7 +1309,7 @@ export default function Game({
           ctx.shadowBlur = 15;
         }
         ctx.stroke();
-        
+
         ctx.restore();
       }
     });
@@ -1319,7 +1319,7 @@ export default function Game({
       const isRight = p.facing === 'right';
       const isFire = p.role === 'fire';
       const isMoving = Math.abs(p.vx) > 0.5;
-      
+
       if (settingsRef.current.particles && Math.abs(p.vx) > 1 && Math.random() > 0.5) {
         addParticles(p.x + 15, p.y + 30, color, 1);
       }
@@ -1327,17 +1327,17 @@ export default function Game({
       ctx.save();
       ctx.translate(p.x + 15, p.y + 20); // Center of player
       if (!isRight) ctx.scale(-1, 1);
-      
+
       if (settingsRef.current.bloom) {
         ctx.shadowBlur = 10;
         ctx.shadowColor = color;
       }
-      
+
       // Animation variables
       let bodyScaleY = 1;
       let bodyScaleX = 1;
       let bodyOffsetY = 0;
-      
+
       if (settingsRef.current.animations) {
         if (p.animState === 'jump') {
           bodyScaleY = 1.2;
@@ -1377,12 +1377,12 @@ export default function Game({
         // Flame head shape (pointed top)
         ctx.beginPath();
         ctx.moveTo(-15, 0 + bodyOffsetY);
-        const pointyTop = settingsRef.current.animations ? -35 + bodyOffsetY - Math.sin(time*0.01)*5 : -35 + bodyOffsetY;
+        const pointyTop = settingsRef.current.animations ? -35 + bodyOffsetY - Math.sin(time * 0.01) * 5 : -35 + bodyOffsetY;
         ctx.quadraticCurveTo(-15, -25 + bodyOffsetY, 0, pointyTop); // Pointy top
         ctx.quadraticCurveTo(15, -25 + bodyOffsetY, 15, 0 + bodyOffsetY);
         ctx.lineTo(-15, 0 + bodyOffsetY);
         ctx.fill();
-        
+
         // Inner flame flicker
         ctx.fillStyle = '#ffcc00';
         ctx.beginPath();
@@ -1396,10 +1396,10 @@ export default function Game({
         ctx.beginPath();
         ctx.arc(0, -10 + bodyOffsetY, 18, 0, Math.PI * 2);
         ctx.fill();
-        
+
         // Hair Bun / Ponytail
         ctx.beginPath();
-        const bunBob = settingsRef.current.animations ? Math.sin(time*0.01)*2 : 0;
+        const bunBob = settingsRef.current.animations ? Math.sin(time * 0.01) * 2 : 0;
         if (isMoving) {
           // Flowing back ponytail
           ctx.moveTo(-10, -15 + bodyOffsetY);
@@ -1410,14 +1410,14 @@ export default function Game({
           ctx.arc(0, -28 + bodyOffsetY + bunBob, 8, 0, Math.PI * 2);
           ctx.fill();
         }
-        
+
         // Side-swept hair/bangs
         ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
         ctx.beginPath();
-        ctx.moveTo(-15 + faceOffsetX/2, -15 + bodyOffsetY);
-        ctx.quadraticCurveTo(0 + faceOffsetX/2, -25 + bodyOffsetY, 15 + faceOffsetX/2, -10 + bodyOffsetY);
-        ctx.lineTo(15 + faceOffsetX/2, -5 + bodyOffsetY);
-        ctx.quadraticCurveTo(0 + faceOffsetX/2, -15 + bodyOffsetY, -15 + faceOffsetX/2, -5 + bodyOffsetY);
+        ctx.moveTo(-15 + faceOffsetX / 2, -15 + bodyOffsetY);
+        ctx.quadraticCurveTo(0 + faceOffsetX / 2, -25 + bodyOffsetY, 15 + faceOffsetX / 2, -10 + bodyOffsetY);
+        ctx.lineTo(15 + faceOffsetX / 2, -5 + bodyOffsetY);
+        ctx.quadraticCurveTo(0 + faceOffsetX / 2, -15 + bodyOffsetY, -15 + faceOffsetX / 2, -5 + bodyOffsetY);
         ctx.fill();
       }
 
@@ -1445,12 +1445,12 @@ export default function Game({
         ctx.beginPath();
         ctx.arc(faceOffsetX + 2, -12 + bodyOffsetY, 5, 0, Math.PI * 2); // Front eye
         ctx.fill();
-        
+
         ctx.fillStyle = '#000';
         ctx.beginPath();
         ctx.arc(faceOffsetX + 4, -12 + bodyOffsetY, 2, 0, Math.PI * 2); // Pupil looking forward
         ctx.fill();
-        
+
         if (!isFire) {
           // Eyelashes for girl
           ctx.strokeStyle = '#000';
@@ -1466,13 +1466,13 @@ export default function Game({
         ctx.arc(5, -12 + bodyOffsetY, 5, 0, Math.PI * 2); // Right eye
         ctx.arc(-5, -12 + bodyOffsetY, 5, 0, Math.PI * 2); // Left eye
         ctx.fill();
-        
+
         ctx.fillStyle = '#000';
         ctx.beginPath();
         ctx.arc(6, -12 + bodyOffsetY, 2, 0, Math.PI * 2); // Right pupil
         ctx.arc(-4, -12 + bodyOffsetY, 2, 0, Math.PI * 2); // Left pupil
         ctx.fill();
-        
+
         if (!isFire) {
           // Eyelashes for girl
           ctx.strokeStyle = '#000';
@@ -1501,13 +1501,13 @@ export default function Game({
       ctx.strokeStyle = color;
       ctx.lineWidth = 5;
       ctx.lineCap = 'round';
-      
+
       if (settingsRef.current.animations) {
         if (p.animState === 'run') {
           const legAngle = Math.sin(p.animFrame * Math.PI) * 0.6;
           ctx.beginPath(); ctx.moveTo(-3, 15); ctx.lineTo(Math.sin(legAngle) * 14 - 3, 26); ctx.stroke();
           ctx.beginPath(); ctx.moveTo(3, 15); ctx.lineTo(Math.sin(legAngle + Math.PI) * 14 + 3, 26); ctx.stroke();
-          
+
           const armAngle = Math.cos(p.animFrame * Math.PI) * 0.5;
           ctx.beginPath(); ctx.moveTo(8, 5); ctx.lineTo(Math.sin(armAngle) * 12 + 8, 16); ctx.stroke();
         } else if (p.animState === 'jump') {
@@ -1532,7 +1532,7 @@ export default function Game({
           ctx.beginPath(); ctx.moveTo(4, 18); ctx.lineTo(4, 26); ctx.stroke();
         }
       }
-      
+
       ctx.restore();
       ctx.shadowBlur = 0;
     };
@@ -1547,12 +1547,12 @@ export default function Game({
         ctx.shadowBlur = 15;
         ctx.shadowColor = '#fff';
       }
-      
+
       ctx.beginPath();
       engine.projectiles.forEach(p => {
         ctx.moveTo(p.x + p.radius, p.y);
         ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
-        
+
         // Trail
         if (settingsRef.current.particles && Math.random() > 0.3) {
           addParticles(p.x, p.y, '#fff', 1);
@@ -1567,73 +1567,73 @@ export default function Game({
     // Dark Mode Overlay
     if (engine.level.worldSettings?.darkMode) {
       const radius = engine.level.worldSettings.lightRadius || 150;
-      
+
       // Create a temporary canvas for the mask if not exists or resized
       // For simplicity in this environment, we'll just draw directly with a composite operation
-      
+
       ctx.save();
       ctx.globalCompositeOperation = 'multiply'; // This will darken everything
-      
+
       // Create a separate buffer for the lighting to avoid complex composite operations on the main ctx
       const lightCanvas = document.createElement('canvas');
       lightCanvas.width = CANVAS_WIDTH;
       lightCanvas.height = CANVAS_HEIGHT;
       const lctx = lightCanvas.getContext('2d');
-      
+
       if (lctx) {
         // Fill with black (complete darkness)
         lctx.fillStyle = 'black';
         lctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-        
+
         // Cut out circles for players
         lctx.globalCompositeOperation = 'destination-out';
-        
+
         const drawLight = (p: typeof engine.player1, color: string) => {
           const x = p.x + 15;
           const y = p.y + 20;
-          
+
           const gradient = lctx.createRadialGradient(x, y, 0, x, y, radius);
           gradient.addColorStop(0, 'rgba(255, 255, 255, 1)');
           gradient.addColorStop(0.5, 'rgba(255, 255, 255, 0.5)');
           gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
-          
+
           lctx.fillStyle = gradient;
           lctx.beginPath();
           lctx.arc(x, y, radius, 0, Math.PI * 2);
           lctx.fill();
         };
-        
+
         drawLight(engine.player1, '#ff5500');
         drawLight(engine.player2, '#00ddff');
-        
+
         // Add colored glow
         lctx.globalCompositeOperation = 'source-over';
         const drawGlow = (p: typeof engine.player1, color: string) => {
           const x = p.x + 15;
           const y = p.y + 20;
-          
+
           const gradient = lctx.createRadialGradient(x, y, 0, x, y, radius);
           const r = parseInt(color.slice(1, 3), 16);
           const g = parseInt(color.slice(3, 5), 16);
           const b = parseInt(color.slice(5, 7), 16);
-          
+
           gradient.addColorStop(0, `rgba(${r}, ${g}, ${b}, 0.2)`);
           gradient.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`);
-          
+
           lctx.fillStyle = gradient;
           lctx.beginPath();
           lctx.arc(x, y, radius, 0, Math.PI * 2);
           lctx.fill();
         };
-        
+
         drawGlow(engine.player1, '#ff5500');
         drawGlow(engine.player2, '#00ddff');
-        
+
         // Draw the mask onto the main canvas
         ctx.globalCompositeOperation = 'source-over';
         ctx.drawImage(lightCanvas, 0, 0);
       }
-      
+
       ctx.restore();
     }
 
@@ -1650,7 +1650,7 @@ export default function Game({
       const size = Math.max(1, world.pixelate);
       const w = CANVAS_WIDTH / size;
       const h = CANVAS_HEIGHT / size;
-      
+
       const tempCanvas = document.createElement('canvas');
       tempCanvas.width = w;
       tempCanvas.height = h;
@@ -1711,7 +1711,7 @@ export default function Game({
     <div className="flex flex-col items-center justify-center min-h-screen bg-black text-white p-4 font-mono">
       <AnimatePresence>
         {!gameStarted && (
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: 1.1 }}
@@ -1720,7 +1720,7 @@ export default function Game({
             <h1 className="text-6xl font-black mb-4 tracking-tighter text-transparent bg-clip-text bg-gradient-to-r from-orange-500 to-cyan-500">
               NEON ELEMENTS
             </h1>
-            
+
             <div className="w-full max-w-md">
               <div className="mb-8 p-4 bg-zinc-900 rounded-2xl border border-white/5">
                 <div className="text-xs text-zinc-500 uppercase mb-1">Room Code</div>
@@ -1729,12 +1729,11 @@ export default function Game({
               </div>
 
               <div className="grid grid-cols-2 gap-6 mb-8">
-                <button 
+                <button
                   onClick={() => selectRole('fire')}
                   disabled={Object.values(lobbyData?.players || {}).some((p: any) => p.role === 'fire' && p.id !== userId)}
-                  className={`relative p-6 rounded-2xl border-2 transition-all ${
-                    role === 'fire' ? 'border-orange-500 bg-orange-500/20' : 'border-white/10 bg-zinc-900 hover:border-orange-500/50'
-                  } disabled:opacity-30 disabled:cursor-not-allowed`}
+                  className={`relative p-6 rounded-2xl border-2 transition-all ${role === 'fire' ? 'border-orange-500 bg-orange-500/20' : 'border-white/10 bg-zinc-900 hover:border-orange-500/50'
+                    } disabled:opacity-30 disabled:cursor-not-allowed`}
                 >
                   <div className="text-4xl mb-2">🔥</div>
                   <div className="font-bold">FIREBOY</div>
@@ -1743,12 +1742,11 @@ export default function Game({
                   )}
                 </button>
 
-                <button 
+                <button
                   onClick={() => selectRole('water')}
                   disabled={Object.values(lobbyData?.players || {}).some((p: any) => p.role === 'water' && p.id !== userId)}
-                  className={`relative p-6 rounded-2xl border-2 transition-all ${
-                    role === 'water' ? 'border-cyan-500 bg-cyan-500/20' : 'border-white/10 bg-zinc-900 hover:border-cyan-500/50'
-                  } disabled:opacity-30 disabled:cursor-not-allowed`}
+                  className={`relative p-6 rounded-2xl border-2 transition-all ${role === 'water' ? 'border-cyan-500 bg-cyan-500/20' : 'border-white/10 bg-zinc-900 hover:border-cyan-500/50'
+                    } disabled:opacity-30 disabled:cursor-not-allowed`}
                 >
                   <div className="text-4xl mb-2">💧</div>
                   <div className="font-bold">WATERGIRL</div>
@@ -1787,7 +1785,7 @@ export default function Game({
                         Anonymous login is restricted. Please sign in to continue.
                       </div>
                     )}
-                    <button 
+                    <button
                       onClick={handleGoogleSignIn}
                       className="px-12 py-4 bg-orange-500 text-white font-bold rounded-full hover:bg-orange-600 transition-all active:scale-95 flex items-center justify-center gap-2"
                     >
@@ -1795,13 +1793,13 @@ export default function Game({
                     </button>
                   </div>
                 ) : isHost ? (
-                  <button 
+                  <button
                     onClick={handleStartMultiplayer}
                     disabled={!lobbyData || !Object.values(lobbyData.players).some((p: any) => p.role === 'fire') || !Object.values(lobbyData.players).some((p: any) => p.role === 'water')}
                     className="px-12 py-4 bg-white text-black font-bold rounded-full hover:bg-zinc-200 transition-all active:scale-95 disabled:opacity-30"
                   >
-                    {!lobbyData || Object.keys(lobbyData.players).length < 2 ? 'WAITING FOR PLAYERS...' : 
-                     (!Object.values(lobbyData.players).some((p: any) => p.role === 'fire') || !Object.values(lobbyData.players).some((p: any) => p.role === 'water') ? 'SELECT ROLES...' : 'START GAME')}
+                    {!lobbyData || Object.keys(lobbyData.players).length < 2 ? 'WAITING FOR PLAYERS...' :
+                      (!Object.values(lobbyData.players).some((p: any) => p.role === 'fire') || !Object.values(lobbyData.players).some((p: any) => p.role === 'water') ? 'SELECT ROLES...' : 'START GAME')}
                   </button>
                 ) : (
                   <div className="px-12 py-4 bg-zinc-800 text-white font-bold rounded-full opacity-50 text-center">
@@ -1825,12 +1823,12 @@ export default function Game({
         )}
       </AnimatePresence>
 
-// Bilal Saeed xxxxx
+
       <div className="relative w-full max-w-5xl aspect-[4/3] bg-zinc-900 rounded-2xl overflow-hidden border border-zinc-800 shadow-2xl mx-auto h-auto min-h-[300px]">
-// Bilal Saeed xxxxx
-        <canvas 
-          ref={canvasRef} 
-          width={CANVAS_WIDTH} 
+
+        <canvas
+          ref={canvasRef}
+          width={CANVAS_WIDTH}
           height={CANVAS_HEIGHT}
           className="w-full h-full"
         />
@@ -1845,7 +1843,7 @@ export default function Game({
               </div>
             </div>
             <div className="text-2xl font-black tracking-tighter italic uppercase">{customLevel ? customLevel.name : levels[levelIndex].name}</div>
-            
+
             <div className="flex gap-6 mt-4">
               <div className="flex flex-col">
                 <span className="text-[8px] text-zinc-500 uppercase font-bold mb-1">Mission Timer</span>
@@ -1878,16 +1876,16 @@ export default function Game({
 
           {/* Progress Bar */}
           <div className="absolute top-0 left-1/2 -translate-x-1/2 w-48 h-2 bg-black/40 rounded-full overflow-hidden border border-white/10">
-            <motion.div 
+            <motion.div
               initial={{ width: 0 }}
               animate={{ width: `${((levelIndex + 1) / levels.length) * 100}%` }}
               className="h-full bg-gradient-to-r from-orange-500 to-cyan-500"
             />
           </div>
-          
+
           <div className="flex gap-2 pointer-events-auto">
             {onBack && (
-              <button 
+              <button
                 onClick={onBack}
                 className="p-2 bg-black/50 border border-white/10 rounded-lg hover:bg-white/10 transition-colors"
                 title="Back to Menu"
@@ -1895,33 +1893,33 @@ export default function Game({
                 <ArrowLeft size={18} />
               </button>
             )}
-            <button 
+            <button
               onClick={copyInviteLink}
               className="px-3 py-2 bg-black/50 border border-white/10 rounded-lg hover:bg-white/10 transition-colors text-xs font-bold"
             >
               INVITE
             </button>
-            <button 
+            <button
               onClick={() => setUseTilt(!useTilt)}
               className={`p-2 border rounded-lg transition-colors ${useTilt ? 'bg-cyan-500/20 border-cyan-500 text-cyan-500' : 'bg-black/50 border-white/10 text-white'}`}
               title="Tilt Controls"
             >
               <Smartphone size={18} />
             </button>
-            <button 
+            <button
               onClick={() => setEngine(new GameEngine(levels[levelIndex]))}
               className="p-2 bg-black/50 border border-white/10 rounded-lg hover:bg-white/10 transition-colors"
             >
               <RefreshCw size={18} />
             </button>
-            <button 
+            <button
               onClick={() => setShowSettings(!showSettings)}
               className="p-2 bg-black/50 border border-white/10 rounded-lg hover:bg-white/10 transition-colors"
               title="Settings"
             >
               <Settings size={18} />
             </button>
-            <button 
+            <button
               onClick={() => setShowChat(!showChat)}
               className="p-2 bg-black/50 border border-white/10 rounded-lg hover:bg-white/10 transition-colors"
             >
@@ -1933,7 +1931,7 @@ export default function Game({
         {/* Chat Overlay */}
         <AnimatePresence>
           {showChat && (
-            <motion.div 
+            <motion.div
               initial={{ x: 300 }}
               animate={{ x: 0 }}
               exit={{ x: 300 }}
@@ -1949,8 +1947,8 @@ export default function Game({
               </div>
               <div className="grid grid-cols-4 gap-2">
                 {['🔥', '💧', '👍', '👎', '🏃', '🛑', '❓', '✨'].map(e => (
-                  <button 
-                    key={e} 
+                  <button
+                    key={e}
                     onClick={() => sendChat('', e)}
                     className="p-2 bg-white/5 rounded hover:bg-white/10 transition-colors text-xl"
                   >
@@ -1965,7 +1963,7 @@ export default function Game({
         {/* Settings Overlay */}
         <AnimatePresence>
           {showSettings && (
-            <motion.div 
+            <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
@@ -1974,47 +1972,47 @@ export default function Game({
               <div className="bg-zinc-900 border border-white/10 rounded-2xl p-6 w-full max-w-md shadow-2xl">
                 <div className="flex justify-between items-center mb-6">
                   <h2 className="text-xl font-black uppercase tracking-widest text-white">Optimization Control</h2>
-                  <button 
+                  <button
                     onClick={() => setShowSettings(false)}
                     className="p-2 hover:bg-white/10 rounded-lg transition-colors text-zinc-400 hover:text-white"
                   >
                     ✕
                   </button>
                 </div>
-                
+
                 <div className="space-y-4">
                   <div className="flex items-center justify-between p-4 bg-black/50 rounded-xl border border-white/5">
                     <div>
                       <div className="font-bold text-white uppercase tracking-wider text-sm">Animations</div>
                       <div className="text-xs text-zinc-500 mt-1">Player movements, hazard effects, dynamic elements</div>
                     </div>
-                    <button 
+                    <button
                       onClick={() => setSettings({ ...settings, animations: !settings.animations })}
                       className={`w-12 h-6 rounded-full transition-colors relative ${settings.animations ? 'bg-cyan-500' : 'bg-zinc-700'}`}
                     >
                       <div className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${settings.animations ? 'translate-x-6' : 'translate-x-0'}`} />
                     </button>
                   </div>
-                  
+
                   <div className="flex items-center justify-between p-4 bg-black/50 rounded-xl border border-white/5">
                     <div>
                       <div className="font-bold text-white uppercase tracking-wider text-sm">Particles</div>
                       <div className="text-xs text-zinc-500 mt-1">Sparks, splashes, ambient dust, collection effects</div>
                     </div>
-                    <button 
+                    <button
                       onClick={() => setSettings({ ...settings, particles: !settings.particles })}
                       className={`w-12 h-6 rounded-full transition-colors relative ${settings.particles ? 'bg-orange-500' : 'bg-zinc-700'}`}
                     >
                       <div className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${settings.particles ? 'translate-x-6' : 'translate-x-0'}`} />
                     </button>
                   </div>
-                  
+
                   <div className="flex items-center justify-between p-4 bg-black/50 rounded-xl border border-white/5">
                     <div>
                       <div className="font-bold text-white uppercase tracking-wider text-sm">Shadows</div>
                       <div className="text-xs text-zinc-500 mt-1">Dynamic lighting, drop shadows, ambient occlusion</div>
                     </div>
-                    <button 
+                    <button
                       onClick={() => setSettings({ ...settings, shadows: !settings.shadows })}
                       className={`w-12 h-6 rounded-full transition-colors relative ${settings.shadows ? 'bg-green-500' : 'bg-zinc-700'}`}
                     >
@@ -2027,7 +2025,7 @@ export default function Game({
                       <div className="font-bold text-white uppercase tracking-wider text-sm">Bloom</div>
                       <div className="text-xs text-zinc-500 mt-1">Glow effects, light bleeding, neon highlights</div>
                     </div>
-                    <button 
+                    <button
                       onClick={() => setSettings({ ...settings, bloom: !settings.bloom })}
                       className={`w-12 h-6 rounded-full transition-colors relative ${settings.bloom ? 'bg-purple-500' : 'bg-zinc-700'}`}
                     >
@@ -2035,7 +2033,7 @@ export default function Game({
                     </button>
                   </div>
                 </div>
-                
+
                 <div className="mt-6 pt-6 border-t border-white/10 text-center">
                   <p className="text-xs text-zinc-500">Disable features to improve performance on older devices.</p>
                 </div>
@@ -2044,18 +2042,18 @@ export default function Game({
           )}
         </AnimatePresence>
 
-// Bilal Saeed xxxxx
+
         {/* Mobile Controls */}
         <div className="absolute bottom-6 left-6 right-6 flex justify-between pointer-events-none md:hidden">
           <div className="flex gap-4 pointer-events-auto">
-            <button 
+            <button
               onTouchStart={(e) => { e.preventDefault(); keys.current.add(role === 'water' ? 'ArrowLeft' : 'KeyA'); }}
               onTouchEnd={(e) => { e.preventDefault(); keys.current.delete(role === 'water' ? 'ArrowLeft' : 'KeyA'); }}
               className="w-20 h-20 bg-white/20 backdrop-blur-md rounded-full flex items-center justify-center border-2 border-white/30 active:bg-white/40 shadow-xl"
             >
               <span className="text-3xl text-white">←</span>
             </button>
-            <button 
+            <button
               onTouchStart={(e) => { e.preventDefault(); keys.current.add(role === 'water' ? 'ArrowRight' : 'KeyD'); }}
               onTouchEnd={(e) => { e.preventDefault(); keys.current.delete(role === 'water' ? 'ArrowRight' : 'KeyD'); }}
               className="w-20 h-20 bg-white/20 backdrop-blur-md rounded-full flex items-center justify-center border-2 border-white/30 active:bg-white/40 shadow-xl"
@@ -2064,7 +2062,7 @@ export default function Game({
             </button>
           </div>
           <div className="pointer-events-auto">
-            <button 
+            <button
               onTouchStart={(e) => { e.preventDefault(); keys.current.add(role === 'water' ? 'ArrowUp' : 'KeyW'); }}
               onTouchEnd={(e) => { e.preventDefault(); keys.current.delete(role === 'water' ? 'ArrowUp' : 'KeyW'); }}
               className="w-24 h-24 bg-white/20 backdrop-blur-md rounded-full flex items-center justify-center border-2 border-white/30 active:bg-white/40 shadow-xl"
@@ -2073,7 +2071,7 @@ export default function Game({
             </button>
           </div>
         </div>
-// Bilal Saeed xxxxx
+
       </div>
 
       <div className="mt-8 flex gap-8 text-zinc-500 text-xs uppercase tracking-widest hidden">
@@ -2093,17 +2091,15 @@ export default function Game({
             initial={{ opacity: 0, y: 50 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 50 }}
-            className={`fixed bottom-8 left-1/2 -translate-x-1/2 px-6 py-3 rounded-full font-bold shadow-2xl z-[100] flex items-center gap-3 border ${
-              toast.type === 'success' ? 'bg-green-500/20 border-green-500 text-green-500' :
-              toast.type === 'error' ? 'bg-red-500/20 border-red-500 text-red-500' :
-              'bg-cyan-500/20 border-cyan-500 text-cyan-500'
-            }`}
+            className={`fixed bottom-8 left-1/2 -translate-x-1/2 px-6 py-3 rounded-full font-bold shadow-2xl z-[100] flex items-center gap-3 border ${toast.type === 'success' ? 'bg-green-500/20 border-green-500 text-green-500' :
+                toast.type === 'error' ? 'bg-red-500/20 border-red-500 text-red-500' :
+                  'bg-cyan-500/20 border-cyan-500 text-cyan-500'
+              }`}
           >
-            <div className={`w-2 h-2 rounded-full ${
-              toast.type === 'success' ? 'bg-green-500' :
-              toast.type === 'error' ? 'bg-red-500' :
-              'bg-cyan-500'
-            } animate-pulse`} />
+            <div className={`w-2 h-2 rounded-full ${toast.type === 'success' ? 'bg-green-500' :
+                toast.type === 'error' ? 'bg-red-500' :
+                  'bg-cyan-500'
+              } animate-pulse`} />
             {toast.message}
           </motion.div>
         )}

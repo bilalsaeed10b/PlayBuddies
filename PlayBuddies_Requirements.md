@@ -405,7 +405,7 @@ For real-time games (like Fireboy-Watergirl), the server:
 Each game follows a **standardized adapter pattern**, inspired by the existing Fireboy-Watergirl structure:
 
 ```typescript
-// Bilal Saeed xxxxx
+
 // packages/shared/types/game.ts
 
 interface IGameAdapter {
@@ -444,7 +444,7 @@ interface GameMetadata {
   estimatedDuration: string;   // e.g., "5-10 min"
   controls: string;            // e.g., "WASD + Arrow Keys"
 }
-// Bilal Saeed xxxxx
+
 ```
 
 ### 7.2 Game Loading Strategies

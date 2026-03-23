@@ -1,4 +1,4 @@
-// Bilal Saeed xxxxx
+
 "use client";
 
 import { useEffect } from "react";
@@ -52,7 +52,7 @@ export default function AuthProvider({
           console.error("Error setting user document:", error);
         }
       }
-      
+
       setUser(user);
       setLoading(false);
     });
@@ -62,4 +62,4 @@ export default function AuthProvider({
 
   return <>{children}</>;
 }
-// Bilal Saeed xxxxx
+

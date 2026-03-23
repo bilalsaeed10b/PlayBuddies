@@ -1,4 +1,4 @@
-// Bilal Saeed xxxxx
+
 "use client";
 
 import { useState, useEffect } from "react";
@@ -158,15 +158,15 @@ export default function DashboardPage() {
 
             <div className="flex flex-col sm:flex-row items-center gap-4">
               <form onSubmit={joinLobby} className="flex items-center glass rounded-2xl p-1 border border-white/10 hover:border-white/20 transition-colors">
-                <input 
-                  type="text" 
-                  placeholder="Enter Code" 
+                <input
+                  type="text"
+                  placeholder="Enter Code"
                   value={joinCode}
                   onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
                   className="bg-transparent border-none outline-none text-white px-4 py-2 w-32 uppercase placeholder:text-text-muted/50 placeholder:normal-case font-mono font-bold"
                   maxLength={6}
                 />
-                <button 
+                <button
                   type="submit"
                   disabled={isJoining || joinCode.length < 3}
                   className="bg-white/10 hover:bg-white/20 text-white px-4 py-2 rounded-xl text-sm font-bold transition-colors disabled:opacity-50"
@@ -174,7 +174,7 @@ export default function DashboardPage() {
                   {isJoining ? "..." : "Join"}
                 </button>
               </form>
-              
+
               <div className="text-text-muted font-bold text-sm hidden sm:block">OR</div>
 
               <motion.button
@@ -260,4 +260,4 @@ export default function DashboardPage() {
     </AuthGuard>
   );
 }
-// Bilal Saeed xxxxx
+

@@ -1,4 +1,4 @@
-// Bilal Saeed xxxxx
+
 import { initializeApp, getApps, getApp } from "firebase/app";
 import { getAuth, GoogleAuthProvider } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
@@ -23,4 +23,4 @@ export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
 
 export default app;
-// Bilal Saeed xxxxx
+

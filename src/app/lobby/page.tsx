@@ -1,4 +1,4 @@
-// Bilal Saeed xxxxx
+
 "use client";
 
 import { useState, useEffect, Suspense } from "react";
@@ -213,9 +213,9 @@ function LobbyContent() {
 
   return (
     <AuthGuard>
-// Bilal Saeed xxxxx
+
       <div className="h-screen bg-background flex flex-col overflow-hidden">
-// Bilal Saeed xxxxx
+
         {/* Navbar Simplified */}
         <nav className="glass border-b border-white/5 px-6 py-4 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-3">
@@ -253,13 +253,13 @@ function LobbyContent() {
           {/* Left Column: Players & Chat */}
           <div className="w-full lg:w-80 flex flex-col border-r border-white/5 bg-black/20">
             {/* Players List */}
-// Bilal Saeed xxxxx
+
             <div className="p-6 flex flex-col min-h-0 h-[40%] border-b border-white/5">
-// Bilal Saeed xxxxx
+
               <h2 className="text-sm font-bold text-text-muted uppercase tracking-wider mb-4 flex items-center gap-2">
                 <Users size={16} /> Crew ({lobby.players?.length || 0}/8)
               </h2>
-// Bilal Saeed xxxxx
+
               <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar">
                 <div className="space-y-3">
                   <AnimatePresence>
@@ -295,29 +295,28 @@ function LobbyContent() {
                 </div>
               </div>
             </div>
-// Bilal Saeed xxxxx
 
-// Bilal Saeed xxxxx
+
+
             {/* Chat Area */}
             <div className="flex-1 flex flex-col min-h-0 p-4 bg-black/40">
-// Bilal Saeed xxxxx
+
               <div className="flex-1 overflow-y-auto mb-4 p-2 space-y-4 flex flex-col-reverse">
                 <div className="space-y-4">
                   {lobby.messages?.map((msg, i) => (
                     <div key={i} className={`flex flex-col ${msg.uid === user?.uid ? "items-end" : "items-start"}`}>
                       <span className="text-[10px] text-text-muted mb-1 px-1">{msg.displayName}</span>
-                      <div className={`px-3 py-2 rounded-2xl text-sm max-w-[90%] ${
-                        msg.uid === user?.uid 
-                          ? "bg-primary text-white rounded-tr-none" 
+                      <div className={`px-3 py-2 rounded-2xl text-sm max-w-[90%] ${msg.uid === user?.uid
+                          ? "bg-primary text-white rounded-tr-none"
                           : "bg-white/10 text-white rounded-tl-none"
-                      }`}>
+                        }`}>
                         {msg.text}
                       </div>
                     </div>
                   ))}
                   {(!lobby.messages || lobby.messages.length === 0) && (
                     <div className="text-center text-xs text-text-muted my-2">
-                       No messages yet. Start the trash talk!
+                      No messages yet. Start the trash talk!
                     </div>
                   )}
                 </div>
@@ -330,7 +329,7 @@ function LobbyContent() {
                   value={chatMessage}
                   onChange={(e) => setChatMessage(e.target.value)}
                 />
-                <button 
+                <button
                   type="submit"
                   className="absolute right-2 top-1/2 -translate-y-1/2 p-2 hover:bg-white/10 rounded-lg text-text-muted hover:text-white transition-colors"
                 >
@@ -341,7 +340,7 @@ function LobbyContent() {
           </div>
 
           {/* Right Column: Game Selection / Central Container */}
-          <div 
+          <div
             className={`flex-1 relative flex flex-col ${lobby.status === "playing" ? "p-0 overflow-hidden" : "p-6 lg:p-12 overflow-y-auto"}`}
             style={{ backgroundImage: `url(${process.env.NEXT_PUBLIC_BASE_PATH || ''}/noise.png)` }}
           >
@@ -352,14 +351,14 @@ function LobbyContent() {
               /* The Game Container! */
               <div className="flex-1 w-full relative z-10 flex flex-col bg-black">
                 {/* The actual game running locally */}
-                <iframe 
+                <iframe
                   id="game-iframe"
-                  src={`${process.env.NEXT_PUBLIC_BASE_PATH || ""}/games/fireboy-watergirl/index.html?room=${roomId}&host=${isHost}&displayName=${encodeURIComponent(user?.displayName || "Player")}&photoURL=${encodeURIComponent(user?.photoURL || "")}`} 
+                  src={`${process.env.NEXT_PUBLIC_BASE_PATH || ""}/games/fireboy-watergirl/index.html?room=${roomId}&host=${isHost}&displayName=${encodeURIComponent(user?.displayName || "Player")}&photoURL=${encodeURIComponent(user?.photoURL || "")}`}
                   className="flex-1 w-full h-full border-none z-10"
                   title={selectedGameObj?.name || "Game Window"}
                   allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
                 />
-                
+
                 {/* Overlay Controls */}
                 <div className="absolute top-4 right-4 z-20 flex gap-2">
                   <motion.button
@@ -375,90 +374,88 @@ function LobbyContent() {
                   {isHost && (
                     <motion.button
                       onClick={async () => {
-                         await updateDoc(doc(db, "lobbies", roomId), {
-                           status: "waiting",
-                           gameId: null,
-                         });
+                        await updateDoc(doc(db, "lobbies", roomId), {
+                          status: "waiting",
+                          gameId: null,
+                        });
                       }}
                       whileHover={{ scale: 1.05 }}
                       whileTap={{ scale: 0.95 }}
                       className="glass px-4 py-2 bg-black/80 hover:bg-black text-white font-bold rounded-xl border border-white/20 text-sm shadow-2xl backdrop-blur-md"
                     >
-                       End Game
+                      End Game
                     </motion.button>
                   )}
                 </div>
+              </div>
+            ) : (
+              /* Game Selection Screen */
+              <div className="space-y-8">
+                <div className="text-center mb-12">
+                  <h1 className="text-4xl font-black text-white mb-2">
+                    {isHost ? "Select a Game" : "Waiting for Host..."}
+                  </h1>
+                  <p className="text-text-secondary">
+                    {isHost
+                      ? "Pick what your crew will play next."
+                      : `Host (${lobby.players?.find(p => p.uid === lobby.hostId)?.displayName || 'Host'}) is picking a game.`}
+                  </p>
                 </div>
-              ) : (
-                /* Game Selection Screen */
-                <div className="space-y-8">
-                  <div className="text-center mb-12">
-                    <h1 className="text-4xl font-black text-white mb-2">
-                      {isHost ? "Select a Game" : "Waiting for Host..."}
-                    </h1>
-                    <p className="text-text-secondary">
-                      {isHost
-                        ? "Pick what your crew will play next."
-                        : `Host (${lobby.players?.find(p => p.uid === lobby.hostId)?.displayName || 'Host'}) is picking a game.`}
-                    </p>
-                  </div>
 
-                  {/* Selected Game Highlight */}
-                  {selectedGameObj && (
-                    <motion.div
-                      layoutId="selected-game"
-                      className="glass p-8 rounded-3xl border border-primary/30 flex items-center gap-8 relative overflow-hidden"
-                    >
-                      <div className={`absolute inset-0 bg-gradient-to-r ${selectedGameObj.color} opacity-10`} />
-                      <div className="text-6xl">{selectedGameObj.icon}</div>
-                      <div className="flex-1 cursor-default">
-                        <h2 className="text-3xl font-bold text-white">{selectedGameObj.name}</h2>
-                        <p className="text-primary font-medium">{selectedGameObj.subtitle}</p>
-                        <p className="text-text-muted mt-2 text-sm">{selectedGameObj.description}</p>
-                      </div>
-                      
-                      {isHost && (
-                        <motion.button
-                          onClick={startGame}
-                          whileHover={{ scale: 1.05 }}
-                          whileTap={{ scale: 0.95 }}
-                          className="btn-glow shrink-0 px-8 py-4 bg-gradient-to-r from-primary to-accent rounded-2xl text-white font-bold text-lg shadow-xl shadow-primary/20 flex items-center gap-3"
-                        >
-                          <Play size={20} className="fill-white" /> Start Game
-                        </motion.button>
-                      )}
-                    </motion.div>
-                  )}
+                {/* Selected Game Highlight */}
+                {selectedGameObj && (
+                  <motion.div
+                    layoutId="selected-game"
+                    className="glass p-8 rounded-3xl border border-primary/30 flex items-center gap-8 relative overflow-hidden"
+                  >
+                    <div className={`absolute inset-0 bg-gradient-to-r ${selectedGameObj.color} opacity-10`} />
+                    <div className="text-6xl">{selectedGameObj.icon}</div>
+                    <div className="flex-1 cursor-default">
+                      <h2 className="text-3xl font-bold text-white">{selectedGameObj.name}</h2>
+                      <p className="text-primary font-medium">{selectedGameObj.subtitle}</p>
+                      <p className="text-text-muted mt-2 text-sm">{selectedGameObj.description}</p>
+                    </div>
 
-                  {/* Game Grid selection (only interactive for host) */}
-                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                    {GAMES.map((game) => {
-                      const isSelected = lobby.gameId === game.id;
-                      return (
-                        <motion.div
-                          key={game.id}
-                          whileHover={isHost ? { scale: 1.05, y: -5 } : {}}
-                          onClick={() => selectGame(game.id)}
-                          className={`relative rounded-2xl p-6 glass transition-all ${
-                            isHost ? "cursor-pointer" : "cursor-default opacity-50 grayscale"
-                          } ${
-                            isSelected
-                              ? "border-2 border-primary shadow-lg shadow-primary/20 ring-4 ring-primary/10"
-                              : "border border-white/5 hover:border-white/20"
+                    {isHost && (
+                      <motion.button
+                        onClick={startGame}
+                        whileHover={{ scale: 1.05 }}
+                        whileTap={{ scale: 0.95 }}
+                        className="btn-glow shrink-0 px-8 py-4 bg-gradient-to-r from-primary to-accent rounded-2xl text-white font-bold text-lg shadow-xl shadow-primary/20 flex items-center gap-3"
+                      >
+                        <Play size={20} className="fill-white" /> Start Game
+                      </motion.button>
+                    )}
+                  </motion.div>
+                )}
+
+                {/* Game Grid selection (only interactive for host) */}
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                  {GAMES.map((game) => {
+                    const isSelected = lobby.gameId === game.id;
+                    return (
+                      <motion.div
+                        key={game.id}
+                        whileHover={isHost ? { scale: 1.05, y: -5 } : {}}
+                        onClick={() => selectGame(game.id)}
+                        className={`relative rounded-2xl p-6 glass transition-all ${isHost ? "cursor-pointer" : "cursor-default opacity-50 grayscale"
+                          } ${isSelected
+                            ? "border-2 border-primary shadow-lg shadow-primary/20 ring-4 ring-primary/10"
+                            : "border border-white/5 hover:border-white/20"
                           }`}
-                        >
-                          <div className="text-3xl mb-3 text-center">{game.icon}</div>
-                          <h3 className="text-sm font-bold text-white text-center mb-1">
-                            {game.name}
-                          </h3>
-                          <div className="text-[10px] font-semibold text-center text-text-muted uppercase tracking-wider">
-                            {game.players}P
-                          </div>
-                        </motion.div>
-                      );
-                    })}
-                  </div>
+                      >
+                        <div className="text-3xl mb-3 text-center">{game.icon}</div>
+                        <h3 className="text-sm font-bold text-white text-center mb-1">
+                          {game.name}
+                        </h3>
+                        <div className="text-[10px] font-semibold text-center text-text-muted uppercase tracking-wider">
+                          {game.players}P
+                        </div>
+                      </motion.div>
+                    );
+                  })}
                 </div>
+              </div>
             )}
           </div>
         </div>
@@ -474,4 +471,4 @@ export default function LobbyPage() {
     </Suspense>
   );
 }
-// Bilal Saeed xxxxx
+
