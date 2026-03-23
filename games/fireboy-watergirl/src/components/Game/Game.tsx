@@ -1824,8 +1824,27 @@ export default function Game({
       </AnimatePresence>
 
 // Bilal Saeed xxxxx
-      <div className="relative w-full h-full flex flex-col landscape:flex-row items-center justify-center p-2 lg:p-4">
-        <div className="relative w-full max-h-[70vh] landscape:max-h-full aspect-[4/3] bg-zinc-900 rounded-2xl overflow-hidden border border-zinc-800 shadow-2xl mx-auto flex items-center justify-center">
+      <div className="relative w-full h-full flex flex-col landscape:flex-row items-center justify-center gap-4 p-2">
+        {/* Left Side Controls (Landscape) */}
+        <div className="hidden landscape:flex flex-col gap-6 p-4 z-20">
+          <button 
+            onTouchStart={(e) => { e.preventDefault(); keys.current.add(role === 'water' ? 'ArrowLeft' : 'KeyA'); }}
+            onTouchEnd={(e) => { e.preventDefault(); keys.current.delete(role === 'water' ? 'ArrowLeft' : 'KeyA'); }}
+            className="w-20 h-20 bg-white/10 backdrop-blur-md rounded-full flex items-center justify-center border-2 border-white/20 active:bg-white/40 shadow-xl pointer-events-auto"
+          >
+            <span className="text-3xl text-white">←</span>
+          </button>
+          <button 
+            onTouchStart={(e) => { e.preventDefault(); keys.current.add(role === 'water' ? 'ArrowRight' : 'KeyD'); }}
+            onTouchEnd={(e) => { e.preventDefault(); keys.current.delete(role === 'water' ? 'ArrowRight' : 'KeyD'); }}
+            className="w-20 h-20 bg-white/10 backdrop-blur-md rounded-full flex items-center justify-center border-2 border-white/20 active:bg-white/40 shadow-xl pointer-events-auto"
+          >
+            <span className="text-3xl text-white">→</span>
+          </button>
+        </div>
+
+        {/* Game Area */}
+        <div className="relative w-full landscape:w-auto h-auto landscape:h-full max-h-[65vh] landscape:max-h-full aspect-[4/3] bg-zinc-900 rounded-2xl overflow-hidden border border-zinc-800 shadow-2xl flex items-center justify-center z-10">
 // Bilal Saeed xxxxx
 
         <canvas
@@ -2048,34 +2067,42 @@ export default function Game({
 // Bilal Saeed xxxxx
         </div>
 
-        {/* Mobile Controls Overlay/Container */}
-        <div className="fixed bottom-4 left-0 right-0 px-6 flex justify-between pointer-events-none md:hidden z-[150] landscape:bottom-10">
-          {/* Movement Controls (Left) */}
-          <div className="flex gap-4 pointer-events-auto landscape:ml-4">
+        {/* Right Side Control (Landscape) */}
+        <div className="hidden landscape:flex p-4 z-20">
+          <button 
+            onTouchStart={(e) => { e.preventDefault(); keys.current.add(role === 'water' ? 'ArrowUp' : 'KeyW'); }}
+            onTouchEnd={(e) => { e.preventDefault(); keys.current.delete(role === 'water' ? 'ArrowUp' : 'KeyW'); }}
+            className="w-24 h-24 bg-white/20 backdrop-blur-md rounded-full flex items-center justify-center border-2 border-white/30 active:bg-white/50 shadow-xl pointer-events-auto"
+          >
+            <span className="text-4xl text-white">↑</span>
+          </button>
+        </div>
+
+        {/* Bottom Controls (Portrait) */}
+        <div className="flex landscape:hidden w-full items-center justify-between px-8 py-4 z-20 pointer-events-none">
+          <div className="flex gap-6 pointer-events-auto">
             <button 
               onTouchStart={(e) => { e.preventDefault(); keys.current.add(role === 'water' ? 'ArrowLeft' : 'KeyA'); }}
               onTouchEnd={(e) => { e.preventDefault(); keys.current.delete(role === 'water' ? 'ArrowLeft' : 'KeyA'); }}
-              className="w-16 h-16 landscape:w-20 landscape:h-20 bg-white/10 backdrop-blur-md rounded-full flex items-center justify-center border-2 border-white/20 active:bg-white/40 shadow-xl"
+              className="w-20 h-20 bg-white/10 backdrop-blur-md rounded-full flex items-center justify-center border-2 border-white/20 active:bg-white/40 shadow-xl"
             >
-              <span className="text-2xl landscape:text-3xl text-white">←</span>
+              <span className="text-3xl text-white">←</span>
             </button>
             <button 
               onTouchStart={(e) => { e.preventDefault(); keys.current.add(role === 'water' ? 'ArrowRight' : 'KeyD'); }}
               onTouchEnd={(e) => { e.preventDefault(); keys.current.delete(role === 'water' ? 'ArrowRight' : 'KeyD'); }}
-              className="w-16 h-16 landscape:w-20 landscape:h-20 bg-white/10 backdrop-blur-md rounded-full flex items-center justify-center border-2 border-white/20 active:bg-white/40 shadow-xl"
+              className="w-20 h-20 bg-white/10 backdrop-blur-md rounded-full flex items-center justify-center border-2 border-white/20 active:bg-white/40 shadow-xl"
             >
-              <span className="text-2xl landscape:text-3xl text-white">→</span>
+              <span className="text-3xl text-white">→</span>
             </button>
           </div>
-          
-          {/* Action Controls (Right) */}
-          <div className="pointer-events-auto landscape:mr-4">
+          <div className="pointer-events-auto">
             <button 
               onTouchStart={(e) => { e.preventDefault(); keys.current.add(role === 'water' ? 'ArrowUp' : 'KeyW'); }}
               onTouchEnd={(e) => { e.preventDefault(); keys.current.delete(role === 'water' ? 'ArrowUp' : 'KeyW'); }}
-              className="w-20 h-20 landscape:w-24 landscape:h-24 bg-white/20 backdrop-blur-md rounded-full flex items-center justify-center border-2 border-white/30 active:bg-white/40 shadow-xl"
+              className="w-24 h-24 bg-white/20 backdrop-blur-md rounded-full flex items-center justify-center border-2 border-white/30 active:bg-white/50 shadow-xl"
             >
-              <span className="text-3xl text-white">↑</span>
+              <span className="text-4xl text-white">↑</span>
             </button>
           </div>
         </div>
