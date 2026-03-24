@@ -22,16 +22,16 @@ import {
 } from "lucide-react";
 
 export default function DashboardPage() {
-  const { user } = useAuthStore();
+  const { user, stats, setStats } = useAuthStore();
   const router = useRouter();
   const [isCreating, setIsCreating] = useState(false);
   const [joinCode, setJoinCode] = useState("");
   const [isJoining, setIsJoining] = useState(false);
-  const [userStats, setUserStats] = useState({ friendsOnline: 0, gamesPlayed: 0, winRate: "0%" });
-  const [loadingStats, setLoadingStats] = useState(true);
+  const [userStats, setUserStats] = useState(stats || { friendsOnline: 0, gamesPlayed: 0, winRate: "0%" });
+  const [loadingStats, setLoadingStats] = useState(!stats);
 
   useEffect(() => {
-    if (!user) return;
+    if (!user || stats) return; // Use cached stats if available
     const fetchStats = async () => {
       try {
         const userRef = doc(db, "users", user.uid);
@@ -41,11 +41,13 @@ export default function DashboardPage() {
           const games = data.stats?.gamesPlayed || 0;
           const wins = data.stats?.wins || 0;
           const winRate = games > 0 ? Math.round((wins / games) * 100) + "%" : "0%";
-          setUserStats({
+          const newStats = {
             friendsOnline: data.stats?.friendsOnline || 0,
             gamesPlayed: games,
             winRate: winRate,
-          });
+          };
+          setUserStats(newStats);
+          setStats(newStats); // Cache it globally
         }
       } catch (error) {
         console.error("Error fetching user stats:", error);
@@ -54,7 +56,7 @@ export default function DashboardPage() {
       }
     };
     fetchStats();
-  }, [user]);
+  }, [user, stats, setStats]);
 
   const handleSignOut = async () => {
     try {
@@ -68,7 +70,12 @@ export default function DashboardPage() {
   const createLobby = async (gameId: string | null = null) => {
     if (!user) return;
     setIsCreating(true);
-    const roomId = Math.random().toString(36).substring(2, 8).toUpperCase();
+    
+    // Generate a secure 8-character Room ID
+    const array = new Uint32Array(2);
+    crypto.getRandomValues(array);
+    const roomId = (array[0].toString(36) + array[1].toString(36)).substring(0, 8).toUpperCase();
+    
     try {
       await setDoc(doc(db, "lobbies", roomId), {
         hostId: user.uid,
@@ -76,6 +83,8 @@ export default function DashboardPage() {
         gameId: typeof gameId === 'string' ? gameId : null,
         players: [],
         createdAt: serverTimestamp(),
+        // TTL cleanup in 2 hours
+        expiresAt: new Date(Date.now() + 2 * 60 * 60 * 1000),
       });
       router.push(`/lobby?room=${roomId}`);
     } catch (e) {
@@ -193,7 +202,7 @@ export default function DashboardPage() {
           {/* Quick Stats */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 mb-16">
             {[
-              { label: "Friends Online", value: loadingStats ? "-" : userStats.friendsOnline, icon: Users, color: "text-green-400" },
+              { label: "Friends Online", value: loadingStats ? "-" : stats?.friendsOnline || 0, icon: Users, color: "text-green-400" },
               { label: "Games Played", value: loadingStats ? "-" : userStats.gamesPlayed, icon: Gamepad2, color: "text-blue-400" },
               { label: "Win Rate", value: loadingStats ? "-" : userStats.winRate, icon: Trophy, color: "text-yellow-400" },
             ].map((stat, i) => (

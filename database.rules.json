@@ -1,0 +1,34 @@
+{
+  "rules": {
+    "presence": {
+      "$roomId": {
+        ".read": "auth != null",
+        "$uid": {
+          ".write": "auth != null && auth.uid == $uid"
+        }
+      }
+    },
+    "lobbies": {
+      "$roomId": {
+        ".read": "auth != null",
+        "updates": {
+          "$uid": {
+            ".write": "auth != null && auth.uid == $uid"
+          }
+        }
+      }
+    },
+    "status": {
+      "$uid": {
+        ".read": "auth != null",
+        ".write": "auth != null && auth.uid == $uid"
+      }
+    },
+    "invites": {
+      "$toUid": {
+        ".read": "auth != null && auth.uid == $toUid",
+        ".write": "auth != null"
+      }
+    }
+  }
+}
