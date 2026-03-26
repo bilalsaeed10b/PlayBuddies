@@ -396,6 +396,7 @@ function LobbyContent() {
                     initialRoomId={roomId}
                     isHost={isHost}
                     initialGameMode="multi"
+                    platformUserId={user?.uid}
                     displayName={user?.displayName || "Player"}
                     photoURL={user?.photoURL || ""}
                     onBack={async () => {

@@ -37,7 +37,8 @@ export default function FireboyWatergirl({
   initialRoomId,
   isHost = false,
   displayName,
-  photoURL
+  photoURL,
+  platformUserId
 }: {
   customLevel?: Level | null,
   startLevelIndex?: number,
@@ -47,13 +48,14 @@ export default function FireboyWatergirl({
   initialRoomId?: string,
   isHost?: boolean,
   displayName?: string,
-  photoURL?: string
+  photoURL?: string,
+  platformUserId?: string
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [engine, setEngine] = useState<GameEngine | null>(null);
   const [screenShake, setScreenShake] = useState(0);
   const [levelIndex, setLevelIndex] = useState(startLevelIndex);
-  const [userId, setUserId] = useState<string | null>(null);
+  const [userId, setUserId] = useState<string | null>(platformUserId || null);
   const [roomId, setRoomId] = useState(initialRoomId || '');
   const [role, setRole] = useState<'fire' | 'water' | 'both' | null>(initialGameMode === 'single' ? 'both' : null);
   const [gameMode, setGameMode] = useState<'single' | 'multi' | null>(initialGameMode);

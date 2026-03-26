@@ -21,15 +21,24 @@ export default function AuthProvider({
         const userRef = doc(db, "users", user.uid);
         try {
           const userSnap = await getDoc(userRef);
+          
+          let generatedFriendCode = "";
+          if (!userSnap.exists() || !userSnap.data().friendCode) {
+            const array = new Uint32Array(2);
+            crypto.getRandomValues(array);
+            generatedFriendCode = (array[0].toString(36) + array[1].toString(36)).substring(0, 8).toUpperCase();
+          }
+
           if (!userSnap.exists()) {
             await setDoc(userRef, {
               uid: user.uid,
               displayName: user.displayName,
               email: user.email,
               photoURL: user.photoURL,
+              friendCode: generatedFriendCode,
+              searchableName: user.displayName?.toLowerCase() || "",
               createdAt: serverTimestamp(),
               lastLogin: serverTimestamp(),
-              status: "online",
               stats: {
                 friendsOnline: 0,
                 gamesPlayed: 0,
@@ -37,16 +46,28 @@ export default function AuthProvider({
               }
             });
           } else {
-            await setDoc(
-              userRef,
-              {
-                lastLogin: serverTimestamp(),
-                status: "online",
-                displayName: user.displayName, // Update info if changed
-                photoURL: user.photoURL,
-              },
-              { merge: true }
-            );
+            const data = userSnap.data();
+            const lastLoginStamp = data.lastLogin?.toMillis?.() || 0;
+            const now = Date.now();
+            const shouldUpdate = 
+              now - lastLoginStamp > 24 * 60 * 60 * 1000 || 
+              data.displayName !== user.displayName || 
+              data.photoURL !== user.photoURL ||
+              !data.friendCode;
+
+            if (shouldUpdate) {
+              await setDoc(
+                userRef,
+                {
+                  lastLogin: serverTimestamp(),
+                  displayName: user.displayName, 
+                  searchableName: user.displayName?.toLowerCase() || "",
+                  photoURL: user.photoURL,
+                  ...(generatedFriendCode ? { friendCode: generatedFriendCode } : {}),
+                },
+                { merge: true }
+              );
+            }
           }
         } catch (error) {
           console.error("Error setting user document:", error);
