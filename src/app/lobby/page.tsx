@@ -16,6 +16,10 @@ import {
   arrayUnion,
   arrayRemove,
   serverTimestamp,
+  addDoc,
+  collection,
+  query,
+  where,
 } from "firebase/firestore";
 import {
   Users,
@@ -29,9 +33,9 @@ import {
   Loader2,
   Maximize2,
   Send,
+  X,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import FireboyWatergirl from "@/games/fireboy-watergirl/components/FireboyWatergirl";
 
 interface LobbyState {
   hostId: string;
@@ -57,6 +61,51 @@ function LobbyContent() {
   const router = useRouter();
   const { user } = useAuthStore();
 
+
+  const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
+  const [friends, setFriends] = useState<any[]>([]);
+
+  useEffect(() => {
+    if (!user || !isInviteModalOpen) return;
+    const q = query(collection(db, "connections"), where("participants", "array-contains", user.uid));
+    const unsub = onSnapshot(q, async (snap) => {
+      const allConnections = snap.docs.map(d => ({ id: d.id, ...d.data() } as any));
+      const accepted: any[] = [];
+
+      for (const conn of allConnections) {
+        if (conn.status !== "accepted") continue;
+        const otherUid = conn.participants.find((p: string) => p !== user.uid);
+        if (!otherUid) continue;
+        try {
+           const profileSnap = await getDoc(doc(db, "users", otherUid));
+           if (!profileSnap.exists()) continue;
+           accepted.push({ ...profileSnap.data(), connId: conn.id });
+        } catch (e) {
+           console.error("Error fetching friend profile in lobby", e);
+        }
+      }
+      setFriends(accepted);
+    });
+    return () => unsub();
+  }, [user, isInviteModalOpen]);
+
+  const handleSendInvite = async (friendId: string) => {
+    if (!user || !roomId) return;
+    try {
+      await addDoc(collection(db, "invites"), {
+        targetId: friendId,
+        fromUid: user.uid,
+        fromName: user.displayName,
+        roomId: roomId,
+        timestamp: Date.now()
+      });
+      alert("Invite sent!");
+      setIsInviteModalOpen(false);
+    } catch (e) {
+      console.error("Invite error:", e);
+      alert("Failed to send invite");
+    }
+  };
 
   const [lobby, setLobby] = useState<LobbyState | null>(null);
   const [copied, setCopied] = useState(false);
@@ -257,11 +306,18 @@ function LobbyContent() {
 
           <div className="flex items-center gap-4">
             <button
+              onClick={() => setIsInviteModalOpen(true)}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-primary hover:bg-primary/90 text-white font-bold transition-all shadow-[0_0_15px_#ff440055]"
+            >
+              <Users size={18} />
+              Invite Friends
+            </button>
+            <button
               onClick={copyLink}
-              className="flex items-center gap-2 px-4 py-2 rounded-lg glass hover:bg-white/10 text-white font-medium transition-colors border border-white/5"
+              className="flex items-center gap-2 px-4 py-2 rounded-xl border border-white/10 glass text-white font-medium hover:bg-white/10 transition-colors"
             >
               {copied ? <Check size={16} className="text-success" /> : <Copy size={16} />}
-              {copied ? "Copied!" : "Invite Friends"}
+              <span className="hidden sm:inline-block">{copied ? "Copied!" : "Copy Link"}</span>
             </button>
             <button
               onClick={leaveLobby}
@@ -272,6 +328,60 @@ function LobbyContent() {
           </div>
         </nav>
 
+        {/* Invite Modal Overlay */}
+        <AnimatePresence>
+          {isInviteModalOpen && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+              onClick={() => setIsInviteModalOpen(false)}
+            >
+              <motion.div
+                initial={{ scale: 0.9, y: 20 }}
+                animate={{ scale: 1, y: 0 }}
+                exit={{ scale: 0.9, y: 20 }}
+                onClick={(e) => e.stopPropagation()}
+                className="w-full max-w-md glass-solid rounded-3xl border border-white/10 shadow-2xl overflow-hidden flex flex-col"
+              >
+                <div className="p-6 border-b border-white/10 flex items-center justify-between">
+                  <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                    <Users className="text-primary" /> Invite Crew
+                  </h3>
+                  <button onClick={() => setIsInviteModalOpen(false)} className="p-2 hover:bg-white/10 rounded-xl transition-colors">
+                    <X className="text-text-muted" size={20} />
+                  </button>
+                </div>
+                
+                <div className="p-4 max-h-[60vh] overflow-y-auto space-y-2">
+                  {friends.length === 0 ? (
+                    <div className="text-center py-10 text-text-muted">
+                      <Users size={48} className="mx-auto opacity-20 mb-4" />
+                      <p>You don't have any friends yet!</p>
+                      <p className="text-sm">Find them via the main dashboard.</p>
+                    </div>
+                  ) : (
+                    friends.map(f => (
+                      <div key={f.uid} className="glass p-3 rounded-2xl border border-white/5 flex items-center justify-between group">
+                        <div className="flex items-center gap-3">
+                          <img src={f.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${f.uid}`} alt={f.displayName} className="w-10 h-10 rounded-full" />
+                          <p className="font-bold text-white">{f.displayName}</p>
+                        </div>
+                        <button
+                          onClick={() => handleSendInvite(f.uid)}
+                          className="px-4 py-2 bg-primary/20 hover:bg-primary text-primary hover:text-white text-xs font-bold rounded-xl transition-all"
+                        >
+                          Send Invite
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Main Split Layout */}
         <div className="flex-1 flex flex-row overflow-hidden relative">
@@ -390,33 +500,14 @@ function LobbyContent() {
               /* The Game Container! */
               <div className={`${isPseudoFull ? 'fixed inset-0 z-[100] bg-black' : 'flex-1 relative'
                 } w-full flex flex-col`}>
-                {/* The actual game running natively */}
-                {lobby.gameId === 'fireboy-watergirl' ? (
-                  <FireboyWatergirl
-                    initialRoomId={roomId}
-                    isHost={isHost}
-                    initialGameMode="multi"
-                    platformUserId={user?.uid}
-                    displayName={user?.displayName || "Player"}
-                    photoURL={user?.photoURL || ""}
-                    onBack={async () => {
-                      if (isHost) {
-                        await updateDoc(doc(db, "lobbies", roomId), {
-                          status: "waiting",
-                          gameId: null,
-                        });
-                      }
-                    }}
-                  />
-                ) : (
-                  <iframe
-                    id="game-iframe"
-                    src={`${process.env.NEXT_PUBLIC_BASE_PATH || ""}/games/${lobby.gameId}/index.html?room=${roomId}&host=${isHost}&displayName=${encodeURIComponent(user?.displayName || "Player")}&photoURL=${encodeURIComponent(user?.photoURL || "")}`}
-                    className="flex-1 w-full h-full border-none z-10"
-                    title={selectedGameObj?.name || "Game Window"}
-                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
-                  />
-                )}
+                {/* The actual game running natively or via iframe */}
+                <iframe
+                  id="game-iframe"
+                  src={`${process.env.NEXT_PUBLIC_BASE_PATH || ""}/games/${lobby.gameId}/index.html?room=${roomId}&host=${isHost}&displayName=${encodeURIComponent(user?.displayName || "Player")}&photoURL=${encodeURIComponent(user?.photoURL || "")}`}
+                  className="flex-1 w-full h-full border-none z-10"
+                  title={selectedGameObj?.name || "Game Window"}
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
+                />
 
 
 

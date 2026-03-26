@@ -65,8 +65,7 @@ export default function App() {
         displayName: params.get('displayName') || '',
         photoURL: params.get('photoURL') || ''
       });
-      setView('game');
-      // Remove the parameter from the URL so it doesn't trigger again on refresh
+      // We do NOT setView('game') here anymore. The user requested to see the Menu first.
       window.history.replaceState({}, document.title, window.location.pathname);
     }
   }, []);
@@ -102,7 +101,11 @@ export default function App() {
               <MenuBtn 
                 onClick={() => {
                   setGameMode('multi');
-                  setView('multiplayer-menu');
+                  if (roomId) {
+                    setView('game');
+                  } else {
+                    setView('multiplayer-menu');
+                  }
                 }} 
                 icon={<Smartphone size={20} />} 
                 label="MULTIPLAYER" 

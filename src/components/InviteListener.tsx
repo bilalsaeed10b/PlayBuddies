@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { rtdb } from "@/lib/firebase";
-import { ref, onChildAdded, onValue, remove, child } from "firebase/database";
+import { db } from "@/lib/firebase";
+import { collection, query, where, onSnapshot, doc, deleteDoc } from "firebase/firestore";
 import { useAuthStore } from "@/store/useAuthStore";
 import { motion, AnimatePresence } from "framer-motion";
 import { useRouter } from "next/navigation";
@@ -16,45 +16,39 @@ export default function InviteListener() {
   useEffect(() => {
     if (!user) return;
 
-    const invitesRef = ref(rtdb, `invites/${user.uid}`);
+    const q = query(collection(db, "invites"), where("targetId", "==", user.uid));
     
-    const unsubscribe = onChildAdded(invitesRef, (snapshot) => {
-      const inviteData = snapshot.val();
-      const inviteKey = snapshot.key;
-      
-      if (!inviteData) return;
-      
-      // Auto-ignore old invites (older than 1 minute)
-      if (Date.now() - inviteData.timestamp > 60000) {
-        remove(ref(rtdb, `invites/${user.uid}/${inviteKey}`));
-        return;
-      }
-
-      setInvites(prev => [...prev, { id: inviteKey, ...inviteData }]);
-      
-      // Auto-remove visually after 15 seconds
-      setTimeout(() => {
-        setInvites(prev => prev.filter(i => i.id !== inviteKey));
-        remove(ref(rtdb, `invites/${user.uid}/${inviteKey}`)).catch(() => {});
-      }, 15000);
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const activeInvites: any[] = [];
+      snapshot.forEach(docSnap => {
+        const data = docSnap.data();
+        
+        // Auto-ignore strictly old invites (older than 1 minute)
+        if (Date.now() - data.timestamp > 60000) {
+          deleteDoc(doc(db, "invites", docSnap.id)).catch(() => {});
+        } else {
+          activeInvites.push({ id: docSnap.id, ...data });
+        }
+      });
+      setInvites(activeInvites);
     });
 
     return () => unsubscribe();
   }, [user]);
 
-  const acceptInvite = (invite: any) => {
-    // Remove from UI
+  const acceptInvite = async (invite: any) => {
+    // Remove from UI optimistically
     setInvites(prev => prev.filter(i => i.id !== invite.id));
     // Remove from DB
-    remove(ref(rtdb, `invites/${user?.uid}/${invite.id}`));
+    await deleteDoc(doc(db, "invites", invite.id)).catch(() => {});
     
     // Navigate to lobby
     router.push(`/lobby?room=${invite.roomId}`);
   };
 
-  const declineInvite = (inviteId: string) => {
+  const declineInvite = async (inviteId: string) => {
     setInvites(prev => prev.filter(i => i.id !== inviteId));
-    remove(ref(rtdb, `invites/${user?.uid}/${inviteId}`));
+    await deleteDoc(doc(db, "invites", inviteId)).catch(() => {});
   };
 
   if (!user || invites.length === 0) return null;

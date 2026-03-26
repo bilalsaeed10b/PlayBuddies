@@ -1,10 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { collection, query, where, onSnapshot, getDocs, setDoc, doc, deleteDoc, serverTimestamp, getDoc } from "firebase/firestore";
-import { db, rtdb } from "@/lib/firebase";
+import { collection, query, where, onSnapshot, getDocs, setDoc, doc, deleteDoc, serverTimestamp, getDoc, addDoc } from "firebase/firestore";
+import { db } from "@/lib/firebase";
 import { useAuthStore } from "@/store/useAuthStore";
-import { ref, push } from "firebase/database";
 import { Users, X, UserPlus, Check, MessageCircle, Search } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -135,8 +134,8 @@ export default function FriendsSidebar() {
         return;
       }
 
-      const inviteRef = ref(rtdb, `invites/${friendId}`);
-      push(inviteRef, {
+      await addDoc(collection(db, "invites"), {
+        targetId: friendId,
         fromUid: user.uid,
         fromName: user.displayName,
         roomId: lobbyToInvite,
