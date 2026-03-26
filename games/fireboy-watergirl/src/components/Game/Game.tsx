@@ -150,7 +150,7 @@ export default function Game({
     if (event === 'collect') {
       playCollectSound();
       if (gameMode === 'multi' && roomId && userId) {
-        const roomRef = doc(db, 'rooms', roomId);
+        const roomRef = doc(db, 'lobbies', roomId);
         updateDoc(roomRef, {
           [`collectedGems.${data.id || data}`]: true
         });
@@ -227,7 +227,7 @@ export default function Game({
       }
       setRoomId(room);
 
-      const roomRef = doc(db, 'rooms', room);
+      const roomRef = doc(db, 'lobbies', room);
       const roomSnap = await getDoc(roomRef);
 
       if (!roomSnap.exists()) {
@@ -269,7 +269,7 @@ export default function Game({
     if (gameMode !== 'multi' || !roomId || !userId) return;
 
     console.log(`[Multiplayer] Setting up Firestore listeners for room [${roomId}]`);
-    const roomRef = doc(db, 'rooms', roomId);
+    const roomRef = doc(db, 'lobbies', roomId);
 
     const unsubscribeRoom = onSnapshot(roomRef, (doc) => {
       if (doc.exists()) {
@@ -330,7 +330,7 @@ export default function Game({
     const unsubscribes: (() => void)[] = [];
 
     otherPlayers.forEach(pid => {
-      const pRef = doc(db, 'rooms', roomId, 'updates', pid);
+      const pRef = doc(db, 'lobbies', roomId, 'updates', pid);
       const unsub = onSnapshot(pRef, (snap) => {
         if (snap.exists()) {
           const state = snap.data();
@@ -402,7 +402,7 @@ export default function Game({
         };
       };
 
-      const roomRef = doc(db, 'rooms', roomId);
+      const roomRef = doc(db, 'lobbies', roomId);
 
       if (isHost) {
         const dc = pc.createDataChannel('game-sync', { negotiated: true, id: 0 });
@@ -584,7 +584,7 @@ export default function Game({
         const now = Date.now();
         const syncInterval = rtcConnected ? 200 : 50; // 5fps if WebRTC connected, 20fps otherwise
         if (now - lastUpdateRef.current > syncInterval) {
-          const pRef = doc(db, 'rooms', roomId, 'updates', userId);
+          const pRef = doc(db, 'lobbies', roomId, 'updates', userId);
           setDoc(pRef, { ...state, role, lastUpdate: now }, { merge: true }).catch(console.error);
           lastUpdateRef.current = now;
         }
@@ -607,7 +607,7 @@ export default function Game({
           if (dcRef.current?.readyState === 'open') {
             dcRef.current.send(JSON.stringify({ type: 'sync', role, state, lastUpdate: Date.now() }));
           }
-          const pRef = doc(db, 'rooms', roomId, 'updates', userId);
+          const pRef = doc(db, 'lobbies', roomId, 'updates', userId);
           setDoc(pRef, { ...state, role, lastUpdate: Date.now() }, { merge: true }).catch(console.error);
         }
         handleWin();
@@ -654,7 +654,7 @@ export default function Game({
       if (levelIndex < levels.length - 1) {
         if (gameMode === 'multi' && roomId) {
           if (isHost) {
-            const roomRef = doc(db, 'rooms', roomId);
+            const roomRef = doc(db, 'lobbies', roomId);
             updateDoc(roomRef, {
               level: winLevelIndex + 1,
               collectedGems: {} // Reset gems for next level
@@ -680,7 +680,7 @@ export default function Game({
 
     // Immediately sync death if in multiplayer
     if (gameMode === 'multi' && roomId && userId && role && role !== 'both') {
-      const pRef = doc(db, 'rooms', roomId, 'updates', userId);
+      const pRef = doc(db, 'lobbies', roomId, 'updates', userId);
       updateDoc(pRef, { isDead: true }).catch(console.error);
 
       if (dcRef.current?.readyState === 'open') {
@@ -705,7 +705,7 @@ export default function Game({
 
       // Reset Firestore state for this player to prevent immediate re-death sync
       if (gameMode === 'multi' && roomId && userId && role && role !== 'both') {
-        const pRef = doc(db, 'rooms', roomId, 'updates', userId);
+        const pRef = doc(db, 'lobbies', roomId, 'updates', userId);
         const p = role === 'fire' ? newEngine.player1 : newEngine.player2;
         setDoc(pRef, {
           x: p.x,
@@ -1669,7 +1669,7 @@ export default function Game({
 
   const sendChat = (msg: string, emoji?: string) => {
     if (gameMode === 'multi' && roomId && userId) {
-      const roomRef = doc(db, 'rooms', roomId);
+      const roomRef = doc(db, 'lobbies', roomId);
       updateDoc(roomRef, {
         chat: arrayUnion({
           id: userId,
@@ -1684,14 +1684,14 @@ export default function Game({
 
   const handleStartMultiplayer = () => {
     if (lobbyData?.status === 'lobby' && roomId) {
-      const roomRef = doc(db, 'rooms', roomId);
+      const roomRef = doc(db, 'lobbies', roomId);
       updateDoc(roomRef, { status: 'playing' });
     }
   };
 
   const selectRole = (selectedRole: 'fire' | 'water') => {
     if (gameMode === 'multi' && roomId && userId) {
-      const roomRef = doc(db, 'rooms', roomId);
+      const roomRef = doc(db, 'lobbies', roomId);
       updateDoc(roomRef, {
         [`players.${userId}.role`]: selectedRole
       });

@@ -1,12 +1,12 @@
 
 "use client";
 
-import { useState, useEffect, Suspense } from "react";
+import { useState, useEffect, useRef, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useAuthStore } from "@/store/useAuthStore";
 import { GAMES } from "@/lib/games";
 import AuthGuard from "@/components/AuthGuard";
-import { db } from "@/lib/firebase";
+import { db, auth, rtdb } from "@/lib/firebase";
 import {
   doc,
   getDoc,
@@ -21,6 +21,7 @@ import {
   query,
   where,
 } from "firebase/firestore";
+import { ref, onValue, set, onDisconnect, remove, get } from "firebase/database";
 import {
   Users,
   Copy,
@@ -97,7 +98,8 @@ function LobbyContent() {
         fromUid: user.uid,
         fromName: user.displayName,
         roomId: roomId,
-        timestamp: Date.now()
+        timestamp: Date.now(),
+        expiresAt: new Date(Date.now() + 2 * 60 * 1000)
       });
       alert("Invite sent!");
       setIsInviteModalOpen(false);
@@ -174,8 +176,39 @@ function LobbyContent() {
       }
     });
 
+    // Bilal Saeed 123 - Presence Auto-Cleanup
+    const presenceRef = ref(rtdb, `presence/${roomId}/${user.uid}`);
+    set(presenceRef, true);
+    onDisconnect(presenceRef).remove();
+
+    let presenceUnsub: (() => void) | undefined;
+    // Host watches presence and purges dead players from Firestore
+    if (user.uid === lobby?.hostId) {
+      const roomPresenceRef = ref(rtdb, `presence/${roomId}`);
+      // Using onValue to get the unsubscribe callback correctly
+      const listener = onValue(roomPresenceRef, async (snap) => {
+        const activeDocs = snap.val() || {};
+        try {
+          const s = await getDoc(roomRef);
+          if (s.exists()) {
+             const currentPlayers = s.data().players || [];
+             const deadPlayers = currentPlayers.filter((p: any) => !activeDocs[p.uid]);
+             if (deadPlayers.length > 0) {
+               for (const p of deadPlayers) {
+                 await updateDoc(roomRef, { players: arrayRemove(p) });
+               }
+             }
+          }
+        } catch (err) {}
+      });
+      presenceUnsub = () => listener();
+    }
+    // Bilal Saeed 123
+
     return () => {
       unsubscribe();
+      if (presenceUnsub) presenceUnsub();
+      remove(presenceRef); // Bilal Saeed 123
       // Leave room on unmount
       const playerProfile = {
         uid: user.uid,
@@ -187,7 +220,7 @@ function LobbyContent() {
         players: arrayRemove(playerProfile), // Might not work perfectly if isReady changed, but good for MVP
       }).catch(console.error);
     };
-  }, [user, roomId]);
+  }, [user, roomId, lobby?.hostId]);
 
   const copyLink = () => {
     navigator.clipboard.writeText(window.location.href);
@@ -228,9 +261,16 @@ function LobbyContent() {
     }
   };
 
+  // Bilal Saeed 123
+  const lastMessageTimeRef = useRef<number>(0);
   const sendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!chatMessage.trim() || !user) return;
+
+    // Rate limit: 1 message per second
+    const now = Date.now();
+    if (now - lastMessageTimeRef.current < 1000) return;
+    lastMessageTimeRef.current = now;
 
     try {
       const roomRef = doc(db, "lobbies", roomId);
@@ -238,7 +278,7 @@ function LobbyContent() {
         messages: arrayUnion({
           uid: user.uid,
           displayName: user.displayName || "Player",
-          text: chatMessage.trim(),
+          text: chatMessage.trim().substring(0, 200),
           timestamp: new Date().toISOString(),
         }),
       });
@@ -247,6 +287,7 @@ function LobbyContent() {
       console.error("Error sending message:", e);
     }
   };
+  // Bilal Saeed 123
 
   const toggleFullScreen = () => {
     const isTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;

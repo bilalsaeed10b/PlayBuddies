@@ -1,0 +1,24 @@
+{
+  "rules": {
+    "invites": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid",
+        ".write": "auth != null",
+        "$inviteId": {
+          ".validate": "newData.hasChildren(['fromUid', 'fromName', 'roomId', 'timestamp'])",
+          ".write": "auth != null && (newData.child('fromUid').val() === auth.uid || !data.exists() || auth.uid === $uid)"
+        }
+      }
+    },
+    "signaling": {
+      "$roomId": {
+        ".read": "auth != null",
+        ".write": "auth != null"
+      }
+    },
+    "$other": {
+      ".read": false,
+      ".write": false
+    }
+  }
+}

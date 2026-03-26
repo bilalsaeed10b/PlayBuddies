@@ -22,7 +22,9 @@ import {
 } from "lucide-react";
 
 export default function DashboardPage() {
-  const { user } = useAuthStore();
+  // Bilal Saeed 123
+  const { user, stats: cachedStats, statsFetchedAt, setStats } = useAuthStore();
+  // Bilal Saeed 123
   const router = useRouter();
   const [isCreating, setIsCreating] = useState(false);
   const [joinCode, setJoinCode] = useState("");
@@ -32,6 +34,17 @@ export default function DashboardPage() {
 
   useEffect(() => {
     if (!user) return;
+
+    // Bilal Saeed 123
+    // Use cached stats if fresh (less than 5 minutes old)
+    const STALE_THRESHOLD = 5 * 60 * 1000;
+    if (cachedStats && Date.now() - statsFetchedAt < STALE_THRESHOLD) {
+      setUserStats(cachedStats);
+      setLoadingStats(false);
+      return;
+    }
+    // Bilal Saeed 123
+
     const fetchStats = async () => {
       try {
         const userRef = doc(db, "users", user.uid);
@@ -41,11 +54,13 @@ export default function DashboardPage() {
           const games = data.stats?.gamesPlayed || 0;
           const wins = data.stats?.wins || 0;
           const winRate = games > 0 ? Math.round((wins / games) * 100) + "%" : "0%";
-          setUserStats({
+          const freshStats = {
             friendsOnline: data.stats?.friendsOnline || 0,
             gamesPlayed: games,
             winRate: winRate,
-          });
+          };
+          setUserStats(freshStats);
+          setStats(freshStats); // Cache in Zustand
         }
       } catch (error) {
         console.error("Error fetching user stats:", error);
@@ -68,14 +83,22 @@ export default function DashboardPage() {
   const createLobby = async (gameId: string | null = null) => {
     if (!user) return;
     setIsCreating(true);
-    const roomId = Math.random().toString(36).substring(2, 8).toUpperCase();
+    // Bilal Saeed 123
+    const arr = new Uint8Array(4);
+    crypto.getRandomValues(arr);
+    const roomId = Array.from(arr, b => b.toString(36)).join('').substring(0, 7).toUpperCase();
+    // Bilal Saeed 123
     try {
+      // Bilal Saeed 123
+      const expiresAt = new Date(Date.now() + 2 * 60 * 60 * 1000); // 2 hours TTL
+      // Bilal Saeed 123
       await setDoc(doc(db, "lobbies", roomId), {
         hostId: user.uid,
         status: "waiting",
         gameId: typeof gameId === 'string' ? gameId : null,
         players: [],
         createdAt: serverTimestamp(),
+        expiresAt,
       });
       router.push(`/lobby?room=${roomId}`);
     } catch (e) {

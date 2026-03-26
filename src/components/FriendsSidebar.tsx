@@ -139,7 +139,8 @@ export default function FriendsSidebar() {
         fromUid: user.uid,
         fromName: user.displayName,
         roomId: lobbyToInvite,
-        timestamp: Date.now()
+        timestamp: Date.now(),
+        expiresAt: new Date(Date.now() + 2 * 60 * 1000)
       });
       alert("Invite sent to friend!");
     } catch (e) {

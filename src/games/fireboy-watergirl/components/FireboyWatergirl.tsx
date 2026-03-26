@@ -116,6 +116,16 @@ export default function FireboyWatergirl({
   const lastFpsUpdateRef = useRef<number>(0);
   const lastPingSentRef = useRef<number>(0);
 
+  // Bilal Saeed 123
+  const timersRef = useRef<NodeJS.Timeout[]>([]);
+  useEffect(() => {
+    return () => {
+      // Memory Leak Plug: Cleanly unplug any hanging timeouts during unmount natively
+      timersRef.current.forEach(timer => clearTimeout(timer));
+    };
+  }, []);
+  // Bilal Saeed 123
+  
   const addParticles = useCallback((x: number, y: number, color: string, count: number = 10) => {
     if (!settingsRef.current.particles) return;
     const newParticles: Particle[] = [];
@@ -183,7 +193,7 @@ export default function FireboyWatergirl({
     if (event === 'collect') {
       playCollectSound();
       if (gameMode === 'multi' && roomId && userId) {
-        const roomRef = doc(db, 'rooms', roomId);
+        const roomRef = doc(db, 'lobbies', roomId);
         updateDoc(roomRef, {
           [`collectedGems.${data.id || data}`]: true
         });
@@ -260,7 +270,7 @@ export default function FireboyWatergirl({
       }
       setRoomId(room);
 
-      const roomRef = doc(db, 'rooms', room);
+      const roomRef = doc(db, 'lobbies', room);
       const roomSnap = await getDoc(roomRef);
 
       if (!roomSnap.exists()) {
@@ -302,7 +312,7 @@ export default function FireboyWatergirl({
     if (gameMode !== 'multi' || !roomId || !userId) return;
 
     console.log(`[Multiplayer] Setting up Firestore listeners for room [${roomId}]`);
-    const roomRef = doc(db, 'rooms', roomId);
+    const roomRef = doc(db, 'lobbies', roomId);
 
     const unsubscribeRoom = onSnapshot(roomRef, (docSnap: any) => {
       if (docSnap.exists()) {
@@ -363,7 +373,7 @@ export default function FireboyWatergirl({
     const unsubscribes: (() => void)[] = [];
 
     otherPlayers.forEach(pid => {
-      const pRef = doc(db, 'rooms', roomId, 'updates', pid);
+      const pRef = doc(db, 'lobbies', roomId, 'updates', pid);
       const unsub = onSnapshot(pRef, (snap: any) => {
         if (snap.exists()) {
           const state = snap.data();
@@ -439,7 +449,7 @@ export default function FireboyWatergirl({
         };
       };
 
-      const roomRef = doc(db, 'rooms', roomId);
+      const roomRef = doc(db, 'lobbies', roomId);
 
       if (isHost) {
         const dc = pc.createDataChannel('game-sync', { negotiated: true, id: 0 });
@@ -636,13 +646,11 @@ export default function FireboyWatergirl({
           dcRef.current.send(JSON.stringify({ type: 'sync', role, state, lastUpdate: Date.now() }));
         }
 
-        const syncNow = Date.now();
-        const syncInterval = rtcConnected ? 200 : 50; // 5fps if WebRTC connected, 20fps otherwise
-        if (syncNow - lastUpdateRef.current > syncInterval) {
-          const pRef = doc(db, 'rooms', roomId, 'updates', userId);
-          setDoc(pRef, { ...state, role, lastUpdate: syncNow }, { merge: true }).catch(console.error);
-          lastUpdateRef.current = syncNow;
-        }
+        // Bilal Saeed 123
+        // CRITICAL COST OPTIMIZATION: Disabled Firestore 20fps movement sync entirely.
+        // All real-time movement data is now exclusively routed through the WebRTC P2P DataChannel.
+        // lastUpdateRef.current = syncNow;
+        // Bilal Saeed 123
       }
 
       currentEngine.updateEntities(dt);
@@ -662,7 +670,7 @@ export default function FireboyWatergirl({
           if (dcRef.current?.readyState === 'open') {
             dcRef.current.send(JSON.stringify({ type: 'sync', role, state, lastUpdate: Date.now() }));
           }
-          const pRef = doc(db, 'rooms', roomId, 'updates', userId);
+          const pRef = doc(db, 'lobbies', roomId, 'updates', userId);
           setDoc(pRef, { ...state, role, lastUpdate: Date.now() }, { merge: true }).catch(console.error);
         }
         handleWin();
@@ -700,7 +708,8 @@ export default function FireboyWatergirl({
       onComplete?.(levels[levelIndex].id);
     }
 
-    setTimeout(() => {
+    // Bilal Saeed 123 - Active Timeout Tracking
+    const timer = setTimeout(() => {
       if (customLevel) {
         onBack?.();
         return;
@@ -709,7 +718,7 @@ export default function FireboyWatergirl({
       if (levelIndex < levels.length - 1) {
         if (gameMode === 'multi' && roomId) {
           if (isHost) {
-            const roomRef = doc(db, 'rooms', roomId);
+            const roomRef = doc(db, 'lobbies', roomId);
             updateDoc(roomRef, {
               level: winLevelIndex + 1,
               collectedGems: {} // Reset gems for next level
@@ -722,9 +731,12 @@ export default function FireboyWatergirl({
         }
       } else {
         showToast("All levels complete!", "success");
-        setTimeout(onBack || (() => { }), 2000);
+        const exitTimer = setTimeout(onBack || (() => { }), 2000);
+        timersRef.current.push(exitTimer);
       }
     }, 2000);
+    timersRef.current.push(timer);
+    // Bilal Saeed 123
   };
 
   const handleDeath = () => {
@@ -735,7 +747,7 @@ export default function FireboyWatergirl({
 
     // Immediately sync death if in multiplayer
     if (gameMode === 'multi' && roomId && userId && role && role !== 'both') {
-      const pRef = doc(db, 'rooms', roomId, 'updates', userId);
+      const pRef = doc(db, 'lobbies', roomId, 'updates', userId);
       updateDoc(pRef, { isDead: true }).catch(console.error);
 
       if (dcRef.current?.readyState === 'open') {
@@ -751,7 +763,8 @@ export default function FireboyWatergirl({
       }
     }
 
-    setTimeout(() => {
+    // Bilal Saeed 123 - Active Timeout Tracking
+    const timer = setTimeout(() => {
       const level = customLevel || levels[levelIndex];
       const newEngine = new GameEngine(level);
       newEngine.onEvent = handleGameEvent;
@@ -760,7 +773,7 @@ export default function FireboyWatergirl({
 
       // Reset Firestore state for this player to prevent immediate re-death sync
       if (gameMode === 'multi' && roomId && userId && role && role !== 'both') {
-        const pRef = doc(db, 'rooms', roomId, 'updates', userId);
+        const pRef = doc(db, 'lobbies', roomId, 'updates', userId);
         const p = role === 'fire' ? newEngine.player1 : newEngine.player2;
         setDoc(pRef, {
           x: p.x,
@@ -776,6 +789,8 @@ export default function FireboyWatergirl({
 
       setIsGameOver(false);
     }, 1500);
+    timersRef.current.push(timer);
+    // Bilal Saeed 123
   };
 
   const drawParticles = (ctx: CanvasRenderingContext2D) => {
@@ -1724,7 +1739,7 @@ export default function FireboyWatergirl({
 
   const sendChat = (msg: string, emoji?: string) => {
     if (gameMode === 'multi' && roomId && userId) {
-      const roomRef = doc(db, 'rooms', roomId);
+      const roomRef = doc(db, 'lobbies', roomId);
       updateDoc(roomRef, {
         chat: arrayUnion({
           id: userId,
@@ -1739,14 +1754,14 @@ export default function FireboyWatergirl({
 
   const handleStartMultiplayer = () => {
     if (lobbyData?.status === 'lobby' && roomId) {
-      const roomRef = doc(db, 'rooms', roomId);
+      const roomRef = doc(db, 'lobbies', roomId);
       updateDoc(roomRef, { status: 'playing' });
     }
   };
 
   const selectRole = (selectedRole: 'fire' | 'water') => {
     if (gameMode === 'multi' && roomId && userId) {
-      const roomRef = doc(db, 'rooms', roomId);
+      const roomRef = doc(db, 'lobbies', roomId);
       updateDoc(roomRef, {
         [`players.${userId}.role`]: selectedRole
       });
