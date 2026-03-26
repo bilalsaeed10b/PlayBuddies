@@ -22,8 +22,6 @@ export const metadata: Metadata = {
 };
 
 import AuthProvider from "@/components/AuthProvider";
-import FriendsSidebar from "@/components/FriendsSidebar";
-import InviteListener from "@/components/InviteListener";
 
 export default function RootLayout({
   children,
@@ -45,11 +43,7 @@ export default function RootLayout({
         />
       </head>
       <body className="antialiased noise" suppressHydrationWarning>
-        <AuthProvider>
-          {children}
-          <FriendsSidebar />
-          <InviteListener />
-        </AuthProvider>
+        <AuthProvider>{children}</AuthProvider>
       </body>
     </html>
   );

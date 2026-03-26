@@ -1,0 +1,62 @@
+{
+  "entities": {
+    "Player": {
+      "title": "Player",
+      "description": "A player in a game room",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "role": { "type": "string", "enum": ["fire", "water"] },
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "vx": { "type": "number" },
+        "vy": { "type": "number" },
+        "animState": { "type": "string" },
+        "animFrame": { "type": "number" },
+        "isDead": { "type": "boolean" },
+        "score": { "type": "number" },
+        "ready": { "type": "boolean" },
+        "lastUpdate": { "type": "number" }
+      },
+      "required": ["id"]
+    },
+    "Room": {
+      "title": "Room",
+      "description": "A multiplayer game room",
+      "type": "object",
+      "properties": {
+        "roomId": { "type": "string" },
+        "status": { "type": "string", "enum": ["lobby", "playing"] },
+        "level": { "type": "number" },
+        "players": { 
+          "type": "object",
+          "additionalProperties": { "$ref": "Player" }
+        },
+        "chat": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "message": { "type": "string" },
+              "emoji": { "type": "string" },
+              "role": { "type": "string" },
+              "timestamp": { "type": "number" }
+            }
+          }
+        }
+      },
+      "required": ["roomId", "status", "level", "players"]
+    }
+  },
+  "firestore": {
+    "/rooms/{roomId}": {
+      "schema": "Room",
+      "description": "Multiplayer game rooms"
+    },
+    "/rooms/{roomId}/updates/{playerId}": {
+      "schema": "Player",
+      "description": "Live player position and state updates"
+    }
+  }
+}

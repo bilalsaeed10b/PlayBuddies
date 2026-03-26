@@ -1,13 +1,12 @@
 
-// Bilal Saeed 123
 "use client";
 
-import { useState, useEffect, useRef, useCallback, Suspense } from "react";
+import { useState, useEffect, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useAuthStore } from "@/store/useAuthStore";
 import { GAMES } from "@/lib/games";
 import AuthGuard from "@/components/AuthGuard";
-import { db, rtdb } from "@/lib/firebase";
+import { db } from "@/lib/firebase";
 import {
   doc,
   getDoc,
@@ -15,15 +14,9 @@ import {
   onSnapshot,
   updateDoc,
   arrayUnion,
+  arrayRemove,
   serverTimestamp,
 } from "firebase/firestore";
-import {
-  ref,
-  set,
-  onDisconnect,
-  onValue,
-  serverTimestamp as rtdbServerTimestamp,
-} from "firebase/database";
 import {
   Users,
   Copy,
@@ -40,33 +33,22 @@ import {
 import { motion, AnimatePresence } from "framer-motion";
 import FireboyWatergirl from "@/games/fireboy-watergirl/components/FireboyWatergirl";
 
-interface PlayerProfile {
-  uid: string;
-  displayName: string;
-  photoURL: string;
-  isReady: boolean;
-  role?: 'fire' | 'water' | 'both' | null;
-}
-
 interface LobbyState {
   hostId: string;
   gameId: string | null;
   status: "waiting" | "playing";
-  players: PlayerProfile[];
+  players: {
+    uid: string;
+    displayName: string;
+    photoURL: string;
+    isReady: boolean;
+  }[];
   messages?: {
     uid: string;
     displayName: string;
     text: string;
     timestamp: any;
   }[];
-  // Game-specific fields consolidated here
-  level?: number;
-  collectedGems?: Record<string, boolean>;
-  // WebRTC Signaling fields consolidated here
-  offer?: any;
-  answer?: any;
-  hostCandidates?: string[];
-  clientCandidates?: string[];
 }
 
 function LobbyContent() {
@@ -75,19 +57,13 @@ function LobbyContent() {
   const router = useRouter();
   const { user } = useAuthStore();
 
+
   const [lobby, setLobby] = useState<LobbyState | null>(null);
   const [copied, setCopied] = useState(false);
   const [isReady, setIsReady] = useState(false);
   const [chatMessage, setChatMessage] = useState("");
   const [showSidebar, setShowSidebar] = useState(false);
   const [isPseudoFull, setIsPseudoFull] = useState(false);
-  const lobbyRef = useRef<LobbyState | null>(null);
-  const lastMessageTime = useRef<number>(0);
-
-  // Keep lobbyRef in sync for use in cleanup callbacks
-  useEffect(() => {
-    lobbyRef.current = lobby;
-  }, [lobby]);
 
   useEffect(() => {
     const handleFullscreenChange = () => {
@@ -101,101 +77,23 @@ function LobbyContent() {
 
   const isHost = lobby?.hostId === user?.uid;
 
-  // ──────────────────────────────────────────────────────
-  // FIX #1: RTDB Presence System for Ghost Player Cleanup
-  // ──────────────────────────────────────────────────────
-  // Firebase RTDB's onDisconnect runs SERVER-SIDE when the
-  // client's connection drops (crash, tab close, mobile kill).
-  // This is 100x more reliable than React's useEffect cleanup.
-  useEffect(() => {
-    if (!user || !roomId) return;
-
-    const presenceRef = ref(rtdb, `presence/${roomId}/${user.uid}`);
-    const connectedRef = ref(rtdb, '.info/connected');
-
-    const unsubPresence = onValue(connectedRef, (snap) => {
-      if (snap.val() === true) {
-        // We're connected. Set our presence and schedule cleanup.
-        set(presenceRef, {
-          online: true,
-          displayName: user.displayName || "Player",
-          photoURL: user.photoURL || "",
-          lastSeen: rtdbServerTimestamp(),
-        });
-
-        // SERVER-SIDE: When this client disconnects, remove their presence node
-        onDisconnect(presenceRef).remove();
-      }
-    });
-
-    return () => {
-      unsubPresence();
-      // Also try a graceful cleanup on unmount
-      set(presenceRef, null).catch(() => {});
-    };
-  }, [user, roomId]);
-
-  // ──────────────────────────────────────────────────────
-  // RTDB Presence Watcher: Auto-remove ghost players from
-  // Firestore when their RTDB presence disappears
-  // ──────────────────────────────────────────────────────
-  useEffect(() => {
-    if (!roomId || !user) return;
-
-    const presenceRoomRef = ref(rtdb, `presence/${roomId}`);
-
-    const unsubPresenceWatch = onValue(presenceRoomRef, async (snap) => {
-      const onlineUids = snap.exists() ? Object.keys(snap.val()) : [];
-      const currentLobby = lobbyRef.current;
-
-      if (!currentLobby?.players || currentLobby.hostId !== user.uid) return;
-      // Only the host runs ghost cleanup to avoid race conditions
-
-      const ghostPlayers = currentLobby.players.filter(
-        (p: PlayerProfile) => !onlineUids.includes(p.uid) && p.uid !== user.uid
-      );
-
-      if (ghostPlayers.length > 0) {
-        const roomRef = doc(db, "lobbies", roomId);
-        const freshPlayers = currentLobby.players.filter(
-          (p: PlayerProfile) => onlineUids.includes(p.uid) || p.uid === user.uid
-        );
-        try {
-          await updateDoc(roomRef, { players: freshPlayers });
-          console.log(`[Presence] Cleaned ${ghostPlayers.length} ghost player(s)`);
-        } catch (e) {
-          console.error("[Presence] Failed to clean ghosts:", e);
-        }
-      }
-    });
-
-    return () => unsubPresenceWatch();
-  }, [roomId, user]);
-
-  // ──────────────────────────────────────────────────────
-  // FIX #2: Separated Lobby State Listener
-  // ──────────────────────────────────────────────────────
-  // Only listen to LOBBY METADATA (players, status, gameId).
-  // Game physics (x, y, gems) are synced via RTDB in the game
-  // component, NOT here. This prevents the lobby UI from
-  // re-rendering on every frame of movement data.
   useEffect(() => {
     if (!user || !roomId) return;
 
     const roomRef = doc(db, "lobbies", roomId);
 
     const joinRoom = async () => {
-      const playerProfile: PlayerProfile = {
+      const playerProfile = {
         uid: user.uid,
         displayName: user.displayName || "Player",
         photoURL: user.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.uid}`,
         isReady: false,
-        role: null,
       };
 
       try {
         const snap = await getDoc(roomRef);
         if (!snap.exists()) {
+          // If room doesn't exist, create it and become host
           await setDoc(roomRef, {
             hostId: user.uid,
             status: "waiting",
@@ -205,15 +103,11 @@ function LobbyContent() {
             updatedAt: serverTimestamp(),
           });
         } else {
-          // Check if already in room to avoid duplicates
-          const data = snap.data();
-          const alreadyIn = data?.players?.some((p: PlayerProfile) => p.uid === user.uid);
-          if (!alreadyIn) {
-            await updateDoc(roomRef, {
-              players: arrayUnion(playerProfile),
-              updatedAt: serverTimestamp(),
-            });
-          }
+          // Room exists, join it
+          await updateDoc(roomRef, {
+            players: arrayUnion(playerProfile),
+            updatedAt: serverTimestamp(),
+          });
         }
       } catch (e) {
         console.error("Error joining room:", e);
@@ -222,31 +116,29 @@ function LobbyContent() {
 
     joinRoom();
 
-    // Firestore listener for lobby metadata only.
-    // Game physics sync happens in RTDB within the game component.
     const unsubscribe = onSnapshot(roomRef, (snapshot) => {
       if (snapshot.exists()) {
         setLobby(snapshot.data() as LobbyState);
       } else {
+        // Handle kicked/closed room
         router.push("/dashboard");
       }
     });
 
     return () => {
       unsubscribe();
-      // Graceful leave (backup — RTDB onDisconnect is the primary)
-      if (user) {
-        const currentLobby = lobbyRef.current;
-        if (currentLobby?.players) {
-          const remainingPlayers = currentLobby.players.filter(
-            (p: PlayerProfile) => p.uid !== user.uid
-          );
-          updateDoc(roomRef, { players: remainingPlayers }).catch(console.error);
-        }
-      }
+      // Leave room on unmount
+      const playerProfile = {
+        uid: user.uid,
+        displayName: user.displayName || "Player",
+        photoURL: user.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.uid}`,
+        isReady: isReady, // Have to exact match object to arrayRemove or just manually filter
+      };
+      updateDoc(roomRef, {
+        players: arrayRemove(playerProfile), // Might not work perfectly if isReady changed, but good for MVP
+      }).catch(console.error);
     };
   }, [user, roomId]);
-// Bilal Saeed 123
 
   const copyLink = () => {
     navigator.clipboard.writeText(window.location.href);
@@ -290,14 +182,6 @@ function LobbyContent() {
   const sendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!chatMessage.trim() || !user) return;
-    
-    // Rate limit: 1 message per second
-    const now = Date.now();
-    if (now - lastMessageTime.current < 1000) {
-      console.warn("Message rate limited");
-      return;
-    }
-    lastMessageTime.current = now;
 
     try {
       const roomRef = doc(db, "lobbies", roomId);
@@ -422,24 +306,22 @@ function LobbyContent() {
                         exit={{ opacity: 0, x: -20 }}
                         className="flex items-center justify-between p-3 rounded-xl glass border border-white/5"
                       >
-                        <div className="flex items-center justify-between w-full">
-                          <div className="flex items-center gap-3">
-                            <img
-                              src={player.photoURL}
-                              alt={player.displayName}
-                              className="w-10 h-10 rounded-full border-2 border-primary/50"
-                            />
-                            <div>
-                              <p className="text-sm font-bold text-white flex items-center gap-1">
-                                {player.displayName}
-                                {player.uid === lobby.hostId && (
-                                  <Crown size={14} className="text-yellow-400" />
-                                )}
-                              </p>
-                              <p className="text-xs text-text-muted">
-                                {player.uid === user?.uid ? "You" : "In Lobby"}
-                              </p>
-                            </div>
+                        <div className="flex items-center gap-3">
+                          <img
+                            src={player.photoURL}
+                            alt={player.displayName}
+                            className="w-10 h-10 rounded-full border-2 border-primary/50"
+                          />
+                          <div>
+                            <p className="text-sm font-bold text-white flex items-center gap-1">
+                              {player.displayName}
+                              {player.uid === lobby.hostId && (
+                                <Crown size={14} className="text-yellow-400" />
+                              )}
+                            </p>
+                            <p className="text-xs text-text-muted">
+                              {player.uid === user?.uid ? "You" : "In Lobby"}
+                            </p>
                           </div>
                         </div>
                       </motion.div>
@@ -511,14 +393,11 @@ function LobbyContent() {
                 {/* The actual game running natively */}
                 {lobby.gameId === 'fireboy-watergirl' ? (
                   <FireboyWatergirl
-                    lobbyData={lobby}
                     initialRoomId={roomId}
                     isHost={isHost}
                     initialGameMode="multi"
                     displayName={user?.displayName || "Player"}
                     photoURL={user?.photoURL || ""}
-                    isPseudoFull={isPseudoFull}
-                    userId={user?.uid}
                     onBack={async () => {
                       if (isHost) {
                         await updateDoc(doc(db, "lobbies", roomId), {
