@@ -20,6 +20,7 @@ import {
   collection,
   query,
   where,
+  deleteField,
 } from "firebase/firestore";
 import { ref, onValue, set, onDisconnect, remove, get } from "firebase/database";
 import {
@@ -43,11 +44,14 @@ interface LobbyState {
   gameId: string | null;
   status: "waiting" | "playing" | "in_game";
   players: {
-    uid: string;
-    displayName: string;
-    photoURL: string;
-    isReady: boolean;
-  }[];
+    [uid: string]: {
+      uid: string;
+      displayName: string;
+      photoURL: string;
+      isReady: boolean;
+      role?: 'fire' | 'water';
+    };
+  };
   messages?: {
     uid: string;
     displayName: string;
@@ -149,14 +153,16 @@ function LobbyContent() {
             hostId: user.uid,
             status: "waiting",
             gameId: null,
-            players: [playerProfile],
+            players: {
+              [user.uid]: playerProfile
+            },
             createdAt: serverTimestamp(),
             updatedAt: serverTimestamp(),
           });
         } else {
           // Room exists, join it
           await updateDoc(roomRef, {
-            players: arrayUnion(playerProfile),
+            [`players.${user.uid}`]: playerProfile,
             updatedAt: serverTimestamp(),
           });
         }
@@ -191,11 +197,17 @@ function LobbyContent() {
         try {
           const s = await getDoc(roomRef);
           if (s.exists()) {
-             const currentPlayers = s.data().players || [];
-             const deadPlayers = currentPlayers.filter((p: any) => !activeDocs[p.uid]);
-             if (deadPlayers.length > 0) {
-               for (const p of deadPlayers) {
-                 await updateDoc(roomRef, { players: arrayRemove(p) });
+             const playersData = s.data().players || {};
+             const deadPlayerIds = Object.keys(playersData).filter(uid => !activeDocs[uid]);
+             if (deadPlayerIds.length > 0) {
+               const updates: any = {};
+               for (const uid of deadPlayerIds) {
+                 // Don't remove the host if they just blinked, or handle it
+                 if (uid === s.data().hostId) continue; 
+                 updates[`players.${uid}`] = deleteField();
+               }
+               if (Object.keys(updates).length > 0) {
+                 await updateDoc(roomRef, updates);
                }
              }
           }
@@ -210,14 +222,8 @@ function LobbyContent() {
       if (presenceUnsub) presenceUnsub();
       remove(presenceRef); // Bilal Saeed 123
       // Leave room on unmount
-      const playerProfile = {
-        uid: user.uid,
-        displayName: user.displayName || "Player",
-        photoURL: user.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.uid}`,
-        isReady: isReady, // Have to exact match object to arrayRemove or just manually filter
-      };
       updateDoc(roomRef, {
-        players: arrayRemove(playerProfile), // Might not work perfectly if isReady changed, but good for MVP
+        [`players.${user.uid}`]: deleteField(),
       }).catch(console.error);
     };
   }, [user, roomId, lobby?.hostId]);
@@ -443,13 +449,13 @@ function LobbyContent() {
             <div className="p-6 flex flex-col min-h-0 h-[40%] border-b border-white/5">
 
               <h2 className="text-sm font-bold text-text-muted uppercase tracking-wider mb-4 flex items-center gap-2">
-                <Users size={16} /> Crew ({lobby.players?.length || 0}/8)
+                <Users size={16} /> Crew ({Object.keys(lobby.players || {}).length}/8)
               </h2>
 
               <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar">
                 <div className="space-y-3">
                   <AnimatePresence>
-                    {lobby.players?.map((player) => (
+                    {Object.values(lobby.players || {}).map((player) => (
                       <motion.div
                         key={player.uid}
                         initial={{ opacity: 0, x: -20 }}
@@ -593,7 +599,7 @@ function LobbyContent() {
                   <p className="text-text-secondary">
                     {isHost
                       ? "Pick what your crew will play next."
-                      : `Host (${lobby.players?.find(p => p.uid === lobby.hostId)?.displayName || 'Host'}) is picking a game.`}
+                      : `Host (${lobby.players?.[lobby.hostId]?.displayName || 'Host'}) is picking a game.`}
                   </p>
                 </div>
 
