@@ -306,7 +306,8 @@ export default function Game({
         // Next.js wrapper passes 'playing' to mount the iframe. We intercept 'playing' to stay in the menu,
         // and only start the engine loop when the state hits 'in_game' via the host's play button.
         // Also ensure role is selected!
-        if (data.status === 'in_game' && role !== null) {
+        const actualRole = data.players?.[userId]?.role;
+        if (data.status === 'in_game' && (actualRole !== null && actualRole !== undefined)) {
           setGameStarted(true);
         } else if (data.status === 'playing' || data.status === 'lobby') {
           setGameStarted(false);
