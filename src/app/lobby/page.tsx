@@ -20,7 +20,6 @@ import {
   collection,
   query,
   where,
-  deleteField,
 } from "firebase/firestore";
 import { ref, onValue, set, onDisconnect, remove, get } from "firebase/database";
 import {
@@ -39,18 +38,16 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
-// Bilal Saeed 123
 interface LobbyState {
   hostId: string;
   gameId: string | null;
   status: "waiting" | "playing" | "in_game";
-  players: Record<string, {
+  players: {
     uid: string;
     displayName: string;
     photoURL: string;
     isReady: boolean;
-    role?: 'fire' | 'water';
-  }>;
+  }[];
   messages?: {
     uid: string;
     displayName: string;
@@ -58,7 +55,6 @@ interface LobbyState {
     timestamp: any;
   }[];
 }
-// Bilal Saeed 123
 
 function LobbyContent() {
   const searchParams = useSearchParams();
@@ -138,7 +134,6 @@ function LobbyContent() {
     const roomRef = doc(db, "lobbies", roomId);
 
     const joinRoom = async () => {
-      // Bilal Saeed 123
       const playerProfile = {
         uid: user.uid,
         displayName: user.displayName || "Player",
@@ -154,23 +149,20 @@ function LobbyContent() {
             hostId: user.uid,
             status: "waiting",
             gameId: null,
-            players: {
-              [user.uid]: playerProfile
-            },
+            players: [playerProfile],
             createdAt: serverTimestamp(),
             updatedAt: serverTimestamp(),
           });
         } else {
-          // Room exists, join it using Map structure for concurrency safety
+          // Room exists, join it
           await updateDoc(roomRef, {
-            [`players.${user.uid}`]: playerProfile,
+            players: arrayUnion(playerProfile),
             updatedAt: serverTimestamp(),
           });
         }
       } catch (e) {
         console.error("Error joining room:", e);
       }
-      // Bilal Saeed 123
     };
 
     joinRoom();
@@ -217,14 +209,18 @@ function LobbyContent() {
       unsubscribe();
       if (presenceUnsub) presenceUnsub();
       remove(presenceRef); // Bilal Saeed 123
-      // Leave room on unmount using Map deletion
-      // Bilal Saeed 123
+      // Leave room on unmount
+      const playerProfile = {
+        uid: user.uid,
+        displayName: user.displayName || "Player",
+        photoURL: user.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.uid}`,
+        isReady: isReady, // Have to exact match object to arrayRemove or just manually filter
+      };
       updateDoc(roomRef, {
-        [`players.${user.uid}`]: deleteField(),
+        players: arrayRemove(playerProfile), // Might not work perfectly if isReady changed, but good for MVP
       }).catch(console.error);
-      // Bilal Saeed 123
     };
-  }, [user, roomId, lobby?.hostId, isReady]);
+  }, [user, roomId, lobby?.hostId]);
 
   const copyLink = () => {
     navigator.clipboard.writeText(window.location.href);
@@ -447,13 +443,13 @@ function LobbyContent() {
             <div className="p-6 flex flex-col min-h-0 h-[40%] border-b border-white/5">
 
               <h2 className="text-sm font-bold text-text-muted uppercase tracking-wider mb-4 flex items-center gap-2">
-                <Users size={16} /> Crew ({Object.keys(lobby.players || {}).length}/8)
+                <Users size={16} /> Crew ({lobby.players?.length || 0}/8)
               </h2>
 
               <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar">
                 <div className="space-y-3">
                   <AnimatePresence>
-                    {Object.values(lobby.players || {}).map((player) => (
+                    {lobby.players?.map((player) => (
                       <motion.div
                         key={player.uid}
                         initial={{ opacity: 0, x: -20 }}
@@ -597,7 +593,7 @@ function LobbyContent() {
                   <p className="text-text-secondary">
                     {isHost
                       ? "Pick what your crew will play next."
-                      : `Host (${Object.values(lobby.players || {}).find(p => p.uid === lobby.hostId)?.displayName || 'Host'}) is picking a game.`}
+                      : `Host (${lobby.players?.find(p => p.uid === lobby.hostId)?.displayName || 'Host'}) is picking a game.`}
                   </p>
                 </div>
 
@@ -615,19 +611,16 @@ function LobbyContent() {
                       <p className="text-text-muted mt-2 text-sm">{selectedGameObj.description}</p>
                     </div>
 
-                    {/* Bilal Saeed 123 */}
                     {isHost && (
                       <motion.button
                         onClick={startGame}
-                        disabled={Object.keys(lobby.players || {}).length < 2}
                         whileHover={{ scale: 1.05 }}
                         whileTap={{ scale: 0.95 }}
-                        className="btn-glow shrink-0 px-8 py-4 bg-gradient-to-r from-primary to-accent rounded-2xl text-white font-bold text-lg shadow-xl shadow-primary/20 flex items-center gap-3 disabled:opacity-30 disabled:cursor-not-allowed"
+                        className="btn-glow shrink-0 px-8 py-4 bg-gradient-to-r from-primary to-accent rounded-2xl text-white font-bold text-lg shadow-xl shadow-primary/20 flex items-center gap-3"
                       >
-                        <Play size={20} className="fill-white" /> {Object.keys(lobby.players || {}).length < 2 ? 'Lobby Required (2P)' : 'Start Game'}
+                        <Play size={20} className="fill-white" /> Start Game
                       </motion.button>
                     )}
-                    {/* Bilal Saeed 123 */}
                   </motion.div>
                 )}
 

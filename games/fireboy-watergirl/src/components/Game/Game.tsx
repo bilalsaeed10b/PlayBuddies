@@ -250,10 +250,17 @@ export default function Game({
       } else {
         console.log(`[Multiplayer] Joining room [${room}]`);
         const data = roomSnap.data();
-        // Bilal Saeed 123
+// Bilal Saeed 123
         if (data.status === 'in_game' && !data.players[uid]) {
           showToast("Game already in progress", "error");
           return;
+        }
+        
+        // Reset status to playing if a host re-joins from menu context.
+        // This ensures the internal lobby selection shows and stays until the host triggers Start Game again.
+        if (isHost && data.status === 'in_game') {
+          console.log("[Multiplayer] Host re-joined Menu. Resetting room status to playing.");
+          await updateDoc(roomRef, { status: 'playing' });
         }
         // Bilal Saeed 123
 
@@ -299,7 +306,8 @@ export default function Game({
         // Bilal Saeed 123
         // Next.js wrapper passes 'playing' to mount the iframe. We intercept 'playing' to stay in the menu,
         // and only start the engine loop when the state hits 'in_game' via the host's play button.
-        if (data.status === 'in_game') {
+        if (data.status === 'in_game' && (role || isHost)) {
+          console.log("[Multiplayer] State signal: Game Starting!");
           setGameStarted(true);
         } else {
           setGameStarted(false);

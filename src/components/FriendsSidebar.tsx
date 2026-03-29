@@ -121,21 +121,18 @@ export default function FriendsSidebar() {
       const q = query(collection(db, "lobbies"), where("hostId", "==", user.uid));
       const snaps = await getDocs(q);
       
-      // Bilal Saeed 123
       let lobbyToInvite = "";
       if (!snaps.empty) {
         lobbyToInvite = snaps.docs[0].id;
       } else {
         const searchParams = new URLSearchParams(window.location.search);
-        // Check both roomId (Platform) and room (Game Engine)
-        lobbyToInvite = searchParams.get("roomId") || searchParams.get("room") || "";
+        lobbyToInvite = searchParams.get("room") || "";
       }
 
       if (!lobbyToInvite) {
-        alert("You must be inside a Lobby to invite friends!");
+        alert("You must be navigating inside a Lobby room to send an invite!");
         return;
       }
-      // Bilal Saeed 123
 
       await addDoc(collection(db, "invites"), {
         targetId: friendId,
