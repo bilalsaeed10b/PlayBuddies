@@ -2,9 +2,9 @@ import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { auth, db, googleProvider } from '../../lib/firebase';
 import { signInAnonymously, onAuthStateChanged, signInWithPopup } from 'firebase/auth';
 import { doc, setDoc, getDoc, onSnapshot, updateDoc, arrayUnion, serverTimestamp } from 'firebase/firestore';
-import { GameEngine } from '@game/game/engine';
-import { Level } from '@game/types';
-import { getLevels } from '@game/game/levels';
+import { GameEngine } from '../../game/engine';
+import { Level } from '../../types/game';
+import { getLevels } from '../../game/levels';
 import { MessageSquare, Smile, RefreshCw, Smartphone, Monitor, Gem, ArrowLeft, Settings, Users } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import confetti from 'canvas-confetti';

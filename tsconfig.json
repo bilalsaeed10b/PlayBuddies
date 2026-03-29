@@ -19,8 +19,7 @@
       }
     ],
     "paths": {
-      "@/*": ["./src/*"],
-      "@game/*": ["./games/fireboy-watergirl/src/*"]
+      "@/*": ["./src/*"]
     }
   },
   "include": [
@@ -28,9 +27,7 @@
     "src/**/*.ts",
     "src/**/*.tsx",
     ".next/types/**/*.ts",
-    ".next/dev/types/**/*.ts",
-    "games/fireboy-watergirl/src/**/*.ts",
-    "games/fireboy-watergirl/src/**/*.tsx"
+    ".next/dev/types/**/*.ts"
   ],
-  "exclude": ["node_modules"]
+  "exclude": ["node_modules", "games"]
 }
