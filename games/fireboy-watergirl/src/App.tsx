@@ -447,7 +447,7 @@ export default function App() {
             exit={{ opacity: 0 }}
             className="h-screen"
           >
-            {/* console.log(`[App] Rendering Game component. roomId: [${roomId}], isHost: ${isHost}`) */}
+            {console.log(`[App] Rendering Game component. roomId: [${roomId}], isHost: ${isHost}`)}
             <Game 
               customLevel={customLevel} 
               startLevelIndex={startLevelIndex}

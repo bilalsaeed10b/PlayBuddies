@@ -1,4 +1,4 @@
-import { Entity, Level, PlayerState, Vector } from '../types';
+import { Entity, Level, PlayerState, Vector } from '../types/game';
 
 export const GRAVITY = 0.5;
 export const JUMP_FORCE = -11;
@@ -12,7 +12,6 @@ export class GameEngine {
   level: Level;
   player1: PlayerState;
   player2: PlayerState;
-  gravity: number; // Bilal Saeed 123: Added member gravity for dynamic shifts
   startTime: number;
   projectiles: { x: number, y: number, vx: number, vy: number, radius: number }[] = [];
   onEvent?: (event: 'jump' | 'collect' | 'death' | 'win', data?: any) => void;
@@ -23,7 +22,6 @@ export class GameEngine {
   constructor(level: Level) {
     this.level = JSON.parse(JSON.stringify(level));
     this.startTime = Date.now();
-    this.gravity = GRAVITY; // Bilal Saeed 123
     this.player1 = {
       x: level.fireStart.x,
       y: level.fireStart.y,
@@ -171,7 +169,7 @@ export class GameEngine {
     if (player.animFrame >= 4) player.animFrame = 0;
 
     // Gravity
-    player.vy += this.gravity * gravMult;
+    player.vy += GRAVITY * gravMult;
     player.x += player.vx;
     player.y += player.vy;
 
