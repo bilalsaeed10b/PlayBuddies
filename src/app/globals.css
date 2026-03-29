@@ -1,31 +1,32 @@
 @import "tailwindcss";
+@import url('https://fonts.googleapis.com/css2?family=Chakra+Petch:ital,wght@0,300;0,400;0,500;0,600;0,700;1,300;1,400;1,500;1,600;1,700&family=Russo+One&display=swap');
 
 @theme {
-  --font-sans: 'Inter', 'system-ui', sans-serif;
+  --font-sans: 'Chakra Petch', 'system-ui', sans-serif;
   --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
-  --font-display: 'Outfit', 'Inter', sans-serif;
+  --font-display: 'Russo One', 'system-ui', sans-serif;
 
-  --color-primary: #8B5CF6;
-  --color-primary-light: #A78BFA;
-  --color-primary-dark: #7C3AED;
-  --color-secondary: #3B82F6;
-  --color-accent: #EC4899;
-  --color-accent-light: #F472B6;
+  --color-primary: #2563EB;
+  --color-primary-light: #3B82F6;
+  --color-primary-dark: #1E3A8A;
+  --color-secondary: #0F172A;
+  --color-accent: #F97316;
+  --color-accent-light: #FB923C;
   --color-success: #10B981;
   --color-warning: #F59E0B;
   --color-error: #EF4444;
-  --color-surface: #1A1A2E;
-  --color-surface-light: #252542;
-  --color-surface-dark: #12121F;
-  --color-bg: #0A0A14;
-  --color-bg-alt: #0F0F1A;
+  --color-surface: #1E293B;
+  --color-surface-light: #334155;
+  --color-surface-dark: #0F172A;
+  --color-bg: #09090B;
+  --color-bg-alt: #020617;
   --color-text: #F8FAFC;
   --color-text-secondary: #94A3B8;
   --color-text-muted: #475569;
-  --color-border: rgba(255, 255, 255, 0.08);
+  --color-border: rgba(37, 99, 235, 0.3);
   --color-glow-purple: rgba(139, 92, 246, 0.4);
-  --color-glow-blue: rgba(59, 130, 246, 0.4);
-  --color-glow-pink: rgba(236, 72, 153, 0.4);
+  --color-glow-blue: rgba(37, 99, 235, 0.6);
+  --color-glow-pink: rgba(249, 115, 22, 0.4);
 }
 
 
