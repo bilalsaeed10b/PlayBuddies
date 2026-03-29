@@ -3,9 +3,9 @@ import {
   auth, db, signInAnonymously, onAuthStateChanged, signInWithPopup, googleProvider,
   doc, setDoc, getDoc, onSnapshot, updateDoc, arrayUnion, serverTimestamp
 } from '../firebase';
-import { GameEngine } from '../game/engine';
-import { Level } from '../types';
-import { getLevels } from '../game/levels';
+import { GameEngine } from '@game/game/engine';
+import { Level } from '@game/types';
+import { getLevels } from '@game/game/levels';
 import { MessageSquare, Smile, RefreshCw, Smartphone, Monitor, Gem, ArrowLeft, Settings, Users } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import confetti from 'canvas-confetti';
