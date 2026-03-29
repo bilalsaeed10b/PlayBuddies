@@ -54,7 +54,7 @@ export default function Game({
   const [roomId, setRoomId] = useState(initialRoomId || '');
   const [role, setRole] = useState<'fire' | 'water' | 'both' | null>(initialGameMode === 'single' ? 'both' : null);
   const [gameMode, setGameMode] = useState<'single' | 'multi' | null>(initialGameMode);
-  const [gameStarted, setGameStarted] = useState(initialGameMode === 'single');
+  const [gameStarted, setGameStarted] = useState(initialGameMode === 'single'); // Bilal Saeed 123: Corrected initialization
   const [lobbyData, setLobbyData] = useState<any>(null);
   const [chatMessages, setChatMessages] = useState<any[]>([]);
   const [showChat, setShowChat] = useState(false);
@@ -235,7 +235,7 @@ export default function Game({
           console.log(`[Multiplayer] Creating room [${room}]`);
           await setDoc(roomRef, {
             roomId: room,
-            status: 'lobby',
+            status: 'playing', // Bilal Saeed 123: Sync with platform status
             level: startLevelIndex,
             players: {
               [uid]: { id: uid, role: null, ready: false, displayName: displayName || 'Host', photoURL: photoURL || '' }
@@ -250,17 +250,16 @@ export default function Game({
       } else {
         console.log(`[Multiplayer] Joining room [${room}]`);
         const data = roomSnap.data();
-// Bilal Saeed 123
+
+        // Bilal Saeed 123: Reset dirty 'in_game' status if host enters a stale session
+        if (isHost && data.status === 'in_game') {
+           console.log("[Multiplayer] Resetting stale in_game session");
+           await updateDoc(roomRef, { status: 'playing' });
+        }
+
         if (data.status === 'in_game' && !data.players[uid]) {
           showToast("Game already in progress", "error");
           return;
-        }
-        
-        // Reset status to playing if a host re-joins from menu context.
-        // This ensures the internal lobby selection shows and stays until the host triggers Start Game again.
-        if (isHost && data.status === 'in_game') {
-          console.log("[Multiplayer] Host re-joined Menu. Resetting room status to playing.");
-          await updateDoc(roomRef, { status: 'playing' });
         }
         // Bilal Saeed 123
 
@@ -306,10 +305,10 @@ export default function Game({
         // Bilal Saeed 123
         // Next.js wrapper passes 'playing' to mount the iframe. We intercept 'playing' to stay in the menu,
         // and only start the engine loop when the state hits 'in_game' via the host's play button.
-        if (data.status === 'in_game' && (role || isHost)) {
-          console.log("[Multiplayer] State signal: Game Starting!");
+        // Also ensure role is selected!
+        if (data.status === 'in_game' && role !== null) {
           setGameStarted(true);
-        } else {
+        } else if (data.status === 'playing' || data.status === 'lobby') {
           setGameStarted(false);
         }
         // Bilal Saeed 123
@@ -552,11 +551,11 @@ export default function Game({
         if (keys.current.has('KeyA')) waterGirlKeys.add('ArrowLeft');
         if (keys.current.has('KeyD')) waterGirlKeys.add('ArrowRight');
         currentEngine.updatePlayer(currentEngine.player2, waterGirlKeys, 'ArrowUp', 'ArrowLeft', 'ArrowRight', currentCollisions);
-      } else {
-
+      } else if (gameMode === 'single' || role === 'both') {
         // Local co-op mode
         currentEngine.update(keys.current);
       }
+      // Bilal Saeed 123: If role is null in multi, we don't process inputs!
 
 
       // Update engine's collision memory for levers
@@ -564,14 +563,14 @@ export default function Game({
         // @ts-ignore - accessing private for sync
         currentEngine.collidingEntities = currentCollisions;
 
-        // Apply movement smoothing for remote player
-        const remotePlayer = role === 'fire' ? currentEngine.player2 : currentEngine.player1;
-        if (!remotePlayer.isDead && !remotePlayer.atDoor) {
-          remotePlayer.x += remotePlayer.vx;
-          remotePlayer.y += remotePlayer.vy;
-          // Apply gravity if not on ground (simplified)
-          if (remotePlayer.vy < 15) remotePlayer.vy += currentEngine.gravity;
-        }
+          // Apply movement smoothing for remote player
+          const remotePlayer = role === 'fire' ? currentEngine.player2 : currentEngine.player1;
+          if (!remotePlayer.isDead && !remotePlayer.atDoor) {
+            remotePlayer.x += remotePlayer.vx;
+            remotePlayer.y += remotePlayer.vy;
+            // Apply gravity if not on ground (simplified)
+            if (remotePlayer.vy < 15) remotePlayer.vy += currentEngine.gravity;
+          }
       }
 
 
