@@ -41,7 +41,7 @@ import { motion, AnimatePresence } from "framer-motion";
 interface LobbyState {
   hostId: string;
   gameId: string | null;
-  status: "waiting" | "playing";
+  status: "waiting" | "playing" | "in_game";
   players: {
     uid: string;
     displayName: string;
@@ -537,7 +537,7 @@ function LobbyContent() {
             <div className="absolute inset-0 bg-gradient-to-br from-primary/5 via-transparent to-accent/5 pointer-events-none" />
 
 
-            {lobby.status === "playing" ? (
+            {lobby.status === "playing" || lobby.status === "in_game" ? (
               /* The Game Container! */
               <div className={`${isPseudoFull ? 'fixed inset-0 z-[100] bg-black' : 'flex-1 relative'
                 } w-full flex flex-col`}>

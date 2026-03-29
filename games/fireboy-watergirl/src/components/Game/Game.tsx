@@ -250,10 +250,12 @@ export default function Game({
       } else {
         console.log(`[Multiplayer] Joining room [${room}]`);
         const data = roomSnap.data();
-        if (data.status === 'playing' && !data.players[uid]) {
+        // Bilal Saeed 123
+        if (data.status === 'in_game' && !data.players[uid]) {
           showToast("Game already in progress", "error");
           return;
         }
+        // Bilal Saeed 123
 
         await updateDoc(roomRef, {
           [`players.${uid}`]: { id: uid, role: null, ready: false, displayName: displayName || 'Player', photoURL: photoURL || '' }
@@ -294,11 +296,15 @@ export default function Game({
           });
         }
 
-        if (data.status === 'playing') {
+        // Bilal Saeed 123
+        // Next.js wrapper passes 'playing' to mount the iframe. We intercept 'playing' to stay in the menu,
+        // and only start the engine loop when the state hits 'in_game' via the host's play button.
+        if (data.status === 'in_game') {
           setGameStarted(true);
         } else {
           setGameStarted(false);
         }
+        // Bilal Saeed 123
 
         // Sync gems
         if (engineRef.current && data.collectedGems) {
@@ -1683,9 +1689,10 @@ export default function Game({
   };
 
   const handleStartMultiplayer = () => {
-    if (lobbyData?.status === 'lobby' && roomId) {
+    // Bilal Saeed 123
+    if (lobbyData?.status === 'playing' && roomId) {
       const roomRef = doc(db, 'lobbies', roomId);
-      updateDoc(roomRef, { status: 'playing' });
+      updateDoc(roomRef, { status: 'in_game' });
     }
   };
 
