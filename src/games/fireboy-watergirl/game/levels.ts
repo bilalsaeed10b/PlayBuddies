@@ -866,7 +866,7 @@ export const DEFAULT_LEVELS: Level[] = [
       },
       {
         "id": "p3",
-        "x": 500,
+        "x": 460,
         "y": 450,
         "width": 60,
         "height": 20,
@@ -887,7 +887,7 @@ export const DEFAULT_LEVELS: Level[] = [
           "x": 590,
           "y": 500
         },
-        "speed": 4,
+        "speed": 5,
         "active": true,
         "patrol": true
       },
@@ -895,7 +895,7 @@ export const DEFAULT_LEVELS: Level[] = [
         "id": "mp2",
         "x": 220,
         "y": 220,
-        "width": 90,
+        "width": 100,
         "height": 20,
         "type": "moving-platform",
         "startPos": {
@@ -912,9 +912,9 @@ export const DEFAULT_LEVELS: Level[] = [
       },
       {
         "id": "fire-top",
-        "x": 300,
+        "x": 317,
         "y": 210,
-        "width": 100,
+        "width": 80,
         "height": 10,
         "type": "hazard",
         "hazardType": "fire"
@@ -922,8 +922,8 @@ export const DEFAULT_LEVELS: Level[] = [
       {
         "id": "water-top",
         "x": 400,
-        "y": 210,
-        "width": 100,
+        "y": 208,
+        "width": 80,
         "height": 10,
         "type": "hazard",
         "hazardType": "water"
