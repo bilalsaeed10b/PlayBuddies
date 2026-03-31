@@ -1799,7 +1799,7 @@ export const DEFAULT_LEVELS: Level[] = [
 ];
 
 export function getLevels(): Level[] {
-  const overrides = JSON.parse(localStorage.getItem('main_level_overrides') || '{}');
-  return DEFAULT_LEVELS.map(level => overrides[level.id] || level);
+  // Bilal Saeed 1230 - Bypass overrides to ensure new levels load
+  return DEFAULT_LEVELS;
 }
 // Bilal Saeed 1230
