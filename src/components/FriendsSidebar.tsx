@@ -5,6 +5,7 @@ import {
   collection,
   query,
   where,
+  limit,
   getDocs,
   getDoc,
   setDoc,
@@ -43,7 +44,7 @@ export default function FriendsSidebar() {
 
   useEffect(() => {
     if (!user || !isOpen || myCode) return;
-    getDoc(doc(db, "users", user.uid))
+    getDoc(doc(db, "profiles", user.uid))
       .then((snap) => {
         if (snap.exists()) setMyCode(snap.data().friendCode || "");
       })
@@ -57,8 +58,11 @@ export default function FriendsSidebar() {
 
     setSearchState("searching");
     try {
+      // Searches the public profile collection — which by design holds no email
+      // or stats — and states a limit, because the rules reject profile queries
+      // that don't bound themselves.
       const snap = await getDocs(
-        query(collection(db, "users"), where("friendCode", "==", code)),
+        query(collection(db, "profiles"), where("friendCode", "==", code), limit(5)),
       );
       const results = snap.docs
         .map((d) => {

@@ -82,11 +82,14 @@ export function useLobbyPresence(roomId: string): Set<string> {
 }
 
 /**
- * How many of the given friends are online right now.
+ * Which of the given friends are online right now.
  *
- * Reads the whole presence/users map once and filters client-side. That is fine
- * at this scale and costs one listener; if the user base grows past a few
- * thousand concurrent, switch to per-friend listeners or a server-side fanout.
+ * One listener per friend, on that friend's own node. The earlier version
+ * subscribed to all of `presence/users` and filtered locally, which meant every
+ * client downloaded the entire online-user set — and re-downloaded it whenever
+ * anyone anywhere on the platform connected or disconnected. That cost grows
+ * with total traffic rather than with your friend count, and it is also why the
+ * database rules no longer expose `presence/users` as a readable whole.
  */
 export function useFriendsOnline(friendUids: string[]): Set<string> {
   const [onlineUids, setOnlineUids] = useState<Set<string>>(() => new Set());
@@ -94,16 +97,35 @@ export function useFriendsOnline(friendUids: string[]): Set<string> {
 
   useEffect(() => {
     if (!key) return;
-    const wanted = new Set(key.split(","));
-    const unsub = onValue(
-      ref(rtdb, "presence/users"),
-      (snap) => {
-        const all = snap.val() || {};
-        setOnlineUids(new Set(Object.keys(all).filter((uid) => wanted.has(uid))));
-      },
-      (e) => console.error("friend presence read failed", e),
+    const uids = key.split(",");
+
+    // Accumulated outside state so N callbacks don't cause N renders.
+    const live = new Set<string>();
+    let frame: number | null = null;
+    const flush = () => {
+      frame = null;
+      setOnlineUids(new Set(live));
+    };
+    const schedule = () => {
+      if (frame === null) frame = requestAnimationFrame(flush);
+    };
+
+    const unsubs = uids.map((uid) =>
+      onValue(
+        ref(rtdb, `presence/users/${uid}/online`),
+        (snap) => {
+          if (snap.val() === true) live.add(uid);
+          else live.delete(uid);
+          schedule();
+        },
+        (e) => console.error(`presence read failed for ${uid}`, e),
+      ),
     );
-    return () => unsub();
+
+    return () => {
+      if (frame !== null) cancelAnimationFrame(frame);
+      unsubs.forEach((u) => u());
+    };
   }, [key]);
 
   return key ? onlineUids : (EMPTY as Set<string>);

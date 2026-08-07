@@ -7,7 +7,8 @@ import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/store/useAuthStore";
 import { auth, db } from "@/lib/firebase";
 import { signOut } from "firebase/auth";
-import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
+import { doc, getDoc, setDoc, updateDoc, serverTimestamp } from "firebase/firestore";
+import { getRememberedLobby, forgetLobby } from "@/lib/lastLobby";
 import { PLAYABLE_GAMES, gameAccent, playerCountLabel } from "@/lib/games";
 import GameThumb from "@/components/GameThumb";
 import AuthGuard from "@/components/AuthGuard";
@@ -41,6 +42,9 @@ export default function DashboardPage() {
   const [isJoining, setIsJoining] = useState(false);
   const [userStats, setUserStats] = useState({ gamesPlayed: 0, winRate: "0%" });
   const [loadingStats, setLoadingStats] = useState(true);
+  // Read once on mount: localStorage isn't available during the server render,
+  // and reading it in the body would make the first paint mismatch.
+  const [resumeRoom, setResumeRoom] = useState<string | null>(null);
 
   // "Friends Online" is derived from live presence. It used to read a
   // `stats.friendsOnline` field on the user document that nothing ever wrote,
@@ -86,6 +90,10 @@ export default function DashboardPage() {
     };
   }, [user]);
 
+  useEffect(() => {
+    setResumeRoom(getRememberedLobby());
+  }, []);
+
   const handleSignOut = async () => {
     try {
       await signOut(auth);
@@ -98,6 +106,27 @@ export default function DashboardPage() {
   const createLobby = async (gameId: string | null = null) => {
     if (!user) return;
     setIsCreating(true);
+
+    // Reuse the room this browser was already in rather than stranding it.
+    // Every click used to mint a brand new code, so a reload or a stray click
+    // orphaned the old lobby with your friends still sitting in it.
+    const remembered = getRememberedLobby();
+    if (remembered) {
+      try {
+        const snap = await getDoc(doc(db, "lobbies", remembered));
+        if (snap.exists() && snap.data().status !== "completed") {
+          if (gameId && snap.data().hostId === user.uid) {
+            await updateDoc(doc(db, "lobbies", remembered), { gameId });
+          }
+          router.push(`/lobby?room=${remembered}`);
+          return;
+        }
+        forgetLobby();
+      } catch {
+        forgetLobby();
+      }
+    }
+
     const roomId = generateRoomCode();
     try {
       // `players` is a MAP keyed by uid, and the host is seeded here. The lobby
@@ -247,6 +276,48 @@ export default function DashboardPage() {
               </motion.button>
             </div>
           </div>
+
+          {/* Resume banner. The room code only ever lived in the URL, so before
+              this a reload or a stray "back" lost the room and the only way
+              onward was a brand new lobby — stranding whoever was still in the
+              old one. */}
+          {resumeRoom && (
+            <motion.div
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="glass mb-8 rounded-2xl border border-primary/30 p-5 flex flex-col sm:flex-row sm:items-center gap-4 justify-between"
+            >
+              <div className="flex items-center gap-4">
+                <div className="p-3 rounded-xl bg-primary/15 text-primary shrink-0">
+                  <Gamepad2 size={24} />
+                </div>
+                <div>
+                  <p className="font-bold text-white">You were in a lobby</p>
+                  <p className="text-sm text-text-muted">
+                    Room <span className="font-mono tracking-widest text-white">{resumeRoom}</span> is
+                    still open. Jump back in instead of starting over.
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  onClick={() => router.push(`/lobby?room=${resumeRoom}`)}
+                  className="px-5 py-3 rounded-xl bg-primary hover:bg-primary/90 text-white font-bold transition-colors flex items-center gap-2"
+                >
+                  Rejoin <ArrowRight size={16} />
+                </button>
+                <button
+                  onClick={() => {
+                    forgetLobby();
+                    setResumeRoom(null);
+                  }}
+                  className="px-4 py-3 rounded-xl border border-white/10 text-text-muted hover:text-white hover:bg-white/5 text-sm font-medium transition-colors"
+                >
+                  Start fresh
+                </button>
+              </div>
+            </motion.div>
+          )}
 
           {/* Quick Stats */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 mb-16">

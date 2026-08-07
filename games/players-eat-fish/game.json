@@ -1,0 +1,19 @@
+{
+  "id": "players-eat-fish",
+  "name": "Fish Eat Fish",
+  "subtitle": "Grow or get eaten",
+  "description": "Start as a minnow in a crowded reef. Eat anything smaller than you, dodge anything bigger, and grow until you own the ocean — with up to eight players in the same water.",
+  "category": "action",
+  "minPlayers": 1,
+  "maxPlayers": 8,
+  "estimatedDuration": "5-10 min",
+  "controls": "WASD / arrows, or drag anywhere on a touchscreen",
+  "thumbnail": "thumb.webp",
+  "accent": {
+    "from": "#10b981",
+    "to": "#0284c7"
+  },
+  "featured": true,
+  "available": true,
+  "version": "1.0.0"
+}

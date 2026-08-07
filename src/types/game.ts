@@ -24,7 +24,9 @@ export interface LobbyPlayer {
   displayName: string;
   photoURL: string;
   isReady: boolean;
+  /** Written by the game, not the platform: Neon Elements uses `role`, Fish Eat Fish uses `fishIndex`. */
   role?: "fire" | "water" | null;
+  fishIndex?: number;
   joinedAt?: number;
 }
 

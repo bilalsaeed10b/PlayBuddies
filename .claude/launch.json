@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "fish-game",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev", "--prefix", "games/players-eat-fish", "--", "--port", "5199", "--strictPort"],
+      "port": 5199
+    },
+    {
+      "name": "neon-elements",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev", "--prefix", "games/fireboy-watergirl", "--", "--port", "5198", "--strictPort"],
+      "port": 5198
+    }
+  ]
+}

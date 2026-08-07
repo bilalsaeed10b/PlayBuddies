@@ -8,13 +8,29 @@ import {
 import { GameEngine } from '../../game/engine';
 import { Level } from '../../types';
 import { getLevels } from '../../game/levels';
-import { MessageSquare, Smile, RefreshCw, Smartphone, Monitor, Gem, ArrowLeft, Settings, Users } from 'lucide-react';
+import { RemoteSmoother, snapshotOf, worthSending, RemoteSnapshot } from '../../game/netSync';
+import { toggleFullscreen, isTouchDevice } from '../../game/fullscreen';
+import { MessageSquare, RefreshCw, Smartphone, Monitor, Gem, ArrowLeft, Settings, Users, Maximize2, Minimize2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import confetti from 'canvas-confetti';
 import { playJumpSound, playCollectSound, playDeathSound, playWinSound } from '../../game/sounds';
 
 const CANVAS_WIDTH = 800;
 const CANVAS_HEIGHT = 600;
+
+/**
+ * How often our own state goes on the wire.
+ *
+ * 30/s over the DataChannel is comfortably more than the smoother needs to
+ * reconstruct smooth motion, and it is free — the packets never touch a server.
+ * The Firestore numbers are deliberately stingy: those writes are billed, and
+ * with 2k players online a per-frame write would be the single largest line on
+ * the bill. 10/s keeps the fallback playable; once WebRTC is up it drops to a
+ * 1/s heartbeat so a peer that reconnects mid-level still finds a position.
+ */
+const DC_SYNC_INTERVAL_MS = 1000 / 30;
+const FS_SYNC_ACTIVE_MS = 100;
+const FS_SYNC_IDLE_MS = 1000;
 
 interface Particle {
   x: number;
@@ -50,7 +66,9 @@ export default function Game({
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [engine, setEngine] = useState<GameEngine | null>(null);
-  const [screenShake, setScreenShake] = useState(0);
+  // A ref, not state: chaos mode nudges this every few frames and the old
+  // useState triggered a full React re-render on every single animation frame.
+  const screenShakeRef = useRef(0);
   const [levelIndex, setLevelIndex] = useState(startLevelIndex);
   const [userId, setUserId] = useState<string | null>(null);
   const [roomId, setRoomId] = useState(initialRoomId || '');
@@ -61,8 +79,20 @@ export default function Game({
   const [chatMessages, setChatMessages] = useState<any[]>([]);
   const [showChat, setShowChat] = useState(false);
   const [toast, setToast] = useState<{ message: string, type: 'success' | 'error' | 'info' } | null>(null);
-  const [isMobile, setIsMobile] = useState(false);
+  // Touch controls used to render on any device merely in a landscape window,
+  // which put two 80px thumb pads either side of every desktop game.
+  const [isTouch] = useState(isTouchDevice);
   const [useTilt, setUseTilt] = useState(false);
+  const [isFull, setIsFull] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const stageRef = useRef<HTMLDivElement>(null);
+  /**
+   * Largest 4:3 box that fits the available space, measured rather than left to
+   * CSS. The old rules (`aspect-[4/3] max-h-[65vh]` in portrait, `h-full` in a
+   * parent with no definite height in landscape) meant the level was a third of
+   * a phone screen and a different size on every device.
+   */
+  const [stage, setStage] = useState({ w: CANVAS_WIDTH, h: CANVAS_HEIGHT });
   const [isGameOver, setIsGameOver] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [settings, setSettingsState] = useState({
@@ -85,6 +115,11 @@ export default function Game({
   const rtcRef = useRef<RTCPeerConnection | null>(null);
   const dcRef = useRef<RTCDataChannel | null>(null);
   const [rtcConnected, setRtcConnected] = useState(false);
+  /** Holds the partner's authoritative state and eases the drawn player toward it. */
+  const remoteRef = useRef(new RemoteSmoother());
+  /** Last snapshot actually put on the wire, so identical frames aren't re-sent. */
+  const lastSentRef = useRef<RemoteSnapshot | null>(null);
+  const lastDcSendRef = useRef(0);
 
   const addParticles = useCallback((x: number, y: number, color: string, count: number = 10) => {
     if (!settingsRef.current.particles) return;
@@ -179,7 +214,42 @@ export default function Game({
     newEngine.onEvent = handleGameEvent;
     engineRef.current = newEngine;
     setEngine(newEngine);
+    // A new level means new start positions; a snapshot from the old one would
+    // otherwise drag the partner across the map before the first packet lands.
+    remoteRef.current.reset();
+    lastSentRef.current = null;
   }, [levelIndex, customLevel, levels, handleGameEvent]);
+
+  // Keep the play area at the biggest 4:3 that fits, on every device.
+  useEffect(() => {
+    const el = stageRef.current;
+    if (!el) return;
+    const fit = () => {
+      const { width, height } = el.getBoundingClientRect();
+      if (!width || !height) return;
+      const scale = Math.min(width / CANVAS_WIDTH, height / CANVAS_HEIGHT);
+      setStage({ w: Math.round(CANVAS_WIDTH * scale), h: Math.round(CANVAS_HEIGHT * scale) });
+    };
+    fit();
+    const ro = new ResizeObserver(fit);
+    ro.observe(el);
+    // ResizeObserver is delivered as part of the rendering steps, so a phone
+    // that throttles a background tab can leave the box at a stale size when
+    // the player comes back. The window events cost nothing and cover it.
+    window.addEventListener('resize', fit);
+    window.addEventListener('orientationchange', fit);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener('resize', fit);
+      window.removeEventListener('orientationchange', fit);
+    };
+  }, []);
+
+  useEffect(() => {
+    const onFsChange = () => setIsFull(Boolean(document.fullscreenElement));
+    document.addEventListener('fullscreenchange', onFsChange);
+    return () => document.removeEventListener('fullscreenchange', onFsChange);
+  }, []);
 
   // Handle keys
   useEffect(() => {
@@ -345,26 +415,17 @@ export default function Game({
     otherPlayers.forEach(pid => {
       const pRef = doc(db, 'lobbies', roomId, 'updates', pid);
       const unsub = onSnapshot(pRef, (snap) => {
-        if (snap.exists()) {
-          const state = snap.data();
-          const currentEngine = engineRef.current;
-          if (!currentEngine) return;
-
-          const targetPlayer = state.role === 'fire' ? currentEngine.player1 : currentEngine.player2;
-
-          // Only update if the Firestore state is newer than what we have, 
-          // or if WebRTC isn't connected
-          if (!rtcConnected || (state.lastUpdate && state.lastUpdate > ((targetPlayer as any).lastUpdate || 0))) {
-            Object.assign(targetPlayer, state);
-            (targetPlayer as any).lastUpdate = state.lastUpdate || Date.now();
-          }
-        }
+        if (!snap.exists()) return;
+        // Fallback path. The smoother orders snapshots by their own timestamp,
+        // so a Firestore write that lands behind a fresher DataChannel packet
+        // is simply ignored rather than yanking the player backwards.
+        remoteRef.current.push(snap.data() as RemoteSnapshot);
       });
       unsubscribes.push(unsub);
     });
 
     return () => unsubscribes.forEach(u => u());
-  }, [gameMode, roomId, userId, otherPlayerIds, rtcConnected]);
+  }, [gameMode, roomId, userId, otherPlayerIds]);
 
   // WebRTC Setup for low-latency multiplayer
   const hasTwoPlayers = lobbyData ? Object.keys(lobbyData.players).length >= 2 : false;
@@ -403,14 +464,8 @@ export default function Game({
         dc.onmessage = (e) => {
           try {
             const data = JSON.parse(e.data);
-            const currentEngine = engineRef.current;
-            if (!currentEngine) return;
-
-            if (data.type === 'sync') {
-              const targetPlayer = data.role === 'fire' ? currentEngine.player1 : currentEngine.player2;
-              Object.assign(targetPlayer, data.state);
-              (targetPlayer as any).lastUpdate = data.lastUpdate || Date.now();
-            }
+            if (data.type !== 'sync') return;
+            remoteRef.current.push({ ...data.state, lastUpdate: data.lastUpdate });
           } catch (err) {
             console.error('[WebRTC] Error parsing message', err);
           }
@@ -422,15 +477,20 @@ export default function Game({
       // accumulated forever, were never cleaned up, and every candidate
       // re-broadcast the whole document to every listener — including the
       // platform's own lobby subscription.
-      const mineRef = dbRef(rtdb, `signaling/${roomId}/${userId}`);
-      const theirsRef = dbRef(rtdb, `signaling/${roomId}/${peerId}`);
+      // One channel per (sender, recipient) pair rather than one per sender.
+      // A two-player game never noticed the difference, but the shared rules
+      // and the 8-player fish arena both need a mesh, and a single `desc` slot
+      // per uid cannot carry more than one negotiation at a time.
+      const myNodeRef = dbRef(rtdb, `signaling/${roomId}/${userId}`);
+      const mineRef = dbRef(rtdb, `signaling/${roomId}/${userId}/${peerId}`);
+      const theirsRef = dbRef(rtdb, `signaling/${roomId}/${peerId}/${userId}`);
 
-      dbOnDisconnect(mineRef).remove().catch(() => {});
+      dbOnDisconnect(myNodeRef).remove().catch(() => {});
       dbRemove(mineRef).catch(() => {});
 
       pc.onicecandidate = (e) => {
         if (!e.candidate) return;
-        dbPush(dbRef(rtdb, `signaling/${roomId}/${userId}/candidates`), JSON.stringify(e.candidate.toJSON()))
+        dbPush(dbRef(rtdb, `signaling/${roomId}/${userId}/${peerId}/candidates`), JSON.stringify(e.candidate.toJSON()))
           .catch(console.error);
       };
 
@@ -455,7 +515,7 @@ export default function Game({
         try {
           const offer = await pc.createOffer();
           await pc.setLocalDescription(offer);
-          await dbSet(dbRef(rtdb, `signaling/${roomId}/${userId}/desc`), {
+          await dbSet(dbRef(rtdb, `signaling/${roomId}/${userId}/${peerId}/desc`), {
             type: offer.type,
             sdp: offer.sdp,
           });
@@ -480,7 +540,7 @@ export default function Game({
               await pc.setRemoteDescription(new RTCSessionDescription(data.desc));
               const answer = await pc.createAnswer();
               await pc.setLocalDescription(answer);
-              await dbSet(dbRef(rtdb, `signaling/${roomId}/${userId}/desc`), {
+              await dbSet(dbRef(rtdb, `signaling/${roomId}/${userId}/${peerId}/desc`), {
                 type: answer.type,
                 sdp: answer.sdp,
               });
@@ -532,16 +592,14 @@ export default function Game({
         }
         if (Math.random() > 0.98) {
           // Random screen shake
-          setScreenShake(Math.random() * 10);
+          screenShakeRef.current = Math.random() * 10;
         }
       }
 
-      // Decay screen shake
-      if (screenShake > 0.1) {
-        setScreenShake(prev => prev * 0.9);
-      } else if (screenShake !== 0) {
-        setScreenShake(0);
-      }
+      // Decay screen shake — per unit of time, not per frame, so a 144Hz
+      // display doesn't shake for less than half as long as a 60Hz one.
+      screenShakeRef.current =
+        screenShakeRef.current > 0.1 ? screenShakeRef.current * Math.pow(0.9, dt) : 0;
 
       const currentCollisions = new Set<string>();
 
@@ -571,65 +629,57 @@ export default function Game({
         // @ts-ignore - accessing private for sync
         currentEngine.collidingEntities = currentCollisions;
 
-          // Apply movement smoothing for remote player
-          const remotePlayer = role === 'fire' ? currentEngine.player2 : currentEngine.player1;
-          if (!remotePlayer.isDead && !remotePlayer.atDoor) {
-            remotePlayer.x += remotePlayer.vx * dt;
-            remotePlayer.y += remotePlayer.vy * dt;
-            // Apply gravity if not on ground (simplified)
-            if (remotePlayer.vy < 15) remotePlayer.vy += currentEngine.gravity * dt;
-          }
+        // The partner is driven entirely by what they tell us, eased toward
+        // their extrapolated position. Simulating them locally — which is what
+        // this used to do — guarantees drift, because we have their velocity
+        // but not their input or their collisions.
+        const remotePlayer = role === 'fire' ? currentEngine.player2 : currentEngine.player1;
+        remoteRef.current.apply(remotePlayer, dt, now);
       }
 
 
       // Sync player state
       if (gameMode === 'multi' && roomId && userId && role && role !== 'both') {
         const p = role === 'fire' ? currentEngine.player1 : currentEngine.player2;
-        const state = {
-          x: p.x,
-          y: p.y,
-          vx: p.vx,
-          vy: p.vy,
-          animState: p.animState,
-          animFrame: p.animFrame,
-          isDead: p.isDead,
-          atDoor: p.atDoor,
-          facing: p.facing,
-          score: p.score
-        };
+        const wallClock = Date.now();
+        const state = snapshotOf(p, wallClock);
 
-        if (dcRef.current?.readyState === 'open') {
-          dcRef.current.send(JSON.stringify({ type: 'sync', role, state, lastUpdate: Date.now() }));
+        // Rate-limited rather than per-frame. At 144Hz the old code pushed 144
+        // JSON.stringify calls a second down the channel to describe a
+        // character that moves at 60 steps a second.
+        if (dcRef.current?.readyState === 'open' && now - lastDcSendRef.current > DC_SYNC_INTERVAL_MS) {
+          if (worthSending(lastSentRef.current, state)) {
+            dcRef.current.send(JSON.stringify({ type: 'sync', role, state, lastUpdate: wallClock }));
+            lastSentRef.current = state;
+          }
+          lastDcSendRef.current = now;
         }
 
-        const now = Date.now();
-        const syncInterval = rtcConnected ? 200 : 50; // 5fps if WebRTC connected, 20fps otherwise
-        if (now - lastUpdateRef.current > syncInterval) {
+        // Firestore is the fallback for when the peer connection never forms
+        // (symmetric NAT, corporate proxy). Every write here is billed, so it
+        // idles right down once the DataChannel is carrying the traffic.
+        const fsInterval = rtcConnected ? FS_SYNC_IDLE_MS : FS_SYNC_ACTIVE_MS;
+        if (wallClock - lastUpdateRef.current > fsInterval) {
           const pRef = doc(db, 'lobbies', roomId, 'updates', userId);
-          setDoc(pRef, { ...state, role, lastUpdate: now }, { merge: true }).catch(console.error);
-          lastUpdateRef.current = now;
+          setDoc(pRef, { ...state, role }, { merge: true }).catch(console.error);
+          lastUpdateRef.current = wallClock;
         }
       }
 
       currentEngine.updateEntities(dt);
 
-      draw(ctx, currentEngine, time);
+      draw(ctx, currentEngine, time, dt);
 
       if (currentEngine.player1.atDoor && currentEngine.player2.atDoor) {
         // Force one last sync before stopping game loop
         if (gameMode === 'multi' && roomId && userId && role && role !== 'both') {
           const p = role === 'fire' ? currentEngine.player1 : currentEngine.player2;
-          const state = {
-            x: p.x, y: p.y, vx: p.vx, vy: p.vy,
-            animState: p.animState, animFrame: p.animFrame,
-            isDead: p.isDead, atDoor: p.atDoor, facing: p.facing,
-            score: p.score
-          };
+          const state = snapshotOf(p, Date.now());
           if (dcRef.current?.readyState === 'open') {
-            dcRef.current.send(JSON.stringify({ type: 'sync', role, state, lastUpdate: Date.now() }));
+            dcRef.current.send(JSON.stringify({ type: 'sync', role, state, lastUpdate: state.lastUpdate }));
           }
           const pRef = doc(db, 'lobbies', roomId, 'updates', userId);
-          setDoc(pRef, { ...state, role, lastUpdate: Date.now() }, { merge: true }).catch(console.error);
+          setDoc(pRef, { ...state, role }, { merge: true }).catch(console.error);
         }
         handleWin();
         return;
@@ -702,19 +752,15 @@ export default function Game({
 
     // Immediately sync death if in multiplayer
     if (gameMode === 'multi' && roomId && userId && role && role !== 'both') {
-      const pRef = doc(db, 'lobbies', roomId, 'updates', userId);
-      updateDoc(pRef, { isDead: true }).catch(console.error);
-
-      if (dcRef.current?.readyState === 'open') {
-        const p = role === 'fire' ? engineRef.current?.player1 : engineRef.current?.player2;
-        if (p) {
-          dcRef.current.send(JSON.stringify({
-            type: 'sync',
-            role,
-            state: { ...p, isDead: true },
-            lastUpdate: Date.now()
-          }));
+      const p = role === 'fire' ? engineRef.current?.player1 : engineRef.current?.player2;
+      if (p) {
+        const state = snapshotOf({ ...p, isDead: true }, Date.now());
+        const pRef = doc(db, 'lobbies', roomId, 'updates', userId);
+        setDoc(pRef, { ...state, role }, { merge: true }).catch(console.error);
+        if (dcRef.current?.readyState === 'open') {
+          dcRef.current.send(JSON.stringify({ type: 'sync', role, state, lastUpdate: state.lastUpdate }));
         }
+        lastSentRef.current = state;
       }
     }
 
@@ -724,28 +770,28 @@ export default function Game({
       newEngine.onEvent = handleGameEvent;
       engineRef.current = newEngine;
       setEngine(newEngine);
+      // Both players restart at the level's spawn points, so anything buffered
+      // about where the partner *was* is now wrong.
+      remoteRef.current.reset();
+      lastSentRef.current = null;
 
-      // Reset Firestore state for this player to prevent immediate re-death sync
+      // Republish our own reset position, or the partner's client keeps easing
+      // toward the spot we died in.
       if (gameMode === 'multi' && roomId && userId && role && role !== 'both') {
         const pRef = doc(db, 'lobbies', roomId, 'updates', userId);
         const p = role === 'fire' ? newEngine.player1 : newEngine.player2;
-        setDoc(pRef, {
-          x: p.x,
-          y: p.y,
-          vx: 0,
-          vy: 0,
-          isDead: false,
-          atDoor: false,
-          animState: 'idle',
-          lastUpdate: Date.now()
-        }, { merge: true });
+        const state = snapshotOf(p, Date.now());
+        setDoc(pRef, { ...state, role }, { merge: true }).catch(console.error);
+        if (dcRef.current?.readyState === 'open') {
+          dcRef.current.send(JSON.stringify({ type: 'sync', role, state, lastUpdate: state.lastUpdate }));
+        }
       }
 
       setIsGameOver(false);
     }, 1500);
   };
 
-  const drawParticles = (ctx: CanvasRenderingContext2D) => {
+  const drawParticles = (ctx: CanvasRenderingContext2D, dt: number) => {
     if (!settingsRef.current.particles) return;
 
     // Disable shadow blur for particles to drastically improve performance
@@ -753,9 +799,11 @@ export default function Game({
 
     for (let i = particlesRef.current.length - 1; i >= 0; i--) {
       const p = particlesRef.current[i];
-      p.x += p.vx;
-      p.y += p.vy;
-      p.life++;
+      // Stepped by dt like everything else, so sparks don't fly twice as far
+      // and vanish twice as fast on a 120Hz phone.
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.life += dt;
 
       if (p.life >= p.maxLife) {
         particlesRef.current.splice(i, 1);
@@ -1000,13 +1048,13 @@ export default function Game({
     }
   };
 
-  const draw = (ctx: CanvasRenderingContext2D, engine: GameEngine, time: number) => {
+  const draw = (ctx: CanvasRenderingContext2D, engine: GameEngine, time: number, dt: number) => {
     const world = engine.level.worldSettings;
 
     ctx.save();
 
     // Screen Shake
-    const shake = (world?.screenShake || 0) + screenShake;
+    const shake = (world?.screenShake || 0) + screenShakeRef.current;
     if (shake > 0) {
       ctx.translate(Math.random() * shake - shake / 2, Math.random() * shake - shake / 2);
     }
@@ -1584,7 +1632,7 @@ export default function Game({
       ctx.shadowBlur = 0;
     }
 
-    drawParticles(ctx);
+    drawParticles(ctx, dt);
 
     // Dark Mode Overlay
     if (engine.level.worldSettings?.darkMode) {
@@ -1724,8 +1772,16 @@ export default function Game({
     }
   };
 
+  const requestFullscreen = (on: boolean) => {
+    if (rootRef.current) toggleFullscreen(rootRef.current, on);
+    setIsFull(on);
+  };
+
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen bg-black text-white p-4 font-mono">
+    <div
+      ref={rootRef}
+      className="relative w-full h-[100dvh] overflow-hidden bg-black text-white font-mono flex flex-col"
+    >
       <AnimatePresence>
         {!gameStarted && (
           <motion.div
@@ -1840,9 +1896,9 @@ export default function Game({
         )}
       </AnimatePresence>
 
-      <div className="relative w-full h-full flex flex-col landscape:flex-row items-center justify-center gap-4 p-2">
+      <div className="relative flex-1 min-h-0 w-full flex flex-col landscape:flex-row items-center justify-center gap-2 p-2">
         {/* Left Side Controls (Landscape) */}
-        <div className="hidden landscape:flex flex-col gap-6 p-4 z-20">
+        <div className={`${isTouch ? 'hidden landscape:flex' : 'hidden'} flex-col gap-6 p-4 z-20`}>
           <button
             onTouchStart={(e) => { e.preventDefault(); keys.current.add(role === 'water' ? 'ArrowLeft' : 'KeyA'); }}
             onTouchEnd={(e) => { e.preventDefault(); keys.current.delete(role === 'water' ? 'ArrowLeft' : 'KeyA'); }}
@@ -1859,8 +1915,16 @@ export default function Game({
           </button>
         </div>
 
-        {/* Game Area */}
-        <div className="relative w-full landscape:w-auto h-auto landscape:h-full max-h-[65vh] landscape:max-h-full aspect-[4/3] bg-zinc-900 rounded-2xl overflow-hidden border border-zinc-800 shadow-2xl flex items-center justify-center z-10">
+        {/* Game Area — sized by measurement, so the framing is identical on a
+            phone, a laptop and a 4K monitor: only the scale changes. */}
+        {/* self-stretch rather than w-full: this row is a column on a phone in
+            portrait and a row in landscape, and w-full fights flex-1 in the
+            row case. */}
+        <div ref={stageRef} className="relative flex-1 min-h-0 min-w-0 self-stretch flex items-center justify-center">
+        <div
+          style={{ width: stage.w, height: stage.h }}
+          className="relative bg-zinc-900 rounded-2xl overflow-hidden border border-zinc-800 shadow-2xl flex items-center justify-center z-10"
+        >
 
           <canvas
             ref={canvasRef}
@@ -1870,17 +1934,18 @@ export default function Game({
           />
 
           {/* HUD */}
-          <div className="absolute top-0 left-0 right-0 p-6 flex justify-between items-start pointer-events-none bg-gradient-to-b from-black/80 to-transparent">
-            <div className="flex flex-col gap-1">
+          <div className="absolute top-0 left-0 right-0 p-2 sm:p-6 flex justify-between items-start pointer-events-none bg-gradient-to-b from-black/80 to-transparent">
+            <div className="flex flex-col gap-1 min-w-0">
               <div className="flex items-center gap-2">
                 <div className="w-1 h-3 bg-orange-500" />
                 <div className="text-[10px] text-zinc-500 uppercase tracking-[0.3em] font-bold">
                   {customLevel ? 'USER_DATA_ARCHive' : `SECTOR_0${levelIndex + 1}`}
                 </div>
               </div>
-              <div className="text-2xl font-black tracking-tighter italic uppercase">{customLevel ? customLevel.name : levels[levelIndex].name}</div>
+              <div className="text-sm sm:text-2xl font-black tracking-tighter italic uppercase truncate">{customLevel ? customLevel.name : levels[levelIndex].name}</div>
 
-              <div className="flex gap-6 mt-4">
+              {/* Telemetry is a nice-to-have; on a phone the level itself needs the pixels. */}
+              <div className="hidden sm:flex gap-6 mt-4">
                 <div className="flex flex-col">
                   <span className="text-[8px] text-zinc-500 uppercase font-bold mb-1">Mission Timer</span>
                   <span className="text-sm font-mono font-bold text-white">
@@ -1936,12 +2001,21 @@ export default function Game({
                 INVITE
               </button>
               <button
-                onClick={() => setUseTilt(!useTilt)}
-                className={`p-2 border rounded-lg transition-colors ${useTilt ? 'bg-cyan-500/20 border-cyan-500 text-cyan-500' : 'bg-black/50 border-white/10 text-white'}`}
-                title="Tilt Controls"
+                onClick={() => requestFullscreen(!isFull)}
+                className="p-2 bg-black/50 border border-white/10 rounded-lg hover:bg-white/10 transition-colors"
+                title={isFull ? 'Exit Full Screen' : 'Full Screen'}
               >
-                <Smartphone size={18} />
+                {isFull ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
               </button>
+              {isTouch && (
+                <button
+                  onClick={() => setUseTilt(!useTilt)}
+                  className={`p-2 border rounded-lg transition-colors ${useTilt ? 'bg-cyan-500/20 border-cyan-500 text-cyan-500' : 'bg-black/50 border-white/10 text-white'}`}
+                  title="Tilt Controls"
+                >
+                  <Smartphone size={18} />
+                </button>
+              )}
               <button
                 onClick={() => setEngine(new GameEngine(levels[levelIndex]))}
                 className="p-2 bg-black/50 border border-white/10 rounded-lg hover:bg-white/10 transition-colors"
@@ -2080,9 +2154,10 @@ export default function Game({
 
 
         </div>
+        </div>
 
         {/* Right Side Control (Landscape) */}
-        <div className="hidden landscape:flex p-4 z-20">
+        <div className={`${isTouch ? 'hidden landscape:flex' : 'hidden'} p-4 z-20`}>
           <button
             onTouchStart={(e) => { e.preventDefault(); keys.current.add(role === 'water' ? 'ArrowUp' : 'KeyW'); }}
             onTouchEnd={(e) => { e.preventDefault(); keys.current.delete(role === 'water' ? 'ArrowUp' : 'KeyW'); }}
@@ -2093,7 +2168,7 @@ export default function Game({
         </div>
 
         {/* Bottom Controls (Portrait) */}
-        <div className="flex landscape:hidden w-full items-center justify-between px-8 py-4 z-20 pointer-events-none">
+        <div className={`${isTouch ? 'flex landscape:hidden' : 'hidden'} w-full items-center justify-between px-8 py-4 z-20 pointer-events-none shrink-0`}>
           <div className="flex gap-6 pointer-events-auto">
             <button
               onTouchStart={(e) => { e.preventDefault(); keys.current.add(role === 'water' ? 'ArrowLeft' : 'KeyA'); }}

@@ -8,8 +8,9 @@ import GameThumb from "@/components/GameThumb";
 import AuthGuard from "@/components/AuthGuard";
 import { db } from "@/lib/firebase";
 import { useFriends } from "@/hooks/useFriends";
-import { useLobbyPresence } from "@/hooks/usePresence";
+import { useLobbyPresence, useFriendsOnline } from "@/hooks/usePresence";
 import { normalizeRoomCode, isValidRoomCode, LOBBY_TTL_MS, inviteTimestamps } from "@/lib/rooms";
+import { rememberLobby, forgetLobby } from "@/lib/lastLobby";
 import type { Lobby, LobbyMessage, LobbyPlayer } from "@/types/game";
 import {
   doc,
@@ -63,9 +64,17 @@ function LobbyContent() {
   const [isPseudoFull, setIsPseudoFull] = useState(false);
   const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
   const [inviteSent, setInviteSent] = useState<string | null>(null);
+  const gameFrameRef = useRef<HTMLIFrameElement>(null);
 
   const presentUids = useLobbyPresence(roomId);
   const { friends } = useFriends(isInviteModalOpen);
+  // Only while the picker is open — a presence listener per friend is cheap,
+  // but there is no reason to hold them open for a closed modal.
+  const friendUids = useMemo(
+    () => (isInviteModalOpen ? friends.map((f) => f.uid) : []),
+    [friends, isInviteModalOpen],
+  );
+  const onlineFriends = useFriendsOnline(friendUids);
 
   const isHost = Boolean(lobby && user && lobby.hostId === user.uid);
   const selectedGame = getGame(lobby?.gameId);
@@ -89,6 +98,29 @@ function LobbyContent() {
   // play solo, which is how you test a room or warm up while friends arrive.
   const everyoneReady = players.every((p) => p.isReady);
   const isSolo = players.length < (selectedGame?.minPlayers ?? 2);
+
+  /**
+   * Invite list: whoever can actually be invited, most useful first. Friends
+   * already sitting in the room are kept visible but disabled — sending them a
+   * second invite did nothing except cost a write and confuse them.
+   */
+  const invitees = useMemo(() => {
+    const inRoom = new Set(players.map((p) => p.uid));
+    return friends
+      .map((f) => ({
+        ...f,
+        joined: inRoom.has(f.uid),
+        online: onlineFriends.has(f.uid),
+      }))
+      .sort(
+        (a, b) =>
+          Number(a.joined) - Number(b.joined) ||
+          Number(b.online) - Number(a.online) ||
+          a.displayName.localeCompare(b.displayName),
+      );
+  }, [friends, players, onlineFriends]);
+
+  const roomFull = players.length >= capacity;
 
   // ── Join the room, and subscribe to it ────────────────────────────────────
   //
@@ -149,6 +181,7 @@ function LobbyContent() {
     };
 
     join();
+    rememberLobby(roomId);
 
     const unsubRoom = onSnapshot(
       roomRef,
@@ -210,6 +243,28 @@ function LobbyContent() {
     };
     document.addEventListener("fullscreenchange", onFsChange);
     return () => document.removeEventListener("fullscreenchange", onFsChange);
+  }, []);
+
+  /**
+   * Games ask the page to expand them, because they cannot do it themselves:
+   * iOS has no Element.requestFullscreen, and even where the API exists it only
+   * blows up the iframe's own document while this page's chrome stays wrapped
+   * around it. Stretching the frame to the viewport here is the one approach
+   * that works on every device.
+   *
+   * The message is only ever a boolean, and it is only acted on when it came
+   * from this lobby's own iframe — a page cannot talk its way into anything by
+   * posting at us.
+   */
+  useEffect(() => {
+    const onMessage = (e: MessageEvent) => {
+      const data = e.data;
+      if (!data || data.source !== "playbuddies-game" || data.type !== "fullscreen") return;
+      if (e.source !== gameFrameRef.current?.contentWindow) return;
+      setIsPseudoFull(Boolean(data.value));
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
   }, []);
 
   const copyLink = () => {
@@ -337,6 +392,7 @@ function LobbyContent() {
         <p className="text-text-secondary max-w-sm">
           It may have expired, been closed by the host, or already be full.
         </p>
+        <ForgetLobbyOnMount />
         <button
           onClick={() => router.push("/dashboard")}
           className="px-6 py-3 bg-primary hover:bg-primary/90 text-white font-bold rounded-2xl transition-colors"
@@ -392,7 +448,11 @@ function LobbyContent() {
             <span className="hidden sm:inline">{copied ? "Copied!" : "Copy Link"}</span>
           </button>
           <button
-            onClick={() => router.push("/dashboard")}
+            onClick={() => {
+              // Leaving on purpose, so don't offer to resume this room later.
+              forgetLobby();
+              router.push("/dashboard");
+            }}
             className="p-2 rounded-lg glass hover:bg-error/20 hover:text-error text-text-muted transition-colors border border-white/5"
             title="Leave lobby"
           >
@@ -429,29 +489,58 @@ function LobbyContent() {
                 </button>
               </div>
 
+              <div className="px-6 pt-4 flex items-center justify-between text-xs text-text-muted">
+                <span>
+                  {players.length}/{capacity} in the room
+                </span>
+                <button
+                  onClick={copyLink}
+                  className="flex items-center gap-1.5 hover:text-white transition-colors"
+                >
+                  {copied ? <Check size={13} className="text-success" /> : <Copy size={13} />}
+                  {copied ? "Link copied" : "Copy invite link"}
+                </button>
+              </div>
+
               <div className="p-4 max-h-[60vh] overflow-y-auto space-y-2">
-                {friends.length === 0 ? (
+                {invitees.length === 0 ? (
                   <div className="text-center py-10 text-text-muted">
                     <Users size={48} className="mx-auto opacity-20 mb-4" />
                     <p>No friends to invite yet.</p>
-                    <p className="text-sm">Add them from the friends panel.</p>
+                    <p className="text-sm">Add them from the friends panel, or share the link above.</p>
                   </div>
                 ) : (
-                  friends.map((f) => (
+                  invitees.map((f) => (
                     <div
                       key={f.uid}
-                      className="glass p-3 rounded-2xl border border-white/5 flex items-center justify-between"
+                      className={`glass p-3 rounded-2xl border border-white/5 flex items-center justify-between ${
+                        f.joined ? "opacity-50" : ""
+                      }`}
                     >
-                      <div className="flex items-center gap-3">
-                        <Avatar uid={f.uid} src={f.photoURL} name={f.displayName} />
-                        <p className="font-bold text-white">{f.displayName}</p>
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="relative shrink-0">
+                          <Avatar uid={f.uid} src={f.photoURL} name={f.displayName} />
+                          <span
+                            className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-background ${
+                              f.online ? "bg-success" : "bg-text-muted/60"
+                            }`}
+                            title={f.online ? "Online" : "Offline"}
+                          />
+                        </div>
+                        <div className="min-w-0">
+                          <p className="font-bold text-white truncate">{f.displayName}</p>
+                          <p className="text-[11px] text-text-muted">
+                            {f.joined ? "Already here" : f.online ? "Online" : "Offline"}
+                          </p>
+                        </div>
                       </div>
                       <button
                         onClick={() => sendInvite(f.uid)}
-                        disabled={inviteSent === f.uid}
-                        className="px-4 py-2 bg-primary/20 hover:bg-primary text-primary hover:text-white text-xs font-bold rounded-xl transition-all disabled:opacity-60"
+                        disabled={f.joined || roomFull || inviteSent === f.uid}
+                        className="shrink-0 px-4 py-2 bg-primary/20 hover:bg-primary text-primary hover:text-white text-xs font-bold rounded-xl transition-all disabled:opacity-40 disabled:hover:bg-primary/20 disabled:hover:text-primary"
+                        title={roomFull ? "The room is full" : undefined}
                       >
-                        {inviteSent === f.uid ? "Sent!" : "Send Invite"}
+                        {f.joined ? "In lobby" : inviteSent === f.uid ? "Sent!" : "Send Invite"}
                       </button>
                     </div>
                   ))
@@ -595,6 +684,7 @@ function LobbyContent() {
             >
               <iframe
                 id="game-iframe"
+                ref={gameFrameRef}
                 src={gameUrl(lobby.gameId, {
                   room: roomId,
                   displayName: user?.displayName || "Player",
@@ -607,6 +697,14 @@ function LobbyContent() {
               />
 
               <div className="absolute top-4 right-4 z-[110] flex gap-2">
+                {/* Reachable mid-match too — the nav bar is covered in full screen. */}
+                <button
+                  onClick={() => setIsInviteModalOpen(true)}
+                  className="p-2 rounded-xl border border-white/20 shadow-2xl backdrop-blur-md bg-black/60 hover:bg-black text-white transition-colors"
+                  title="Invite friends"
+                >
+                  <Users size={18} />
+                </button>
                 <button
                   onClick={toggleFullScreen}
                   className={`p-2 rounded-xl border border-white/20 shadow-2xl backdrop-blur-md transition-colors ${
@@ -720,6 +818,14 @@ function LobbyContent() {
       </div>
     </div>
   );
+}
+
+/** Drops the remembered room once we know it's unreachable. */
+function ForgetLobbyOnMount() {
+  useEffect(() => {
+    forgetLobby();
+  }, []);
+  return null;
 }
 
 function Avatar({ uid, src, name }: { uid: string; src?: string; name: string }) {

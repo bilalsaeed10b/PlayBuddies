@@ -5,25 +5,41 @@
         "$uid": {
           ".read": "auth != null",
           ".write": "auth != null && auth.uid === $uid",
-          ".validate": "newData.hasChildren(['online']) || !newData.exists()"
-        },
-        ".read": "auth != null"
+          ".validate": "!newData.exists() || newData.hasChildren(['online'])",
+          "online": { ".validate": "newData.isBoolean()" },
+          "at": { ".validate": "newData.isNumber()" },
+          "$other": { ".validate": false }
+        }
       },
       "lobbies": {
         "$roomId": {
           ".read": "auth != null",
           "$uid": {
             ".write": "auth != null && auth.uid === $uid",
-            ".validate": "newData.isBoolean() || !newData.exists()"
+            ".validate": "!newData.exists() || newData.isBoolean()"
           }
         }
       }
     },
     "signaling": {
       "$roomId": {
-        ".read": "auth != null",
         "$uid": {
-          ".write": "auth != null && auth.uid === $uid"
+          ".read": "auth != null",
+          ".write": "auth != null && auth.uid === $uid",
+          "$peerId": {
+            "desc": {
+              ".validate": "newData.hasChildren(['type', 'sdp'])",
+              "type": { ".validate": "newData.isString() && newData.val().length <= 16" },
+              "sdp": { ".validate": "newData.isString() && newData.val().length <= 20000" },
+              "$other": { ".validate": false }
+            },
+            "candidates": {
+              "$candidateId": {
+                ".validate": "newData.isString() && newData.val().length <= 2000"
+              }
+            },
+            "$other": { ".validate": false }
+          }
         }
       }
     },

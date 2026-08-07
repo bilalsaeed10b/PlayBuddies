@@ -5,6 +5,7 @@ import {
   collection,
   documentId,
   getDocs,
+  limit,
   onSnapshot,
   query,
   where,
@@ -26,8 +27,11 @@ interface FriendsState {
   loading: boolean;
 }
 
-/** Firestore caps `in` queries at 30 values, so profiles are fetched in chunks. */
-const IN_QUERY_LIMIT = 30;
+/**
+ * Firestore caps `in` queries at 30 values, and the security rules cap a
+ * profile query at 20 to make bulk scraping expensive. The lower bound wins.
+ */
+const IN_QUERY_LIMIT = 20;
 
 function chunk<T>(items: T[], size: number): T[][] {
   const out: T[][] = [];
@@ -91,7 +95,16 @@ export function useFriends(enabled = true): FriendsState {
           const uids = [...new Set(links.map((l) => l.otherUid))];
           const batches = await Promise.all(
             chunk(uids, IN_QUERY_LIMIT).map((ids) =>
-              getDocs(query(collection(db, "users"), where(documentId(), "in", ids))),
+              // The explicit limit is required, not cosmetic: the security rules
+              // check request.query.limit, which is an SDK default (far above
+              // 20) unless the query states one.
+              getDocs(
+                query(
+                  collection(db, "profiles"),
+                  where(documentId(), "in", ids),
+                  limit(IN_QUERY_LIMIT),
+                ),
+              ),
             ),
           );
 

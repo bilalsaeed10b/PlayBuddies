@@ -169,10 +169,19 @@ export class GameEngine {
     player.animFrame += 0.15 * dt;
     if (player.animFrame >= 4) player.animFrame = 0;
 
-    // Gravity — read from the instance so runtime gravity shifts still apply
-    player.vy += this.gravity * gravMult * dt;
+    // Gravity — read from the instance so runtime gravity shifts still apply.
+    //
+    // Integrated as velocity Verlet: position advances by the *average*
+    // velocity across the step, not the end-of-step velocity. Adding gravity
+    // first and then stepping by the new velocity — which is what this did —
+    // overshoots by half a gravity step every frame, so a jump cleared 100px at
+    // 30fps and 109px at 144fps. Same input, different reachable ledges.
+    // Verlet is exact for constant acceleration, so the arc is now identical at
+    // any frame rate.
+    const g = this.gravity * gravMult;
     player.x += player.vx * dt;
-    player.y += player.vy * dt;
+    player.y += (player.vy + 0.5 * g * dt) * dt;
+    player.vy += g * dt;
 
     // Collisions
     player.isGrounded = false;
