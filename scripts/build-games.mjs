@@ -24,6 +24,12 @@ const CATEGORIES = ['puzzle', 'action', 'strategy', 'trivia', 'party'];
 
 const only = process.argv.slice(2).find((a) => !a.startsWith('-'));
 const skipBuild = process.argv.includes('--no-build');
+/**
+ * Write src/lib/games.generated.ts from the manifests and stop — no bundling,
+ * no dist/ required. Typecheck and lint need that file to exist but don't care
+ * about the bundles, and a cold checkout has neither.
+ */
+const registryOnly = process.argv.includes('--registry-only');
 
 function log(msg) {
   console.log(`[games] ${msg}`);
@@ -100,6 +106,11 @@ for (const id of ids) {
     continue;
   }
 
+  if (registryOnly) {
+    registry.push(meta);
+    continue;
+  }
+
   const dest = path.join(OUT_DIR, id);
 
   if (!skipBuild) {
@@ -141,4 +152,7 @@ export const GENERATED_GAMES: GameMetadata[] = ${JSON.stringify(registry, null, 
 
 fs.mkdirSync(path.dirname(REGISTRY), { recursive: true });
 fs.writeFileSync(REGISTRY, generated);
-log(`registry written: ${registry.length} game(s) → src/lib/games.generated.ts`);
+log(
+  `registry written: ${registry.length} game(s) → src/lib/games.generated.ts` +
+    (registryOnly ? ' (registry only — bundles not built)' : ''),
+);

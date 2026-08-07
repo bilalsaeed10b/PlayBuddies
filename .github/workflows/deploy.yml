@@ -30,16 +30,17 @@ jobs:
       - name: Install platform dependencies
         run: npm ci
 
+      # Builds every games/<id>/ into public/g/<id>/ and generates the catalog
+      # at src/lib/games.generated.ts. Both are gitignored, so this must run
+      # before anything that reads them — including the typecheck.
+      - name: Build games
+        run: npm run build:games
+
       - name: Typecheck
         run: npm run typecheck
 
       - name: Lint
         run: npm run lint
-
-      # Builds every games/<id>/ into public/g/<id>/ and regenerates the
-      # catalog. Must run before `next build` so the export picks them up.
-      - name: Build games
-        run: npm run build:games
 
       - name: Build site
         run: npx next build

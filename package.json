@@ -6,9 +6,10 @@
     "dev": "next dev -H 0.0.0.0",
     "build": "npm run build:games && next build",
     "build:games": "node scripts/build-games.mjs",
+    "registry": "node scripts/build-games.mjs --registry-only",
     "start": "next start",
-    "lint": "eslint",
-    "typecheck": "tsc --noEmit"
+    "lint": "npm run registry && eslint",
+    "typecheck": "npm run registry && tsc --noEmit"
   },
   "dependencies": {
     "firebase": "^12.11.0",
