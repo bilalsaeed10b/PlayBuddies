@@ -63,8 +63,13 @@ export default function App() {
     if (!roomParam) return;
 
     const room = roomParam.toUpperCase().trim();
+    // The platform sends mode=single when the player is alone in the lobby, so
+    // they get local co-op (both characters on one keyboard) instead of being
+    // stuck waiting on a peer that will never arrive.
+    const solo = params.get('mode') === 'single';
+
     setRoomId(room);
-    setGameMode('multi');
+    setGameMode(solo ? 'single' : 'multi');
     setProfile({
       displayName: params.get('displayName') || '',
       photoURL: params.get('photoURL') || ''

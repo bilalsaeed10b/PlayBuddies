@@ -22,14 +22,22 @@ export function gameThumbnail(game: GameMetadata): string {
   return `${BASE}/g/${game.id}/${game.thumbnail}`;
 }
 
-/** Entry point of a game's built bundle, with the platform handoff in the query. */
+/**
+ * Entry point of a game's built bundle, with the platform handoff in the query.
+ *
+ * `solo` tells the game to run its local mode (one person on both control sets)
+ * instead of waiting for a peer that isn't coming. Note there is deliberately
+ * no `host` parameter — host status is read from the lobby document, since a
+ * query string is trivially editable.
+ */
 export function gameUrl(
   gameId: string,
-  params: { room: string; displayName?: string; photoURL?: string },
+  params: { room: string; displayName?: string; photoURL?: string; solo?: boolean },
 ): string {
   const q = new URLSearchParams({ room: params.room });
   if (params.displayName) q.set("displayName", params.displayName);
   if (params.photoURL) q.set("photoURL", params.photoURL);
+  if (params.solo) q.set("mode", "single");
   return `${BASE}/g/${gameId}/index.html?${q.toString()}`;
 }
 

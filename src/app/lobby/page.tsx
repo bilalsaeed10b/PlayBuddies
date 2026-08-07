@@ -83,8 +83,12 @@ function LobbyContent() {
   }, [lobby?.players, presentUids, user?.uid]);
 
   const me = players.find((p) => p.uid === user?.uid);
-  const everyoneReady =
-    players.length >= (selectedGame?.minPlayers ?? 2) && players.every((p) => p.isReady);
+
+  // Ready is opt-out, not opt-in: players join ready and can un-ready if they
+  // need a moment. Nothing blocks on player count — a host alone can start and
+  // play solo, which is how you test a room or warm up while friends arrive.
+  const everyoneReady = players.every((p) => p.isReady);
+  const isSolo = players.length < (selectedGame?.minPlayers ?? 2);
 
   // ── Join the room, and subscribe to it ────────────────────────────────────
   //
@@ -103,7 +107,7 @@ function LobbyContent() {
         uid: user.uid,
         displayName: user.displayName || "Player",
         photoURL: user.photoURL || "",
-        isReady: false,
+        isReady: true,
         joinedAt: Date.now(),
       };
 
@@ -244,6 +248,9 @@ function LobbyContent() {
         status: "playing",
         matchStarted: false,
         collectedGems: {},
+        // Frozen at start. Deriving it live would remount the iframe — and
+        // discard the run in progress — the moment a friend joined.
+        soloMode: isSolo,
       });
     } catch (e) {
       console.error("Error starting game:", e);
@@ -520,7 +527,7 @@ function LobbyContent() {
                     : "bg-white/10 text-white hover:bg-white/20"
                 }`}
               >
-                {me.isReady ? "Ready ✓" : "Mark as Ready"}
+                {me.isReady ? "Ready ✓" : "Not ready — click when set"}
               </button>
             )}
           </div>
@@ -592,6 +599,7 @@ function LobbyContent() {
                   room: roomId,
                   displayName: user?.displayName || "Player",
                   photoURL: user?.photoURL || "",
+                  solo: lobby.soloMode ?? false,
                 })}
                 className="flex-1 w-full h-full border-none z-10"
                 title={selectedGame?.name || "Game Window"}
@@ -663,13 +671,16 @@ function LobbyContent() {
                         disabled={!everyoneReady}
                         className="btn-glow px-8 py-4 bg-gradient-to-r from-primary to-accent rounded-2xl text-white font-bold text-lg shadow-xl shadow-primary/20 flex items-center gap-3 disabled:opacity-40 disabled:cursor-not-allowed"
                       >
-                        <Play size={20} className="fill-white" /> Start Game
+                        <Play size={20} className="fill-white" />
+                        {isSolo ? "Play Solo" : "Start Game"}
                       </button>
-                      {!everyoneReady && (
-                        <span className="text-xs text-text-muted">
-                          Waiting for everyone to be ready
-                        </span>
-                      )}
+                      <span className="text-xs text-text-muted max-w-[12rem] text-center">
+                        {!everyoneReady
+                          ? "Waiting for everyone to be ready"
+                          : isSolo
+                            ? "You'll control both characters"
+                            : ""}
+                      </span>
                     </div>
                   )}
                 </div>

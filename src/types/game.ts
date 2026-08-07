@@ -34,6 +34,8 @@ export interface Lobby {
   status: LobbyStatus;
   players: Record<string, LobbyPlayer>;
   matchStarted?: boolean;
+  /** Set when the match starts; the game runs local co-op instead of waiting for a peer. */
+  soloMode?: boolean;
   collectedGems?: Record<string, boolean>;
   level?: number;
   createdAt?: unknown;
