@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Entity, Level, Vector } from '../../types';
-import { getLevels } from '../../game/levels';
+import { getLevels, getLevelOverrides, setLevelOverrides } from '../../game/levels';
 import { Save, Download, Upload, Trash2, Plus, Play, MousePointer2, Grid, Layers, Square, Circle, Triangle, RefreshCw, Undo2, Redo2, Globe, Lock, Unlock, Eye, EyeOff } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -9,20 +9,18 @@ const CANVAS_HEIGHT = 600;
 
 type Tool = 'select' | 'platform' | 'box' | 'circle' | 'triangle' | 'floor' | 'fire-hazard' | 'water-hazard' | 'acid-hazard' | 'door-fire' | 'door-water' | 'gem-fire' | 'gem-water' | 'trigger' | 'moving-platform' | 'fire-start' | 'water-start' | 'world-tool' | 'cannon';
 
+/**
+ * Derived from Level rather than re-declared. The editor previously kept its
+ * own copy of this shape, which had drifted to a stale four-theme union and no
+ * longer matched the levels it was editing.
+ */
+type WorldSettings = NonNullable<Level['worldSettings']>;
+
 interface EditorState {
   entities: Entity[];
   fireStart: Vector;
   waterStart: Vector;
-  worldSettings: {
-    darkMode: boolean;
-    lightRadius: number;
-    gravityMultiplier?: number;
-    speedMultiplier?: number;
-    jumpMultiplier?: number;
-    windX?: number;
-    windY?: number;
-    backgroundTheme?: 'default' | 'neon' | 'void' | 'matrix';
-  };
+  worldSettings: WorldSettings;
 }
 
 export default function LevelEditor({ onBack, onPlay, initialLevel }: { onBack: () => void, onPlay: (level: Level, fromEditor?: boolean) => void, initialLevel?: Level | null }) {
@@ -30,8 +28,8 @@ export default function LevelEditor({ onBack, onPlay, initialLevel }: { onBack: 
   const [entities, setEntities] = useState<Entity[]>(initialLevel?.entities || []);
   const [fireStart, setFireStart] = useState<Vector>(initialLevel?.fireStart || { x: 50, y: 500 });
   const [waterStart, setWaterStart] = useState<Vector>(initialLevel?.waterStart || { x: 100, y: 500 });
-  const [worldSettings, setWorldSettings] = useState(initialLevel?.worldSettings || { 
-    darkMode: false, 
+  const [worldSettings, setWorldSettings] = useState<WorldSettings>(initialLevel?.worldSettings || {
+    darkMode: false,
     lightRadius: 150,
     gravityMultiplier: 1,
     speedMultiplier: 1,
@@ -1254,9 +1252,9 @@ export default function LevelEditor({ onBack, onPlay, initialLevel }: { onBack: 
 
     if (levelId && levelId <= 15) {
       // Main level override
-      const overrides = JSON.parse(localStorage.getItem('main_level_overrides') || '{}');
+      const overrides = getLevelOverrides();
       overrides[levelId] = level;
-      localStorage.setItem('main_level_overrides', JSON.stringify(overrides));
+      setLevelOverrides(overrides);
       showToast('Main level override saved!', 'success');
     } else {
       // Custom level
@@ -1289,7 +1287,7 @@ export default function LevelEditor({ onBack, onPlay, initialLevel }: { onBack: 
   };
 
   const exportAllCampaign = () => {
-    const overrides = JSON.parse(localStorage.getItem('main_level_overrides') || '{}');
+    const overrides = getLevelOverrides();
     const campaignData = levels.map(l => overrides[l.id] || l);
     const blob = new Blob([JSON.stringify(campaignData, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -1308,13 +1306,13 @@ export default function LevelEditor({ onBack, onPlay, initialLevel }: { onBack: 
       try {
         const imported = JSON.parse(ev.target?.result as string);
         if (Array.isArray(imported)) {
-          const overrides = JSON.parse(localStorage.getItem('main_level_overrides') || '{}');
+          const overrides = getLevelOverrides();
           imported.forEach((lvl: Level) => {
             if (lvl.id >= 1 && lvl.id <= 15) {
               overrides[lvl.id] = lvl;
             }
           });
-          localStorage.setItem('main_level_overrides', JSON.stringify(overrides));
+          setLevelOverrides(overrides);
           showToast('Campaign overrides imported', 'success');
           window.location.reload();
         }
@@ -1360,7 +1358,7 @@ export default function LevelEditor({ onBack, onPlay, initialLevel }: { onBack: 
 
   if (editorMode === 'select') {
     const customLevels = JSON.parse(localStorage.getItem('custom_levels') || '[]');
-    const overrides = JSON.parse(localStorage.getItem('main_level_overrides') || '{}');
+    const overrides = getLevelOverrides();
 
     return (
       <div className="flex flex-col h-screen bg-[#050505] text-white font-mono overflow-hidden relative">

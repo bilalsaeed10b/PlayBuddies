@@ -1797,7 +1797,40 @@ export const DEFAULT_LEVELS: Level[] = [
   }
 ];
 
+/**
+ * Bump this whenever DEFAULT_LEVELS changes.
+ *
+ * Overrides saved by the level editor are namespaced by this version, so newly
+ * shipped default levels are never shadowed by a player's stale localStorage.
+ * That shadowing is what made earlier level updates appear not to apply.
+ */
+export const LEVELS_VERSION = 2;
+
+const OVERRIDES_KEY = `main_level_overrides_v${LEVELS_VERSION}`;
+
+/** Editor overrides for built-in levels, keyed by level id. Never throws. */
+export function getLevelOverrides(): Record<string, Level> {
+  if (typeof localStorage === 'undefined') return {};
+  try {
+    const raw = localStorage.getItem(OVERRIDES_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    // Corrupt entry would otherwise white-screen the game on boot.
+    return {};
+  }
+}
+
+export function setLevelOverrides(overrides: Record<string, Level>): void {
+  if (typeof localStorage === 'undefined') return;
+  try {
+    localStorage.setItem(OVERRIDES_KEY, JSON.stringify(overrides));
+  } catch {
+    // Quota exceeded or private mode — editing just won't persist.
+  }
+}
+
 export function getLevels(): Level[] {
-  const overrides = JSON.parse(localStorage.getItem('main_level_overrides') || '{}');
+  const overrides = getLevelOverrides();
   return DEFAULT_LEVELS.map(level => overrides[level.id] || level);
 }

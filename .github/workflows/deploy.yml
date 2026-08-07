@@ -1,4 +1,4 @@
-name: Deploy Next.js site to Pages
+name: Deploy PlayBuddies to Pages
 
 on:
   push:
@@ -20,15 +20,30 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: "20"
           cache: "npm"
-      - name: Install dependencies
+
+      - name: Install platform dependencies
         run: npm ci
-      - name: Build with Next.js
-        run: npm run build
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      # Builds every games/<id>/ into public/g/<id>/ and regenerates the
+      # catalog. Must run before `next build` so the export picks them up.
+      - name: Build games
+        run: npm run build:games
+
+      - name: Build site
+        run: npx next build
+
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:

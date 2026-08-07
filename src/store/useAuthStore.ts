@@ -1,16 +1,19 @@
-
 import { create } from 'zustand';
 import { User } from 'firebase/auth';
 
-// Bilal Saeed 123
+export interface UserStats {
+  gamesPlayed: number;
+  winRate: string;
+}
+
 interface AuthState {
   user: User | null;
   loading: boolean;
-  stats: any;
+  stats: UserStats | null;
   statsFetchedAt: number;
   setUser: (user: User | null) => void;
   setLoading: (loading: boolean) => void;
-  setStats: (stats: any) => void;
+  setStats: (stats: UserStats) => void;
 }
 
 export const useAuthStore = create<AuthState>((set) => ({
@@ -22,5 +25,4 @@ export const useAuthStore = create<AuthState>((set) => ({
   setLoading: (loading) => set({ loading }),
   setStats: (stats) => set({ stats, statsFetchedAt: Date.now() }),
 }));
-// Bilal Saeed 123
 

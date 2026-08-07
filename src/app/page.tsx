@@ -2,7 +2,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { motion, AnimatePresence, useScroll, useTransform } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import { useRouter } from "next/navigation";
 import { signInWithPopup } from "firebase/auth";
 import { auth, googleProvider } from "@/lib/firebase";
@@ -27,40 +27,38 @@ import {
   Loader2,
 } from "lucide-react";
 
-import { GAMES } from "@/lib/games";
+import { PLAYABLE_GAMES, gameAccent, playerCountLabel } from "@/lib/games";
+import GameThumb from "@/components/GameThumb";
+import type { GameMetadata } from "@/types/game";
 
+
+const PARTICLE_COLORS = [
+  "rgba(139, 92, 246, 0.3)",
+  "rgba(236, 72, 153, 0.2)",
+  "rgba(59, 130, 246, 0.2)",
+  "rgba(16, 185, 129, 0.15)",
+];
+
+/**
+ * Scatter values derived from the particle index rather than Math.random().
+ *
+ * Random values had to be generated in an effect to keep the prerendered HTML
+ * and the hydrated client in agreement, which meant the particles only faded in
+ * after hydration. Deterministic values render on first paint and match on both
+ * sides. The multipliers are primes so the pattern doesn't visibly repeat.
+ */
+const PARTICLES = Array.from({ length: 30 }, (_, i) => ({
+  id: i,
+  x: (i * 37) % 100,
+  y: (i * 61) % 100,
+  size: 2 + ((i * 13) % 40) / 10,
+  duration: 10 + ((i * 29) % 150) / 10,
+  delay: ((i * 17) % 100) / 10,
+  color: PARTICLE_COLORS[i % PARTICLE_COLORS.length],
+}));
 
 function FloatingParticles() {
-  const [particles, setParticles] = useState<
-    {
-      id: number;
-      x: number;
-      y: number;
-      size: number;
-      duration: number;
-      delay: number;
-      color: string;
-    }[]
-  >([]);
-
-  useEffect(() => {
-    const colors = [
-      "rgba(139, 92, 246, 0.3)",
-      "rgba(236, 72, 153, 0.2)",
-      "rgba(59, 130, 246, 0.2)",
-      "rgba(16, 185, 129, 0.15)",
-    ];
-    const p = Array.from({ length: 30 }, (_, i) => ({
-      id: i,
-      x: Math.random() * 100,
-      y: Math.random() * 100,
-      size: Math.random() * 4 + 2,
-      duration: Math.random() * 15 + 10,
-      delay: Math.random() * 10,
-      color: colors[Math.floor(Math.random() * colors.length)],
-    }));
-    setParticles(p);
-  }, []);
+  const particles = PARTICLES;
 
   return (
     <div className="fixed inset-0 pointer-events-none overflow-hidden z-0">
@@ -530,10 +528,11 @@ function GameCard({
   game,
   index,
 }: {
-  game: (typeof GAMES)[0];
+  game: GameMetadata;
   index: number;
 }) {
   const [isHovered, setIsHovered] = useState(false);
+  const accent = gameAccent(game);
 
   return (
     <motion.div
@@ -545,13 +544,13 @@ function GameCard({
       onMouseLeave={() => setIsHovered(false)}
       className={`game-card relative group rounded-2xl overflow-hidden cursor-pointer ${game.featured ? "md:col-span-2 md:row-span-2" : ""
         }`}
-      style={{ background: game.bgColor }}
+      style={{ background: `${accent.from}14` }}
     >
       {/* Gradient border on hover */}
       <motion.div
         className="absolute inset-0 rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-500"
         style={{
-          background: `linear-gradient(135deg, ${game.borderColor}, transparent, ${game.borderColor})`,
+          background: `linear-gradient(135deg, ${accent.from}66, transparent, ${accent.to}66)`,
           padding: "1px",
         }}
       />
@@ -577,7 +576,7 @@ function GameCard({
             rotate: { duration: 0.5, repeat: Infinity }
           }}
         >
-          {game.icon}
+          <GameThumb game={game} size={game.featured ? 224 : 80} className="w-full h-full" />
         </motion.div>
 
         {/* Content Container (Right for featured, Bottom for normal) */}
@@ -589,7 +588,7 @@ function GameCard({
                 {game.featured ? `🔥 Featured: ${game.category}` : game.category}
               </span>
               <span className="text-xs font-mono text-text-muted">
-                {game.players}P
+                {playerCountLabel(game)}P
               </span>
             </div>
             
@@ -641,7 +640,10 @@ function GameCard({
           transition={{ duration: 0.4, type: "spring" }}
           className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-20 pointer-events-none"
         >
-          <div className={`w-20 h-20 rounded-full bg-gradient-to-r ${game.color} flex items-center justify-center shadow-[0_0_40px_rgba(255,255,255,0.3)] border-2 border-white/20`}>
+          <div
+            className="w-20 h-20 rounded-full flex items-center justify-center shadow-[0_0_40px_rgba(255,255,255,0.3)] border-2 border-white/20"
+            style={{ backgroundImage: `linear-gradient(to right, ${accent.from}, ${accent.to})` }}
+          >
             <Play size={32} className="text-white fill-white ml-2" />
           </div>
         </motion.div>
@@ -694,7 +696,7 @@ function GamesSection() {
 
         {/* Games Grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 auto-rows-auto">
-          {GAMES.map((game, i) => (
+          {PLAYABLE_GAMES.map((game, i) => (
             <GameCard key={game.id} game={game} index={i} />
           ))}
         </div>

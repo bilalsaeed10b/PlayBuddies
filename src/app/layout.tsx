@@ -1,11 +1,33 @@
-
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
+import { Inter, Outfit, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
+import AuthProvider from "@/components/AuthProvider";
+import AppChrome from "@/components/AppChrome";
+
+// Self-hosted at build time. The previous <link> to fonts.googleapis.com was
+// render-blocking and cost two extra connections before first paint.
+const inter = Inter({
+  subsets: ["latin"],
+  variable: "--font-inter",
+  display: "swap",
+});
+
+const outfit = Outfit({
+  subsets: ["latin"],
+  variable: "--font-outfit",
+  display: "swap",
+});
+
+const jetbrainsMono = JetBrains_Mono({
+  subsets: ["latin"],
+  variable: "--font-jetbrains",
+  display: "swap",
+});
 
 export const metadata: Metadata = {
   title: "PlayBuddies — Play Games With Friends",
   description:
-    "The ultimate multiplayer gaming platform. Log in with Google, invite your friends, and play 10+ browser games together in real-time. No downloads needed.",
+    "The ultimate multiplayer gaming platform. Log in with Google, invite your friends, and play browser games together in real-time. No downloads needed.",
   keywords: [
     "multiplayer games",
     "browser games",
@@ -21,9 +43,11 @@ export const metadata: Metadata = {
   },
 };
 
-import AuthProvider from "@/components/AuthProvider";
-import FriendsSidebar from "@/components/FriendsSidebar";
-import InviteListener from "@/components/InviteListener";
+export const viewport: Viewport = {
+  themeColor: "#0F0F1A",
+  width: "device-width",
+  initialScale: 1,
+};
 
 export default function RootLayout({
   children,
@@ -31,27 +55,17 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="dark" suppressHydrationWarning>
-      <head>
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link
-          rel="preconnect"
-          href="https://fonts.gstatic.com"
-          crossOrigin="anonymous"
-        />
-        <link
-          href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;700&family=Outfit:wght@400;500;600;700;800;900&display=swap"
-          rel="stylesheet"
-        />
-      </head>
+    <html
+      lang="en"
+      className={`dark ${inter.variable} ${outfit.variable} ${jetbrainsMono.variable}`}
+      suppressHydrationWarning
+    >
       <body className="antialiased noise" suppressHydrationWarning>
         <AuthProvider>
           {children}
-          <FriendsSidebar />
-          <InviteListener />
+          <AppChrome />
         </AuthProvider>
       </body>
     </html>
   );
 }
-

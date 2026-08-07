@@ -1,19 +1,30 @@
 {
   "rules": {
-    "invites": {
-      "$uid": {
-        ".read": "auth != null && auth.uid === $uid",
-        ".write": "auth != null",
-        "$inviteId": {
-          ".validate": "newData.hasChildren(['fromUid', 'fromName', 'roomId', 'timestamp'])",
-          ".write": "auth != null && (newData.child('fromUid').val() === auth.uid || !data.exists() || auth.uid === $uid)"
+    "presence": {
+      "users": {
+        "$uid": {
+          ".read": "auth != null",
+          ".write": "auth != null && auth.uid === $uid",
+          ".validate": "newData.hasChildren(['online']) || !newData.exists()"
+        },
+        ".read": "auth != null"
+      },
+      "lobbies": {
+        "$roomId": {
+          ".read": "auth != null",
+          "$uid": {
+            ".write": "auth != null && auth.uid === $uid",
+            ".validate": "newData.isBoolean() || !newData.exists()"
+          }
         }
       }
     },
     "signaling": {
       "$roomId": {
         ".read": "auth != null",
-        ".write": "auth != null"
+        "$uid": {
+          ".write": "auth != null && auth.uid === $uid"
+        }
       }
     },
     "$other": {

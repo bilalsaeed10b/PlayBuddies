@@ -3,11 +3,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, Suspense, lazy } from 'react';
 import Game from './components/Game/Game';
-import LevelEditor from './components/Editor/LevelEditor';
+
+// The editor is ~2.5k lines that most players never open — keep it out of the
+// initial download and fetch it only when someone actually edits a level.
+const LevelEditor = lazy(() => import('./components/Editor/LevelEditor'));
 import { Level } from './types';
 import { getLevels } from './game/levels';
+import { db, auth, doc, getDoc } from './firebase';
 import { motion, AnimatePresence } from 'motion/react';
 import { Play, Plus, Layout, Lock, Unlock, ChevronRight, ArrowLeft, Edit3, Star, Monitor, Smartphone, Users } from 'lucide-react';
 
@@ -56,18 +60,31 @@ export default function App() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const roomParam = params.get('room');
-    const hostParam = params.get('host');
-    if (roomParam) {
-      setRoomId(roomParam.toUpperCase().trim());
-      setGameMode('multi');
-      setIsHost(hostParam === 'true');
-      setProfile({
-        displayName: params.get('displayName') || '',
-        photoURL: params.get('photoURL') || ''
+    if (!roomParam) return;
+
+    const room = roomParam.toUpperCase().trim();
+    setRoomId(room);
+    setGameMode('multi');
+    setProfile({
+      displayName: params.get('displayName') || '',
+      photoURL: params.get('photoURL') || ''
+    });
+    // We do NOT setView('game') here. The user sees the menu first.
+    window.history.replaceState({}, document.title, window.location.pathname);
+
+    // Host is read from the lobby document, never from the URL — a query
+    // param would let anyone claim host just by editing the address bar.
+    let cancelled = false;
+    getDoc(doc(db, 'lobbies', room))
+      .then(snap => {
+        if (cancelled || !snap.exists()) return;
+        const uid = auth.currentUser?.uid;
+        setIsHost(Boolean(uid) && snap.data().hostId === uid);
+      })
+      .catch(() => {
+        /* not signed in or offline — stay a non-host, which is the safe default */
       });
-      // We do NOT setView('game') here anymore. The user requested to see the Menu first.
-      window.history.replaceState({}, document.title, window.location.pathname);
-    }
+    return () => { cancelled = true; };
   }, []);
 
   return (
@@ -447,8 +464,7 @@ export default function App() {
             exit={{ opacity: 0 }}
             className="h-screen"
           >
-            {console.log(`[App] Rendering Game component. roomId: [${roomId}], isHost: ${isHost}`)}
-            <Game 
+            <Game
               customLevel={customLevel} 
               startLevelIndex={startLevelIndex}
               onBack={() => {
@@ -476,11 +492,19 @@ export default function App() {
             exit={{ opacity: 0, x: -100 }}
             className="h-screen"
           >
-            <LevelEditor 
-              initialLevel={customLevel}
-              onBack={() => setView('level-select')} 
-              onPlay={handlePlayCustom}
-            />
+            <Suspense
+              fallback={
+                <div className="h-screen flex items-center justify-center text-white font-mono">
+                  Loading editor…
+                </div>
+              }
+            >
+              <LevelEditor
+                initialLevel={customLevel}
+                onBack={() => setView('level-select')}
+                onPlay={handlePlayCustom}
+              />
+            </Suspense>
           </motion.div>
         )}
       </AnimatePresence>

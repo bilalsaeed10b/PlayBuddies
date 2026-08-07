@@ -1,21 +1,30 @@
 
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { motion } from "framer-motion";
 import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/store/useAuthStore";
 import { auth, db } from "@/lib/firebase";
 import { signOut } from "firebase/auth";
 import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
-import { GAMES } from "@/lib/games";
+import { PLAYABLE_GAMES, gameAccent, playerCountLabel } from "@/lib/games";
+import GameThumb from "@/components/GameThumb";
 import AuthGuard from "@/components/AuthGuard";
+import {
+  generateRoomCode,
+  normalizeRoomCode,
+  isValidRoomCode,
+  ROOM_CODE_LENGTH,
+  LOBBY_TTL_MS,
+} from "@/lib/rooms";
+import { useFriends } from "@/hooks/useFriends";
+import { useFriendsOnline } from "@/hooks/usePresence";
 import {
   Gamepad2,
   LogOut,
   Plus,
   ArrowRight,
-  User as UserIcon,
   Play,
   Trophy,
   Users,
@@ -28,47 +37,53 @@ export default function DashboardPage() {
   const router = useRouter();
   const [isCreating, setIsCreating] = useState(false);
   const [joinCode, setJoinCode] = useState("");
+  const [joinError, setJoinError] = useState("");
   const [isJoining, setIsJoining] = useState(false);
-  const [userStats, setUserStats] = useState({ friendsOnline: 0, gamesPlayed: 0, winRate: "0%" });
+  const [userStats, setUserStats] = useState({ gamesPlayed: 0, winRate: "0%" });
   const [loadingStats, setLoadingStats] = useState(true);
+
+  // "Friends Online" is derived from live presence. It used to read a
+  // `stats.friendsOnline` field on the user document that nothing ever wrote,
+  // so it always displayed 0.
+  const { friends } = useFriends();
+  const friendUids = useMemo(() => friends.map((f) => f.uid), [friends]);
+  const onlineFriends = useFriendsOnline(friendUids);
 
   useEffect(() => {
     if (!user) return;
 
-    // Bilal Saeed 123
-    // Use cached stats if fresh (less than 5 minutes old)
+    // Serve cached stats if fresh (under 5 minutes old) to avoid a read per visit.
     const STALE_THRESHOLD = 5 * 60 * 1000;
     if (cachedStats && Date.now() - statsFetchedAt < STALE_THRESHOLD) {
       setUserStats(cachedStats);
       setLoadingStats(false);
       return;
     }
-    // Bilal Saeed 123
 
+    let cancelled = false;
     const fetchStats = async () => {
       try {
-        const userRef = doc(db, "users", user.uid);
-        const snap = await getDoc(userRef);
-        if (snap.exists()) {
-          const data = snap.data();
-          const games = data.stats?.gamesPlayed || 0;
-          const wins = data.stats?.wins || 0;
-          const winRate = games > 0 ? Math.round((wins / games) * 100) + "%" : "0%";
-          const freshStats = {
-            friendsOnline: data.stats?.friendsOnline || 0,
-            gamesPlayed: games,
-            winRate: winRate,
-          };
-          setUserStats(freshStats);
-          setStats(freshStats); // Cache in Zustand
-        }
+        const snap = await getDoc(doc(db, "users", user.uid));
+        if (cancelled || !snap.exists()) return;
+        const data = snap.data();
+        const games = data.stats?.gamesPlayed || 0;
+        const wins = data.stats?.wins || 0;
+        const freshStats = {
+          gamesPlayed: games,
+          winRate: games > 0 ? Math.round((wins / games) * 100) + "%" : "0%",
+        };
+        setUserStats(freshStats);
+        setStats(freshStats);
       } catch (error) {
         console.error("Error fetching user stats:", error);
       } finally {
-        setLoadingStats(false);
+        if (!cancelled) setLoadingStats(false);
       }
     };
     fetchStats();
+    return () => {
+      cancelled = true;
+    };
   }, [user]);
 
   const handleSignOut = async () => {
@@ -83,22 +98,26 @@ export default function DashboardPage() {
   const createLobby = async (gameId: string | null = null) => {
     if (!user) return;
     setIsCreating(true);
-    // Bilal Saeed 123
-    const arr = new Uint8Array(4);
-    crypto.getRandomValues(arr);
-    const roomId = Array.from(arr, b => b.toString(36)).join('').substring(0, 7).toUpperCase();
-    // Bilal Saeed 123
+    const roomId = generateRoomCode();
     try {
-      // Bilal Saeed 123
-      const expiresAt = new Date(Date.now() + 2 * 60 * 60 * 1000); // 2 hours TTL
-      // Bilal Saeed 123
+      // `players` is a MAP keyed by uid, and the host is seeded here. The lobby
+      // page updates it with dotted paths (`players.<uid>`), which Firestore
+      // rejects against an array field — that mismatch meant a host never
+      // appeared in the lobby they had just created.
       await setDoc(doc(db, "lobbies", roomId), {
         hostId: user.uid,
         status: "waiting",
-        gameId: typeof gameId === 'string' ? gameId : null,
-        players: [],
+        gameId: typeof gameId === "string" ? gameId : null,
+        players: {
+          [user.uid]: {
+            uid: user.uid,
+            displayName: user.displayName || "Player",
+            photoURL: user.photoURL || "",
+            isReady: false,
+          },
+        },
         createdAt: serverTimestamp(),
-        expiresAt,
+        expiresAt: new Date(Date.now() + LOBBY_TTL_MS),
       });
       router.push(`/lobby?room=${roomId}`);
     } catch (e) {
@@ -109,9 +128,14 @@ export default function DashboardPage() {
 
   const joinLobby = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!joinCode || joinCode.trim() === "") return;
+    const code = normalizeRoomCode(joinCode);
+    if (!isValidRoomCode(code)) {
+      setJoinError("That code doesn't look right — it's 6 letters and numbers.");
+      return;
+    }
+    setJoinError("");
     setIsJoining(true);
-    router.push(`/lobby?room=${joinCode.trim().toUpperCase()}`);
+    router.push(`/lobby?room=${code}`);
   };
 
   return (
@@ -180,23 +204,34 @@ export default function DashboardPage() {
             </div>
 
             <div className="flex flex-col sm:flex-row items-center gap-4">
-              <form onSubmit={joinLobby} className="flex items-center glass rounded-2xl p-1 border border-white/10 hover:border-white/20 transition-colors">
-                <input
-                  type="text"
-                  placeholder="Enter Code"
-                  value={joinCode}
-                  onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
-                  className="bg-transparent border-none outline-none text-white px-4 py-2 w-32 uppercase placeholder:text-text-muted/50 placeholder:normal-case font-mono font-bold"
-                  maxLength={6}
-                />
-                <button
-                  type="submit"
-                  disabled={isJoining || joinCode.length < 3}
-                  className="bg-white/10 hover:bg-white/20 text-white px-4 py-2 rounded-xl text-sm font-bold transition-colors disabled:opacity-50"
-                >
-                  {isJoining ? "..." : "Join"}
-                </button>
-              </form>
+              <div className="flex flex-col gap-1">
+                <form onSubmit={joinLobby} className="flex items-center glass rounded-2xl p-1 border border-white/10 hover:border-white/20 transition-colors">
+                  <label htmlFor="join-code" className="sr-only">Room code</label>
+                  <input
+                    id="join-code"
+                    type="text"
+                    inputMode="text"
+                    autoComplete="off"
+                    placeholder="Enter Code"
+                    value={joinCode}
+                    onChange={(e) => {
+                      setJoinCode(normalizeRoomCode(e.target.value));
+                      if (joinError) setJoinError("");
+                    }}
+                    className="bg-transparent border-none outline-none text-white px-4 py-2 w-32 uppercase placeholder:text-text-muted/50 placeholder:normal-case font-mono font-bold tracking-widest"
+                    maxLength={ROOM_CODE_LENGTH}
+                    aria-invalid={Boolean(joinError)}
+                  />
+                  <button
+                    type="submit"
+                    disabled={isJoining || joinCode.length !== ROOM_CODE_LENGTH}
+                    className="bg-white/10 hover:bg-white/20 text-white px-4 py-2 rounded-xl text-sm font-bold transition-colors disabled:opacity-50"
+                  >
+                    {isJoining ? "..." : "Join"}
+                  </button>
+                </form>
+                {joinError && <p className="text-xs text-error px-2">{joinError}</p>}
+              </div>
 
               <div className="text-text-muted font-bold text-sm hidden sm:block">OR</div>
 
@@ -216,7 +251,7 @@ export default function DashboardPage() {
           {/* Quick Stats */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 mb-16">
             {[
-              { label: "Friends Online", value: loadingStats ? "-" : userStats.friendsOnline, icon: Users, color: "text-green-400" },
+              { label: "Friends Online", value: onlineFriends.size, icon: Users, color: "text-green-400" },
               { label: "Games Played", value: loadingStats ? "-" : userStats.gamesPlayed, icon: Gamepad2, color: "text-blue-400" },
               { label: "Win Rate", value: loadingStats ? "-" : userStats.winRate, icon: Trophy, color: "text-yellow-400" },
             ].map((stat, i) => (
@@ -247,7 +282,7 @@ export default function DashboardPage() {
               </h2>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-              {GAMES.map((game, index) => (
+              {PLAYABLE_GAMES.map((game, index) => (
                 <motion.div
                   key={game.id}
                   initial={{ opacity: 0, scale: 0.9 }}
@@ -259,18 +294,21 @@ export default function DashboardPage() {
                   <motion.div
                     className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300"
                     style={{
-                      background: `linear-gradient(135deg, ${game.borderColor}, transparent)`,
+                      background: `linear-gradient(135deg, ${gameAccent(game).from}33, transparent)`,
                     }}
                   />
                   <div className="relative z-10">
                     <div className="w-16 h-16 sm:w-20 sm:h-20 mb-4 transform group-hover:scale-110 group-hover:-translate-y-1 transition-transform overflow-hidden rounded-2xl flex items-center justify-center shadow-lg">
-                      {game.icon}
+                      <GameThumb game={game} size={80} className="w-full h-full" />
                     </div>
                     <h3 className="text-xl font-bold text-white mb-1">{game.name}</h3>
                     <p className="text-xs font-semibold uppercase tracking-wider text-text-muted mb-4">
-                      {game.category} • {game.players}P
+                      {game.category} • {playerCountLabel(game)}P
                     </p>
-                    <div className={`text-sm opacity-0 group-hover:opacity-100 transition-opacity bg-gradient-to-r ${game.color} bg-clip-text text-transparent font-bold flex items-center gap-2`}>
+                    <div
+                      className="text-sm opacity-0 group-hover:opacity-100 transition-opacity bg-clip-text text-transparent font-bold flex items-center gap-2"
+                      style={{ backgroundImage: `linear-gradient(to right, ${gameAccent(game).from}, ${gameAccent(game).to})` }}
+                    >
                       Play Now <ArrowRight size={16} />
                     </div>
                   </div>

@@ -1,79 +1,150 @@
-// Bilal Saeed 123
 rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isSelf(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    /** Keys this write actually changes. */
+    function touched() {
+      return request.resource.data.diff(resource.data).affectedKeys();
+    }
+
     // ─── Users ───
     match /users/{userId} {
-      allow read: if request.auth != null;
-      allow create: if request.auth != null && request.auth.uid == userId;
-      allow update: if request.auth != null && request.auth.uid == userId;
+      allow read: if signedIn();
+      allow create: if isSelf(userId);
+      // Stats are awarded by trusted code, never self-reported, so a client
+      // cannot inflate its own win count.
+      allow update: if isSelf(userId) && !touched().hasAny(['stats', 'uid', 'createdAt']);
       allow delete: if false;
     }
 
-    // ─── Friend Connections ───
+    // ─── Friend connections ───
     match /connections/{connId} {
-      allow read: if request.auth != null
-                  && request.auth.uid in resource.data.participants;
-      allow create: if request.auth != null
-                    && request.auth.uid in request.resource.data.participants;
-      allow update: if request.auth != null
-                    && request.auth.uid in resource.data.participants;
-      allow delete: if request.auth != null
-                    && request.auth.uid in resource.data.participants;
+      allow read: if signedIn() && request.auth.uid in resource.data.participants;
+
+      allow create: if signedIn()
+                    && request.auth.uid == request.resource.data.senderId
+                    && request.auth.uid in request.resource.data.participants
+                    && request.resource.data.participants.size() == 2
+                    && request.resource.data.status == 'pending';
+
+      // Only the recipient can accept, and accepting is the only field that
+      // may change — this stops a sender from self-accepting their request.
+      allow update: if signedIn()
+                    && request.auth.uid in resource.data.participants
+                    && request.auth.uid != resource.data.senderId
+                    && touched().hasOnly(['status'])
+                    && request.resource.data.status == 'accepted';
+
+      allow delete: if signedIn() && request.auth.uid in resource.data.participants;
     }
 
     // ─── Invites ───
     match /invites/{inviteId} {
-      allow read: if request.auth != null
-                  && request.auth.uid == resource.data.targetId;
-      allow create: if request.auth != null
-                    && request.auth.uid == request.resource.data.fromUid;
-      allow delete: if request.auth != null
-                    && request.auth.uid == resource.data.targetId;
+      allow read: if signedIn() && request.auth.uid == resource.data.targetId;
+      allow create: if signedIn()
+                    && request.auth.uid == request.resource.data.fromUid
+                    && request.resource.data.targetId is string
+                    && request.resource.data.roomId is string;
+      // Either party may clear it: the recipient on accept/decline, the sender
+      // to withdraw. Otherwise a declined invite would linger forever.
+      allow delete: if signedIn()
+                    && (request.auth.uid == resource.data.targetId
+                        || request.auth.uid == resource.data.fromUid);
       allow update: if false;
     }
 
-    // ─── Lobbies (serves as the single source for platform + game) ───
+    // ─── Lobbies ───
     match /lobbies/{lobbyId} {
-      allow read: if request.auth != null;
+      function isLobbyHost() {
+        return signedIn() && resource.data.hostId == request.auth.uid;
+      }
 
-      // Anyone authenticated can create a lobby
-      allow create: if request.auth != null
+      function isMember() {
+        return signedIn() && request.auth.uid in resource.data.players;
+      }
+
+      /** True when the write only touches this caller's own slot in the map. */
+      function touchesOnlyOwnPlayerSlot() {
+        return touched().hasOnly([
+          'players.' + request.auth.uid,
+          'players.' + request.auth.uid + '.isReady',
+          'players.' + request.auth.uid + '.role',
+          'updatedAt'
+        ]);
+      }
+
+      /**
+       * Shared in-match state any participant may advance (collecting a gem is
+       * a legitimate action by either player). Deliberately narrow: it cannot
+       * touch hostId, players, status or gameId.
+       */
+      function touchesOnlyGameplayState() {
+        return touched().hasOnly(['collectedGems', 'level', 'matchStarted', 'updatedAt']);
+      }
+
+      allow read: if signedIn();
+
+      allow create: if signedIn()
                     && request.resource.data.hostId == request.auth.uid
                     && request.resource.data.players.size() <= 8;
 
-      // Host can update settings/status; players can only modify the players array
-      allow update: if request.auth != null
-                    && (
-                      // Host can do anything
-                      resource.data.hostId == request.auth.uid
-                      ||
-                      // Non-host can only update the players array (join/leave)
-                      (
-                        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['players', 'updatedAt', 'messages'])
-                        && request.resource.data.players.size() <= 8
-                      )
-                    );
+      allow update: if
+        // The host controls game selection and match state.
+        (isLobbyHost() && request.resource.data.players.size() <= 8)
+        ||
+        // Everyone else may only join, leave, or ready-up — themselves.
+        //
+        // The previous rule allowed any signed-in user to replace the whole
+        // `players` map or `messages` array of any lobby whose code they knew,
+        // which let a stranger empty an entire room.
+        (signedIn()
+         && touchesOnlyOwnPlayerSlot()
+         && request.resource.data.players.size() <= 8)
+        ||
+        // In-match progress, writable by anyone actually in the room.
+        (isMember() && touchesOnlyGameplayState())
+        ||
+        // Host migration: a member may claim an abandoned room. The old host is
+        // removed in the same write, so this cannot be used to hijack a live one.
+        (isMember()
+         && touched().hasOnly(['hostId', 'players.' + resource.data.hostId])
+         && request.resource.data.hostId == request.auth.uid);
 
-      // Only host can delete a lobby
-      allow delete: if request.auth != null
-                    && resource.data.hostId == request.auth.uid;
+      allow delete: if isLobbyHost();
+
+      // ─── Lobby chat ───
+      // A subcollection so messages never bloat the room document.
+      match /messages/{messageId} {
+        allow read: if signedIn();
+        allow create: if signedIn()
+                      && request.resource.data.uid == request.auth.uid
+                      && request.resource.data.text is string
+                      && request.resource.data.text.size() > 0
+                      && request.resource.data.text.size() <= 200;
+        allow update, delete: if false;
+      }
+
+      // ─── Per-player game state ───
+      // Written at a high rate during play; each player owns exactly one doc.
+      match /updates/{playerId} {
+        allow read: if signedIn();
+        allow write: if isSelf(playerId);
+      }
     }
 
-    // ─── Game Rooms (legacy — kept for existing game engine compatibility) ───
-    match /rooms/{roomId} {
-      allow read: if request.auth != null;
-      allow create: if request.auth != null;
-      allow update: if request.auth != null;
-      allow delete: if false;
-    }
-
-    // Deny everything else
+    // Anything not matched above is denied. This previously left an open
+    // /rooms/{roomId} collection that any signed-in user could write to freely.
     match /{document=**} {
       allow read, write: if false;
     }
   }
 }
-// Bilal Saeed 123

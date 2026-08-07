@@ -1,31 +1,30 @@
-
 import { initializeApp, getApps, getApp } from "firebase/app";
 import { getAuth, GoogleAuthProvider } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 import { getDatabase } from "firebase/database";
 
-// Bilal Saeed 123
+// Firebase web config is public by design — it identifies the project, it does
+// not authorise anything. Access is controlled by firestore.rules and
+// database.rules.json. Env vars let a build target a different project.
 const firebaseConfig = {
-  apiKey: "AIzaSyCPdgiF18VF7MyAtVa6r1kRCJaKKqrZsJg",
-  authDomain: "playbuddies-556cd.firebaseapp.com",
-  projectId: "playbuddies-556cd",
-  storageBucket: "playbuddies-556cd.firebasestorage.app",
-  messagingSenderId: "741516901024",
-  appId: "1:741516901024:web:6ee715ebc6438dfb1f27c5",
-  measurementId: "G-96MQE1FVP8",
-  databaseURL: "https://playbuddies-556cd-default-rtdb.firebaseio.com",
+  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY ?? "AIzaSyCPdgiF18VF7MyAtVa6r1kRCJaKKqrZsJg",
+  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN ?? "playbuddies-556cd.firebaseapp.com",
+  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID ?? "playbuddies-556cd",
+  storageBucket:
+    process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET ?? "playbuddies-556cd.firebasestorage.app",
+  messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID ?? "741516901024",
+  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID ?? "1:741516901024:web:6ee715ebc6438dfb1f27c5",
+  databaseURL:
+    process.env.NEXT_PUBLIC_FIREBASE_DATABASE_URL ??
+    "https://playbuddies-556cd-default-rtdb.firebaseio.com",
 };
-// Bilal Saeed 123
 
-// Initialize Firebase SDK
-// We use getApps to check if it's already initialized to prevent Next.js hot reload errors
+// getApps() guards against re-initialising across hot reloads.
 const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 
-// Use specific database ID that was in the previous config
 export const db = getFirestore(app);
 export const auth = getAuth(app);
 export const rtdb = getDatabase(app);
 export const googleProvider = new GoogleAuthProvider();
 
 export default app;
-

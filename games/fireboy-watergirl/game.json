@@ -1,0 +1,19 @@
+{
+  "id": "fireboy-watergirl",
+  "name": "Neon Elements",
+  "subtitle": "Fire & Water",
+  "description": "A neon-styled cooperative platformer. Work with your partner to solve puzzles, avoid hazards, and reach the exit together.",
+  "category": "puzzle",
+  "minPlayers": 2,
+  "maxPlayers": 2,
+  "estimatedDuration": "10-20 min",
+  "controls": "Player 1: WASD  |  Player 2: Arrow Keys",
+  "thumbnail": "thumb.webp",
+  "accent": {
+    "from": "#f97316",
+    "to": "#06b6d4"
+  },
+  "featured": true,
+  "available": true,
+  "version": "1.0.0"
+}

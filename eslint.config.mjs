@@ -5,13 +5,17 @@ import nextTs from "eslint-config-next/typescript";
 const eslintConfig = defineConfig([
   ...nextVitals,
   ...nextTs,
-  // Override default ignores of eslint-config-next.
   globalIgnores([
-    // Default ignores of eslint-config-next:
     ".next/**",
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Each game is a self-contained app with its own toolchain and is
+    // typechecked by `tsc --noEmit` from its own directory.
+    "games/**",
+    // Generated: game bundles and the game registry.
+    "public/g/**",
+    "src/lib/games.generated.ts",
   ]),
 ]);
 

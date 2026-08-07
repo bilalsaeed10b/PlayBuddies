@@ -8,47 +8,79 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useRouter } from "next/navigation";
 import { MessageCircle, X, Check } from "lucide-react";
 
+const INVITE_TTL_MS = 60_000;
+
+interface Invite {
+  id: string;
+  fromUid: string;
+  fromName: string;
+  roomId: string;
+  createdAt: number;
+}
+
 export default function InviteListener() {
-  const { user } = useAuthStore();
+  const user = useAuthStore((s) => s.user);
   const router = useRouter();
-  const [invites, setInvites] = useState<any[]>([]);
+  const [allInvites, setInvites] = useState<Invite[]>(() => []);
+  const invites = user ? allInvites : [];
 
   useEffect(() => {
     if (!user) return;
 
     const q = query(collection(db, "invites"), where("targetId", "==", user.uid));
-    
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const activeInvites: any[] = [];
-      snapshot.forEach(docSnap => {
-        const data = docSnap.data();
-        
-        // Auto-ignore strictly old invites (older than 1 minute)
-        if (Date.now() - data.timestamp > 60000) {
-          deleteDoc(doc(db, "invites", docSnap.id)).catch(() => {});
-        } else {
-          activeInvites.push({ id: docSnap.id, ...data });
-        }
-      });
-      setInvites(activeInvites);
-    });
+
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        const now = Date.now();
+        const active: Invite[] = [];
+
+        snapshot.forEach((docSnap) => {
+          const data = docSnap.data();
+          const createdAt = data.createdAt ?? data.timestamp ?? 0;
+          if (now - createdAt > INVITE_TTL_MS) {
+            // Recipient-side cleanup. Invites for users who never sign in again
+            // are swept by the scheduled cleanup, not from here.
+            deleteDoc(doc(db, "invites", docSnap.id)).catch(() => {});
+          } else {
+            active.push({
+              id: docSnap.id,
+              fromUid: data.fromUid,
+              fromName: data.fromName || "A friend",
+              roomId: data.roomId,
+              createdAt,
+            });
+          }
+        });
+
+        active.sort((a, b) => b.createdAt - a.createdAt);
+        setInvites(active);
+      },
+      (e) => console.error("Invite listener failed", e),
+    );
 
     return () => unsubscribe();
   }, [user]);
 
-  const acceptInvite = async (invite: any) => {
-    // Remove from UI optimistically
-    setInvites(prev => prev.filter(i => i.id !== invite.id));
-    // Remove from DB
-    await deleteDoc(doc(db, "invites", invite.id)).catch(() => {});
-    
-    // Navigate to lobby
+  // Expire invites on screen without needing another server round trip.
+  useEffect(() => {
+    if (invites.length === 0) return;
+    const timer = setInterval(() => {
+      const now = Date.now();
+      setInvites((prev) => prev.filter((i) => now - i.createdAt <= INVITE_TTL_MS));
+    }, 5000);
+    return () => clearInterval(timer);
+  }, [invites.length]);
+
+  const acceptInvite = async (invite: Invite) => {
+    setInvites((prev) => prev.filter((i) => i.id !== invite.id));
+    deleteDoc(doc(db, "invites", invite.id)).catch(() => {});
     router.push(`/lobby?room=${invite.roomId}`);
   };
 
   const declineInvite = async (inviteId: string) => {
-    setInvites(prev => prev.filter(i => i.id !== inviteId));
-    await deleteDoc(doc(db, "invites", inviteId)).catch(() => {});
+    setInvites((prev) => prev.filter((i) => i.id !== inviteId));
+    deleteDoc(doc(db, "invites", inviteId)).catch(() => {});
   };
 
   if (!user || invites.length === 0) return null;
@@ -56,7 +88,7 @@ export default function InviteListener() {
   return (
     <div className="fixed top-24 right-6 z-[120] flex flex-col gap-3 max-w-sm w-full">
       <AnimatePresence>
-        {invites.map(invite => (
+        {invites.map((invite) => (
           <motion.div
             key={invite.id}
             initial={{ opacity: 0, x: 50, scale: 0.9 }}
@@ -81,6 +113,7 @@ export default function InviteListener() {
                   </button>
                   <button
                     onClick={() => declineInvite(invite.id)}
+                    aria-label="Decline invite"
                     className="p-2 bg-white/5 hover:bg-white/10 text-text-muted hover:text-white rounded-xl transition-colors"
                   >
                     <X size={20} />

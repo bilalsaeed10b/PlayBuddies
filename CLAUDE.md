@@ -1,1 +1,1 @@
-@AGENTS.md
+use graphify.skill and caveman.skill

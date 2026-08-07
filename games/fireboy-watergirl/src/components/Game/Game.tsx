@@ -1,7 +1,9 @@
 import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import {
-  auth, db, signInAnonymously, onAuthStateChanged, signInWithPopup, googleProvider,
-  doc, setDoc, getDoc, onSnapshot, updateDoc, arrayUnion, serverTimestamp
+  auth, db, rtdb, signInAnonymously, onAuthStateChanged, signInWithPopup, googleProvider,
+  doc, setDoc, getDoc, onSnapshot, updateDoc, serverTimestamp,
+  addDoc, collection, query, orderBy, limit,
+  dbRef, dbSet, dbPush, dbOnValue, dbOnDisconnect, dbRemove
 } from '../../firebase';
 import { GameEngine } from '../../game/engine';
 import { Level } from '../../types';
@@ -79,6 +81,7 @@ export default function Game({
   const gameLoopRef = useRef<number | null>(null);
   const particlesRef = useRef<Particle[]>([]);
   const lastUpdateRef = useRef<number>(0);
+  const lastTimeRef = useRef<number>(0);
   const rtcRef = useRef<RTCPeerConnection | null>(null);
   const dcRef = useRef<RTCDataChannel | null>(null);
   const [rtcConnected, setRtcConnected] = useState(false);
@@ -227,45 +230,28 @@ export default function Game({
       }
       setRoomId(room);
 
+      // The platform owns the lobby document: it creates the room and seeds the
+      // player list. The game only ever adds its own `role` field.
+      //
+      // This previously replaced `players.<uid>` wholesale with a game-shaped
+      // record ({ id, ready, … }), wiping the platform's `uid` and `isReady`
+      // fields and making players disappear from the lobby roster.
       const roomRef = doc(db, 'lobbies', room);
       const roomSnap = await getDoc(roomRef);
 
       if (!roomSnap.exists()) {
-        if (isHost) {
-          console.log(`[Multiplayer] Creating room [${room}]`);
-          await setDoc(roomRef, {
-            roomId: room,
-            status: 'playing', // Bilal Saeed 123: Sync with platform status
-            level: startLevelIndex,
-            players: {
-              [uid]: { id: uid, role: null, ready: false, displayName: displayName || 'Host', photoURL: photoURL || '' }
-            },
-            chat: [],
-            collectedGems: {}
-          });
-        } else {
-          showToast("Room not found", "error");
-          return;
-        }
-      } else {
-        console.log(`[Multiplayer] Joining room [${room}]`);
-        const data = roomSnap.data();
+        showToast("Room not found", "error");
+        return;
+      }
 
-        // Bilal Saeed 123: Reset dirty 'in_game' status if host enters a stale session
-        if (isHost && data.status === 'in_game') {
-           console.log("[Multiplayer] Resetting stale in_game session");
-           await updateDoc(roomRef, { status: 'playing' });
-        }
+      const data = roomSnap.data();
+      if (!data.players?.[uid]) {
+        showToast("You're not in this lobby", "error");
+        return;
+      }
 
-        if (data.status === 'in_game' && !data.players[uid]) {
-          showToast("Game already in progress", "error");
-          return;
-        }
-        // Bilal Saeed 123
-
-        await updateDoc(roomRef, {
-          [`players.${uid}`]: { id: uid, role: null, ready: false, displayName: displayName || 'Player', photoURL: photoURL || '' }
-        });
+      if (data.players[uid].role === undefined) {
+        await updateDoc(roomRef, { [`players.${uid}.role`]: null }).catch(console.error);
       }
     };
 
@@ -302,17 +288,19 @@ export default function Game({
           });
         }
 
-        // Bilal Saeed 123
-        // Next.js wrapper passes 'playing' to mount the iframe. We intercept 'playing' to stay in the menu,
-        // and only start the engine loop when the state hits 'in_game' via the host's play button.
-        // Also ensure role is selected!
+        // The platform sets status='playing' to mount this iframe; that only
+        // gets us to the role-select menu. The engine starts once the host
+        // flips `matchStarted` and this player has picked a role.
+        //
+        // A separate field is used rather than mutating `status`, because the
+        // platform unmounts the iframe whenever status !== 'playing' — writing
+        // 'in_game' here used to tear the game down the moment it began.
         const actualRole = data.players?.[userId]?.role;
-        if (data.status === 'in_game' && (actualRole !== null && actualRole !== undefined)) {
+        if (data.matchStarted && actualRole !== null && actualRole !== undefined) {
           setGameStarted(true);
-        } else if (data.status === 'playing' || data.status === 'lobby') {
+        } else {
           setGameStarted(false);
         }
-        // Bilal Saeed 123
 
         // Sync gems
         if (engineRef.current && data.collectedGems) {
@@ -322,15 +310,26 @@ export default function Game({
           });
         }
 
-        // Sync chat
-        if (data.chat) {
-          setChatMessages(data.chat);
-        }
       }
     });
 
+    // Chat is a subcollection shared with the platform lobby. It used to be an
+    // arrayUnion field on this same document, which meant every message
+    // rewrote and re-sent the entire room doc and would eventually exceed
+    // Firestore's 1MB document limit, permanently breaking the room.
+    const unsubscribeChat = onSnapshot(
+      query(collection(db, 'lobbies', roomId, 'messages'), orderBy('createdAt', 'desc'), limit(50)),
+      (snap) => {
+        const msgs = snap.docs.map(d => ({ id: d.id, ...d.data() } as any));
+        msgs.reverse();
+        setChatMessages(msgs);
+      },
+      (err) => console.error('[Chat] listener failed', err)
+    );
+
     return () => {
       unsubscribeRoom();
+      unsubscribeChat();
     };
   }, [gameMode, roomId, userId, isHost]);
 
@@ -369,9 +368,11 @@ export default function Game({
 
   // WebRTC Setup for low-latency multiplayer
   const hasTwoPlayers = lobbyData ? Object.keys(lobbyData.players).length >= 2 : false;
+  // This game is strictly 2-player, so the peer is simply the other occupant.
+  const peerId = otherPlayerIds.split(',')[0] || '';
 
   useEffect(() => {
-    if (gameMode !== 'multi' || !roomId || !userId || !hasTwoPlayers) return;
+    if (gameMode !== 'multi' || !roomId || !userId || !hasTwoPlayers || !peerId) return;
 
     if (rtcRef.current) return;
 
@@ -416,81 +417,78 @@ export default function Game({
         };
       };
 
-      const roomRef = doc(db, 'lobbies', roomId);
+      // Signaling lives in Realtime Database, not on the lobby document.
+      // ICE candidates were previously arrayUnion'd onto that shared doc: they
+      // accumulated forever, were never cleaned up, and every candidate
+      // re-broadcast the whole document to every listener — including the
+      // platform's own lobby subscription.
+      const mineRef = dbRef(rtdb, `signaling/${roomId}/${userId}`);
+      const theirsRef = dbRef(rtdb, `signaling/${roomId}/${peerId}`);
+
+      dbOnDisconnect(mineRef).remove().catch(() => {});
+      dbRemove(mineRef).catch(() => {});
+
+      pc.onicecandidate = (e) => {
+        if (!e.candidate) return;
+        dbPush(dbRef(rtdb, `signaling/${roomId}/${userId}/candidates`), JSON.stringify(e.candidate.toJSON()))
+          .catch(console.error);
+      };
+
+      const dc = pc.createDataChannel('game-sync', { negotiated: true, id: 0 });
+      dcRef.current = dc;
+      setupDataChannel(dc);
+
+      const applyRemoteCandidates = (candidates: Record<string, string> | null) => {
+        if (!candidates) return;
+        for (const cStr of Object.values(candidates)) {
+          if (addedCandidates.has(cStr)) continue;
+          addedCandidates.add(cStr);
+          try {
+            pc.addIceCandidate(new RTCIceCandidate(JSON.parse(cStr))).catch(console.error);
+          } catch {
+            /* malformed candidate — skip it */
+          }
+        }
+      };
 
       if (isHost) {
-        const dc = pc.createDataChannel('game-sync', { negotiated: true, id: 0 });
-        dcRef.current = dc;
-        setupDataChannel(dc);
-
-        pc.onicecandidate = (e) => {
-          if (e.candidate) {
-            updateDoc(roomRef, {
-              hostCandidates: arrayUnion(JSON.stringify(e.candidate.toJSON()))
-            }).catch(console.error);
-          }
-        };
-
         try {
           const offer = await pc.createOffer();
           await pc.setLocalDescription(offer);
-          await updateDoc(roomRef, { offer: { type: offer.type, sdp: offer.sdp } });
+          await dbSet(dbRef(rtdb, `signaling/${roomId}/${userId}/desc`), {
+            type: offer.type,
+            sdp: offer.sdp,
+          });
         } catch (err) {
           console.error('[WebRTC] Error creating offer', err);
         }
 
-        unsubRoom = onSnapshot(roomRef, (snap) => {
-          const data = snap.data();
-          if (data?.answer && pc.signalingState === 'have-local-offer') {
-            pc.setRemoteDescription(new RTCSessionDescription(data.answer)).catch(console.error);
+        unsubRoom = dbOnValue(theirsRef, (snap) => {
+          const data = snap.val();
+          if (!data) return;
+          if (data.desc && pc.signalingState === 'have-local-offer') {
+            pc.setRemoteDescription(new RTCSessionDescription(data.desc)).catch(console.error);
           }
-          if (data?.clientCandidates) {
-            data.clientCandidates.forEach((cStr: string) => {
-              if (addedCandidates.has(cStr)) return;
-              addedCandidates.add(cStr);
-              try {
-                const c = JSON.parse(cStr);
-                pc.addIceCandidate(new RTCIceCandidate(c)).catch(console.error);
-              } catch (e) { }
-            });
-          }
+          applyRemoteCandidates(data.candidates);
         });
-
       } else {
-        const dc = pc.createDataChannel('game-sync', { negotiated: true, id: 0 });
-        dcRef.current = dc;
-        setupDataChannel(dc);
-
-        pc.onicecandidate = (e) => {
-          if (e.candidate) {
-            updateDoc(roomRef, {
-              clientCandidates: arrayUnion(JSON.stringify(e.candidate.toJSON()))
-            }).catch(console.error);
-          }
-        };
-
-        unsubRoom = onSnapshot(roomRef, async (snap) => {
-          const data = snap.data();
-          if (data?.offer && pc.signalingState === 'stable' && !pc.currentRemoteDescription) {
+        unsubRoom = dbOnValue(theirsRef, async (snap) => {
+          const data = snap.val();
+          if (!data) return;
+          if (data.desc && pc.signalingState === 'stable' && !pc.currentRemoteDescription) {
             try {
-              await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
+              await pc.setRemoteDescription(new RTCSessionDescription(data.desc));
               const answer = await pc.createAnswer();
               await pc.setLocalDescription(answer);
-              await updateDoc(roomRef, { answer: { type: answer.type, sdp: answer.sdp } });
+              await dbSet(dbRef(rtdb, `signaling/${roomId}/${userId}/desc`), {
+                type: answer.type,
+                sdp: answer.sdp,
+              });
             } catch (err) {
               console.error('[WebRTC] Error creating answer', err);
             }
           }
-          if (data?.hostCandidates) {
-            data.hostCandidates.forEach((cStr: string) => {
-              if (addedCandidates.has(cStr)) return;
-              addedCandidates.add(cStr);
-              try {
-                const c = JSON.parse(cStr);
-                pc.addIceCandidate(new RTCIceCandidate(c)).catch(console.error);
-              } catch (e) { }
-            });
-          }
+          applyRemoteCandidates(data.candidates);
         });
       }
     };
@@ -499,12 +497,13 @@ export default function Game({
 
     return () => {
       if (unsubRoom) unsubRoom();
+      if (userId && roomId) dbRemove(dbRef(rtdb, `signaling/${roomId}/${userId}`)).catch(() => {});
       rtcRef.current?.close();
       rtcRef.current = null;
       dcRef.current = null;
       setRtcConnected(false);
     };
-  }, [gameMode, roomId, userId, isHost, hasTwoPlayers]);
+  }, [gameMode, roomId, userId, isHost, hasTwoPlayers, peerId]);
 
   // Game loop
   useEffect(() => {
@@ -516,6 +515,14 @@ export default function Game({
     const loop = (time: number) => {
       const currentEngine = engineRef.current;
       if (!currentEngine || isGameOver) return;
+
+      // Delta time in 60fps-frame units, so physics runs at the same speed on
+      // 60Hz, 120Hz and 144Hz displays. Capped so a backgrounded tab doesn't
+      // resume with a single huge step that tunnels players through geometry.
+      const now = performance.now();
+      if (!lastTimeRef.current) lastTimeRef.current = now;
+      const dt = Math.min(3, (now - lastTimeRef.current) / (1000 / 60));
+      lastTimeRef.current = now;
 
       // Chaos Mode logic
       if (currentEngine.level.worldSettings?.chaosMode) {
@@ -545,16 +552,16 @@ export default function Game({
         if (keys.current.has('ArrowUp')) fireBoyKeys.add('KeyW');
         if (keys.current.has('ArrowLeft')) fireBoyKeys.add('KeyA');
         if (keys.current.has('ArrowRight')) fireBoyKeys.add('KeyD');
-        currentEngine.updatePlayer(currentEngine.player1, fireBoyKeys, 'KeyW', 'KeyA', 'KeyD', currentCollisions);
+        currentEngine.updatePlayer(currentEngine.player1, fireBoyKeys, 'KeyW', 'KeyA', 'KeyD', currentCollisions, dt);
       } else if (role === 'water') {
         const waterGirlKeys = new Set(keys.current);
         if (keys.current.has('KeyW')) waterGirlKeys.add('ArrowUp');
         if (keys.current.has('KeyA')) waterGirlKeys.add('ArrowLeft');
         if (keys.current.has('KeyD')) waterGirlKeys.add('ArrowRight');
-        currentEngine.updatePlayer(currentEngine.player2, waterGirlKeys, 'ArrowUp', 'ArrowLeft', 'ArrowRight', currentCollisions);
+        currentEngine.updatePlayer(currentEngine.player2, waterGirlKeys, 'ArrowUp', 'ArrowLeft', 'ArrowRight', currentCollisions, dt);
       } else if (gameMode === 'single' || role === 'both') {
         // Local co-op mode
-        currentEngine.update(keys.current);
+        currentEngine.update(keys.current, dt);
       }
       // Bilal Saeed 123: If role is null in multi, we don't process inputs!
 
@@ -567,10 +574,10 @@ export default function Game({
           // Apply movement smoothing for remote player
           const remotePlayer = role === 'fire' ? currentEngine.player2 : currentEngine.player1;
           if (!remotePlayer.isDead && !remotePlayer.atDoor) {
-            remotePlayer.x += remotePlayer.vx;
-            remotePlayer.y += remotePlayer.vy;
+            remotePlayer.x += remotePlayer.vx * dt;
+            remotePlayer.y += remotePlayer.vy * dt;
             // Apply gravity if not on ground (simplified)
-            if (remotePlayer.vy < 15) remotePlayer.vy += currentEngine.gravity;
+            if (remotePlayer.vy < 15) remotePlayer.vy += currentEngine.gravity * dt;
           }
       }
 
@@ -604,7 +611,7 @@ export default function Game({
         }
       }
 
-      currentEngine.updateEntities();
+      currentEngine.updateEntities(dt);
 
       draw(ctx, currentEngine, time);
 
@@ -636,6 +643,7 @@ export default function Game({
       gameLoopRef.current = requestAnimationFrame(loop);
     };
 
+    lastTimeRef.current = 0; // restart the clock so a resumed loop starts at dt=1
     gameLoopRef.current = requestAnimationFrame(loop);
     return () => {
       if (gameLoopRef.current) cancelAnimationFrame(gameLoopRef.current);
@@ -1682,26 +1690,20 @@ export default function Game({
   };
 
   const sendChat = (msg: string, emoji?: string) => {
-    if (gameMode === 'multi' && roomId && userId) {
-      const roomRef = doc(db, 'lobbies', roomId);
-      updateDoc(roomRef, {
-        chat: arrayUnion({
-          id: userId,
-          message: msg,
-          emoji,
-          role,
-          timestamp: Date.now()
-        })
-      });
-    }
+    if (gameMode !== 'multi' || !roomId || !userId) return;
+    const text = (emoji ? `${emoji} ${msg}` : msg).trim().slice(0, 200);
+    if (!text) return;
+    addDoc(collection(db, 'lobbies', roomId, 'messages'), {
+      uid: userId,
+      displayName: displayName || 'Player',
+      text,
+      createdAt: Date.now(),
+    }).catch(console.error);
   };
 
   const handleStartMultiplayer = () => {
-    // Bilal Saeed 123
-    if (lobbyData?.status === 'playing' && roomId) {
-      const roomRef = doc(db, 'lobbies', roomId);
-      updateDoc(roomRef, { status: 'in_game' });
-    }
+    if (!isHost || !roomId) return;
+    updateDoc(doc(db, 'lobbies', roomId), { matchStarted: true }).catch(console.error);
   };
 
   const selectRole = (selectedRole: 'fire' | 'water') => {
@@ -1746,7 +1748,7 @@ export default function Game({
               <div className="grid grid-cols-2 gap-6 mb-8">
                 <button
                   onClick={() => selectRole('fire')}
-                  disabled={Object.values(lobbyData?.players || {}).some((p: any) => p.role === 'fire' && p.id !== userId)}
+                  disabled={Object.values(lobbyData?.players || {}).some((p: any) => p.role === 'fire' && p.uid !== userId)}
                   className={`relative p-6 rounded-2xl border-2 transition-all ${role === 'fire' ? 'border-orange-500 bg-orange-500/20' : 'border-white/10 bg-zinc-900 hover:border-orange-500/50'
                     } disabled:opacity-30 disabled:cursor-not-allowed`}
                 >
@@ -1759,7 +1761,7 @@ export default function Game({
 
                 <button
                   onClick={() => selectRole('water')}
-                  disabled={Object.values(lobbyData?.players || {}).some((p: any) => p.role === 'water' && p.id !== userId)}
+                  disabled={Object.values(lobbyData?.players || {}).some((p: any) => p.role === 'water' && p.uid !== userId)}
                   className={`relative p-6 rounded-2xl border-2 transition-all ${role === 'water' ? 'border-cyan-500 bg-cyan-500/20' : 'border-white/10 bg-zinc-900 hover:border-cyan-500/50'
                     } disabled:opacity-30 disabled:cursor-not-allowed`}
                 >
@@ -1775,11 +1777,11 @@ export default function Game({
                 <div className="text-xs text-zinc-500 uppercase mb-3 font-bold">Players in Lobby ({Object.keys(lobbyData?.players || {}).length}/2)</div>
                 <div className="flex flex-col gap-2">
                   {lobbyData?.players && Object.values(lobbyData.players).map((p: any) => (
-                    <div key={p.id} className="flex items-center justify-between bg-black/30 px-4 py-2 rounded-lg border border-white/5">
+                    <div key={p.uid} className="flex items-center justify-between bg-black/30 px-4 py-2 rounded-lg border border-white/5">
                       <div className="flex items-center gap-3">
-                        <div className={`w-2 h-2 rounded-full ${p.id === userId ? 'bg-green-500' : 'bg-zinc-500'}`} />
+                        <div className={`w-2 h-2 rounded-full ${p.uid === userId ? 'bg-green-500' : 'bg-zinc-500'}`} />
                         <span className="font-mono text-sm text-zinc-300">
-                          {p.id === userId ? 'YOU' : `PLAYER (${p.id?.substring(0, 4) || '....'})`}
+                          {p.uid === userId ? 'YOU' : `PLAYER (${p.uid?.substring(0, 4) || '....'})`}
                         </span>
                       </div>
                       {p.role && (
@@ -1972,10 +1974,10 @@ export default function Game({
                 className="absolute top-0 right-0 bottom-0 w-64 bg-black/80 backdrop-blur-md border-l border-white/10 p-4 flex flex-col"
               >
                 <div className="flex-1 overflow-y-auto space-y-2 mb-4">
-                  {chatMessages.map((msg, i) => (
-                    <div key={i} className={`text-sm ${msg.role === 'fire' ? 'text-orange-400' : 'text-cyan-400'}`}>
-                      <span className="font-bold opacity-50">{msg.role}: </span>
-                      {msg.message} {msg.emoji}
+                  {chatMessages.map((msg) => (
+                    <div key={msg.id} className={`text-sm ${msg.uid === userId ? 'text-orange-400' : 'text-cyan-400'}`}>
+                      <span className="font-bold opacity-50">{msg.displayName}: </span>
+                      {msg.text}
                     </div>
                   ))}
                 </div>
