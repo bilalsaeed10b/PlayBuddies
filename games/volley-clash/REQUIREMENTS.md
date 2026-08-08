@@ -50,8 +50,14 @@ Rules that follow from the table:
 
 | | Width | Height | Net height | Reason |
 |---|---|---|---|---|
-| Standard (2P) | 1280 | 720 | 210 | Two players; the court should feel tight enough that positioning matters. |
-| Wide (4P) | 1760 | 780 | 230 | Four bodies need lateral room or 2v2 collapses into a scrum at the net. The taller net keeps rallies alive now that two people can block. |
+| Standard (2P) | 1280 | 720 | 175 | Two players; the court should feel tight enough that positioning matters. |
+| Wide (4P) | 1760 | 780 | 190 | Four bodies need lateral room or 2v2 collapses into a scrum at the net. The taller net keeps rallies alive now that two people can block. |
+
+**Net height is derived, not chosen.** It is set from how high a jumping player
+can reach, so that a held jump gets a player meaningfully above the tape. Lower
+the jump without lowering the net and nothing can be spiked; nothing can be
+spiked, so nothing is ever unreturnable, and rallies run to a hundred touches
+without a point. The absolute numbers do not matter — the gap does.
 
 - **R2.5** The arena is chosen once at match start from the player count and
   never changes mid-match.
@@ -73,7 +79,7 @@ Rules that follow from the table:
   bar, not a plane the ball passes through. Clipping the tape and dribbling over
   is a legitimate and delightful outcome, so the collision must be a real
   circle-vs-rounded-rectangle test, not an axis test.
-- **R3.5** The ball's speed is capped. Uncapped, a charged spike off a dashing
+- **R3.5** The ball's speed is capped. Uncapped, a spike off a dashing
   player tunnels through the floor.
 - **R3.6** Continuous collision against the floor: at spike speeds the ball
   moves further per frame than its own diameter, and a naive `y > floor` test
@@ -92,9 +98,12 @@ simple — the depth comes from timing, not from a complex character controller.
 - **R4.3** **Dash.** A short horizontal burst on a cooldown, usable in the air
   exactly once per airtime. This is the whole movement skill ceiling: a dash
   used to reach a ball is a save, a dash used into the ball is a spike.
-- **R4.4** **Charge.** Holding the action key builds charge up to a maximum.
-  Contact with the ball while charged multiplies the hit power and adds a
-  screen shake and a trail. Charging slows the player, so it is a real choice.
+- **R4.4** There is **no charge, and no space bar.** Holding a key to build a
+  power shot turned every contact into "did I hold it long enough" rather than
+  "did I get under the ball", it had no honest mapping on a touchscreen, and on
+  a shared keyboard the space bar was the key both players reached for. The
+  power that used to come from a full charge is folded into the base hit, so
+  the game is no slower for losing it.
 - **R4.5** Players collide with each other (soft push-apart) but cannot pass
   through the net or the walls, and cannot cross into the opponent's half.
 - **R4.6** Hitting the ball is not a button press — it is **contact**. Where the
@@ -117,22 +126,31 @@ Eight characters, three free, the rest bought with the platform's coin balance
 (the same `localStorage` economy Fish Eat Fish uses, so a player's coins mean
 something across the site).
 
-Each has three stats in the 0.80–1.20 range: **speed**, **jump**, **power**.
-No character is strictly better than another — every stat total is equal.
-The roster exists so 2v2 teams can be built out of complementary bodies, not so
-that a paying player wins.
+**They are skins. There are no stats.** They used to carry speed / jump / power
+multipliers, balanced so every line summed to the same total. Even then, two
+players in the same match were playing marginally different games and every loss
+had an excuse attached. A 1v1 sport is decided by who read the ball better, so
+the numbers are gone: Rookie and Titan differ only in colour and hat.
 
 - **R4.9** Two players in the same match cannot pick the same character.
-- **R4.10** Every character's three stats sum to exactly 3.00 and none sits
-  outside 0.80–1.20. A character that clearly wins is a bug, and a shop that
-  sells one is worse than no shop.
+- **R4.10** No character may ever affect movement, jump or hit power. A shop
+  that sells an advantage in a competitive game is worse than no shop.
+- **R4.11** Every contact adds a fixed upward pop on top of the bounce, capped
+  so it cannot compound. Without the pop, a touch taken slightly off-centre
+  skids away flat and the rally dies; without the cap, each touch adds more
+  height than gravity removes and the ball never comes down at all — that
+  version produced a single rally of 187 touches.
 
 ## 5. Scoring
 
 - **R5.1** Rally scoring: every rally ends in a point for someone.
 - **R5.2** First to 7, win by 2, hard cap at 11. (Configurable to 5 or 11 in
   the settings; the host's choice is the one that counts online.)
-- **R5.3** The ball touching the floor scores for the **other** side.
+- **R5.3** The ball touching the floor scores for the **other** side — on the
+  *touch*, not once it has stopped moving. The ball still visibly bounces
+  afterwards, but that bounce plays out during the point delay and cannot be
+  hit: gating the point on the ball coming to rest meant both sides simply kept
+  playing it off the sand and no point was ever scored.
 - **R5.4** After a point, the side that conceded serves. The ball hangs above
   the server's own head and drops after a short countdown, and **the first
   contact after a serve is multiplied by 1.45**.
@@ -191,15 +209,22 @@ worth playing.
 
 ## 8. Controls
 
-| | Move | Jump | Dash | Charge |
+| | Move | Jump | Dash | |
 |---|---|---|---|---|
-| P1 keyboard | A / D | W | Shift | Space |
-| P2 keyboard | ← / → | ↑ | / | Enter |
-| Touch | Drag anywhere left half | Tap right | — | Hold right |
+| P1 keyboard | A / D | W | Left Shift | — |
+| P2 keyboard | ← / → | ↑ | Right Shift or / | — |
+| Touch | Drag anywhere in the left half | Tap the right half | — | — |
 
-- **R8.1** On a touchscreen the joystick appears under the thumb (the same
-  dynamic-origin stick Fish Eat Fish uses) and the action buttons sit on the
-  right. Jump is a tap, charge is a hold — the same button.
+- **R8.1** On a touchscreen the whole screen is the controller, and it is the
+  **same scheme Neon Elements uses**, so one PlayBuddies game teaches you how to
+  hold the next: the left half is a joystick that appears under your thumb and
+  steers left/right only, the right half is jump. Both halves work at once. No
+  floating buttons — a button beside the court is a target you have to find, and
+  it costs the court the space it sits in.
+- **R8.4** The first touch of a match requests fullscreen. The Fullscreen API
+  only grants a request that is handling a real user gesture, so asking at any
+  other moment silently fails and the game stays boxed in between the browser's
+  address bar and its nav bar.
 - **R8.2** Keyboard layout is remappable between the two sets in settings, for
   couch play where one person prefers arrows.
 - **R8.3** Full-screen works on iOS Safari, which has no Fullscreen API on

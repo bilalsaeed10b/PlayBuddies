@@ -103,7 +103,7 @@ export class MatchEngine {
   private offY = 0;
 
   /** Targets from the newest snapshot. Empty on the host. */
-  private target: { ball: Ball | null; players: Map<string, { x: number; y: number; r: number; charge: number }> } = {
+  private target: { ball: Ball | null; players: Map<string, { x: number; y: number; r: number }> } = {
     ball: null,
     players: new Map(),
   };
@@ -141,7 +141,6 @@ export class MatchEngine {
       dashLeft: 0,
       dashCd: 0,
       airDashUsed: false,
-      charge: 0,
       hitCd: 0,
       brain: newBrain(),
     };
@@ -162,7 +161,7 @@ export class MatchEngine {
       const mates = this.players.filter((p) => p.team === team);
       mates.forEach((p, i) => {
         // Two per side stagger front and back; one per side stands mid-court.
-        const t = mates.length > 1 ? (i === 0 ? 0.62 : 0.28) : 0.48;
+        const t = mates.length > 1 ? (i === 0 ? 0.55 : 0.22) : 0.46;
         p.x = team === 0 ? netX * t : w - netX * t;
         p.y = floor;
         p.vx = 0;
@@ -172,7 +171,6 @@ export class MatchEngine {
         p.dashLeft = 0;
         p.dashCd = 0;
         p.airDashUsed = false;
-        p.charge = 0;
         p.hitCd = 0;
         p.facing = team === 0 ? 1 : -1;
         p.r = BALANCE.PLAYER_R;
@@ -252,10 +250,11 @@ export class MatchEngine {
     }
     this.separatePlayers();
 
-    if (this.phase === 'rally') {
-      this.moveBall(dt);
-      this.movePowerUps(dt);
-    }
+    // The ball keeps moving through the point delay so its bounce plays out
+    // on screen; `contact` is rally-only, so nobody can touch it once the point
+    // has been awarded.
+    if (this.phase === 'rally' || this.phase === 'point') this.moveBall(dt);
+    if (this.phase === 'rally') this.movePowerUps(dt);
     for (const p of this.players) this.contact(p);
 
     this.expirePowers(dt);
@@ -272,22 +271,16 @@ export class MatchEngine {
   // ── players ───────────────────────────────────────────────────────────────
 
   private movePlayer(p: Player, input: Input, dt: number) {
-    const ch = CHARACTERS[p.character];
-    const frozen = this.hasPower('freeze', p.team === 0 ? 1 : 0) ? BALANCE.POWER_FREEZE_SLOW : 1;
-    const charging = input.charge && this.phase === 'rally';
-    const mobility = ch.speed * frozen * (charging ? BALANCE.CHARGE_SLOW : 1);
-
-    // Charge builds while held and dumps the moment it is released, so a player
-    // who mistimes it loses the wind-up rather than keeping it banked.
-    p.charge = charging ? Math.min(1, p.charge + dt / BALANCE.CHARGE_TIME) : 0;
-    if (this.hasPower('rocket', p.team)) p.charge = 1;
+    // Characters are skins. Freeze is the only thing that changes how a body
+    // moves, and it applies to a whole team at once.
+    const mobility = this.hasPower('freeze', p.team === 0 ? 1 : 0) ? BALANCE.POWER_FREEZE_SLOW : 1;
 
     const dir = (input.right ? 1 : 0) - (input.left ? 1 : 0);
     if (dir !== 0) p.facing = dir > 0 ? 1 : -1;
 
     if (p.dashLeft > 0) {
       p.dashLeft -= dt;
-      p.vx = p.facing * BALANCE.DASH_SPEED * ch.speed;
+      p.vx = p.facing * BALANCE.DASH_SPEED;
     } else {
       const accel = (p.onGround ? BALANCE.RUN_ACCEL : BALANCE.AIR_ACCEL) * mobility;
       const cap = BALANCE.MAX_RUN * mobility;
@@ -308,17 +301,18 @@ export class MatchEngine {
       this.puff(p.x, p.y, TEAM_COLORS[p.team].light, 8, 130);
     }
 
-    // Variable-height jump: the initial impulse is the same every time, and the
-    // extra lift only lands if the key is still down. A fixed jump makes every
-    // set identical, which is the fastest way to make a volleyball game boring.
+    // Variable-height jump: the initial impulse is fixed — all characters jump
+    // the same height so nobody is at a fundamental disadvantage. The hold
+    // extension (JUMP_HOLD_ACCEL) adds a tiny extra arc if the key stays down,
+    // which is what makes a set feel different from a spike.
     if (input.jump && p.onGround) {
-      p.vy = -BALANCE.JUMP_V * ch.jump;
+      p.vy = -BALANCE.JUMP_V;
       p.onGround = false;
       p.jumpHeld = 0;
       this.puff(p.x, p.y, '#fde68a', 6, 110);
     } else if (!p.onGround && p.jumpHeld >= 0) {
       if (input.jump && p.jumpHeld < BALANCE.JUMP_HOLD) {
-        p.vy -= BALANCE.JUMP_HOLD_ACCEL * ch.jump * dt;
+        p.vy -= BALANCE.JUMP_HOLD_ACCEL * dt;
         p.jumpHeld += dt;
       } else {
         p.jumpHeld = -1;
@@ -441,7 +435,31 @@ export class MatchEngine {
 
     if (b.y >= floor - R) {
       b.y = floor - R;
+
+      /**
+       * The touch *is* the point.
+       *
+       * The bounce below used to gate it — the rally only ended once the ball
+       * had dribbled to a near-stop, so both sides simply kept playing it off
+       * the sand and AI-vs-AI rallies ran to 187 touches without a single point
+       * being scored. In volleyball the floor ends the rally the instant it is
+       * touched, full stop.
+       *
+       * The hop is kept, because a ball that dies flat looks dead — it just
+       * plays out during the point delay now, after the score is already in.
+       * `land()` ignores anything but the first call, and `contact()` is
+       * rally-only, so nobody can play these bounces.
+       */
       this.land();
+
+      if (b.vy > 80) {
+        b.vy = -Math.abs(b.vy) * BALANCE.FLOOR_BOUNCE;
+        b.vx *= 0.92;
+        this.puff(b.x, floor, '#e7c489', 8, 180);
+      } else {
+        b.vy = 0;
+        b.vx *= 0.8;
+      }
     }
 
     this.trail.push({ x: b.x, y: b.y });
@@ -455,10 +473,8 @@ export class MatchEngine {
     this.puff(this.ball.x, this.arena.floor, '#e7c489', 22, 260);
     this.shake = Math.max(this.shake, 7);
     if (!this.cfg.isHost) {
-      // A client stops the ball and waits to be told the score. Guessing here is
-      // how two screens end up disagreeing about who won.
-      this.ball.vx = 0;
-      this.ball.vy = 0;
+      // A client shows the bounce but waits to be told the score. Guessing here
+      // is how two screens end up disagreeing about who won.
       this.phase = 'point';
       return;
     }
@@ -469,8 +485,6 @@ export class MatchEngine {
     this.score[team]++;
     this.phase = 'point';
     this.phaseTimer = BALANCE.POINT_DELAY;
-    this.ball.vx = 0;
-    this.ball.vy = 0;
 
     const call =
       this.touches <= 1
@@ -546,11 +560,12 @@ export class MatchEngine {
       dy /= len;
     }
 
-    const ch = CHARACTERS[p.character];
     const incoming = Math.hypot(b.vx, b.vy);
+    // Rocket is the only thing that changes hit power now that the charge meter
+    // is gone, and it multiplies the shot directly instead of faking a full
+    // wind-up.
     const rocket = this.hasPower('rocket', p.team);
-    const charge = rocket ? 1 : p.charge;
-    const power = ch.power * (1 + charge * BALANCE.CHARGE_GAIN) * (this.serveShot ? BALANCE.SERVE_BONUS : 1);
+    const power = (rocket ? BALANCE.POWER_ROCKET_HIT : 1) * (this.serveShot ? BALANCE.SERVE_BONUS : 1);
     this.serveShot = false;
     const speed = Math.min(
       BALANCE.BALL_MAX_SPEED,
@@ -561,22 +576,37 @@ export class MatchEngine {
     b.y = p.y + dy * (min + 1);
     b.vx = dx * speed + p.vx * BALANCE.HIT_CARRY;
     b.vy = dy * speed + p.vy * BALANCE.HIT_CARRY * 0.5;
+
+    // The pop. Every touch lifts the ball, on top of whatever the contact
+    // normal did — a volleyball coming off a forearm goes *up*, and without
+    // this a slightly-off contact skidded away flat and killed the rally.
+    // A downward spike keeps most of its bite: it is scaled back, not cancelled.
+    // Only balls that are already heading up get the pop. Lifting a downward
+    // spike as well was softening the one shot that is supposed to end a rally.
+    if (b.vy < 0) {
+      b.vy -= BALANCE.BOUNCE_LIFT;
+      if (b.vy < -BALANCE.MAX_UP) b.vy = -BALANCE.MAX_UP;
+    }
+
     b.spin = clamp(p.vx * BALANCE.SPIN_FROM_HIT, -BALANCE.MAX_SPIN, BALANCE.MAX_SPIN);
     b.lastTeam = p.team;
     b.lastHitter = p.id;
 
     p.hitCd = BALANCE.HIT_COOLDOWN;
-    p.charge = 0;
     this.touches++;
-    this.lastPower = charge;
+
+    const outgoing = Math.hypot(b.vx, b.vy);
+    const heat = clamp(outgoing / BALANCE.BALL_MAX_SPEED, 0, 1);
+    this.lastPower = heat;
 
     if (rocket) this.dropPower('rocket');
 
-    const heat = clamp(speed / BALANCE.BALL_MAX_SPEED, 0, 1);
-    this.shake = Math.max(this.shake, heat * 9 * (charge > 0.5 ? 1 : 0.4));
+    this.shake = Math.max(this.shake, heat * 9);
     this.puff(b.x, b.y, TEAM_COLORS[p.team].light, 6 + Math.round(heat * 14), 120 + heat * 260);
-    this.cfg.onHit?.(charge);
-    if (charge > 0.85 && dy > 0.15) this.say('SPIKE!');
+    this.cfg.onHit?.(heat);
+    // A spike is now a fact about the ball rather than about a held key: fast,
+    // and heading down into the other half.
+    if (heat > 0.7 && b.vy > 120) this.say('SPIKE!');
     else if (this.touches === 6) this.say('RALLY x6');
   }
 
@@ -669,7 +699,6 @@ export class MatchEngine {
         Math.round(q.vx),
         Math.round(q.vy),
         Math.round(q.r),
-        Math.round(q.charge * 100) / 100,
         (q.onGround ? 1 : 0) | (q.facing === 1 ? 2 : 0) | (q.dashLeft > 0 ? 4 : 0),
       ];
     }
@@ -720,15 +749,15 @@ export class MatchEngine {
     };
     this.target.players.clear();
     for (const [id, d] of Object.entries(s.p)) {
-      this.target.players.set(id, { x: d[0], y: d[1], r: d[4], charge: d[5] });
+      this.target.players.set(id, { x: d[0], y: d[1], r: d[4] });
       const local = this.players.find((q) => q.id === id);
       if (local && local.control !== 'local') {
         // Remote bodies take the host's velocity outright — there is nothing to
         // predict for them, so the smoothest result is to follow exactly.
         local.vx = d[2];
         local.vy = d[3];
-        local.onGround = (d[6] & 1) !== 0;
-        local.facing = (d[6] & 2) !== 0 ? 1 : -1;
+        local.onGround = (d[5] & 1) !== 0;
+        local.facing = (d[5] & 2) !== 0 ? 1 : -1;
       }
     }
   }
@@ -760,7 +789,6 @@ export class MatchEngine {
       p.x += (t.x - p.x) * k;
       p.y += (t.y - p.y) * k;
       p.r = t.r;
-      if (!inputs.has(p.id)) p.charge = t.charge;
     }
   }
 
@@ -869,7 +897,6 @@ export class MatchEngine {
       p.y - p.r * 0.55,
       p.r,
       p.facing,
-      p.charge,
       TEAM_COLORS[p.team].main,
     );
 

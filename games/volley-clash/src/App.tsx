@@ -55,7 +55,7 @@ const DEFAULT_SETTINGS: GameSettings = {
   powerUps: true,
 };
 
-type View = 'menu' | 'solo' | 'couch' | 'room' | 'game';
+type View = 'menu' | 'solo' | 'couch' | 'room' | 'game' | 'offline_menu';
 
 interface LobbyPerson {
   uid: string;
@@ -225,13 +225,38 @@ export default function App() {
     );
   }
 
+  /**
+   * Every empty seat gets a bot.
+   *
+   * This used to fill the fourth slot of a three-person lobby and nothing else,
+   * which meant a lobby with one person in it — the platform's solo mode, or
+   * simply being first into the room — started a match with **no opponent on
+   * the court at all**. The ball landed on an empty half over and over and the
+   * score climbed on its own.
+   *
+   * Ids and characters are derived, never random: the host simulates the bots
+   * and every client draws them, so all of them have to agree on who is there
+   * and what they look like without exchanging a word about it.
+   */
   function onlineConfig(): MatchConfig {
+    const perTeam = people.length > 2 ? 2 : 1;
+    const taken = new Set(people.map((p) => p.character).filter((c): c is number => c !== null && c !== undefined));
+    const pool = FREE_CHARACTERS.filter((c) => !taken.has(c));
+
     const bots: MatchConfig['bots'] = [];
-    // A three-person lobby plays 2v2 with a bot rather than not playing at all.
-    if (people.length === 3) {
-      const short: Team = people.filter((p) => p.team === 0).length < 2 ? 0 : 1;
-      bots.push({ id: 'bot-fill', team: short, character: 0, level: 1, name: 'Bot' });
+    for (const team of [0, 1] as Team[]) {
+      const humans = people.filter((p) => p.team === team).length;
+      for (let i = humans; i < perTeam; i++) {
+        bots.push({
+          id: `bot-${team}-${i}`,
+          team,
+          character: pool[bots.length % Math.max(1, pool.length)] ?? 0,
+          level: aiLevel,
+          name: TIERS[aiLevel].label,
+        });
+      }
     }
+
     return {
       roomId: handoff.room,
       uid,
@@ -295,12 +320,34 @@ export default function App() {
         />
       )}
 
+      {view === 'offline_menu' && (
+        <Menu
+          coins={coins}
+          onSolo={() => {
+            audioService.unlock();
+            setSeatCount(1);
+            setSeatChar({});
+            setView('solo');
+          }}
+          onCouch={() => {
+            audioService.unlock();
+            setSeatCount(2);
+            setSeatChar({});
+            setView('couch');
+          }}
+          onSettings={() => setShowSettings(true)}
+          aiLevel={aiLevel}
+          onAiLevel={setAiLevel}
+          onBack={online ? () => setView('room') : undefined}
+        />
+      )}
+
       {(view === 'solo' || view === 'couch') && (
         <OfflinePick
           seatCount={seatCount}
           owned={owned}
           coins={coins}
-          onBack={() => setView('menu')}
+          onBack={() => setView(online ? 'offline_menu' : 'menu')}
           onBuy={buy}
           onDone={(picks) => {
             setSeatChar(picks);
@@ -324,6 +371,7 @@ export default function App() {
           onStart={startMatch}
           onSettings={() => setShowSettings(true)}
           onFullscreen={() => toggleFullscreen(document.documentElement, !document.fullscreenElement)}
+          onPlayOffline={() => { audioService.unlock(); setView('offline_menu'); }}
         />
       )}
 
@@ -349,6 +397,7 @@ function Menu({
   onSettings,
   aiLevel,
   onAiLevel,
+  onBack,
 }: {
   coins: number;
   onSolo: () => void;
@@ -356,9 +405,17 @@ function Menu({
   onSettings: () => void;
   aiLevel: number;
   onAiLevel: (n: number) => void;
+  onBack?: () => void;
 }) {
   return (
     <div className="flex h-full flex-col items-center justify-center gap-7 overflow-y-auto p-6">
+      {onBack && (
+        <div className="absolute left-4 top-4">
+          <button onClick={onBack} className="panel rounded-2xl p-3">
+            <ArrowLeft className="h-5 w-5" />
+          </button>
+        </div>
+      )}
       <div className="text-center">
         <div className="mb-4 inline-block rounded-3xl bg-amber-400/20 p-4">
           <Volleyball className="h-14 w-14 text-amber-300" />
@@ -398,13 +455,21 @@ function Menu({
           onClick={onCouch}
           className="w-full rounded-2xl border border-white/25 bg-white/10 py-4 font-black transition-colors hover:bg-white/20"
         >
-          Couch — two on one keyboard
+          Offline 1v1 — two players, one PC
+          <span className="mt-1 block text-[11px] font-bold normal-case tracking-normal text-white/50">
+            Player 1 on A / D / W · Player 2 on the arrow keys
+          </span>
         </button>
 
-        <p className="text-center text-xs text-white/50">
-          Playing online? Start a lobby on PlayBuddies and pick this game. Two players face off; three or four play
-          2v2 on a wider court.
-        </p>
+        <div className="rounded-2xl bg-black/25 p-3 text-center text-xs leading-relaxed text-white/50">
+          <p className="mb-1 font-black uppercase tracking-[0.15em] text-white/40">Controls</p>
+          <p>Move left and right, jump. That is it — where the ball hits you decides where it goes.</p>
+          <p className="mt-1">Touchscreen: drag the left half to move, tap the right half to jump.</p>
+          <p className="mt-2 text-white/40">
+            Playing online? Start a lobby on PlayBuddies and pick this game. Two players face off; three or four
+            play 2v2 on a wider court.
+          </p>
+        </div>
       </div>
 
       <div className="flex items-center gap-3">
@@ -431,23 +496,23 @@ function Portrait({ index, size = 68 }: { index: number; size?: number }) {
       if (!ctx) return;
       ctx.scale(dpr, dpr);
       ctx.clearRect(0, 0, size, size);
-      drawCharacter(ctx, CHARACTERS[index], size / 2, size * 0.62, size * 0.34, 1, 0, 'rgba(255,255,255,0.28)');
+      drawCharacter(ctx, CHARACTERS[index], size / 2, size * 0.62, size * 0.34, 1, 'rgba(255,255,255,0.28)');
     },
     [index, size],
   );
   return <canvas ref={ref} style={{ width: size, height: size }} />;
 }
 
-function StatBar({ label, value }: { label: string; value: number }) {
-  // 0.8–1.2 mapped across the bar, so the differences are visible rather than
-  // four near-identical full bars.
-  const t = Math.max(0, Math.min(1, (value - 0.8) / 0.4));
+/**
+ * Stat bars used to live here, one row each for speed, jump and power. They are
+ * gone with the stats: showing three identical full bars on every card would
+ * imply a choice that no longer exists, and hinting at one is worse than
+ * saying plainly that these are skins.
+ */
+function SkinNote() {
   return (
-    <div className="flex items-center gap-1.5">
-      <span className="w-9 shrink-0 text-[9px] font-black uppercase tracking-wider opacity-60">{label}</span>
-      <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-black/25">
-        <div className="h-full rounded-full bg-amber-400" style={{ width: `${12 + t * 88}%` }} />
-      </div>
+    <div className="rounded-lg bg-black/25 px-2 py-1 text-center text-[9px] font-black uppercase tracking-[0.15em] text-white/45">
+      Skin only · same stats
     </div>
   );
 }
@@ -497,10 +562,8 @@ function CharacterGrid({
             )}
             <Portrait index={index} />
             <span className="text-sm font-black uppercase tracking-wide">{ch.name}</span>
-            <div className="w-full space-y-1">
-              <StatBar label="spd" value={ch.speed} />
-              <StatBar label="jmp" value={ch.jump} />
-              <StatBar label="pwr" value={ch.power} />
+            <div className="w-full">
+              <SkinNote />
             </div>
             <span className="text-[10px] leading-tight text-white/50">{ch.blurb}</span>
             {taken && <span className="text-[9px] font-black uppercase text-rose-300">{taken}</span>}
@@ -602,6 +665,7 @@ function RoomScreen({
   onStart,
   onSettings,
   onFullscreen,
+  onPlayOffline,
 }: {
   ready: boolean;
   error: string | null;
@@ -616,6 +680,7 @@ function RoomScreen({
   onStart: () => void;
   onSettings: () => void;
   onFullscreen: () => void;
+  onPlayOffline: () => void;
 }) {
   const takenBy = useMemo(() => {
     const map: Record<number, string> = {};
@@ -683,6 +748,12 @@ function RoomScreen({
             {iAmReady ? 'Waiting for the host…' : 'Pick a character to be ready.'}
           </p>
         )}
+        <button
+          onClick={onPlayOffline}
+          className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl border border-white/20 bg-white/5 py-2.5 text-sm font-black text-white/70 transition-colors hover:bg-white/15"
+        >
+          Play Offline / Couch
+        </button>
       </div>
 
       <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[auto_minmax(0,1fr)] gap-3 sm:gap-4 lg:grid-cols-3 lg:grid-rows-[minmax(0,1fr)]">
@@ -753,6 +824,12 @@ function RoomScreen({
                 {!iAmReady ? 'Pick a character to be ready.' : 'Waiting for the host…'}
               </p>
             )}
+            <button
+              onClick={onPlayOffline}
+              className="mt-3 flex w-full items-center justify-center gap-2 rounded-2xl border border-white/20 bg-white/5 py-3 font-black text-white/60 transition-colors hover:bg-white/15"
+            >
+              Play Offline / Couch
+            </button>
           </div>
         </div>
       </div>

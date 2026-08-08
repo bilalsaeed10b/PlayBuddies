@@ -20,19 +20,27 @@ export type PowerKind = 'rocket' | 'feather' | 'giant' | 'freeze';
  */
 export type Control = 'local' | 'remote' | 'ai';
 
+/**
+ * Move, jump, dash. That is the whole game.
+ *
+ * There used to be a fourth: hold to charge a power shot, on the space bar. It
+ * is gone. A charge meter turns every contact into "did I hold it long enough"
+ * rather than "did I get under the ball", and on a touchscreen it had no honest
+ * mapping at all. Contact and position decide the shot now, which is what the
+ * game was always actually about.
+ */
 export interface Input {
   left: boolean;
   right: boolean;
   jump: boolean;
   dash: boolean;
-  charge: boolean;
 }
 
-export const NO_INPUT: Input = { left: false, right: false, jump: false, dash: false, charge: false };
+export const NO_INPUT: Input = { left: false, right: false, jump: false, dash: false };
 
-/** Inputs go over the wire as one byte. Five booleans do not deserve JSON. */
+/** Inputs go over the wire as one byte. Four booleans do not deserve JSON. */
 export function packInput(i: Input): number {
-  return (i.left ? 1 : 0) | (i.right ? 2 : 0) | (i.jump ? 4 : 0) | (i.dash ? 8 : 0) | (i.charge ? 16 : 0);
+  return (i.left ? 1 : 0) | (i.right ? 2 : 0) | (i.jump ? 4 : 0) | (i.dash ? 8 : 0);
 }
 
 export function unpackInput(b: number): Input {
@@ -41,7 +49,6 @@ export function unpackInput(b: number): Input {
     right: (b & 2) !== 0,
     jump: (b & 4) !== 0,
     dash: (b & 8) !== 0,
-    charge: (b & 16) !== 0,
   };
 }
 
@@ -71,8 +78,6 @@ export interface Player {
   dashLeft: number;
   dashCd: number;
   airDashUsed: boolean;
-  /** 0–1. Multiplies hit power, and slows the player while it builds. */
-  charge: number;
   /** Blocks a second contact for a moment, so the ball can't stick to a body. */
   hitCd: number;
 
@@ -137,7 +142,6 @@ export type PlayerPacket = [
   vx: number,
   vy: number,
   r: number,
-  charge: number,
   flags: number,
 ];
 

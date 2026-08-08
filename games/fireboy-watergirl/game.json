@@ -7,7 +7,7 @@
   "minPlayers": 2,
   "maxPlayers": 2,
   "estimatedDuration": "10-20 min",
-  "controls": "Player 1: WASD  |  Player 2: Arrow Keys",
+  "controls": "Fire: WASD  |  Water: Arrow Keys  |  Touch: drag the left half to move, tap the right half to jump",
   "thumbnail": "thumb.webp",
   "accent": {
     "from": "#f97316",

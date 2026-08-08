@@ -27,9 +27,20 @@ export interface Arena {
  * Four players means two of them can be at the net at once, and on the standard
  * net a 2v2 rally dies on the first block every single time.
  */
+/**
+ * Net heights are set *relative to how high a player can get*, not picked for
+ * looks.
+ *
+ * Lowering the jump to stop everyone floating also removed the only shot that
+ * ends a rally: with the old 210-tall net a player could no longer reach above
+ * the tape, so nothing was ever unreturnable and AI-vs-AI rallies ran past a
+ * hundred touches. The net came down with the jump. What matters is the gap
+ * between the tape and a jumping player's reach — keep that and the game plays
+ * the same, whatever the absolute numbers are.
+ */
 export const ARENAS: Record<ArenaKind, Arena> = {
-  standard: { w: 1280, h: 720, floor: 660, netX: 640, netW: 16, netTop: 450 },
-  wide: { w: 1760, h: 780, floor: 715, netX: 880, netW: 18, netTop: 485 },
+  standard: { w: 1280, h: 720, floor: 660, netX: 640, netW: 16, netTop: 485 },
+  wide: { w: 1760, h: 780, floor: 715, netX: 880, netW: 18, netTop: 525 },
 };
 
 export function arenaFor(playerCount: number): Arena {
@@ -38,7 +49,7 @@ export function arenaFor(playerCount: number): Arena {
 
 export const BALANCE = {
   // ── ball ────────────────────────────────────────────────────────────────
-  GRAVITY: 1750,
+  GRAVITY: 2400,
   BALL_R: 24,
   /**
    * Uncapped, a charged spike off a dashing player moves further in one step
@@ -46,6 +57,8 @@ export const BALANCE = {
    */
   BALL_MAX_SPEED: 1750,
   WALL_BOUNCE: 0.86,
+  /** Ball bounces off the floor with this much energy retained (higher = bouncier). */
+  FLOOR_BOUNCE: 0.72,
   NET_BOUNCE: 0.68,
   /** Sideways force from spin, perpendicular to travel. Small on purpose. */
   MAGNUS: 0.00026,
@@ -57,28 +70,74 @@ export const BALANCE = {
 
   // ── players ─────────────────────────────────────────────────────────────
   PLAYER_R: 42,
-  PLAYER_GRAVITY: 2600,
-  RUN_ACCEL: 4200,
-  AIR_ACCEL: 1500,
-  MAX_RUN: 470,
-  FRICTION: 3400,
-  JUMP_V: 1000,
-  /** Extra lift while the jump key is still down, for JUMP_HOLD seconds. */
-  JUMP_HOLD_ACCEL: 1500,
-  JUMP_HOLD: 0.18,
+  /**
+   * Heavier than it was (2600).
+   *
+   * "Too floaty" is almost never about speed — it is about hang time. At 2600
+   * a jump kept you airborne for the better part of a second with barely any
+   * air control, so half of every rally was spent drifting and waiting to land.
+   * More gravity shortens the hang without taking the jump away.
+   */
+  PLAYER_GRAVITY: 3200,
+  /**
+   * Movement is effectively instant, and that is the point.
+   *
+   * These went 2800 → 4800 → here. Even at 4800 there was a perceptible ramp
+   * on and off every step, and a positioning game where you cannot trust where
+   * you will actually stop feels broken rather than weighty. At 14000 a key
+   * press is a position change: full speed inside two frames, dead stop inside
+   * two frames. Arcade, not simulation.
+   */
+  RUN_ACCEL: 14000,
+  AIR_ACCEL: 5000,
+  MAX_RUN: 440,
+  FRICTION: 14000,
+  JUMP_V: 1020,
+  /**
+   * Extra lift while the jump key is still down, for JUMP_HOLD seconds.
+   *
+   * Cut from 1200: a held jump used to sail well clear of the net from a
+   * standing start, which is the "jumping too high" everyone noticed. A tap now
+   * just reaches blocking height and a held jump reaches spiking height, so the
+   * difference between the two is worth learning.
+   */
+  JUMP_HOLD_ACCEL: 700,
+  JUMP_HOLD: 0.16,
   DASH_SPEED: 940,
   DASH_TIME: 0.16,
   DASH_COOLDOWN: 0.9,
 
-  /** Seconds of holding to reach full charge. */
-  CHARGE_TIME: 0.7,
-  /** Movement multiplier while charging — charging in the wrong place is a real cost. */
-  CHARGE_SLOW: 0.55,
-
   // ── contact ─────────────────────────────────────────────────────────────
-  HIT_BASE: 700,
-  /** Full charge adds this fraction on top of the base hit. */
-  CHARGE_GAIN: 0.95,
+  /**
+   * Every hit is this hard now.
+   *
+   * It was 700, on the assumption that a held charge would multiply it by up to
+   * 1.9. With the charge meter gone that multiplier went too, so every contact
+   * became a 700 lob that anybody could run down: AI-vs-AI rallies went to 40,
+   * 77, once 136 touches and a single point took over a minute. Folding the
+   * average charged hit back into the base restores the pace without asking the
+   * player to hold anything.
+   */
+  HIT_BASE: 1150,
+  /**
+   * Straight upward kick added to every contact, on top of the bounce.
+   *
+   * The ball used to leave along the contact normal and nothing else, so a
+   * touch taken slightly off-centre skidded away flat and low and the rally was
+   * over. A fixed pop makes every touch pick the ball *up* — which is what a
+   * volleyball does off a forearm, and what makes a rally feel like a rally.
+   */
+  BOUNCE_LIFT: 150,
+  /**
+   * Hard ceiling on how fast the ball can be travelling upward after a contact.
+   *
+   * BOUNCE_LIFT is added on top of the hit, so without a cap it compounds: at
+   * 210 with no ceiling, AI-vs-AI rallies ran to 136 touches and one lasted two
+   * minutes, because every touch put in more height than gravity took out and
+   * the ball simply stopped coming down. Anything that adds energy to a rally
+   * needs a limit; this is that limit.
+   */
+  MAX_UP: 1220,
   /**
    * How much of the incoming speed is returned.
    *
@@ -110,12 +169,12 @@ export const BALANCE = {
    * This started at 0.2 and it was the single worst number in the game: a
    * glancing contact left at 0.2 up and 0.98 across, which is a horizontal
    * missile, and AI-vs-AI rallies died after 1.4 touches because nothing could
-   * be returned. At 0.55 a ground touch always arcs, which is both what a pass
+   * be returned. At 0.62 a ground touch always arcs, which is both what a pass
    * looks like and what gives the other side time to get under it. The rule
    * players learn from it — you can only spike in the air — is the single most
    * important thing about how the game reads.
    */
-  GROUND_LIFT: 0.55,
+  GROUND_LIFT: 0.7,
 
   // ── match ───────────────────────────────────────────────────────────────
   SERVE_DELAY: 1.3,
@@ -131,6 +190,8 @@ export const BALANCE = {
   POWER_R: 26,
   POWER_FALL: 95,
   POWER_FEATHER_GRAVITY: 0.5,
+  /** Rocket multiplies the next hit. It replaced the charge meter's role. */
+  POWER_ROCKET_HIT: 1.85,
   POWER_GIANT_SCALE: 1.4,
   POWER_FREEZE_SLOW: 0.5,
   DURATION: { rocket: Infinity, feather: 8, giant: 7, freeze: 4 } as const,

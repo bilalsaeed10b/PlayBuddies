@@ -7,7 +7,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, Maximize2, Settings as SettingsIcon, Trophy, Wifi, WifiOff } from 'lucide-react';
-import Joystick from '../components/Joystick';
+import TouchPad, { PadState } from '../components/TouchPad';
 import { toggleFullscreen } from '../fullscreen';
 import { CHARACTERS } from '../game/characters';
 import { POWER_META, TEAM_COLORS, arenaFor } from '../game/rules';
@@ -21,7 +21,6 @@ import {
   NetMessage,
   Snapshot,
   Team,
-  Vector2D,
   packInput,
   unpackInput,
 } from '../types/game';
@@ -48,10 +47,16 @@ export interface MatchConfig {
   bots: { id: string; team: Team; character: number; level: number; name: string }[];
 }
 
-/** Two keyboard layouts, so two people can share a laptop without arguing. */
+/**
+ * Two keyboard layouts, so two people can share a laptop without arguing.
+ *
+ * There is no space bar binding any more. It used to hold a charge meter, which
+ * is gone — and on a shared keyboard the space bar was the one key both players
+ * reached for anyway.
+ */
 const KEYSETS = [
-  { left: ['KeyA'], right: ['KeyD'], jump: ['KeyW'], dash: ['ShiftLeft', 'ShiftRight'], charge: ['Space'] },
-  { left: ['ArrowLeft'], right: ['ArrowRight'], jump: ['ArrowUp'], dash: ['Slash'], charge: ['Enter', 'NumpadEnter'] },
+  { left: ['KeyA'], right: ['KeyD'], jump: ['KeyW'], dash: ['ShiftLeft'] },
+  { left: ['ArrowLeft'], right: ['ArrowRight'], jump: ['ArrowUp'], dash: ['ShiftRight', 'Slash'] },
 ];
 
 export default function MatchView({
@@ -123,8 +128,8 @@ export default function MatchView({
   // Live input state, outside React — this is read 120 times a second and has
   // no business causing a re-render.
   const held = useRef<Record<string, boolean>>({});
-  const stick = useRef<Vector2D>({ x: 0, y: 0 });
-  const touchAction = useRef({ down: false, since: 0 });
+  /** Written by the touch pad, read by the render loop. Never causes a render. */
+  const padRef = useRef<PadState>({ left: false, right: false, jump: false });
   const remoteInputs = useRef(new Map<string, Input>());
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
@@ -172,25 +177,21 @@ export default function MatchView({
       right: on(set.right),
       jump: on(set.jump),
       dash: on(set.dash),
-      charge: on(set.charge),
     };
 
     // Touch only ever drives the first seat — nobody plays couch co-op on one
-    // phone, and letting the stick drive seat two makes it feel broken.
+    // phone, and letting the pad drive seat two makes it feel broken.
     if (!isOnlySeat || !touch) return keyboard;
 
-    const held0 = touchAction.current.down;
-    const heldFor = held0 ? (performance.now() - touchAction.current.since) / 1000 : 0;
+    // No dash on touch, deliberately. Two zones is the whole scheme; a third
+    // gesture to learn is what the old jump-or-charge-depending-on-how-long-you
+    // -held-it button was, and nobody worked it out.
+    const pad = padRef.current;
     return {
-      left: keyboard.left || stick.current.x < -0.2,
-      right: keyboard.right || stick.current.x > 0.2,
-      // The same button taps to jump and holds to charge. A tap is under
-      // 180 ms; past that the player clearly means to wind up.
-      jump: keyboard.jump || (held0 && heldFor < 0.18),
-      // Flick the stick down to dash. Binding it to a full sideways push would
-      // mean you dash every time you sprint, which is not a choice.
-      dash: keyboard.dash || stick.current.y > 0.65,
-      charge: keyboard.charge || (held0 && heldFor >= 0.18),
+      left: keyboard.left || pad.left,
+      right: keyboard.right || pad.right,
+      jump: keyboard.jump || pad.jump,
+      dash: keyboard.dash,
     };
   }, [touch]);
 
@@ -223,6 +224,10 @@ export default function MatchView({
       onWhistle: () => audioService.playWhistle(),
     });
     engineRef.current = engine;
+    // Dev-only handle. Court state is otherwise unreachable from the console,
+    // and "who is actually on the court" is the first question worth asking
+    // when a seat does not show up.
+    if (import.meta.env.DEV) (window as unknown as { __engine?: MatchEngine }).__engine = engine;
 
     const fit = () => {
       const box = shellRef.current?.getBoundingClientRect();
@@ -423,24 +428,17 @@ export default function MatchView({
 
       {/* ── touch controls ── */}
       {touch && !over && (
-        <>
-          <div className="absolute bottom-0 left-0 top-0 z-10 w-1/2">
-            <Joystick onMove={(v) => (stick.current = v)} onEnd={() => (stick.current = { x: 0, y: 0 })} />
-          </div>
-          <button
-            className="absolute bottom-8 right-8 z-20 h-28 w-28 touch-none select-none rounded-full border-4 border-white/40 bg-white/20 text-sm font-black uppercase tracking-wider text-white backdrop-blur-md active:bg-white/40"
-            onPointerDown={(e) => {
-              e.currentTarget.setPointerCapture(e.pointerId);
-              touchAction.current = { down: true, since: performance.now() };
-            }}
-            onPointerUp={() => (touchAction.current = { down: false, since: 0 })}
-            onPointerCancel={() => (touchAction.current = { down: false, since: 0 })}
-          >
-            jump
-            <br />
-            <span className="text-[10px] opacity-70">hold = spike</span>
-          </button>
-        </>
+        <TouchPad
+          state={padRef}
+          hintKey={0}
+          onFirstTouch={() => {
+            // The Fullscreen API only grants a request that is handling a real
+            // user gesture, and the first touch of the match is one. Once only,
+            // so quitting fullscreen on purpose is respected.
+            if (document.fullscreenElement) return;
+            toggleFullscreen(shellRef.current ?? document.documentElement, true);
+          }}
+        />
       )}
 
       {/* ── result ── */}
@@ -473,7 +471,7 @@ export default function MatchView({
           {config.localIds
             .map((id, i) => {
               const set = (i + settings.controlScheme) % 2;
-              const keys = set === 0 ? 'A/D · W · Shift · Space' : '← → · ↑ · / · Enter';
+              const keys = set === 0 ? 'A / D move · W jump · Shift dash' : '← → move · ↑ jump · / dash';
               return `${config.localNames[id] ?? `P${i + 1}`}: ${keys}`;
             })
             .join('   |   ')}

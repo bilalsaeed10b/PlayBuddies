@@ -31,16 +31,14 @@ interface Tier {
   slop: number;
   /** Chance, per decision, of going up for an attacking hit instead of a safe one. */
   aggression: number;
-  /** Fraction of full charge it holds before hitting. */
-  charge: number;
   dashes: boolean;
   label: string;
 }
 
 export const TIERS: Tier[] = [
-  { think: 0.26, slop: 105, aggression: 0.18, charge: 0.25, dashes: false, label: 'Rookie' },
-  { think: 0.13, slop: 48, aggression: 0.5, charge: 0.65, dashes: true, label: 'Pro' },
-  { think: 0.05, slop: 14, aggression: 0.85, charge: 1.0, dashes: true, label: 'Legend' },
+  { think: 0.26, slop: 105, aggression: 0.18, dashes: false, label: 'Rookie' },
+  { think: 0.13, slop: 48, aggression: 0.5, dashes: true, label: 'Pro' },
+  { think: 0.05, slop: 14, aggression: 0.85, dashes: true, label: 'Legend' },
 ];
 
 /** Where the ball will be when it next falls to `hitY`, and how long that takes. */
@@ -119,7 +117,6 @@ export function thinkFor(
     right: dir > 0 && !coasting,
     jump: false,
     dash: false,
-    charge: false,
   };
 
   // Jumping is a decision made at think time and executed once, not a dice roll
@@ -138,11 +135,6 @@ export function thinkFor(
     input.dash = true;
     brain.wantDash = false;
   }
-
-  // Wind up while the ball is inbound and close. The tier decides how much of a
-  // charge it is willing to hold — a Rookie taps it, a Legend commits.
-  const closing = brain.claimed && Math.hypot(ball.x - self.x, ball.y - self.y) < self.r * 5.5;
-  if (closing && self.charge < tier.charge) input.charge = true;
 
   return input;
 }

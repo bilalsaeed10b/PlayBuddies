@@ -10,6 +10,7 @@ import { Level } from '../../types';
 import { getLevels } from '../../game/levels';
 import { RemoteSmoother, snapshotOf, worthSending, RemoteSnapshot } from '../../game/netSync';
 import { toggleFullscreen, isTouchDevice } from '../../game/fullscreen';
+import TouchControls from './TouchControls';
 import { MessageSquare, RefreshCw, Smartphone, Monitor, Gem, ArrowLeft, Settings, Users, Maximize2, Minimize2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import confetti from 'canvas-confetti';
@@ -1777,6 +1778,27 @@ export default function Game({
     setIsFull(on);
   };
 
+  /**
+   * Take the screen on the player's first touch of a match.
+   *
+   * The Fullscreen API only grants a request that is handling a real user
+   * gesture, and a postMessage from the game to the host page does not carry
+   * one — which is why asking the host to expand the frame stretched the frame
+   * but never hid the browser's address bar, and the game stayed a small box
+   * with a URL bar above it and a nav bar below.
+   *
+   * The first touch on the controller *is* a gesture, and on a phone it happens
+   * within a second of the level starting. Once per mount, so quitting
+   * fullscreen deliberately is respected.
+   */
+  const autoFullTried = useRef(false);
+  const grabFullscreen = useCallback(() => {
+    if (autoFullTried.current || isFull) return;
+    autoFullTried.current = true;
+    requestFullscreen(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isFull]);
+
   return (
     <div
       ref={rootRef}
@@ -1908,25 +1930,14 @@ export default function Game({
         )}
       </AnimatePresence>
 
-      <div className="relative flex-1 min-h-0 w-full flex flex-col landscape:flex-row items-center justify-center gap-2 p-2">
-        {/* Left Side Controls (Landscape) */}
-        <div className={`${isTouch ? 'hidden landscape:flex' : 'hidden'} flex-col gap-6 p-4 z-20`}>
-          <button
-            onTouchStart={(e) => { e.preventDefault(); keys.current.add(role === 'water' ? 'ArrowLeft' : 'KeyA'); }}
-            onTouchEnd={(e) => { e.preventDefault(); keys.current.delete(role === 'water' ? 'ArrowLeft' : 'KeyA'); }}
-            className="w-20 h-20 bg-white/10 backdrop-blur-md rounded-full flex items-center justify-center border-2 border-white/20 active:bg-white/40 shadow-xl pointer-events-auto"
-          >
-            <span className="text-3xl text-white">←</span>
-          </button>
-          <button
-            onTouchStart={(e) => { e.preventDefault(); keys.current.add(role === 'water' ? 'ArrowRight' : 'KeyD'); }}
-            onTouchEnd={(e) => { e.preventDefault(); keys.current.delete(role === 'water' ? 'ArrowRight' : 'KeyD'); }}
-            className="w-20 h-20 bg-white/10 backdrop-blur-md rounded-full flex items-center justify-center border-2 border-white/20 active:bg-white/40 shadow-xl pointer-events-auto"
-          >
-            <span className="text-3xl text-white">→</span>
-          </button>
-        </div>
-
+      {/* No padding on a touch device: every pixel spent on a gutter is a pixel
+          the level does not get, and the controls are zones now rather than
+          buttons that needed room beside the canvas. */}
+      <div
+        className={`relative flex-1 min-h-0 w-full flex flex-col landscape:flex-row items-center justify-center ${
+          isTouch ? '' : 'gap-2 p-2'
+        }`}
+      >
         {/* Game Area — sized by measurement, so the framing is identical on a
             phone, a laptop and a 4K monitor: only the scale changes. */}
         {/* self-stretch rather than w-full: this row is a column on a phone in
@@ -2156,8 +2167,40 @@ export default function Game({
                     </div>
                   </div>
 
-                  <div className="mt-6 pt-6 border-t border-white/10 text-center">
-                    <p className="text-xs text-zinc-500">Disable features to improve performance on older devices.</p>
+                  <div className="mt-6 pt-6 border-t border-white/10">
+                    <div className="mb-2 text-[10px] font-black uppercase tracking-[0.25em] text-zinc-500">
+                      Controls
+                    </div>
+                    {isTouch ? (
+                      <div className="space-y-2 text-xs text-zinc-400">
+                        <div className="flex items-center gap-3">
+                          <span className="w-16 shrink-0 font-bold text-white">Left half</span>
+                          <span>Touch anywhere and drag — the stick appears under your thumb. Left and right only.</span>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <span className="w-16 shrink-0 font-bold text-white">Right half</span>
+                          <span>Tap to jump. Hold it for a longer jump.</span>
+                        </div>
+                        <p className="pt-1 text-[11px] text-zinc-600">
+                          Both halves work at once, so you can steer and jump together. The first touch of a
+                          level takes the full screen.
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="space-y-2 text-xs text-zinc-400">
+                        <div className="flex items-center gap-3">
+                          <span className="w-16 shrink-0 font-bold text-orange-400">Fire</span>
+                          <span>A / D to move, W to jump</span>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <span className="w-16 shrink-0 font-bold text-cyan-400">Water</span>
+                          <span>← / → to move, ↑ to jump</span>
+                        </div>
+                      </div>
+                    )}
+                    <p className="mt-4 text-center text-xs text-zinc-500">
+                      Disable features above to improve performance on older devices.
+                    </p>
                   </div>
                 </div>
               </motion.div>
@@ -2168,46 +2211,29 @@ export default function Game({
         </div>
         </div>
 
-        {/* Right Side Control (Landscape) */}
-        <div className={`${isTouch ? 'hidden landscape:flex' : 'hidden'} p-4 z-20`}>
-          <button
-            onTouchStart={(e) => { e.preventDefault(); keys.current.add(role === 'water' ? 'ArrowUp' : 'KeyW'); }}
-            onTouchEnd={(e) => { e.preventDefault(); keys.current.delete(role === 'water' ? 'ArrowUp' : 'KeyW'); }}
-            className="w-24 h-24 bg-white/20 backdrop-blur-md rounded-full flex items-center justify-center border-2 border-white/30 active:bg-white/50 shadow-xl pointer-events-auto"
-          >
-            <span className="text-4xl text-white">↑</span>
-          </button>
-        </div>
-
-        {/* Bottom Controls (Portrait) */}
-        <div className={`${isTouch ? 'flex landscape:hidden' : 'hidden'} w-full items-center justify-between px-8 py-4 z-20 pointer-events-none shrink-0`}>
-          <div className="flex gap-6 pointer-events-auto">
-            <button
-              onTouchStart={(e) => { e.preventDefault(); keys.current.add(role === 'water' ? 'ArrowLeft' : 'KeyA'); }}
-              onTouchEnd={(e) => { e.preventDefault(); keys.current.delete(role === 'water' ? 'ArrowLeft' : 'KeyA'); }}
-              className="w-20 h-20 bg-white/10 backdrop-blur-md rounded-full flex items-center justify-center border-2 border-white/20 active:bg-white/40 shadow-xl"
-            >
-              <span className="text-3xl text-white">←</span>
-            </button>
-            <button
-              onTouchStart={(e) => { e.preventDefault(); keys.current.add(role === 'water' ? 'ArrowRight' : 'KeyD'); }}
-              onTouchEnd={(e) => { e.preventDefault(); keys.current.delete(role === 'water' ? 'ArrowRight' : 'KeyD'); }}
-              className="w-20 h-20 bg-white/10 backdrop-blur-md rounded-full flex items-center justify-center border-2 border-white/20 active:bg-white/40 shadow-xl"
-            >
-              <span className="text-3xl text-white">→</span>
-            </button>
-          </div>
-          <div className="pointer-events-auto">
-            <button
-              onTouchStart={(e) => { e.preventDefault(); keys.current.add(role === 'water' ? 'ArrowUp' : 'KeyW'); }}
-              onTouchEnd={(e) => { e.preventDefault(); keys.current.delete(role === 'water' ? 'ArrowUp' : 'KeyW'); }}
-              className="w-24 h-24 bg-white/20 backdrop-blur-md rounded-full flex items-center justify-center border-2 border-white/30 active:bg-white/50 shadow-xl"
-            >
-              <span className="text-4xl text-white">↑</span>
-            </button>
-          </div>
-        </div>
       </div>
+
+      {/*
+        The controller. Rendered last and positioned over everything, so it
+        covers the letterbox bars either side of the level as well as the level
+        itself — the whole screen is the pad.
+
+        Hidden whenever something modal is up, because this sits above the
+        stage's own stacking context and would otherwise swallow taps meant for
+        the settings sheet or the pre-game menu.
+      */}
+      {isTouch && gameStarted && !showSettings && !showChat && !isGameOver && (
+        <TouchControls
+          keys={keys}
+          bind={
+            role === 'water'
+              ? { left: 'ArrowLeft', right: 'ArrowRight', jump: 'ArrowUp' }
+              : { left: 'KeyA', right: 'KeyD', jump: 'KeyW' }
+          }
+          hintKey={levelIndex}
+          onFirstTouch={grabFullscreen}
+        />
+      )}
 
       <div className="mt-8 flex gap-8 text-zinc-500 text-xs uppercase tracking-widest hidden">
         <div className="flex items-center gap-2">

@@ -6,20 +6,18 @@
  * sprite sheets cost megabytes. Fish Eat Fish shipped 11.6 MB of PNGs before
  * anyone noticed; this is that lesson applied up front.
  *
- * The stats are the point of the roster, and they are constrained: every
- * character's three stats add up to exactly 3.00, and none is outside
- * 0.80–1.20. That guarantees the paid characters are *different*, not better,
- * which is the only version of a shop that is fair in a competitive game.
+ * **These are skins and nothing else.** They used to carry speed / jump / power
+ * multipliers. Even balanced on paper — every line summed to the same total —
+ * it meant two players in the same match were playing slightly different games,
+ * and every loss came with an excuse attached. A 1v1 sport has to be decided by
+ * who read the ball better, so the stats are gone. The only difference between
+ * Rookie and Titan is what you look like.
  */
 
 export type Accessory = 'none' | 'band' | 'cap' | 'visor' | 'horns' | 'crown' | 'shades' | 'bolt';
 
 export interface Character {
   name: string;
-  /** Multiplies run speed and jump height and hit power respectively. */
-  speed: number;
-  jump: number;
-  power: number;
   price: number;
   body: string;
   trim: string;
@@ -30,51 +28,51 @@ export interface Character {
 export const CHARACTERS: Character[] = [
   {
     name: 'Rookie',
-    speed: 1.0, jump: 1.0, power: 1.0, price: 0,
+    price: 0,
     body: '#f8fafc', trim: '#94a3b8', accessory: 'none',
-    blurb: 'No weaknesses, no tricks. Learn the game on this one.',
+    blurb: 'Clean white kit. Nothing to hide behind.',
   },
   {
     name: 'Sprint',
-    speed: 1.2, jump: 0.95, power: 0.85, price: 0,
+    price: 0,
     body: '#facc15', trim: '#a16207', accessory: 'band',
-    blurb: 'Covers the whole court. Hits like a polite suggestion.',
+    blurb: 'Yellow, with the headband of someone who means it.',
   },
   {
     name: 'Hops',
-    speed: 0.9, jump: 1.2, power: 0.9, price: 0,
+    price: 0,
     body: '#4ade80', trim: '#15803d', accessory: 'cap',
-    blurb: 'Lives above the net. Getting there is the slow part.',
+    blurb: 'Green and capped, permanently mid-warm-up.',
   },
   {
     name: 'Hammer',
-    speed: 0.85, jump: 0.95, power: 1.2, price: 400,
+    price: 400,
     body: '#f43f5e', trim: '#881337', accessory: 'horns',
-    blurb: 'One clean spike ends the rally. Getting to the ball does not.',
+    blurb: 'Red with horns. Intimidation is free.',
   },
   {
     name: 'Comet',
-    speed: 1.15, jump: 1.05, power: 0.8, price: 600,
+    price: 600,
     body: '#38bdf8', trim: '#075985', accessory: 'bolt',
-    blurb: 'Fast and springy. You will win on retrieval, not on force.',
+    blurb: 'Sky blue with a lightning bolt. Purely decorative.',
   },
   {
     name: 'Tower',
-    speed: 0.85, jump: 1.15, power: 1.0, price: 800,
+    price: 800,
     body: '#c084fc', trim: '#6b21a8', accessory: 'visor',
-    blurb: 'A wall at the net. Do not ask it to chase a drop shot.',
+    blurb: 'Violet, visored, completely unreadable.',
   },
   {
     name: 'Gale',
-    speed: 1.1, jump: 0.9, power: 1.0, price: 1100,
+    price: 1100,
     body: '#2dd4bf', trim: '#0f766e', accessory: 'shades',
-    blurb: 'Ground game. Dash in, dash out, never leave the sand.',
+    blurb: 'Teal, wearing sunglasses at the beach. Correctly.',
   },
   {
     name: 'Titan',
-    speed: 0.9, jump: 0.9, power: 1.2, price: 1500,
+    price: 1500,
     body: '#fb923c', trim: '#7c2d12', accessory: 'crown',
-    blurb: 'Slow, heavy, and the hardest hit in the game.',
+    blurb: 'Orange, crowned, not remotely humble about it.',
   },
 ];
 
@@ -93,22 +91,11 @@ export function drawCharacter(
   y: number,
   r: number,
   facing: 1 | -1,
-  /** 0–1. Rings the body and tints the trim. */
-  charge: number,
   teamColor: string,
 ) {
   ctx.save();
   ctx.translate(x, y);
   ctx.scale(facing, 1);
-
-  // Charge ring. Drawn under the body so it reads as an aura, not a hat.
-  if (charge > 0.02) {
-    ctx.beginPath();
-    ctx.arc(0, 0, r * (1.15 + charge * 0.25), 0, Math.PI * 2);
-    ctx.strokeStyle = `rgba(255, 220, 120, ${0.25 + charge * 0.55})`;
-    ctx.lineWidth = 3 + charge * 7;
-    ctx.stroke();
-  }
 
   // Team ring: in 2v2 you must be able to tell sides apart at a glance, and
   // the character colours alone cannot carry that.

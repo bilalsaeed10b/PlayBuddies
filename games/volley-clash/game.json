@@ -7,7 +7,7 @@
   "minPlayers": 1,
   "maxPlayers": 4,
   "estimatedDuration": "5-8 min",
-  "controls": "P1: A/D move, W jump, Shift dash, Space spike  |  P2: arrows, / dash, Enter spike  |  Touch: drag to move, hold to charge",
+  "controls": "P1: A/D move, W jump, Shift dash  |  P2: arrows move/jump, / dash  |  Touch: drag the left half to move, tap the right half to jump",
   "thumbnail": "thumb.svg",
   "accent": {
     "from": "#f59e0b",
