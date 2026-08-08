@@ -6,6 +6,7 @@ import { GameSettings, NetMessage, PlayerPacket } from '../types/game';
 import { Mesh } from '../net/mesh';
 import { audioService } from '../services/audio';
 import { toggleFullscreen } from '../fullscreen';
+import { db, doc, setDoc, onSnapshot } from '../firebase';
 
 /**
  * How often each client publishes itself, and how often the host publishes the
@@ -16,6 +17,22 @@ import { toggleFullscreen } from '../fullscreen';
  */
 const PLAYER_HZ = 15;
 const ENEMY_HZ = 6;
+
+/**
+ * Peer-to-peer is not guaranteed. Signalling can be blocked, and a symmetric
+ * NAT or a corporate proxy will defeat STUN with no TURN server to fall back
+ * on. When that happens the mesh simply never opens a channel, and the first
+ * version of this screen had nothing else — so a guest sat in an empty ocean
+ * with no other players, which is exactly what got reported.
+ *
+ * So there is a slow, billed path underneath: positions through Firestore for
+ * any peer we cannot reach directly. 5Hz is deliberately stingy — it is enough
+ * to see each other and be eaten, and it costs a fraction of what running the
+ * whole game through Firestore would.
+ */
+const FALLBACK_HZ = 5;
+/** No AI snapshot for this long means the host is unreachable — grow our own reef. */
+const HOST_TIMEOUT_MS = 4000;
 
 export interface LobbyPerson {
   uid: string;
@@ -61,6 +78,7 @@ export default function GameView({
   const [ready, setReady] = useState(false);
   const [isFull, setIsFull] = useState(false);
   const [peerCount, setPeerCount] = useState(0);
+  const [link, setLink] = useState<'direct' | 'relayed' | 'alone'>('alone');
   const [scoreboard, setScoreboard] = useState<{ id: string; name: string; size: number; score: number; local: boolean }[]>([]);
   const [defeat, setDefeat] = useState<{ by: string; score: number } | null>(null);
 
@@ -70,6 +88,10 @@ export default function GameView({
   // Latest packet from each seat/peer, read by the broadcast timers.
   const localPackets = useRef(new Map<string, PlayerPacket>());
   const peerPositions = useRef(new Map<string, { x: number; y: number }>());
+  /** When the host's AI snapshot last landed, so we can notice it stopping. */
+  const lastHostSnapshot = useRef(0);
+  /** Firestore listeners for peers the mesh could not reach, keyed by uid. */
+  const fallbackReaders = useRef(new Map<string, () => void>());
   // Props the engine and mesh callbacks read, held in a ref so that a changing
   // roster or a host migration never tears down a match in progress.
   const live = useRef({ people, hostId, uid, isHost });
@@ -144,6 +166,8 @@ export default function GameView({
     let mesh: Mesh | null = null;
     let playerTimer = 0;
     let enemyTimer = 0;
+    let supervisorTimer = 0;
+    let fallbackTimer = 0;
 
     if (online && roomId && uid) {
       mesh = new Mesh(
@@ -164,7 +188,12 @@ export default function GameView({
             case 'e':
               // Only the host's word counts; anyone else claiming to run the AI
               // is ignored rather than allowed to rewrite the ocean.
-              if (from === live.current.hostId) e.applyEnemies(msg.d, msg.b);
+              if (from !== live.current.hostId) break;
+              lastHostSnapshot.current = Date.now();
+              // We may have been running a stand-in reef while out of contact;
+              // stand down before adopting theirs.
+              if (e.runningAI && !live.current.isHost) e.setSimulateAI(false);
+              e.applyEnemies(msg.d, msg.b);
               break;
             case 'k':
               if (from === live.current.hostId) e.removeEnemies(msg.ids);
@@ -200,6 +229,67 @@ export default function GameView({
         const kills = e.takePendingKills();
         if (kills.length) mesh.broadcast({ t: 'k', ids: kills } satisfies NetMessage);
       }, 1000 / ENEMY_HZ);
+
+      // ── the safety net ───────────────────────────────────────────────────
+      // Once a second, work out who we actually reached and patch the gaps.
+      supervisorTimer = window.setInterval(() => {
+        const e = engineRef.current;
+        if (!e || !mesh) return;
+        const direct = new Set(mesh.connectedPeers);
+        const others = live.current.people.filter((p) => p.uid !== uid);
+
+        // Open a Firestore listener for anyone the mesh could not reach, and
+        // close it the moment a direct channel comes up.
+        for (const person of others) {
+          const has = fallbackReaders.current.has(person.uid);
+          if (direct.has(person.uid)) {
+            if (has) {
+              fallbackReaders.current.get(person.uid)!();
+              fallbackReaders.current.delete(person.uid);
+            }
+            continue;
+          }
+          if (has) continue;
+          const stop = onSnapshot(
+            doc(db, 'lobbies', roomId, 'updates', person.uid),
+            (snap) => {
+              const data = snap.data() as { p?: PlayerPacket } | undefined;
+              if (!data?.p) return;
+              const who = live.current.people.find((x) => x.uid === person.uid);
+              engineRef.current?.setRemotePlayer(person.uid, data.p, who?.displayName ?? 'Player');
+              peerPositions.current.set(person.uid, { x: data.p[0], y: data.p[1] });
+            },
+            () => {
+              /* permission denied means the rules aren't deployed; nothing to retry */
+            },
+          );
+          fallbackReaders.current.set(person.uid, stop);
+        }
+        for (const [id, stop] of fallbackReaders.current) {
+          if (!others.some((p) => p.uid === id)) {
+            stop();
+            fallbackReaders.current.delete(id);
+          }
+        }
+
+        // A guest with no word from the host grows its own reef rather than
+        // swimming in a void. Not the same ocean as everyone else's, but a
+        // playable one — and it stands down the instant the host is heard from.
+        if (!live.current.isHost) {
+          const stale = Date.now() - lastHostSnapshot.current > HOST_TIMEOUT_MS;
+          if (stale && !e.runningAI) e.setSimulateAI(true);
+        }
+
+        setLink(others.length === 0 ? 'alone' : fallbackReaders.current.size === 0 ? 'direct' : 'relayed');
+      }, 1000);
+
+      // Slow position publish for peers we have no channel to.
+      fallbackTimer = window.setInterval(() => {
+        if (fallbackReaders.current.size === 0) return;
+        const packet = localPackets.current.get(uid);
+        if (!packet) return;
+        setDoc(doc(db, 'lobbies', roomId, 'updates', uid), { p: packet, n: Date.now() }).catch(() => {});
+      }, 1000 / FALLBACK_HZ);
     }
 
     const board = window.setInterval(() => {
@@ -210,7 +300,11 @@ export default function GameView({
       clearTimeout(settle);
       window.clearInterval(playerTimer);
       window.clearInterval(enemyTimer);
+      window.clearInterval(supervisorTimer);
+      window.clearInterval(fallbackTimer);
       window.clearInterval(board);
+      fallbackReaders.current.forEach((stop) => stop());
+      fallbackReaders.current.clear();
       window.removeEventListener('resize', resize);
       window.removeEventListener('orientationchange', resize);
       mesh?.close();
@@ -226,7 +320,11 @@ export default function GameView({
   useEffect(() => {
     if (!online || !uid) return;
     meshRef.current?.setPeers(people.map((p) => p.uid));
-    engineRef.current?.setSimulateAI(hostId === uid);
+    // Only ever switched *on* here. Turning it off is the job of the host's
+    // first snapshot arriving — otherwise every roster change would yank the
+    // reef out from under a guest that is running its own because it cannot
+    // reach the host.
+    if (hostId === uid) engineRef.current?.setSimulateAI(true);
     const present = new Set(people.map((p) => p.uid));
     for (const row of engineRef.current?.leaderboard() ?? []) {
       if (!row.local && !present.has(row.id)) engineRef.current?.removeRemotePlayer(row.id);
@@ -298,9 +396,19 @@ export default function GameView({
           {online && (
             <div
               className="rounded-xl border border-black/10 bg-white/50 p-2 text-slate-700 backdrop-blur-md"
-              title={peerCount > 0 ? `${peerCount} peer(s) connected` : 'Connecting to players…'}
+              title={
+                link === 'alone'
+                  ? 'Nobody else in the room yet'
+                  : link === 'direct'
+                    ? `Direct connection to ${peerCount} player(s)`
+                    : 'Direct connection failed — using the slower fallback'
+              }
             >
-              {peerCount > 0 ? <Wifi size={18} className="text-emerald-600" /> : <WifiOff size={18} className="text-amber-600" />}
+              {link === 'relayed' ? (
+                <WifiOff size={18} className="text-amber-600" />
+              ) : (
+                <Wifi size={18} className={link === 'direct' ? 'text-emerald-600' : 'text-slate-400'} />
+              )}
             </div>
           )}
           <button

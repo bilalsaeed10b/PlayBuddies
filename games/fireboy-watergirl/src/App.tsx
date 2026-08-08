@@ -93,7 +93,7 @@ export default function App() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-black text-white font-mono overflow-hidden">
+    <div className="h-[100dvh] bg-black text-white font-mono overflow-hidden">
       <AnimatePresence mode="wait">
         {view === 'menu' && (
           <motion.div 
@@ -101,7 +101,7 @@ export default function App() {
             initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: 1.1 }}
-            className="flex flex-col items-center justify-center h-screen gap-8"
+            className="flex flex-col items-center justify-center h-[100dvh] gap-8 overflow-y-auto py-8"
           >
             <div className="text-center">
               <h1 className="text-6xl font-black tracking-tighter mb-2 bg-gradient-to-r from-orange-500 to-cyan-500 bg-clip-text text-transparent">
@@ -152,7 +152,7 @@ export default function App() {
             initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: 1.1 }}
-            className="flex flex-col items-center justify-center h-screen gap-8"
+            className="flex flex-col items-center justify-center h-[100dvh] gap-8 overflow-y-auto py-8"
           >
             <div className="text-center">
               <h1 className="text-6xl font-black tracking-tighter mb-2 bg-gradient-to-r from-orange-500 to-cyan-500 bg-clip-text text-transparent">
@@ -200,7 +200,7 @@ export default function App() {
             initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: 1.1 }}
-            className="flex flex-col items-center justify-center h-screen gap-8"
+            className="flex flex-col items-center justify-center h-[100dvh] gap-8 overflow-y-auto py-8"
           >
             <div className="text-center">
               <h1 className="text-6xl font-black tracking-tighter mb-2 bg-gradient-to-r from-orange-500 to-cyan-500 bg-clip-text text-transparent">
@@ -252,7 +252,7 @@ export default function App() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="flex flex-col h-screen bg-[#050505] overflow-y-auto selection:bg-orange-500/30"
+            className="flex flex-col h-[100dvh] bg-[#050505] overflow-y-auto selection:bg-orange-500/30"
           >
             {/* Background Grid Accent */}
             <div className="fixed inset-0 pointer-events-none opacity-20">
@@ -467,7 +467,7 @@ export default function App() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="h-screen"
+            className="h-[100dvh]"
           >
             <Game
               customLevel={customLevel} 
@@ -495,11 +495,11 @@ export default function App() {
             initial={{ opacity: 0, x: 100 }}
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: -100 }}
-            className="h-screen"
+            className="h-[100dvh]"
           >
             <Suspense
               fallback={
-                <div className="h-screen flex items-center justify-center text-white font-mono">
+                <div className="h-[100dvh] flex items-center justify-center text-white font-mono">
                   Loading editor…
                 </div>
               }

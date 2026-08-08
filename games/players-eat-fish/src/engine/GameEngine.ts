@@ -3,10 +3,11 @@ import {
   FISH_ASSETS,
   BOSS_ASSET,
   assetForSize,
-  lineOf,
+  isShoalingSize,
+  SHOAL_MAX_SIZE,
   fishSrc,
-  BACKGROUND_SRC,
 } from '../game/fish';
+import { buildReef, bakeReef, drawFallbackWater, Reef } from '../game/background';
 import { audioService } from '../services/audio';
 
 /**
@@ -66,18 +67,42 @@ export const BALANCE = {
   SPAWN_RING: 1.15,
   /** Beyond this (same units) a fish nobody can see is recycled. */
   CULL_RING: 2.1,
-  /** How far an AI fish looks for something to chase or run from. */
-  AWARENESS: 340,
-  FLEE_WEIGHT: 2.4,
-  CHASE_WEIGHT: 1.5,
-  SCHOOL_WEIGHT: 0.5,
-  WANDER_WEIGHT: 0.8,
+  /**
+   * AI fish ignore players entirely — they neither hunt you nor flee from you.
+   * A predator that beelines at you is a timer, not a game, and prey that
+   * scatters on sight is never catchable. They swim their own routes; a big one
+   * is dangerous because it is *there*.
+   */
+  /** How long a fish holds a heading before choosing a new one, in seconds. */
+  TURN_EVERY_MIN: 2.5,
+  TURN_EVERY_MAX: 7,
+  /** How sharply it swings onto a new heading. */
+  TURN_RATE: 1.1,
+  /** Shoal cohesion, alignment and personal space. */
+  SCHOOL_PULL: 0.55,
+  SCHOOL_ALIGN: 0.9,
+  SCHOOL_SPACING: 80,
+  SCHOOL_SPREAD: 300,
+  /** Share of spawns that arrive as a shoal rather than a lone fish. */
+  SHOAL_CHANCE: 0.3,
+  SHOAL_MIN: 5,
+  SHOAL_MAX: 9,
 
   // Boss
   BOSS_INTERVAL: 90,
   BOSS_DURATION: 18,
-  BOSS_SPEED: 155,
+  /** Slow enough to outswim. It is a hazard to steer around, not a death sentence. */
+  BOSS_SPEED: 100,
   BOSS_SIZE: 190,
+
+  /**
+   * Whether players can eat each other.
+   *
+   * Off by request: the run is a race to grow against the reef, and two players
+   * who meet simply bump apart. One constant, so turning the arena back into a
+   * free-for-all is a one-word change.
+   */
+  PVP_EATING: false,
 
   // Presentation
   BUBBLES: 60,
@@ -135,7 +160,9 @@ const NET_MAX_EXTRAPOLATION = 0.4;
 export class GameEngine {
   private ctx: CanvasRenderingContext2D;
   private images = new Map<number, HTMLImageElement>();
-  private background: HTMLImageElement | null = null;
+  private reef: Reef = buildReef(BALANCE.WORLD_W, BALANCE.WORLD_H);
+  /** The reef, pre-rendered once. Null only if the device refused the memory. */
+  private backdrop: HTMLCanvasElement | null = null;
 
   private locals = new Map<string, Fish>();
   private remotes = new Map<string, Fish>();
@@ -156,6 +183,7 @@ export class GameEngine {
   private bossTimer = 0;
   private bossLife = 0;
   private nextEnemyId = 1;
+  private nextShoalId = 1;
   /** Enemies eaten since the last time the host published a removal batch. */
   private pendingKills: number[] = [];
 
@@ -189,7 +217,6 @@ export class GameEngine {
       // would hand one player a third more top speed than another for no
       // reason they could see.
       fish.pace = 1;
-      fish.line = lineOf(asset);
       fish.name = config.localNames[id] ?? `Player ${i + 1}`;
       // Spread couch co-op players out so they don't spawn inside each other.
       const spread = config.localIds.length + 1;
@@ -201,6 +228,7 @@ export class GameEngine {
     this.resize();
     this.initBubbles();
     this.loadImages();
+    this.backdrop = bakeReef(this.reef);
     if (this.simulateAI) this.seedEnemies();
   }
 
@@ -238,13 +266,25 @@ export class GameEngine {
   }
 
   /**
-   * Whoever owns the AI can change mid-match: if the host drops, the platform
-   * promotes someone else and this flips on for them.
+   * Whoever owns the AI can change mid-match: if the host drops the platform
+   * promotes someone else, and a guest that cannot reach the host at all falls
+   * back to running its own ocean so it isn't left staring at empty water.
    */
   setSimulateAI(on: boolean) {
     if (this.simulateAI === on) return;
     this.simulateAI = on;
-    if (on && this.enemies.size === 0) this.seedEnemies();
+    if (on) {
+      if (this.enemies.size === 0) this.seedEnemies();
+    } else {
+      // Hand authority back: drop the locally invented fish so the host's next
+      // snapshot lands on a clean slate instead of doubling the population.
+      this.enemies.clear();
+      this.pendingKills = [];
+    }
+  }
+
+  get runningAI(): boolean {
+    return this.simulateAI;
   }
 
   // ── networking surface ───────────────────────────────────────────────────
@@ -373,7 +413,6 @@ export class GameEngine {
     const asset = this.config.localFish[id] ?? 0;
     fish.size = FISH_ASSETS[asset].size;
     fish.asset = asset;
-    fish.line = lineOf(asset);
     fish.score = 0;
     fish.dead = false;
     fish.vx = 0;
@@ -544,7 +583,11 @@ export class GameEngine {
 
   private seedEnemies() {
     const target = this.enemyTarget();
-    for (let i = 0; i < target; i++) {
+    // A couple of shoals from the outset, so the reef looks inhabited rather
+    // than evenly sprinkled.
+    this.spawnShoal();
+    this.spawnShoal();
+    while (this.enemies.size < target) {
       const fish = this.spawnEnemy();
       // The opening population is scattered across the map rather than pushed
       // in from the edge, so the first ten seconds aren't an empty ocean.
@@ -605,6 +648,7 @@ export class GameEngine {
     fish.vx = Math.cos(toward) * speed * fish.pace;
     fish.vy = Math.sin(toward) * speed * fish.pace * 0.6;
     fish.angle = toward;
+    fish.heading = toward;
 
     this.enemies.set(id, fish);
     return fish;
@@ -619,92 +663,109 @@ export class GameEngine {
   }
 
   /**
-   * Steering. Each fish sums a few weighted urges and turns toward the result:
-   * run from anything that could eat it, chase anything it could eat, drift
-   * with fish its own size, and wander when nothing else is going on.
+   * Steering.
    *
-   * The previous version simply picked a direction at spawn and swam in a
-   * straight line until it left the map — which is why the ocean felt like a
-   * screensaver rather than somewhere anything lived.
+   * Every fish holds a heading and swims along it, re-choosing every few
+   * seconds. That single change is what stops the "crazy circling": the old
+   * version summed two sine waves to wander, and the sum of two sinusoids is a
+   * closed loop, so each fish dutifully orbited its own little ellipse forever.
+   *
+   * On top of the heading, shoal members pull gently toward their shoal and
+   * match its direction. Shoals are always one species of small fish (they
+   * spawn that way) — a tiger shark drifting in the middle of a school of neon
+   * tetras looked absurd, so nothing above `isShoalingSize` ever joins one.
+   *
+   * Players are not an input to any of this. Nothing chases, nothing flees.
    */
   private simulateEnemies(dt: number) {
-    const players: Fish[] = [];
-    this.locals.forEach((f) => !f.dead && players.push(f));
-    this.remotes.forEach((f) => !f.dead && players.push(f));
-
-    const awareSq = BALANCE.AWARENESS * BALANCE.AWARENESS;
     const cull = this.viewRadius() * BALANCE.CULL_RING;
     const cullSq = cull * cull;
     const enemies = [...this.enemies.values()];
 
+    // One pass to find where each shoal is and which way it is going, so the
+    // steering pass below is O(n) rather than O(n²).
+    const shoals = new Map<number, { x: number; y: number; hx: number; hy: number; n: number }>();
     for (const fish of enemies) {
-      let sx = 0;
-      let sy = 0;
+      if (fish.shoal === undefined) continue;
+      const s = shoals.get(fish.shoal) ?? { x: 0, y: 0, hx: 0, hy: 0, n: 0 };
+      s.x += fish.x;
+      s.y += fish.y;
+      s.hx += Math.cos(fish.heading);
+      s.hy += Math.sin(fish.heading);
+      s.n++;
+      shoals.set(fish.shoal, s);
+    }
 
-      for (const other of players) {
-        const dx = fish.x - other.x;
-        const dy = fish.y - other.y;
-        const distSq = dx * dx + dy * dy;
-        if (distSq > awareSq || distSq < 1) continue;
-        const dist = Math.sqrt(distSq);
-        // Closer means stronger, so a predator two body-lengths away dominates
-        // whatever else the fish was thinking about.
-        const urgency = 1 - dist / BALANCE.AWARENESS;
+    for (const fish of enemies) {
+      // Pick somewhere new to be, now and then.
+      fish.turnIn -= dt;
+      if (fish.turnIn <= 0) {
+        fish.turnIn = BALANCE.TURN_EVERY_MIN + Math.random() * (BALANCE.TURN_EVERY_MAX - BALANCE.TURN_EVERY_MIN);
+        // A change of course, not a reversal — a fish that spins 180° on the
+        // spot reads as a glitch.
+        fish.heading += (Math.random() - 0.5) * 1.9;
+      }
 
-        if (other.size > fish.size * BALANCE.EAT_MARGIN) {
-          sx += (dx / dist) * BALANCE.FLEE_WEIGHT * urgency;
-          sy += (dy / dist) * BALANCE.FLEE_WEIGHT * urgency;
-        } else if (fish.size > other.size * BALANCE.EAT_MARGIN) {
-          sx -= (dx / dist) * BALANCE.CHASE_WEIGHT * urgency;
-          sy -= (dy / dist) * BALANCE.CHASE_WEIGHT * urgency;
+      let hx = Math.cos(fish.heading);
+      let hy = Math.sin(fish.heading) * 0.55; // fish travel flatter than they climb
+
+      const shoal =
+        fish.shoal !== undefined && isShoalingSize(fish.size) ? shoals.get(fish.shoal) : undefined;
+      if (shoal && shoal.n > 1) {
+        const cxAvg = shoal.x / shoal.n;
+        const cyAvg = shoal.y / shoal.n;
+        const dx = cxAvg - fish.x;
+        const dy = cyAvg - fish.y;
+        const dist = Math.hypot(dx, dy) || 1;
+
+        if (dist > BALANCE.SCHOOL_SPREAD) {
+          // Straggler: cut back to the group hard, otherwise shoals slowly
+          // smear across the whole map and stop reading as shoals.
+          hx += (dx / dist) * 2.2;
+          hy += (dy / dist) * 2.2;
+        } else if (dist > BALANCE.SCHOOL_SPACING) {
+          hx += (dx / dist) * BALANCE.SCHOOL_PULL;
+          hy += (dy / dist) * BALANCE.SCHOOL_PULL;
+        } else {
+          // Personal space, weighted above cohesion so the shoal never
+          // collapses into a single point.
+          hx -= (dx / dist) * 1.3;
+          hy -= (dy / dist) * 1.3;
         }
+
+        const align = Math.hypot(shoal.hx, shoal.hy) || 1;
+        hx += (shoal.hx / align) * BALANCE.SCHOOL_ALIGN;
+        hy += (shoal.hy / align) * BALANCE.SCHOOL_ALIGN * 0.55;
       }
 
-      // Shoaling with fish of a similar size. Sampled rather than exhaustive:
-      // with 70 fish a full pairwise pass every frame is 4,900 comparisons for
-      // an effect nobody can distinguish from this.
-      for (let i = 0; i < 4; i++) {
-        const mate = enemies[(Math.random() * enemies.length) | 0];
-        if (!mate || mate === fish) continue;
-        const dx = mate.x - fish.x;
-        const dy = mate.y - fish.y;
-        const distSq = dx * dx + dy * dy;
-        if (distSq > 30000 || distSq < 1) continue;
-        const similar = Math.abs(mate.size - fish.size) < fish.size * 0.4;
-        if (!similar) continue;
-        const dist = Math.sqrt(distSq);
-        // Cohere, but keep a body length of personal space.
-        const pull = dist > 90 ? 1 : -1;
-        sx += (dx / dist) * BALANCE.SCHOOL_WEIGHT * pull;
-        sy += (dy / dist) * BALANCE.SCHOOL_WEIGHT * pull;
-      }
+      // Turn back before hitting a wall rather than bouncing off it.
+      const margin = 260;
+      if (fish.x < margin) hx += 2.5;
+      if (fish.x > BALANCE.WORLD_W - margin) hx -= 2.5;
+      if (fish.y < margin) hy += 2.5;
+      if (fish.y > BALANCE.WORLD_H - margin) hy -= 2.5;
 
-      fish.wander += dt * (0.6 + fish.pace);
-      sx += Math.cos(fish.wander * 1.3) * BALANCE.WANDER_WEIGHT;
-      sy += Math.sin(fish.wander) * BALANCE.WANDER_WEIGHT * 0.5;
-
-      // Turn away from the walls before hitting them.
-      const margin = 160;
-      if (fish.x < margin) sx += 2;
-      if (fish.x > BALANCE.WORLD_W - margin) sx -= 2;
-      if (fish.y < margin) sy += 2;
-      if (fish.y > BALANCE.WORLD_H - margin) sy -= 2;
-
-      const steer = Math.hypot(sx, sy);
+      const len = Math.hypot(hx, hy) || 1;
       const cruise = (BALANCE.ENEMY_MIN_SPEED + fish.size * 0.35) * fish.pace;
-      if (steer > 0.001) {
-        const targetVx = (sx / steer) * cruise;
-        const targetVy = (sy / steer) * cruise;
-        // Ease toward the desired heading so fish arc rather than snap.
-        const k = 1 - Math.pow(0.0005, dt);
-        fish.vx += (targetVx - fish.vx) * k;
-        fish.vy += (targetVy - fish.vy) * k;
-      }
+      const targetVx = (hx / len) * cruise;
+      const targetVy = (hy / len) * cruise;
+
+      // Ease onto the desired velocity, framerate-independently, so fish arc.
+      const k = 1 - Math.pow(0.02, dt * BALANCE.TURN_RATE);
+      fish.vx += (targetVx - fish.vx) * k;
+      fish.vy += (targetVy - fish.vy) * k;
 
       fish.x += fish.vx * dt;
       fish.y += fish.vy * dt;
+      // Keep `heading` following where the fish actually ended up, so shoal
+      // alignment and the next random turn both build on reality.
+      fish.heading = Math.atan2(fish.vy, fish.vx);
       this.face(fish, dt, 5);
     }
+
+    const players: Fish[] = [];
+    this.locals.forEach((f) => !f.dead && players.push(f));
+    this.remotes.forEach((f) => !f.dead && players.push(f));
 
     // Recycle anything nobody can see, then top the population back up. The old
     // code deleted fish the instant they crossed a world edge, which meant a
@@ -723,9 +784,55 @@ export class GameEngine {
     }
 
     const target = this.enemyTarget();
-    // A few per frame, not all at once, so a big cull doesn't cause a visible
-    // wall of fish appearing together.
-    for (let i = 0; i < 3 && this.enemies.size < target; i++) this.spawnEnemy();
+    // Topped up a few at a time, so a big cull doesn't produce a visible wall
+    // of fish appearing together — except for shoals, which arrive as a group
+    // because that is the entire point of them.
+    for (let i = 0; i < 3 && this.enemies.size < target; i++) {
+      if (Math.random() < BALANCE.SHOAL_CHANCE && this.enemies.size + BALANCE.SHOAL_MAX <= target) {
+        this.spawnShoal();
+        break;
+      }
+      this.spawnEnemy();
+    }
+  }
+
+  /**
+   * A group of one species, arriving together and travelling together.
+   *
+   * Shoals are built at spawn rather than emerging from the steering rules.
+   * Letting them form by proximity is what produced schools with a shark in the
+   * middle: the only thing the old rule checked was that sizes were close, and
+   * two fish of the same size are very often different species.
+   */
+  private spawnShoal() {
+    const ref = this.referenceSize();
+    // Always food, and always small — the whole appeal is a cloud of minnows.
+    const size = Math.max(4, Math.min(SHOAL_MAX_SIZE, ref * (0.28 + Math.random() * 0.45)));
+    const asset = assetForSize(size);
+    const count = BALANCE.SHOAL_MIN + Math.floor(Math.random() * (BALANCE.SHOAL_MAX - BALANCE.SHOAL_MIN + 1));
+
+    const anchor = this.spawnAnchor();
+    const angle = Math.random() * Math.PI * 2;
+    const radius = this.viewRadius() * BALANCE.SPAWN_RING;
+    const cx = clamp(anchor.x + Math.cos(angle) * radius, 150, BALANCE.WORLD_W - 150);
+    const cy = clamp(anchor.y + Math.sin(angle) * radius, 150, BALANCE.WORLD_H - 150);
+    const heading = Math.atan2(anchor.y - cy, anchor.x - cx) + (Math.random() - 0.5);
+    const shoalId = this.nextShoalId++;
+
+    for (let i = 0; i < count; i++) {
+      const id = this.nextEnemyId++;
+      // A little variation in size within the group, so it isn't a stamped grid.
+      const fish = this.makeFish(String(id), 'enemy', size * (0.88 + Math.random() * 0.24), asset);
+      fish.x = cx + (Math.random() - 0.5) * 220;
+      fish.y = cy + (Math.random() - 0.5) * 150;
+      fish.shoal = shoalId;
+      fish.heading = heading;
+      fish.angle = heading;
+      const speed = BALANCE.ENEMY_MIN_SPEED + Math.random() * 40;
+      fish.vx = Math.cos(heading) * speed;
+      fish.vy = Math.sin(heading) * speed * 0.5;
+      this.enemies.set(id, fish);
+    }
   }
 
   private simulateBoss(dt: number) {
@@ -853,16 +960,24 @@ export class GameEngine {
       }
 
       // Other players — local co-op partners and everyone online.
-      //
-      // Only ever decided by the fish that *loses*. Both clients run this same
-      // check on their own player, so having the victim announce the death is
-      // the only version where the two can never disagree about who ate whom.
       const others: [string, Fish][] = [];
       this.locals.forEach((f, id) => id !== myId && others.push([id, f]));
       this.remotes.forEach((f, id) => others.push([id, f]));
 
       for (const [otherId, other] of others) {
         if (other.dead || !overlaps(me, other)) continue;
+
+        // Players bump apart instead of eating each other. The run is a race to
+        // grow against the reef, not a deathmatch.
+        if (!BALANCE.PVP_EATING) {
+          separate(me, other);
+          continue;
+        }
+
+        // When it is on, the outcome is only ever decided by the fish that
+        // *loses*. Both clients run this same check on their own player, so
+        // having the victim announce the death is the only arrangement where
+        // the two can never disagree about who ate whom.
         if (other.size > me.size * BALANCE.EAT_MARGIN) {
           if (invulnerable) continue;
           this.kill(myId, me, other.name ?? 'another fish', otherId);
@@ -891,7 +1006,9 @@ export class GameEngine {
       BALANCE.MAX_SIZE,
       Math.sqrt(fish.size * fish.size + eatenSize * eatenSize * BALANCE.GROWTH),
     );
-    fish.asset = assetForSize(fish.size, fish.line);
+    // `asset` is deliberately untouched. You stay the fish you chose and simply
+    // get bigger; swapping the sprite as the score climbed meant players stopped
+    // recognising themselves halfway through a run.
     audioService.playEatSound();
   }
 
@@ -912,7 +1029,8 @@ export class GameEngine {
       dead: false,
       bornAt: performance.now() / 1000,
       pace: 0.85 + Math.random() * 0.35,
-      wander: Math.random() * Math.PI * 2,
+      heading: Math.random() * Math.PI * 2,
+      turnIn: BALANCE.TURN_EVERY_MIN + Math.random() * BALANCE.TURN_EVERY_MAX,
     };
   }
 
@@ -983,20 +1101,12 @@ export class GameEngine {
   }
 
   private async loadImages() {
-    const total = FISH_ASSETS.length + 1;
+    const total = FISH_ASSETS.length;
     let loaded = 0;
     const done = () => {
       loaded++;
       this.config.onProgress?.(loaded / total);
     };
-
-    const bg = new Image();
-    bg.src = BACKGROUND_SRC;
-    bg.onload = () => {
-      this.background = bg;
-      done();
-    };
-    bg.onerror = done;
 
     FISH_ASSETS.forEach((_, index) => {
       const img = new Image();
@@ -1042,14 +1152,10 @@ export class GameEngine {
 
     ctx.translate(this.viewW / 2 - this.cameraX, this.viewH / 2 - this.cameraY);
 
-    if (this.background) {
-      ctx.drawImage(this.background, 0, 0, BALANCE.WORLD_W, BALANCE.WORLD_H);
+    if (this.backdrop) {
+      ctx.drawImage(this.backdrop, 0, 0, BALANCE.WORLD_W, BALANCE.WORLD_H);
     } else {
-      const grad = ctx.createLinearGradient(0, 0, 0, BALANCE.WORLD_H);
-      grad.addColorStop(0, '#4facfe');
-      grad.addColorStop(1, '#00639b');
-      ctx.fillStyle = grad;
-      ctx.fillRect(0, 0, BALANCE.WORLD_W, BALANCE.WORLD_H);
+      drawFallbackWater(ctx, this.reef);
     }
 
     ctx.strokeStyle = 'rgba(255,255,255,0.18)';

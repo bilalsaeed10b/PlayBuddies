@@ -1788,9 +1788,14 @@ export default function Game({
             initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: 1.1 }}
-            className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-black/95 p-8 text-center overflow-y-auto"
+            className="absolute inset-0 z-50 flex flex-col items-center overflow-y-auto overscroll-contain bg-black/95 p-4 text-center sm:p-8"
           >
-            <h1 className="text-6xl font-black mb-4 tracking-tighter text-transparent bg-clip-text bg-gradient-to-r from-orange-500 to-cyan-500">
+            {/* `justify-center` on a scroll container clips the top of anything
+                taller than the viewport and makes it unreachable. `my-auto` on
+                the content centres it when it fits and lets it scroll when it
+                doesn't — which on a phone it always does. */}
+            <div className="my-auto w-full max-w-md">
+            <h1 className="text-4xl sm:text-6xl font-black mb-4 tracking-tighter text-transparent bg-clip-text bg-gradient-to-r from-orange-500 to-cyan-500">
               NEON ELEMENTS
             </h1>
 
@@ -1883,14 +1888,21 @@ export default function Game({
                   <button onClick={() => onBack?.()} className="flex-1 py-4 bg-zinc-900 border border-white/5 rounded-xl text-xs font-bold text-zinc-500 hover:text-white transition-colors">BACK TO MENU</button>
                 </div>
 
-                {/* Debug Info (Visible in Lobby) */}
-                <div className="mt-4 p-2 bg-black/40 rounded border border-zinc-800 font-mono text-[10px] text-zinc-500 text-left">
+                <button
+                  onClick={() => requestFullscreen(!isFull)}
+                  className="w-full py-3 bg-zinc-900 border border-white/5 rounded-xl text-xs font-bold text-zinc-400 hover:text-white transition-colors flex items-center justify-center gap-2"
+                >
+                  {isFull ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+                  {isFull ? 'EXIT FULL SCREEN' : 'FULL SCREEN'}
+                </button>
+
+                <div className="p-2 bg-black/40 rounded border border-zinc-800 font-mono text-[10px] text-zinc-500 text-left">
                   <div>ROOM: {roomId}</div>
-                  <div>USER: {userId || 'AUTHENTICATING...'}</div>
-                  <div>SYNC: FIRESTORE</div>
                   <div>PLAYERS: {Object.keys(lobbyData?.players || {}).length}</div>
+                  <div>PEER: {rtcConnected ? 'DIRECT' : 'FALLBACK'}</div>
                 </div>
               </div>
+            </div>
             </div>
           </motion.div>
         )}
@@ -2077,9 +2089,9 @@ export default function Game({
                 initial={{ opacity: 0, scale: 0.95 }}
                 animate={{ opacity: 1, scale: 1 }}
                 exit={{ opacity: 0, scale: 0.95 }}
-                className="absolute inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4"
+                className="absolute inset-0 bg-black/80 backdrop-blur-md z-50 flex items-start justify-center overflow-y-auto overscroll-contain p-4"
               >
-                <div className="bg-zinc-900 border border-white/10 rounded-2xl p-6 w-full max-w-md shadow-2xl">
+                <div className="my-auto bg-zinc-900 border border-white/10 rounded-2xl p-4 sm:p-6 w-full max-w-md shadow-2xl">
                   <div className="flex justify-between items-center mb-6">
                     <h2 className="text-xl font-black uppercase tracking-widest text-white">Optimization Control</h2>
                     <button

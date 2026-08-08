@@ -8,6 +8,12 @@
       "port": 5199
     },
     {
+      "name": "volley-clash",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev", "--prefix", "games/volley-clash", "--", "--port", "5197", "--strictPort"],
+      "port": 5197
+    },
+    {
       "name": "neon-elements",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev", "--prefix", "games/fireboy-watergirl", "--", "--port", "5198", "--strictPort"],

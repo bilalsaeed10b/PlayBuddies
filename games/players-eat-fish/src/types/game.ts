@@ -19,15 +19,23 @@ export interface Fish {
   asset: number;
   angle: number;
   dead: boolean;
-  /** Which growth line this fish's sprite follows, for players. */
-  line?: number;
   name?: string;
   /** performance.now() when it entered the world — drives spawn protection. */
   bornAt: number;
   /** Cruise speed multiplier, so a shoal doesn't move as one rigid block. */
   pace: number;
-  /** Steering phase for the wander behaviour. */
-  wander: number;
+  /**
+   * Where this fish is currently trying to go, and how long until it picks
+   * somewhere new. A heading held for a few seconds is what makes a fish look
+   * like it is swimming *somewhere*. Steering by a pair of sine waves — which
+   * is what this used to do — traces a closed loop, and thirty fish each
+   * tracing their own loop is exactly the "just circling around" that was
+   * reported.
+   */
+  heading: number;
+  turnIn: number;
+  /** Members of a shoal share this. Solitary fish have none. */
+  shoal?: number;
   /** Fades the boss in and out. */
   opacity?: number;
   /** Set on fish driven by the network: where they claim to be heading. */

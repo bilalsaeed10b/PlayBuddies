@@ -1,0 +1,19 @@
+{
+  "id": "volley-clash",
+  "name": "Volley Clash",
+  "subtitle": "Two touches, one winner",
+  "description": "Arcade beach volleyball with dashes, charged spikes and power-ups. Play solo against the AI, share a keyboard with a friend, or go online — 1v1, or 2v2 on a wider court.",
+  "category": "action",
+  "minPlayers": 1,
+  "maxPlayers": 4,
+  "estimatedDuration": "5-8 min",
+  "controls": "P1: A/D move, W jump, Shift dash, Space spike  |  P2: arrows, / dash, Enter spike  |  Touch: drag to move, hold to charge",
+  "thumbnail": "thumb.svg",
+  "accent": {
+    "from": "#f59e0b",
+    "to": "#e11d48"
+  },
+  "featured": true,
+  "available": true,
+  "version": "1.0.0"
+}

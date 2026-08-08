@@ -1,0 +1,29 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+}
+
+@layer base {
+  body {
+    @apply text-slate-900 selection:bg-amber-400/40;
+    /* Sunset over water — the same palette the baked court uses, so the menu
+       and the game feel like one place. */
+    background: radial-gradient(circle at 50% 8%, #ffd9a0 0%, #f59e0b 26%, #0e6ba8 66%, #06182a 100%);
+    overflow: hidden;
+  }
+}
+
+@layer utilities {
+  .glass {
+    @apply bg-white/20 backdrop-blur-xl border border-white/30 shadow-[0_8px_32px_rgba(0,0,0,0.18)];
+  }
+
+  .glass-dark {
+    @apply bg-white/85 backdrop-blur-2xl border border-white/50 shadow-[0_8px_32px_rgba(0,0,0,0.22)];
+  }
+
+  .panel {
+    @apply bg-slate-900/70 backdrop-blur-2xl border border-white/15 shadow-[0_8px_32px_rgba(0,0,0,0.35)] text-white;
+  }
+}

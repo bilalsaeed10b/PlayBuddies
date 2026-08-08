@@ -65,6 +65,8 @@ function LobbyContent() {
   const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
   const [inviteSent, setInviteSent] = useState<string | null>(null);
   const gameFrameRef = useRef<HTMLIFrameElement>(null);
+  /** The wrapper that goes fullscreen — the frame plus its floating controls. */
+  const gameShellRef = useRef<HTMLDivElement>(null);
 
   const presentUids = useLobbyPresence(roomId);
   const { friends } = useFriends(isInviteModalOpen);
@@ -368,22 +370,56 @@ function LobbyContent() {
     }
   };
 
+  /**
+   * Both routes, every time.
+   *
+   * The pseudo-fullscreen (the frame goes `fixed inset-0`) is the one that
+   * always works — including on iOS, where the Fullscreen API does not exist
+   * for anything but video. The native request is attempted on top of it
+   * because where it *is* granted it also hides the browser chrome and unlocks
+   * orientation locking. Branching on "is this a phone" was the mistake: it
+   * left phones with a slightly bigger box and no way to fill the screen.
+   */
   const toggleFullScreen = () => {
-    const isDeviceMobile =
-      "ontouchstart" in window || navigator.maxTouchPoints > 0 || window.innerWidth < 1024;
+    const next = !isPseudoFull;
+    setIsPseudoFull(next);
 
-    if (isDeviceMobile) {
-      setIsPseudoFull((v) => !v);
-      return;
-    }
-    if (!document.fullscreenElement) {
-      document.documentElement.requestFullscreen().catch(() => setIsPseudoFull(true));
-      setIsPseudoFull(true);
-    } else {
-      document.exitFullscreen?.();
-      setIsPseudoFull(false);
+    const target = gameShellRef.current ?? document.documentElement;
+    if (next) {
+      target.requestFullscreen?.().catch(() => {
+        /* denied — the fixed-position path already covers it */
+      });
+    } else if (document.fullscreenElement) {
+      document.exitFullscreen?.().catch(() => {});
     }
   };
+
+  /**
+   * While the game owns the screen, nothing behind it should scroll or rotate.
+   * On a phone this is the difference between "bigger" and "fullscreen".
+   */
+  useEffect(() => {
+    if (!isPseudoFull) return;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    const orientation = screen.orientation as ScreenOrientation & {
+      lock?: (o: string) => Promise<void>;
+      unlock?: () => void;
+    };
+    orientation?.lock?.("landscape").catch(() => {
+      /* most browsers only allow this in true fullscreen */
+    });
+
+    return () => {
+      document.body.style.overflow = previous;
+      try {
+        orientation?.unlock?.();
+      } catch {
+        /* not supported */
+      }
+    };
+  }, [isPseudoFull]);
 
   if (notFound) {
     return (
@@ -414,8 +450,10 @@ function LobbyContent() {
 
   const accent = selectedGame ? gameAccent(selectedGame) : null;
 
+  // dvh, not vh: on a phone `vh` counts the space the URL bar occupies, so the
+  // bottom of the lobby sat underneath the browser chrome.
   return (
-    <div className="h-screen bg-background flex flex-col overflow-hidden">
+    <div className="h-[100dvh] bg-background flex flex-col overflow-hidden">
       <nav className="glass border-b border-white/5 px-6 py-4 flex items-center justify-between shrink-0">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary to-accent flex items-center justify-center">
@@ -678,6 +716,7 @@ function LobbyContent() {
 
           {lobby.status === "playing" && lobby.gameId ? (
             <div
+              ref={gameShellRef}
               className={`${
                 isPseudoFull ? "fixed inset-0 z-[100] bg-black" : "flex-1 relative"
               } w-full flex flex-col`}
@@ -685,6 +724,7 @@ function LobbyContent() {
               <iframe
                 id="game-iframe"
                 ref={gameFrameRef}
+                allowFullScreen
                 src={gameUrl(lobby.gameId, {
                   room: roomId,
                   displayName: user?.displayName || "Player",

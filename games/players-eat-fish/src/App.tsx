@@ -7,10 +7,12 @@ import {
   Fish as FishIcon,
   Loader2,
   Lock,
+  Maximize2,
   Play,
   Settings as SettingsIcon,
   Users,
 } from 'lucide-react';
+import { toggleFullscreen } from './fullscreen';
 import {
   auth, db, onAuthStateChanged,
   doc, onSnapshot, updateDoc,
@@ -213,8 +215,14 @@ export default function App() {
   }
 
   // ── shells ───────────────────────────────────────────────────────────────
+  //
+  // A fixed height with the scrolling done *inside* each screen. The root used
+  // to be `min-h-[100dvh] overflow-y-auto`, which grows with its content rather
+  // than scrolling it — and since index.css sets `body { overflow: hidden }`,
+  // anything past the fold was simply unreachable. That is why the start button
+  // could not be tapped on a phone.
   return (
-    <div className="relative min-h-[100dvh] w-full overflow-y-auto text-slate-900">
+    <div className="relative h-[100dvh] w-full overflow-hidden text-slate-900">
       {view === 'shop' && (
         <Shell title="Fish Shop" coins={coins} onBack={() => setView(online ? 'room' : 'menu')}>
           <FishGrid
@@ -229,7 +237,7 @@ export default function App() {
       )}
 
       {view === 'menu' && (
-        <div className="flex min-h-[100dvh] flex-col items-center justify-center gap-10 p-6">
+        <div className="flex h-full flex-col items-center justify-center gap-8 overflow-y-auto p-6">
           <div className="text-center">
             <div className="mb-4 inline-block rounded-3xl bg-emerald-500/15 p-4">
               <FishIcon className="h-14 w-14 text-emerald-600" />
@@ -310,6 +318,7 @@ export default function App() {
           onStart={startMatch}
           onShop={() => setView('shop')}
           onSettings={() => setShowSettings(true)}
+          onFullscreen={() => toggleFullscreen(document.documentElement, !document.fullscreenElement)}
         />
       )}
 
@@ -334,17 +343,19 @@ function Shell({
   children: React.ReactNode;
 }) {
   return (
-    <div className="mx-auto flex min-h-[100dvh] w-full max-w-6xl flex-col gap-4 p-4 sm:p-6">
-      <div className="flex items-center justify-between">
-        <button onClick={onBack} className="glass-dark rounded-2xl p-3">
+    <div className="mx-auto flex h-full w-full max-w-6xl flex-col gap-3 p-3 sm:gap-4 sm:p-6">
+      <div className="flex shrink-0 items-center justify-between gap-2">
+        <button onClick={onBack} className="glass-dark shrink-0 rounded-2xl p-3">
           <ArrowLeft className="h-5 w-5" />
         </button>
-        <h2 className="text-xl font-black tracking-tight sm:text-2xl">{title}</h2>
-        <div className="flex items-center gap-2 rounded-xl bg-amber-500/20 px-3 py-2 font-bold text-amber-600">
+        <h2 className="min-w-0 truncate text-center text-base font-black tracking-tight sm:text-2xl">{title}</h2>
+        <div className="flex shrink-0 items-center gap-2 rounded-xl bg-amber-500/20 px-3 py-2 font-bold text-amber-600">
           <Coins className="h-4 w-4" /> {coins}
         </div>
       </div>
-      <div className="glass-dark flex-1 overflow-y-auto rounded-[2rem] p-4 sm:p-6">{children}</div>
+      <div className="glass-dark min-h-0 flex-1 overflow-y-auto overscroll-contain rounded-[2rem] p-3 sm:p-6">
+        {children}
+      </div>
     </div>
   );
 }
@@ -494,6 +505,7 @@ function RoomScreen({
   onStart,
   onShop,
   onSettings,
+  onFullscreen,
 }: {
   ready: boolean;
   error: string | null;
@@ -508,6 +520,7 @@ function RoomScreen({
   onStart: () => void;
   onShop: () => void;
   onSettings: () => void;
+  onFullscreen: () => void;
 }) {
   const takenBy = useMemo(() => {
     const map: Record<number, string> = {};
@@ -521,7 +534,7 @@ function RoomScreen({
 
   if (error) {
     return (
-      <div className="flex min-h-[100dvh] flex-col items-center justify-center gap-3 p-8 text-center">
+      <div className="flex h-full flex-col items-center justify-center gap-3 overflow-y-auto p-8 text-center">
         <h2 className="text-2xl font-black">{error}</h2>
         <p className="text-sm text-slate-600">Head back to the PlayBuddies lobby and try again.</p>
       </div>
@@ -530,7 +543,7 @@ function RoomScreen({
 
   if (!ready || !uid) {
     return (
-      <div className="flex min-h-[100dvh] flex-col items-center justify-center gap-3">
+      <div className="flex h-full flex-col items-center justify-center gap-3">
         <Loader2 className="h-10 w-10 animate-spin text-emerald-600" />
         <p className="font-bold text-slate-700">Joining the reef…</p>
       </div>
@@ -538,14 +551,18 @@ function RoomScreen({
   }
 
   const everyonePicked = people.every((p) => p.fishIndex !== undefined && p.fishIndex !== null);
+  const iAmReady = myFish !== undefined && myFish !== null;
 
   return (
-    <div className="mx-auto flex min-h-[100dvh] w-full max-w-6xl flex-col gap-4 p-4 sm:p-6">
-      <div className="flex items-center justify-between gap-3">
-        <h2 className="text-xl font-black tracking-tight sm:text-2xl">Pick your fish</h2>
-        <div className="flex items-center gap-2">
+    <div className="mx-auto flex h-full w-full max-w-6xl flex-col gap-3 p-3 sm:gap-4 sm:p-6">
+      <div className="flex shrink-0 items-center justify-between gap-2">
+        <h2 className="min-w-0 truncate text-lg font-black tracking-tight sm:text-2xl">Pick your fish</h2>
+        <div className="flex shrink-0 items-center gap-2">
           <button onClick={onShop} className="glass-dark flex items-center gap-2 rounded-2xl px-3 py-2 font-bold text-amber-600">
             <Coins className="h-4 w-4" /> {coins}
+          </button>
+          <button onClick={onFullscreen} className="glass-dark rounded-2xl p-2.5" title="Full screen">
+            <Maximize2 className="h-5 w-5" />
           </button>
           <button onClick={onSettings} className="glass-dark rounded-2xl p-2.5">
             <SettingsIcon className="h-5 w-5" />
@@ -553,8 +570,30 @@ function RoomScreen({
         </div>
       </div>
 
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-3">
-        <div className="glass-dark order-2 max-h-[55vh] overflow-y-auto rounded-[2rem] p-4 sm:p-6 lg:order-1 lg:col-span-2 lg:max-h-none">
+      {/* On a phone the start button is pinned below the fold otherwise — which
+          is precisely what made it unreachable. It now sits above the picker on
+          small screens and moves to the sidebar from `lg` up. */}
+      <div className="glass-dark shrink-0 rounded-2xl p-3 lg:hidden">
+        {isHost ? (
+          <button
+            onClick={onStart}
+            disabled={!iAmReady}
+            className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 py-3 text-base font-black text-white shadow-lg transition-transform active:scale-95 disabled:opacity-40"
+          >
+            <Play className="h-5 w-5 fill-current" /> DIVE IN
+          </button>
+        ) : (
+          <p className="text-center text-sm font-bold text-slate-500">
+            {iAmReady ? 'Waiting for the host…' : 'Pick a fish to be ready.'}
+          </p>
+        )}
+      </div>
+
+      {/* Explicit rows: a grid's default `auto` rows size to their content, so
+          the picker would grow past the screen instead of scrolling inside it.
+          minmax(0,1fr) is what lets the overflow-y-auto below actually bite. */}
+      <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[auto_minmax(0,1fr)] gap-3 sm:gap-4 lg:grid-cols-3 lg:grid-rows-[minmax(0,1fr)]">
+        <div className="glass-dark order-2 min-h-0 overflow-y-auto overscroll-contain rounded-[2rem] p-3 sm:p-6 lg:order-1 lg:col-span-2">
           <FishGrid
             unlocked={unlocked}
             coins={coins}
@@ -565,12 +604,12 @@ function RoomScreen({
           />
         </div>
 
-        <div className="order-1 flex flex-col gap-4 lg:order-2">
-          <div className="glass-dark flex-1 rounded-[2rem] p-5">
-            <h3 className="mb-4 flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.2em] text-slate-500">
+        <div className="order-1 flex min-h-0 flex-col gap-3 sm:gap-4 lg:order-2">
+          <div className="glass-dark flex min-h-0 max-h-48 flex-col rounded-[2rem] p-4 sm:p-5 lg:max-h-none lg:flex-1">
+            <h3 className="mb-3 flex shrink-0 items-center gap-2 text-[11px] font-black uppercase tracking-[0.2em] text-slate-500">
               <Users className="h-4 w-4" /> In the water ({people.length})
             </h3>
-            <div className="space-y-2">
+            <div className="min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain pr-1">
               {people.map((p) => (
                 <div key={p.uid} className="flex items-center gap-3 rounded-2xl border border-black/5 bg-white/40 p-3">
                   <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-black/10 bg-white/60 p-1">
@@ -594,18 +633,18 @@ function RoomScreen({
             </div>
           </div>
 
-          <div className="glass-dark rounded-[2rem] p-5">
+          <div className="glass-dark hidden shrink-0 rounded-[2rem] p-5 lg:block">
             {isHost ? (
               <>
                 <button
                   onClick={onStart}
-                  disabled={myFish === undefined || myFish === null}
+                  disabled={!iAmReady}
                   className="flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-600 py-4 text-lg font-black text-white shadow-lg transition-transform active:scale-95 disabled:opacity-40"
                 >
                   <Play className="h-5 w-5 fill-current" /> DIVE IN
                 </button>
                 <p className="mt-2 text-center text-[11px] text-slate-500">
-                  {myFish === undefined || myFish === null
+                  {!iAmReady
                     ? 'Pick your own fish first.'
                     : everyonePicked
                       ? 'Everyone is ready.'
@@ -614,7 +653,7 @@ function RoomScreen({
               </>
             ) : (
               <p className="text-center text-sm font-bold text-slate-500">
-                {myFish === undefined || myFish === null ? 'Pick a fish to be ready.' : 'Waiting for the host…'}
+                {!iAmReady ? 'Pick a fish to be ready.' : 'Waiting for the host…'}
               </p>
             )}
           </div>
@@ -635,7 +674,7 @@ function SettingsPanel({
 }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-sky-950/60 p-4 backdrop-blur-sm">
-      <div className="w-full max-w-md space-y-6 rounded-[2rem] border border-white/30 bg-white/95 p-6 shadow-2xl">
+      <div className="max-h-[88dvh] w-full max-w-md space-y-6 overflow-y-auto overscroll-contain rounded-[2rem] border border-white/30 bg-white/95 p-6 shadow-2xl">
         <div className="flex items-center justify-between">
           <h3 className="text-xl font-black">Settings</h3>
           <button onClick={onClose} className="rounded-xl p-2 hover:bg-black/5">

@@ -62,40 +62,30 @@ export const BOSS_ASSET = FISH_ASSETS.length - 1;
 export const STARTER_FISH = [0, 1, 2];
 
 /**
- * Growth lines. Your sprite changes as you grow, and it stays within the line
- * your starting fish belongs to — so a player who picked the tetra grows into
- * reef fish rather than randomly becoming a catfish halfway through a run.
+ * Sprite for an AI fish of a given size.
+ *
+ * Only used when spawning. A *player* keeps the fish they chose for the whole
+ * run and simply gets bigger — swapping their sprite as their score climbed
+ * meant you stopped being the fish you picked, which nobody asked for.
  */
-export const GROWTH_LINES: number[][] = [
-  [0, 4, 10, 14, 17, 21, 24, 27], // Reef
-  [1, 5, 11, 12, 16, 20, 26, 29], // Stream
-  [2, 6, 9, 13, 18, 22, 23, 28], // Predator
-];
-
-/** Which line a chosen fish belongs to. Anything unlisted follows the reef line. */
-export function lineOf(assetIndex: number): number {
-  const found = GROWTH_LINES.findIndex((line) => line.includes(assetIndex));
-  return found === -1 ? 0 : found;
-}
-
-/** Sprite for a fish of this size, following a growth line when it has one. */
-export function assetForSize(size: number, line?: number): number {
-  if (line !== undefined && GROWTH_LINES[line]) {
-    const stages = GROWTH_LINES[line];
-    for (let i = stages.length - 1; i >= 0; i--) {
-      if (size >= FISH_ASSETS[stages[i]].size) return stages[i];
-    }
-    return stages[0];
-  }
+export function assetForSize(size: number): number {
   for (let i = FISH_ASSETS.length - 2; i >= 0; i--) {
     if (size >= FISH_ASSETS[i].size) return i;
   }
   return 0;
 }
 
+/**
+ * Biggest fish that will ever travel in a group. Above this they swim alone —
+ * a shark drifting in the middle of a school of neon tetras looked ridiculous.
+ */
+export const SHOAL_MAX_SIZE = 34;
+
+export function isShoalingSize(size: number): boolean {
+  return size <= SHOAL_MAX_SIZE;
+}
+
 /** Path a browser can load, relative to the bundle so any deploy prefix works. */
 export function fishSrc(assetIndex: number): string {
   return `${import.meta.env.BASE_URL}asset/fishes/${FISH_ASSETS[assetIndex].file}`;
 }
-
-export const BACKGROUND_SRC = `${import.meta.env.BASE_URL}asset/background.webp`;

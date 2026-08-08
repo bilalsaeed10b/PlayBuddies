@@ -12,9 +12,9 @@
  *   - Android Chrome grants it, but the page underneath keeps its layout, so a
  *     game that sizes itself to 65vh is still 65vh — just on a bigger canvas.
  *
- * So the order is: ask the host page (it can stretch the iframe to the viewport
- * with no Fullscreen API involved, which is the only thing that works on iOS),
- * then the real API, then a local CSS-only immersive mode as a last resort.
+ * So all three routes are taken at once, cheapest first: ask the host page to
+ * stretch the frame (the only one that works on iOS), try the real API, and
+ * fall back to fixed-position CSS. Whichever lands, the game fills the screen.
  */
 
 export const IN_IFRAME: boolean = (() => {
@@ -39,35 +39,59 @@ export function isNativeFullscreen(): boolean {
   return Boolean(document.fullscreenElement);
 }
 
-/**
- * Returns true when the caller should also apply its own immersive styling,
- * i.e. when no native fullscreen was available.
- */
-export function toggleFullscreen(el: HTMLElement, on: boolean): boolean {
+const IMMERSIVE = 'position:fixed;inset:0;width:100%;height:100%;z-index:2147483647;';
+
+export function toggleFullscreen(el: HTMLElement, on: boolean) {
   askHostForFullscreen(on);
+  lockPageScroll(on);
 
-  const canNative = typeof el.requestFullscreen === 'function';
-  if (!canNative) return true;
-
-  if (on) {
-    el.requestFullscreen().catch(() => {
-      /* denied (no user gesture, or a permissions policy) — CSS mode covers it */
-    });
-    // Phones are held upright; a 4:3 platformer is unplayable that way.
-    lockLandscape();
-  } else if (document.fullscreenElement) {
-    document.exitFullscreen?.().catch(() => {});
+  if (!on) {
+    el.style.cssText = el.style.cssText.replace(IMMERSIVE, '');
+    if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
+    unlockOrientation();
+    return;
   }
-  return true;
+
+  if (typeof el.requestFullscreen === 'function') {
+    el.requestFullscreen()
+      .then(lockLandscape)
+      // Denied (no user gesture, or a permissions policy) — CSS covers it.
+      .catch(() => applyImmersive(el));
+  } else {
+    // iOS. Nothing to call, so make the element cover the viewport ourselves.
+    applyImmersive(el);
+  }
 }
 
+function applyImmersive(el: HTMLElement) {
+  if (!el.style.cssText.includes('z-index:2147483647')) {
+    el.style.cssText += IMMERSIVE;
+  }
+}
+
+/** Stops the page behind the game rubber-banding under a thumb drag. */
+function lockPageScroll(on: boolean) {
+  document.documentElement.style.overflow = on ? 'hidden' : '';
+  document.body.style.overflow = on ? 'hidden' : '';
+}
+
+type LockableOrientation = ScreenOrientation & {
+  lock?: (o: string) => Promise<void>;
+  unlock?: () => void;
+};
+
 function lockLandscape() {
-  const orientation = screen.orientation as ScreenOrientation & {
-    lock?: (o: string) => Promise<void>;
-  };
-  orientation?.lock?.('landscape').catch(() => {
-    /* not supported, or not in fullscreen — the layout handles portrait anyway */
-  });
+  // Phones are held upright; most browsers only honour this while genuinely
+  // fullscreen, which is why it is attempted after the request resolves.
+  (screen.orientation as LockableOrientation)?.lock?.('landscape').catch(() => {});
+}
+
+function unlockOrientation() {
+  try {
+    (screen.orientation as LockableOrientation)?.unlock?.();
+  } catch {
+    /* not supported */
+  }
 }
 
 /** True for devices driven by a finger, so touch controls aren't shown on a desktop in a wide window. */
