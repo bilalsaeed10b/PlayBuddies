@@ -9,7 +9,9 @@
     "registry": "node scripts/build-games.mjs --registry-only",
     "start": "next start",
     "lint": "npm run registry && eslint",
-    "typecheck": "npm run registry && tsc --noEmit"
+    "typecheck": "npm run registry && tsc --noEmit",
+    "serve": "node scripts/serve.mjs",
+    "host": "npm run build && node scripts/serve.mjs"
   },
   "dependencies": {
     "firebase": "^12.11.0",
