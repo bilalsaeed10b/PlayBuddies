@@ -51,7 +51,7 @@ function readHandoff(): Handoff {
   return handoff;
 }
 
-const DEFAULT_SETTINGS: GameSettings = { bgmVolume: 0.4, sfxVolume: 0.7, controlScheme: 0 };
+const DEFAULT_SETTINGS: GameSettings = { bgmVolume: 0.4, sfxVolume: 0.7, controlScheme: 0, lowPower: false };
 
 type View = 'menu' | 'select' | 'room' | 'game' | 'shop';
 
@@ -68,6 +68,16 @@ export default function App() {
 
   const [seatCount, setSeatCount] = useState(1);
   const [seatFish, setSeatFish] = useState<Record<string, number>>({});
+  /**
+   * The player deliberately asked for an offline run.
+   *
+   * Launched from a lobby this screen used to be unreachable altogether — the
+   * view opened straight on the room and the only way to the shared-keyboard
+   * menu was to not be in a lobby at all. The room now offers it, and this flag
+   * is what keeps the choice: without it the branch below still handed the
+   * engine a single online seat, so players two and three drove nothing.
+   */
+  const [offlineMatch, setOfflineMatch] = useState(false);
 
   const [coins, setCoins] = useState(() => Number(localStorage.getItem('fishy_coins') || 0));
   const [unlocked, setUnlocked] = useState<number[]>(() => {
@@ -163,11 +173,14 @@ export default function App() {
 
   // The host flips matchStarted; everyone drops into the water together.
   useEffect(() => {
-    if (!online) return;
+    // An offline run is the player's own; the room does not get to start or end
+    // it. This guard is also what stops an unrelated lobby update from bouncing
+    // a shared-keyboard run straight back to the room.
+    if (!online || offlineMatch) return;
     if (lobby?.matchStarted && myFish !== undefined && myFish !== null) setView('game');
     else if (view === 'game') setView('room');
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lobby?.matchStarted, myFish, online]);
+  }, [lobby?.matchStarted, myFish, online, offlineMatch]);
 
   const pickFishOnline = useCallback(
     async (index: number) => {
@@ -228,6 +241,7 @@ export default function App() {
    * quit alike — actually passes through.
    */
   const leaveWater = useCallback(() => {
+    setOfflineMatch(false);
     setView(online ? 'room' : 'menu');
     if (!online || !isHost) return;
     void import('./firebase')
@@ -237,16 +251,17 @@ export default function App() {
 
   // ── in the water ─────────────────────────────────────────────────────────
   if (view === 'game') {
-    const localIds = online && uid ? [uid] : Array.from({ length: seatCount }, (_, i) => `seat-${i}`);
-    const localFish = online && uid ? { [uid]: myFish ?? 0 } : seatFish;
-    const localNames = online && uid
+    const netPlay = online && uid && !offlineMatch;
+    const localIds = netPlay ? [uid] : Array.from({ length: seatCount }, (_, i) => `seat-${i}`);
+    const localFish = netPlay ? { [uid]: myFish ?? 0 } : seatFish;
+    const localNames = netPlay
       ? { [uid]: handoff.displayName || 'You' }
       : Object.fromEntries(localIds.map((id, i) => [id, seatCount > 1 ? `Player ${i + 1}` : 'You']));
 
     return (
       <>
         <GameView
-          roomId={online ? handoff.room : null}
+          roomId={netPlay ? handoff.room : null}
           uid={uid}
           hostId={lobby?.hostId ?? null}
           people={people}
@@ -311,6 +326,7 @@ export default function App() {
                 <button
                   key={n}
                   onClick={() => {
+                    setOfflineMatch(true);
                     setSeatCount(n);
                     setSeatFish({});
                     setView('select');
@@ -324,6 +340,14 @@ export default function App() {
             <p className="text-xs text-slate-500">
               Playing online? Start a lobby on PlayBuddies and pick this game.
             </p>
+            {online && (
+              <button
+                onClick={() => setView('room')}
+                className="w-full rounded-xl border border-black/10 bg-white/50 py-2.5 text-sm font-bold text-slate-600 transition-colors hover:bg-white"
+              >
+                Back to the lobby
+              </button>
+            )}
           </div>
 
           <div className="flex items-center gap-3">
@@ -370,6 +394,7 @@ export default function App() {
           onShop={() => setView('shop')}
           onSettings={() => setShowSettings(true)}
           onFullscreen={() => toggleFullscreen(document.documentElement, !document.fullscreenElement)}
+          onPlayOffline={() => setView('menu')}
         />
       )}
 
@@ -559,6 +584,7 @@ function RoomScreen({
   onShop,
   onSettings,
   onFullscreen,
+  onPlayOffline,
 }: {
   ready: boolean;
   error: string | null;
@@ -574,6 +600,7 @@ function RoomScreen({
   onShop: () => void;
   onSettings: () => void;
   onFullscreen: () => void;
+  onPlayOffline: () => void;
 }) {
   const takenBy = useMemo(() => {
     const map: Record<number, string> = {};
@@ -710,6 +737,14 @@ function RoomScreen({
                 </p>
               </div>
             )}
+            {/* Sharing one keyboard is a legitimate way to play this while
+                sitting in a lobby, and until now the lobby was a dead end. */}
+            <button
+              onClick={onPlayOffline}
+              className="mt-2 w-full rounded-xl border border-black/10 bg-white/40 py-2 text-[11px] sm:text-xs font-bold text-slate-600 transition-colors hover:bg-white"
+            >
+              Play offline / one keyboard
+            </button>
           </div>
         </div>
       </div>
@@ -753,6 +788,21 @@ function SettingsPanel({
             />
           </div>
         ))}
+
+        <label className="flex items-center justify-between gap-3">
+          <span className="text-sm font-bold">
+            Low power mode
+            <span className="block text-[11px] font-normal text-slate-500">
+              Smaller canvas, fewer bubbles. Turn this on if the reef stutters.
+            </span>
+          </span>
+          <input
+            type="checkbox"
+            checked={settings.lowPower}
+            onChange={(e) => onChange({ ...settings, lowPower: e.target.checked })}
+            className="h-6 w-6 shrink-0 accent-emerald-500"
+          />
+        </label>
 
         <div className="space-y-2">
           <span className="text-sm font-bold">Keyboard layout</span>

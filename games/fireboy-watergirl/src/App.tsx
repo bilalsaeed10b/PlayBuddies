@@ -13,7 +13,7 @@ import { Level } from './types';
 import { getLevels } from './game/levels';
 import { db, auth, doc, getDoc } from './firebase';
 import { motion, AnimatePresence } from 'motion/react';
-import { Play, Plus, Layout, Lock, Unlock, ChevronRight, ArrowLeft, Edit3, Star, Monitor, Smartphone, Users } from 'lucide-react';
+import { Play, Plus, Layout, Lock, Unlock, ChevronRight, ArrowLeft, Edit3, Star, Smartphone, Users } from 'lucide-react';
 
 export default function App() {
   const [view, setView] = useState<'menu' | 'level-select' | 'game' | 'editor' | 'multiplayer-menu' | 'join-room'>('menu');
@@ -111,13 +111,19 @@ export default function App() {
             </div>
 
             <div className="flex flex-col gap-4 w-64">
+              {/*
+                This mode drives *both* characters from one keyboard, which is
+                the only way one machine can play a two-character co-op game.
+                It was labelled 'SINGLE PLAYER', so the couch mode this game
+                already had read as the one mode that was not couch play.
+              */}
               <MenuBtn 
                 onClick={() => {
                   setGameMode('single');
                   setView('level-select');
                 }} 
-                icon={<Monitor size={20} />} 
-                label="SINGLE PLAYER" 
+                icon={<Users size={20} />} 
+                label="2 PLAYERS · ONE PC" 
                 color="bg-white text-black hover:bg-zinc-200"
               />
               <MenuBtn 

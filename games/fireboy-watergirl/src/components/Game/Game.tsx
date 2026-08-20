@@ -10,6 +10,7 @@ import { Level } from '../../types';
 import { getLevels } from '../../game/levels';
 import { RemoteSmoother, snapshotOf, worthSending, RemoteSnapshot } from '../../game/netSync';
 import { IN_IFRAME, toggleFullscreen, isTouchDevice } from '../../game/fullscreen';
+import { QualityGovernor } from '../../game/quality';
 import TouchControls from './TouchControls';
 import { MessageSquare, RefreshCw, Smartphone, Monitor, Gem, ArrowLeft, Settings, Users, Maximize2, Minimize2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -111,6 +112,18 @@ export default function Game({
   const engineRef = useRef<GameEngine | null>(null);
   const gameLoopRef = useRef<number | null>(null);
   const particlesRef = useRef<Particle[]>([]);
+  /**
+   * Decides how much decoration this device can afford, and keeps deciding:
+   * the first guess comes from what the browser reports, the rest from how
+   * long frames are actually taking. See game/quality.ts.
+   */
+  const governorRef = useRef(new QualityGovernor(false));
+  /**
+   * Bloom is the player's choice until the device proves it cannot pay for it.
+   * Every bloom branch in the draw code is another shadowBlur pass, so this is
+   * the switch that decides whether a level draws in two milliseconds or ten.
+   */
+  const bloomOn = () => settingsRef.current.bloom && governorRef.current.quality.fancy;
   const lastUpdateRef = useRef<number>(0);
   const lastTimeRef = useRef<number>(0);
   const rtcRef = useRef<RTCPeerConnection | null>(null);
@@ -125,7 +138,9 @@ export default function Game({
   const addParticles = useCallback((x: number, y: number, color: string, count: number = 10) => {
     if (!settingsRef.current.particles) return;
     const newParticles: Particle[] = [];
-    for (let i = 0; i < count; i++) {
+    // Never rounded away to nothing: a death with no burst reads as a bug.
+    const n = Math.max(1, Math.round(count * governorRef.current.quality.particles));
+    for (let i = 0; i < n; i++) {
       newParticles.push({
         x,
         y,
@@ -583,6 +598,8 @@ export default function Game({
       const now = performance.now();
       if (!lastTimeRef.current) lastTimeRef.current = now;
       const dt = Math.min(3, (now - lastTimeRef.current) / (1000 / 60));
+      // The governor measures in seconds; `dt` above is in 60fps-frame units.
+      governorRef.current.sample((now - lastTimeRef.current) / 1000);
       lastTimeRef.current = now;
 
       // Chaos Mode logic
@@ -1081,7 +1098,13 @@ export default function Game({
       }
       ctx.translate(-(entity.x + entity.width / 2), -(entity.y + entity.height / 2));
 
-      ctx.shadowBlur = 15;
+      // Shadow blur is the most expensive thing canvas 2D can be asked to do:
+      // every fill under it costs a separate blur pass. This ran for every
+      // entity on every frame no matter what, which is both why the level got
+      // slow with entity count and why the Shadows toggle in settings appeared
+      // to do nothing — it was never read here. The governor can also veto it
+      // outright on a device that has shown it cannot keep up.
+      ctx.shadowBlur = settingsRef.current.shadows && governorRef.current.quality.fancy ? 15 : 0;
 
       const drawShape = () => {
         if (entity.shape === 'circle') {
@@ -1102,7 +1125,7 @@ export default function Game({
 
       if (entity.type === 'platform') {
         ctx.fillStyle = '#222';
-        if (settingsRef.current.bloom) {
+        if (bloomOn()) {
           ctx.shadowColor = '#000';
           ctx.shadowBlur = 5;
         }
@@ -1114,7 +1137,7 @@ export default function Game({
         }
       } else if (entity.type === 'box') {
         ctx.fillStyle = '#8B4513';
-        if (settingsRef.current.bloom) {
+        if (bloomOn()) {
           ctx.shadowColor = '#000';
           ctx.shadowBlur = 10;
         }
@@ -1133,7 +1156,7 @@ export default function Game({
       } else if (entity.type === 'hazard') {
         if (entity.hazardType === 'fire') {
           ctx.fillStyle = '#ff4400';
-          if (settingsRef.current.bloom) {
+          if (bloomOn()) {
             ctx.shadowColor = '#ff4400';
             ctx.shadowBlur = 10;
           }
@@ -1153,7 +1176,7 @@ export default function Game({
           }
         } else if (entity.hazardType === 'water') {
           ctx.fillStyle = 'rgba(0, 150, 255, 0.7)';
-          if (settingsRef.current.bloom) {
+          if (bloomOn()) {
             ctx.shadowColor = '#00ccff';
             ctx.shadowBlur = 10;
           }
@@ -1176,7 +1199,7 @@ export default function Game({
           }
         } else if (entity.hazardType === 'acid') {
           ctx.fillStyle = 'rgba(0, 255, 50, 0.7)';
-          if (settingsRef.current.bloom) {
+          if (bloomOn()) {
             ctx.shadowColor = '#00ff00';
             ctx.shadowBlur = 10;
           }
@@ -1201,7 +1224,7 @@ export default function Game({
       } else if (entity.type === 'door') {
         const doorColor = entity.color || '#fff';
         ctx.strokeStyle = doorColor;
-        if (settingsRef.current.bloom) {
+        if (bloomOn()) {
           ctx.shadowColor = doorColor;
           ctx.shadowBlur = 15;
         }
@@ -1235,7 +1258,7 @@ export default function Game({
         // Draw handle
         const glowColor = entity.active ? '#00ff00' : '#ff0000';
         ctx.strokeStyle = glowColor;
-        if (settingsRef.current.bloom) {
+        if (bloomOn()) {
           ctx.shadowColor = glowColor;
           ctx.shadowBlur = 10;
         }
@@ -1269,7 +1292,7 @@ export default function Game({
 
         // Draw button
         ctx.fillStyle = glowColor;
-        if (settingsRef.current.bloom) {
+        if (bloomOn()) {
           ctx.shadowColor = glowColor;
           ctx.shadowBlur = 10;
         }
@@ -1292,7 +1315,7 @@ export default function Game({
         ctx.shadowBlur = 0;
       } else if (entity.type === 'moving-platform') {
         ctx.fillStyle = '#2a2a35';
-        if (settingsRef.current.bloom) {
+        if (bloomOn()) {
           ctx.shadowColor = '#00ccff';
           ctx.shadowBlur = 10;
         }
@@ -1304,7 +1327,7 @@ export default function Game({
         ctx.strokeRect(entity.x + 4, entity.y + 4, entity.width - 8, entity.height - 8);
       } else if (entity.type === 'cannon') {
         ctx.fillStyle = '#333';
-        if (settingsRef.current.bloom) {
+        if (bloomOn()) {
           ctx.shadowBlur = 10;
           ctx.shadowColor = '#000';
         }
@@ -1328,7 +1351,7 @@ export default function Game({
         const gemY = entity.y;
 
         ctx.fillStyle = entity.color || '#fff';
-        if (settingsRef.current.bloom) {
+        if (bloomOn()) {
           ctx.shadowColor = entity.color || '#fff';
           ctx.shadowBlur = 10;
         }
@@ -1375,7 +1398,7 @@ export default function Game({
         ctx.strokeStyle = '#ff0000';
         ctx.lineWidth = 6;
         ctx.globalAlpha = 0.5;
-        if (settingsRef.current.bloom) {
+        if (bloomOn()) {
           ctx.shadowColor = '#ff0000';
           ctx.shadowBlur = 15;
         }
@@ -1399,7 +1422,7 @@ export default function Game({
       ctx.translate(p.x + 15, p.y + 20); // Center of player
       if (!isRight) ctx.scale(-1, 1);
 
-      if (settingsRef.current.bloom) {
+      if (bloomOn()) {
         ctx.shadowBlur = 10;
         ctx.shadowColor = color;
       }
@@ -1614,7 +1637,7 @@ export default function Game({
     // Draw Projectiles
     if (engine.projectiles.length > 0) {
       ctx.fillStyle = '#fff';
-      if (settingsRef.current.bloom) {
+      if (bloomOn()) {
         ctx.shadowBlur = 15;
         ctx.shadowColor = '#fff';
       }

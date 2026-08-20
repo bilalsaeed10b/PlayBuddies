@@ -18,6 +18,7 @@ import { bakeCourt, drawFallbackCourt } from '../game/court';
 import { CHARACTERS, drawCharacter } from '../game/characters';
 import { Arena, BALANCE, POWER_META, TEAM_COLORS, clamp } from '../game/rules';
 import { newBrain, thinkFor } from './ai';
+import type { Quality } from '../game/quality';
 import {
   ActivePower,
   Ball,
@@ -93,6 +94,8 @@ export class MatchEngine {
   private particles: Particle[] = [];
   private trail: { x: number; y: number }[] = [];
   private powerTimer = 0;
+  /** Multiplier on every particle burst, set once a frame from the governor. */
+  private budget = 1;
   /** Touches in the current rally, for the ACE call. */
   private touches = 0;
   /** True until the serve has been struck. See BALANCE.SERVE_BONUS. */
@@ -838,11 +841,19 @@ export class MatchEngine {
 
   // ── particles ─────────────────────────────────────────────────────────────
 
+  /** How much of the decoration this device can afford. See game/quality.ts. */
+  setBudget(multiplier: number) {
+    this.budget = multiplier;
+  }
+
   private puff(x: number, y: number, color: string, count: number, spread: number) {
     // Hard cap: a long rally with power-ups can otherwise queue thousands and
     // the frame cost lands exactly when the action is busiest.
     if (this.particles.length > 320) return;
-    for (let i = 0; i < count; i++) {
+    // Rounded up, so a burst that was asked for never vanishes entirely — a
+    // hit with no puff at all reads as a missed hit.
+    const n = Math.max(1, Math.ceil(count * this.budget));
+    for (let i = 0; i < n; i++) {
       const a = Math.random() * Math.PI * 2;
       const s = spread * (0.35 + Math.random() * 0.65);
       const life = 0.25 + Math.random() * 0.45;
@@ -881,8 +892,11 @@ export class MatchEngine {
    * unplayable, because you cannot position yourself against a ball you cannot
    * see.
    */
-  resize(canvas: HTMLCanvasElement, cssW: number, cssH: number) {
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  resize(canvas: HTMLCanvasElement, cssW: number, cssH: number, q: Quality) {
+    // The backing store is the whole fill-rate bill: at dpr 2 a 1080p court is
+    // four times the pixels of the same court at dpr 1, for no change in what
+    // the player can actually see happening.
+    const dpr = Math.min(window.devicePixelRatio || 1, q.maxDpr);
     canvas.width = Math.round(cssW * dpr);
     canvas.height = Math.round(cssH * dpr);
     canvas.style.width = `${cssW}px`;
@@ -892,7 +906,7 @@ export class MatchEngine {
     this.offY = (canvas.height - this.arena.h * this.scale) / 2;
   }
 
-  render(ctx: CanvasRenderingContext2D) {
+  render(ctx: CanvasRenderingContext2D, q: Quality) {
     const { canvas } = ctx;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.fillStyle = '#06182a';
@@ -905,10 +919,12 @@ export class MatchEngine {
     if (this.backdrop) ctx.drawImage(this.backdrop, 0, 0);
     else drawFallbackCourt(ctx, this.arena);
 
-    this.drawShadows(ctx);
+    // Shadows sell the height of a jump, so they are worth keeping until the
+    // cheapest tier: they are decoration that still carries information.
+    if (q.fancy) this.drawShadows(ctx);
     this.drawFloating(ctx);
     for (const p of this.players) this.drawPlayer(ctx, p);
-    this.drawBall(ctx);
+    this.drawBall(ctx, q);
     this.drawParticles(ctx);
     this.drawCall(ctx);
   }
@@ -966,14 +982,14 @@ export class MatchEngine {
     }
   }
 
-  private drawBall(ctx: CanvasRenderingContext2D) {
+  private drawBall(ctx: CanvasRenderingContext2D, q: Quality) {
     const b = this.ball;
     const R = BALANCE.BALL_R;
     const speed = Math.hypot(b.vx, b.vy) / BALANCE.BALL_MAX_SPEED;
 
     // Trail thickens with speed, so a spike reads as fast before you have had
     // time to notice where it went.
-    if (this.trail.length > 1 && speed > 0.12) {
+    if (q.trails && this.trail.length > 1 && speed > 0.12) {
       ctx.save();
       ctx.lineCap = 'round';
       for (let i = 1; i < this.trail.length; i++) {
@@ -992,13 +1008,20 @@ export class MatchEngine {
     ctx.translate(b.x, b.y);
     ctx.rotate((b.x + b.y) * 0.012);
 
-    const shade = ctx.createRadialGradient(-R * 0.35, -R * 0.4, R * 0.15, 0, 0, R);
-    shade.addColorStop(0, '#ffffff');
-    shade.addColorStop(0.7, '#f6e7c8');
-    shade.addColorStop(1, '#c9a86f');
+    // A fresh gradient object every frame is the one allocation in this
+    // renderer that buys nothing on a slow device; the cheap tier takes the
+    // flat fill, which at this size is very hard to tell apart in motion.
     ctx.beginPath();
     ctx.arc(0, 0, R, 0, Math.PI * 2);
-    ctx.fillStyle = shade;
+    if (q.fancy) {
+      const shade = ctx.createRadialGradient(-R * 0.35, -R * 0.4, R * 0.15, 0, 0, R);
+      shade.addColorStop(0, '#ffffff');
+      shade.addColorStop(0.7, '#f6e7c8');
+      shade.addColorStop(1, '#c9a86f');
+      ctx.fillStyle = shade;
+    } else {
+      ctx.fillStyle = '#f2e3c4';
+    }
     ctx.fill();
 
     // Panel seams. Three arcs is all it takes to read as a volleyball.

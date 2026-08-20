@@ -49,6 +49,7 @@ function readHandoff(): Handoff {
 const DEFAULT_SETTINGS: GameSettings = {
   bgmVolume: 0.35,
   sfxVolume: 0.7,
+  lowPower: false,
   controlScheme: 0,
   targetPoints: 7,
   winByTwo: false,
@@ -83,6 +84,17 @@ export default function App() {
   /** Offline setup: who is playing, as what, against what. */
   const [seatCount, setSeatCount] = useState(1);
   const [seatChar, setSeatChar] = useState<Record<string, number>>({});
+  /**
+   * The player deliberately asked for an offline match.
+   *
+   * Being signed into a lobby is not the same as wanting to play in it, and
+   * 'Play Offline / Couch' is offered from *inside* the room. Without this flag
+   * the branch below rebuilt the online config for it anyway: one local seat
+   * instead of two, so player two's keys drove nothing, with the whole Firebase
+   * and WebRTC path still running underneath a match that has no peers. That is
+   * what made couch play look broken and run slowly at the same time.
+   */
+  const [offlineMatch, setOfflineMatch] = useState(false);
   const [aiLevel, setAiLevel] = useState(1);
 
   const [coins, setCoins] = useState(() => Number(localStorage.getItem('fishy_coins') || 0));
@@ -185,11 +197,14 @@ export default function App() {
   const myTeam = people.find((p) => p.uid === uid)?.team ?? 0;
 
   useEffect(() => {
-    if (!online) return;
+    // An offline match is the player's own; the room does not get to start or
+    // end it. This guard is also what stops an unrelated lobby update from
+    // bouncing a couch match straight back to the room.
+    if (!online || offlineMatch) return;
     if (lobby?.matchStarted && myCharacter !== undefined && myCharacter !== null) setView('game');
     else if (view === 'game') setView('room');
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lobby?.matchStarted, myCharacter, online]);
+  }, [lobby?.matchStarted, myCharacter, online, offlineMatch]);
 
   const buy = useCallback(
     (index: number) => {
@@ -251,6 +266,7 @@ export default function App() {
    * not a bug — it is exactly what the platform's own "End Game" already does.
    */
   const leaveMatch = useCallback(() => {
+    setOfflineMatch(false);
     setView(online ? 'room' : 'menu');
     if (!online || !isHost) return;
     void import('./firebase')
@@ -260,7 +276,7 @@ export default function App() {
 
   // ── in the match ───────────────────────────────────────────────────────────
   if (view === 'game') {
-    const config = online && uid ? onlineConfig() : offlineConfig();
+    const config = online && uid && !offlineMatch ? onlineConfig() : offlineConfig();
 
     return (
       <>
@@ -357,12 +373,14 @@ export default function App() {
           coins={coins}
           onSolo={() => {
             audioService.unlock();
+            setOfflineMatch(true);
             setSeatCount(1);
             setSeatChar({});
             setView('solo');
           }}
           onCouch={() => {
             audioService.unlock();
+            setOfflineMatch(true);
             setSeatCount(2);
             setSeatChar({});
             setView('couch');
@@ -378,12 +396,14 @@ export default function App() {
           coins={coins}
           onSolo={() => {
             audioService.unlock();
+            setOfflineMatch(true);
             setSeatCount(1);
             setSeatChar({});
             setView('solo');
           }}
           onCouch={() => {
             audioService.unlock();
+            setOfflineMatch(true);
             setSeatCount(2);
             setSeatChar({});
             setView('couch');
@@ -960,6 +980,21 @@ function SettingsPanel({
               : `First to ${settings.targetPoints} takes it. Online, the host's choice is the one that counts.`}
           </p>
         </div>
+
+        <label className="flex items-center justify-between gap-3">
+          <span className="text-sm font-bold">
+            Low power mode
+            <span className="block text-[11px] font-normal text-white/50">
+              Smaller canvas, no ball trail. Turn this on if the court stutters.
+            </span>
+          </span>
+          <input
+            type="checkbox"
+            checked={settings.lowPower}
+            onChange={(e) => onChange({ ...settings, lowPower: e.target.checked })}
+            className="h-6 w-6 shrink-0 accent-amber-400"
+          />
+        </label>
 
         <label className="flex items-center justify-between gap-3">
           <span className="text-sm font-bold">

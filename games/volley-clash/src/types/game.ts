@@ -128,6 +128,13 @@ export interface FloatingPower {
 export interface GameSettings {
   bgmVolume: number;
   sfxVolume: number;
+  /**
+   * Pin the renderer to its cheapest tier instead of letting it measure.
+   *
+   * The governor finds this on its own within a second of play; this is for
+   * the player who would rather not watch it happen every time.
+   */
+  lowPower: boolean;
   /** 0 = player one on WASD, 1 = player one on the arrows. */
   controlScheme: number;
   /** Points needed to win: 5, 7 or 11. */

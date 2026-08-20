@@ -45,6 +45,13 @@ export interface Fish {
 export interface GameSettings {
   bgmVolume: number;
   sfxVolume: number;
+  /**
+   * Pin the renderer to its cheapest tier instead of letting it measure.
+   *
+   * The governor finds this on its own within a second of play; this is for
+   * the player who would rather not watch it happen every time.
+   */
+  lowPower: boolean;
   /** 0 = WASD first, 1 = arrows first, 2 = IJKL first. Only matters for local co-op. */
   controlScheme: number;
 }

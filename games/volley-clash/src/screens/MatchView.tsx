@@ -12,6 +12,7 @@ import { IN_IFRAME, toggleFullscreen } from '../fullscreen';
 import { CHARACTERS } from '../game/characters';
 import { POWER_META, TEAM_COLORS, arenaFor } from '../game/rules';
 import { MatchEngine, Seat } from '../engine/MatchEngine';
+import { QualityGovernor } from '../game/quality';
 // Type-only: the runtime value comes from the dynamic import below, keeping the
 // mesh and the Firebase SDK it depends on out of the main bundle.
 import type { Mesh } from '../net/mesh';
@@ -240,9 +241,12 @@ export default function MatchView({
     // when a seat does not show up.
     if (import.meta.env.DEV) (window as unknown as { __engine?: MatchEngine }).__engine = engine;
 
+    const governor = new QualityGovernor(settingsRef.current.lowPower);
+    let tier = governor.quality.tier;
+
     const fit = () => {
       const box = shellRef.current?.getBoundingClientRect();
-      engine.resize(canvas, box?.width ?? window.innerWidth, box?.height ?? window.innerHeight);
+      engine.resize(canvas, box?.width ?? window.innerWidth, box?.height ?? window.innerHeight, governor.quality);
     };
     fit();
     window.addEventListener('resize', fit);
@@ -259,6 +263,16 @@ export default function MatchView({
       const dt = Math.min((now - last) / 1000, 0.25);
       last = now;
 
+      governor.sample(dt);
+      const q = governor.quality;
+      if (q.tier !== tier) {
+        // A tier change moves the backing-store size, so the canvas has to be
+        // resized for the downgrade to buy anything at all.
+        tier = q.tier;
+        fit();
+      }
+      engine.setBudget(q.particles);
+
       const inputs = new Map<string, Input>();
       config.localIds.forEach((id, i) => {
         inputs.set(id, readInputRef.current(i, config.localIds.length === 1));
@@ -268,7 +282,7 @@ export default function MatchView({
       for (const [id, input] of remoteInputs.current) if (!inputs.has(id)) inputs.set(id, input);
 
       engine.update(dt, inputs);
-      engine.render(ctx);
+      engine.render(ctx, q);
 
       if (online && meshRef.current) {
         if (isHost) {

@@ -90,6 +90,17 @@ export default function App() {
   /** Offline setup: how many people are at this device, and as what. */
   const [seatCount, setSeatCount] = useState(1);
   const [seatSkin, setSeatSkin] = useState<Record<number, number>>({});
+  /**
+   * The player deliberately asked for an offline battle.
+   *
+   * Being signed into a lobby is not the same as wanting to play in it, and
+   * the offline menu is reachable from *inside* the room. Without this flag the
+   * branch below rebuilt the online config for it anyway: one local seat rather
+   * than two, so the second player at the keyboard drove nothing, with the
+   * whole Firebase and WebRTC path still running underneath a battle that has
+   * no peers to talk to.
+   */
+  const [offlineMatch, setOfflineMatch] = useState(false);
   const [aiLevel, setAiLevel] = useState(1);
 
   const [coins, setCoins] = useState(() => Number(localStorage.getItem('fishy_coins') || 0));
@@ -196,11 +207,14 @@ export default function App() {
   const myTeam = people.find((p) => p.uid === uid)?.team ?? 0;
 
   useEffect(() => {
-    if (!online) return;
+    // An offline battle is the player's own; the room does not get to start or
+    // end it. This guard is also what stops an unrelated lobby update from
+    // bouncing a couch battle straight back to the room.
+    if (!online || offlineMatch) return;
     if (lobby?.matchStarted && mySkin !== undefined && mySkin !== null) setView('game');
     else if (view === 'game') setView('room');
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lobby?.matchStarted, mySkin, online]);
+  }, [lobby?.matchStarted, mySkin, online, offlineMatch]);
 
   /**
    * A fresh seed and a fresh coin toss for every match.
@@ -271,6 +285,7 @@ export default function App() {
    * host quitting mid-match, which is what the platform's own End Game does.
    */
   const leaveBattle = useCallback(() => {
+    setOfflineMatch(false);
     setView(online ? 'room' : 'menu');
     if (!online || !isHost) return;
     void import('./firebase')
@@ -281,7 +296,7 @@ export default function App() {
   // -- into the battle --------------------------------------------------------
 
   if (view === 'game') {
-    const config = online && uid ? onlineConfig() : offlineConfig();
+    const config = online && uid && !offlineMatch ? onlineConfig() : offlineConfig();
     return (
       <>
         <BattleView
@@ -385,6 +400,7 @@ export default function App() {
 
   const openOffline = (players: number) => {
     audioService.unlock();
+    setOfflineMatch(true);
     setSeatCount(players);
     setSeatSkin({});
     setView('pick');

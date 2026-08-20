@@ -9,6 +9,7 @@ import {
 } from '../game/fish';
 
 import { audioService } from '../services/audio';
+import { QualityGovernor } from '../game/quality';
 
 /**
  * ONE PLACE TO TUNE THE GAME.
@@ -168,6 +169,14 @@ export class GameEngine {
   private enemies = new Map<number, Fish>();
   private boss: Fish | null = null;
 
+  /**
+   * Decides how much of the decoration this device can afford, and keeps
+   * deciding: the first guess comes from what the browser reports, the rest
+   * from how long frames are actually taking. See game/quality.ts.
+   */
+  private governor: QualityGovernor;
+  /** Last tier acted on, so a change can trigger exactly one resize. */
+  private tier = 0;
   private bubbles: Bubble[] = [];
   private particles: Particle[] = [];
 
@@ -207,6 +216,9 @@ export class GameEngine {
     this.ctx = config.canvas.getContext('2d', { alpha: false })!;
     this.settings = config.settings;
     this.simulateAI = config.simulateAI;
+    // Built before resize() and initBubbles() below, both of which read it.
+    this.governor = new QualityGovernor(config.settings.lowPower);
+    this.tier = this.governor.quality.tier;
 
     config.localIds.forEach((id, i) => {
       const asset = config.localFish[id] ?? 0;
@@ -468,8 +480,9 @@ export class GameEngine {
     if (!parent) return;
     const rect = parent.getBoundingClientRect();
     // Capped device pixel ratio: a 3x phone screen would otherwise ask a mobile
-    // GPU to fill nine times the pixels for a barely visible gain.
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    // GPU to fill nine times the pixels for a barely visible gain. The cap now
+    // moves with the measured frame rate rather than being a fixed 2.
+    const dpr = Math.min(window.devicePixelRatio || 1, this.governor.quality.maxDpr);
 
     this.ctx.canvas.width = Math.max(1, Math.round(rect.width * dpr));
     this.ctx.canvas.height = Math.max(1, Math.round(rect.height * dpr));
@@ -496,6 +509,14 @@ export class GameEngine {
     const dt = Math.max(0, Math.min(0.05, (time - this.lastTime) / 1000));
     this.lastTime = time;
     this.lastDt = dt;
+
+    this.governor.sample(dt);
+    if (this.governor.quality.tier !== this.tier) {
+      // The tier sets the backing-store size, so a change only means anything
+      // once the canvas has been rebuilt at the new scale.
+      this.tier = this.governor.quality.tier;
+      this.resize();
+    }
 
     this.update(dt);
     this.draw();
@@ -1067,7 +1088,10 @@ export class GameEngine {
 
   private initBubbles() {
     this.bubbles = [];
-    for (let i = 0; i < BALANCE.BUBBLES; i++) {
+    // Ambient bubbles are pure atmosphere and there are sixty of them, each an
+    // arc fill every frame — the first thing worth thinning on a slow device.
+    const count = Math.round(BALANCE.BUBBLES * this.governor.quality.particles);
+    for (let i = 0; i < count; i++) {
       this.bubbles.push({
         x: Math.random() * BALANCE.WORLD_W,
         y: Math.random() * BALANCE.WORLD_H,
@@ -1092,7 +1116,9 @@ export class GameEngine {
   }
 
   private burst(x: number, y: number, count: number) {
-    for (let i = 0; i < count; i++) {
+    // Never rounded away to nothing: a kill with no splash reads as a bug.
+    const n = Math.max(1, Math.round(count * this.governor.quality.particles));
+    for (let i = 0; i < n; i++) {
       const angle = Math.random() * Math.PI * 2;
       const speed = 60 + Math.random() * 110;
       this.particles.push({
@@ -1306,11 +1332,17 @@ export class GameEngine {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.font = `bold ${Math.max(13, body * 0.42)}px system-ui, sans-serif`;
-    ctx.lineWidth = 3;
-    ctx.strokeStyle = 'rgba(0,0,0,0.45)';
     ctx.fillStyle = isLocal ? '#bbf7d0' : isRemotePlayer ? '#fde68a' : '#ffffff';
     const label = fish.kind === 'player' && fish.name ? `${fish.name} · ${Math.floor(fish.size)}` : String(Math.floor(fish.size));
-    ctx.strokeText(label, 0, 0);
+    // The number on a fish is what tells you whether it eats you or you eat it,
+    // so the label itself always draws. The outline behind it is legibility
+    // only, and stroked text is the most expensive call in this whole loop —
+    // on a crowded reef it runs once per visible fish, every frame.
+    if (this.governor.quality.outlines) {
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = 'rgba(0,0,0,0.45)';
+      ctx.strokeText(label, 0, 0);
+    }
     ctx.fillText(label, 0, 0);
     ctx.restore();
   }
@@ -1322,12 +1354,18 @@ export class GameEngine {
     ctx.globalAlpha = boss.opacity ?? 1;
     ctx.translate(boss.x, boss.y);
     const aura = bodyRadius(boss.size) * 1.5;
-    const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, aura);
-    grad.addColorStop(0, 'rgba(255,0,0,0.25)');
-    grad.addColorStop(1, 'rgba(255,0,0,0)');
-    ctx.fillStyle = grad;
+    // The aura is a warning, so it stays at every tier — but the cheap tier
+    // pays a flat wash for it rather than building a gradient object a frame.
     ctx.beginPath();
     ctx.arc(0, 0, aura, 0, Math.PI * 2);
+    if (this.governor.quality.fancy) {
+      const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, aura);
+      grad.addColorStop(0, 'rgba(255,0,0,0.25)');
+      grad.addColorStop(1, 'rgba(255,0,0,0)');
+      ctx.fillStyle = grad;
+    } else {
+      ctx.fillStyle = 'rgba(255,0,0,0.12)';
+    }
     ctx.fill();
     ctx.restore();
     this.drawFish(boss, false);
