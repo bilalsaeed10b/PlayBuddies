@@ -210,6 +210,31 @@ export default function App() {
     setCoins((c) => c + Math.floor(score / 8));
   }, []);
 
+  /**
+   * Leaving the water, online: back to the room, and — for the host — the
+   * go-signal comes down with it.
+   *
+   * `matchStarted` was never reset anywhere after being set, so a "Back to
+   * lobby" round-trip was broken: the room screen's transition to 'game' is
+   * driven by `matchStarted && myFish`, and re-pressing "start" is a true ->
+   * true no-op, while picking a *different* fish is a real change to
+   * `myFish` — so it fired off a match nobody had started, with the stale
+   * flag still set from the last one.
+   *
+   * Resetting it here rather than only on some notion of "the round ended"
+   * also covers the host leaving mid-match: fish has no discrete win/lose
+   * moment (death is per-player, not global), so this is the one place every
+   * exit path — the defeat screen's "Back to lobby" and a premature host
+   * quit alike — actually passes through.
+   */
+  const leaveWater = useCallback(() => {
+    setView(online ? 'room' : 'menu');
+    if (!online || !isHost) return;
+    void import('./firebase')
+      .then(({ db, doc, updateDoc }) => updateDoc(doc(db, 'lobbies', handoff.room), { matchStarted: false }))
+      .catch((e) => console.error('Could not reset the match flag', e));
+  }, [online, isHost, handoff.room]);
+
   // ── in the water ─────────────────────────────────────────────────────────
   if (view === 'game') {
     const localIds = online && uid ? [uid] : Array.from({ length: seatCount }, (_, i) => `seat-${i}`);
@@ -230,7 +255,7 @@ export default function App() {
           localNames={localNames}
           settings={settings}
           onOpenSettings={() => setShowSettings(true)}
-          onExit={() => setView(online ? 'room' : 'menu')}
+          onExit={leaveWater}
           onRunEnded={awardCoins}
         />
         {showSettings && (

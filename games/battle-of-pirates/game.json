@@ -1,0 +1,19 @@
+{
+  "id": "battle-of-pirates",
+  "name": "Battle of Pirates",
+  "subtitle": "Aim, swipe, sink",
+  "description": "Two ships, one stretch of open water, and one cannon each. Drag back to set your angle and power, read the wind, and take turns pounding the other hull until it goes under. Play the bot, share a device, or square off online.",
+  "category": "strategy",
+  "minPlayers": 1,
+  "maxPlayers": 2,
+  "estimatedDuration": "3-6 min",
+  "controls": "Drag back from your ship and let go to fire — mouse or finger. Arrows fine-tune, Space fires.",
+  "thumbnail": "thumb.svg",
+  "accent": {
+    "from": "#0ea5e9",
+    "to": "#f59e0b"
+  },
+  "featured": true,
+  "available": true,
+  "version": "1.0.0"
+}

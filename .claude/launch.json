@@ -4,27 +4,72 @@
     {
       "name": "playbuddies",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev"],
+      "runtimeArgs": [
+        "run",
+        "dev"
+      ],
       "port": 3000,
       "url": "http://192.168.100.52:3000"
     },
     {
       "name": "fish-game",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev", "--prefix", "games/players-eat-fish", "--", "--port", "5199", "--strictPort"],
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "--prefix",
+        "games/players-eat-fish",
+        "--",
+        "--port",
+        "5199",
+        "--strictPort"
+      ],
       "port": 5199
     },
     {
       "name": "volley-clash",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev", "--prefix", "games/volley-clash", "--", "--port", "5197", "--strictPort"],
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "--prefix",
+        "games/volley-clash",
+        "--",
+        "--port",
+        "5197",
+        "--strictPort"
+      ],
       "port": 5197
     },
     {
       "name": "neon-elements",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev", "--prefix", "games/fireboy-watergirl", "--", "--port", "5198", "--strictPort"],
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "--prefix",
+        "games/fireboy-watergirl",
+        "--",
+        "--port",
+        "5198",
+        "--strictPort"
+      ],
       "port": 5198
+    },
+    {
+      "name": "battle-of-pirates",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "--prefix",
+        "games/battle-of-pirates",
+        "--",
+        "--port",
+        "5196",
+        "--strictPort"
+      ],
+      "port": 5196
     }
   ]
 }

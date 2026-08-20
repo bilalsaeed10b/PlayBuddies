@@ -1,0 +1,104 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!--
+    Vector rather than a screenshot: it stays sharp at every card size the
+    catalog renders, and it is a couple of kilobytes instead of the few hundred
+    a WebP of the same scene would cost. The palette is the baked sea's, so the
+    card and the game look like the same place.
+  -->
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#071b33" />
+      <stop offset="0.36" stop-color="#14507f" />
+      <stop offset="0.7" stop-color="#4f9dc7" />
+      <stop offset="1" stop-color="#ffd9a8" />
+    </linearGradient>
+    <linearGradient id="sea" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2f8fb8" />
+      <stop offset="0.3" stop-color="#12558a" />
+      <stop offset="1" stop-color="#062744" />
+    </linearGradient>
+    <radialGradient id="sun" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#fff3cd" stop-opacity="0.95" />
+      <stop offset="0.4" stop-color="#ffc98a" stop-opacity="0.35" />
+      <stop offset="1" stop-color="#ffb870" stop-opacity="0" />
+    </radialGradient>
+    <radialGradient id="blast" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#fffdf0" />
+      <stop offset="0.28" stop-color="#ffe08a" stop-opacity="0.95" />
+      <stop offset="0.6" stop-color="#ff9330" stop-opacity="0.6" />
+      <stop offset="1" stop-color="#c2410c" stop-opacity="0" />
+    </radialGradient>
+  </defs>
+
+  <rect width="512" height="512" fill="url(#sky)" />
+  <circle cx="330" cy="300" r="150" fill="url(#sun)" />
+  <circle cx="330" cy="300" r="26" fill="#fff7dc" opacity="0.9" />
+
+  <!-- Far headland, so the horizon is not an empty line. -->
+  <path d="M0 316 Q60 274 118 308 Q180 268 244 310 Q312 272 380 308 Q444 280 512 312 L512 330 L0 330 Z"
+        fill="#0a2b42" opacity="0.72" />
+
+  <!-- Water. -->
+  <rect x="0" y="322" width="512" height="190" fill="url(#sea)" />
+  <path d="M300 322 L360 322 L470 512 L190 512 Z" fill="#ffd9a8" opacity="0.16" />
+  <g stroke="#d6f4ff" stroke-linecap="round" fill="none">
+    <path d="M24 352 q26 -7 52 0" stroke-width="3" opacity="0.3" />
+    <path d="M156 372 q30 -8 60 0" stroke-width="3.5" opacity="0.26" />
+    <path d="M330 366 q30 -8 60 0" stroke-width="3.5" opacity="0.26" />
+    <path d="M60 410 q38 -10 76 0" stroke-width="4" opacity="0.22" />
+    <path d="M296 424 q42 -11 84 0" stroke-width="4.5" opacity="0.2" />
+    <path d="M150 468 q46 -12 92 0" stroke-width="5" opacity="0.16" />
+  </g>
+
+  <!-- The shot: a lobbed arc from the left gun to a hit on the right. -->
+  <path d="M138 300 Q252 150 372 268" fill="none" stroke="#ffe8b0" stroke-width="5"
+        stroke-linecap="round" stroke-dasharray="2 20" opacity="0.85" />
+  <circle cx="252" cy="197" r="11" fill="#12161d" />
+  <circle cx="248" cy="193" r="4" fill="#ffffff" opacity="0.45" />
+
+  <!-- Left ship: the crimson side. -->
+  <g transform="translate(96 330)">
+    <path d="M-8 -6 L-8 -132" stroke="#4a361f" stroke-width="7" stroke-linecap="round" />
+    <path d="M-46 -116 Q10 -104 36 -116 L32 -40 Q6 -26 -40 -40 Z" fill="#f2e8d5" />
+    <path d="M12 -110 Q28 -106 36 -116 L32 -40 Q22 -32 8 -32 Z" fill="#d9cbb0" />
+    <path d="M-44 -90 Q10 -80 34 -90" stroke="#e0453c" stroke-width="5" fill="none" />
+    <path d="M-8 -128 Q14 -134 30 -124 L30 -114 Q14 -108 -8 -114 Z" fill="#e0453c" />
+    <path d="M-62 -24 L62 -24 Q70 -6 38 14 L-40 14 Q-70 -6 -62 -24 Z" fill="#8b5a2b" />
+    <rect x="-60" y="-19" width="118" height="7" fill="#d9a441" />
+    <rect x="-60" y="-11" width="118" height="7" fill="#e0453c" />
+    <g fill="#0c0a08" opacity="0.75">
+      <rect x="-38" y="0" width="13" height="9" /><rect x="-6" y="0" width="13" height="9" />
+      <rect x="26" y="0" width="13" height="9" />
+    </g>
+    <rect x="34" y="-38" width="26" height="9" rx="4" fill="#374151" transform="rotate(-38 34 -34)" />
+  </g>
+
+  <!-- Right ship: the cobalt side, taking one amidships. -->
+  <g transform="translate(400 322) scale(-1 1)">
+    <path d="M-8 -6 L-8 -126" stroke="#4a361f" stroke-width="7" stroke-linecap="round" />
+    <path d="M-44 -110 Q10 -98 34 -110 L30 -38 Q6 -26 -38 -38 Z" fill="#eafaf5" />
+    <path d="M10 -104 Q26 -100 34 -110 L30 -38 Q20 -30 6 -30 Z" fill="#c2ded6" />
+    <path d="M-42 -86 Q10 -76 32 -86" stroke="#3b82f6" stroke-width="5" fill="none" />
+    <path d="M-8 -122 Q14 -128 30 -118 L30 -108 Q14 -102 -8 -108 Z" fill="#3b82f6" />
+    <path d="M-58 -22 L58 -22 Q66 -6 36 13 L-38 13 Q-66 -6 -58 -22 Z" fill="#2f6f6a" />
+    <rect x="-56" y="-17" width="111" height="7" fill="#8fd6c8" />
+    <rect x="-56" y="-9" width="111" height="7" fill="#3b82f6" />
+  </g>
+
+  <!-- The hit. -->
+  <circle cx="374" cy="272" r="66" fill="url(#blast)" />
+  <circle cx="374" cy="272" r="44" fill="none" stroke="#ffe8b0" stroke-width="5" opacity="0.65" />
+  <g fill="#8b5a2b">
+    <rect x="402" y="228" width="20" height="7" rx="2" transform="rotate(28 402 228)" />
+    <rect x="336" y="222" width="17" height="6" rx="2" transform="rotate(-40 336 222)" />
+    <rect x="414" y="286" width="15" height="6" rx="2" transform="rotate(62 414 286)" />
+  </g>
+
+  <!-- Health, because it is the thing the whole game is about. -->
+  <g>
+    <rect x="42" y="52" width="150" height="20" rx="10" fill="#04121f" opacity="0.65" />
+    <rect x="47" y="57" width="122" height="10" rx="5" fill="#4ade80" />
+    <rect x="320" y="52" width="150" height="20" rx="10" fill="#04121f" opacity="0.65" />
+    <rect x="325" y="57" width="52" height="10" rx="5" fill="#f87171" />
+  </g>
+</svg>
