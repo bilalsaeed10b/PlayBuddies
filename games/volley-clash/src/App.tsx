@@ -12,10 +12,9 @@ import {
   Users,
   Volleyball,
 } from 'lucide-react';
-import { toggleFullscreen } from './fullscreen';
-import { auth, db, onAuthStateChanged, doc, onSnapshot, updateDoc } from './firebase';
+import { IN_IFRAME, toggleFullscreen } from './fullscreen';
 import { CHARACTERS, Character, FREE_CHARACTERS, drawCharacter } from './game/characters';
-import { TEAM_COLORS } from './game/rules';
+import { BALANCE, TEAM_COLORS } from './game/rules';
 import { TIERS } from './engine/ai';
 import { audioService } from './services/audio';
 import MatchView, { MatchConfig, Person } from './screens/MatchView';
@@ -52,7 +51,9 @@ const DEFAULT_SETTINGS: GameSettings = {
   sfxVolume: 0.7,
   controlScheme: 0,
   targetPoints: 7,
+  winByTwo: false,
   powerUps: true,
+  powerRate: 1,
 };
 
 type View = 'menu' | 'solo' | 'couch' | 'room' | 'game' | 'offline_menu';
@@ -106,37 +107,62 @@ export default function App() {
   }, [settings]);
 
   // ── platform session ───────────────────────────────────────────────────────
+  //
+  // Firebase is imported dynamically, and only down the online path.
+  //
+  // The SDK is 825 KB against 248 KB for the entire rest of the game, and a
+  // solo or couch match never calls into it once. As a static import it became
+  // a `modulepreload` in the built HTML, so every player paid for all of it
+  // before the court could draw.
   useEffect(() => {
     if (!online) return;
-    return onAuthStateChanged(auth, (user) => {
-      setUid(user?.uid ?? null);
-      setAuthChecked(true);
+    let unsubscribe: (() => void) | undefined;
+    let cancelled = false;
+    void import('./firebase').then(({ auth, onAuthStateChanged }) => {
+      if (cancelled) return;
+      unsubscribe = onAuthStateChanged(auth, (user) => {
+        setUid(user?.uid ?? null);
+        setAuthChecked(true);
+      });
     });
+    return () => {
+      cancelled = true;
+      unsubscribe?.();
+    };
   }, [online]);
 
   useEffect(() => {
     if (!online || !uid) return;
-    return onSnapshot(
-      doc(db, 'lobbies', handoff.room),
-      (snap) => {
-        if (!snap.exists()) {
-          setLobbyError('That lobby is gone.');
-          return;
-        }
-        const data = snap.data() as {
-          hostId: string;
-          players: Record<string, LobbyPerson>;
-          matchStarted?: boolean;
-        };
-        if (!data.players?.[uid]) {
-          setLobbyError("You're not in this lobby.");
-          return;
-        }
-        setLobbyError(null);
-        setLobby(data);
-      },
-      () => setLobbyError('Lost contact with the lobby.'),
-    );
+    let unsubscribe: (() => void) | undefined;
+    let cancelled = false;
+    void import('./firebase').then(({ db, doc, onSnapshot }) => {
+      if (cancelled) return;
+      unsubscribe = onSnapshot(
+        doc(db, 'lobbies', handoff.room),
+        (snap) => {
+          if (!snap.exists()) {
+            setLobbyError('That lobby is gone.');
+            return;
+          }
+          const data = snap.data() as {
+            hostId: string;
+            players: Record<string, LobbyPerson>;
+            matchStarted?: boolean;
+          };
+          if (!data.players?.[uid]) {
+            setLobbyError("You're not in this lobby.");
+            return;
+          }
+          setLobbyError(null);
+          setLobby(data);
+        },
+        () => setLobbyError('Lost contact with the lobby.'),
+      );
+    });
+    return () => {
+      cancelled = true;
+      unsubscribe?.();
+    };
   }, [online, uid, handoff.room]);
 
   const people = useMemo<Person[]>(() => {
@@ -182,6 +208,9 @@ export default function App() {
       if (!uid) return;
       if (!owned.includes(index) && !buy(index)) return;
       try {
+        // Already loaded by the session effect on this path; the import cache
+        // makes this a lookup rather than a second fetch.
+        const { db, doc, updateDoc } = await import('./firebase');
         await updateDoc(doc(db, 'lobbies', handoff.room), { [`players.${uid}.fishIndex`]: index });
       } catch (e) {
         console.error('Could not save your character', e);
@@ -193,6 +222,7 @@ export default function App() {
   const startMatch = useCallback(async () => {
     if (!isHost) return;
     try {
+      const { db, doc, updateDoc } = await import('./firebase');
       await updateDoc(doc(db, 'lobbies', handoff.room), { matchStarted: true });
     } catch (e) {
       console.error('Could not start the match', e);
@@ -592,7 +622,10 @@ function Shell({
 }) {
   return (
     <div className="mx-auto flex h-full w-full max-w-6xl flex-col gap-3 p-3 sm:gap-4 sm:p-6">
-      <div className="flex shrink-0 items-center justify-between gap-2">
+      {/* Reachable while embedded via "Play Offline / Couch", so the whole row
+          clears the host's floating bar rather than just the coin badge — the
+          three sit on one baseline and staggering them reads as broken. */}
+      <div className={`flex shrink-0 items-center justify-between gap-2 ${IN_IFRAME ? 'mt-14' : ''}`}>
         <button onClick={onBack} className="panel shrink-0 rounded-2xl p-3">
           <ArrowLeft className="h-5 w-5" />
         </button>
@@ -719,13 +752,22 @@ function RoomScreen({
           <h2 className="truncate text-lg font-black tracking-tight sm:text-2xl">Pick your character</h2>
           <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-amber-300/80">{format}</p>
         </div>
-        <div className="flex shrink-0 items-center gap-2">
+        {/*
+          Embedded, PlayBuddies floats its own Invite / Full screen / End Game
+          bar over this same corner at a z-index we cannot reach from inside the
+          frame, so this row has to start below it. Full screen is not repeated
+          here for the same reason it was dropped from the match HUD: the host
+          already provides one, and two in one corner is the overlap.
+        */}
+        <div className={`flex shrink-0 items-center gap-2 ${IN_IFRAME ? 'mt-14' : ''}`}>
           <div className="panel flex items-center gap-2 rounded-2xl px-3 py-2 font-bold text-amber-300">
             <Coins className="h-4 w-4" /> {coins}
           </div>
-          <button onClick={onFullscreen} className="panel rounded-2xl p-2.5" title="Full screen">
-            <Maximize2 className="h-5 w-5" />
-          </button>
+          {!IN_IFRAME && (
+            <button onClick={onFullscreen} className="panel rounded-2xl p-2.5" title="Full screen">
+              <Maximize2 className="h-5 w-5" />
+            </button>
+          )}
           <button onClick={onSettings} className="panel rounded-2xl p-2.5">
             <SettingsIcon className="h-5 w-5" />
           </button>
@@ -889,8 +931,27 @@ function SettingsPanel({
               </button>
             ))}
           </div>
-          <p className="text-[11px] text-white/50">Win by two. Online, the host&apos;s choice is the one that counts.</p>
+          <p className="text-[11px] text-white/50">
+            {settings.winByTwo
+              ? `Reach ${settings.targetPoints} with a two-point lead. Online, the host's choice is the one that counts.`
+              : `First to ${settings.targetPoints} takes it. Online, the host's choice is the one that counts.`}
+          </p>
         </div>
+
+        <label className="flex items-center justify-between gap-3">
+          <span className="text-sm font-bold">
+            Win by two
+            <span className="block text-[11px] font-normal text-white/50">
+              {settings.targetPoints}-{settings.targetPoints - 1} keeps playing until someone is two clear
+            </span>
+          </span>
+          <input
+            type="checkbox"
+            checked={settings.winByTwo}
+            onChange={(e) => onChange({ ...settings, winByTwo: e.target.checked })}
+            className="h-6 w-6 shrink-0 accent-amber-400"
+          />
+        </label>
 
         <div className="space-y-2">
           <span className="text-sm font-bold">Keyboard</span>
@@ -923,7 +984,45 @@ function SettingsPanel({
             className="h-6 w-6 shrink-0 accent-amber-400"
           />
         </label>
+
+        {/* Only meaningful while power-ups are on, so it hides with them. */}
+        {settings.powerUps && (
+          <div className="space-y-1">
+            <div className="flex justify-between text-sm font-bold">
+              <span>How often</span>
+              <span>{powerRateLabel(settings.powerRate)}</span>
+            </div>
+            <input
+              type="range"
+              min="0.25"
+              max="3"
+              step="0.25"
+              value={settings.powerRate}
+              onChange={(e) => onChange({ ...settings, powerRate: parseFloat(e.target.value) })}
+              className="w-full accent-amber-400"
+            />
+            <p className="text-[11px] text-white/50">
+              About one drop every {powerGapLabel(settings.powerRate)}. Takes effect straight away, even
+              mid-match.
+            </p>
+          </div>
+        )}
       </div>
     </div>
   );
+}
+
+/** Plain words for the slider, so it doesn't read as a bare multiplier. */
+function powerRateLabel(rate: number): string {
+  if (rate <= 0.4) return 'Rare';
+  if (rate <= 0.8) return 'Occasional';
+  if (rate <= 1.3) return 'Normal';
+  if (rate <= 2.2) return 'Frequent';
+  return 'Chaos';
+}
+
+/** The interval the engine will actually use, in whole seconds. */
+function powerGapLabel(rate: number): string {
+  const mid = (BALANCE.POWER_EVERY_MIN + BALANCE.POWER_EVERY_MAX) / 2 / Math.max(0.05, rate);
+  return `${Math.round(mid)}s`;
 }

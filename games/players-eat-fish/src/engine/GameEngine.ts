@@ -7,7 +7,7 @@ import {
   SHOAL_MAX_SIZE,
   fishSrc,
 } from '../game/fish';
-import { buildReef, bakeReef, drawFallbackWater, Reef } from '../game/background';
+
 import { audioService } from '../services/audio';
 
 /**
@@ -50,12 +50,6 @@ export const BALANCE = {
    */
   GROWTH: 0.55,
   SPAWN_PROTECTION: 2.5,
-  /**
-   * A fish must be this much bigger to eat. Inside the margin neither side can
-   * eat the other, so two evenly matched players circle instead of trading a
-   * coin-flip decided by floating point noise.
-   */
-  EAT_MARGIN: 1.06,
 
   // AI population
   ENEMY_BASE: 26,
@@ -107,6 +101,12 @@ export const BALANCE = {
   // Presentation
   BUBBLES: 60,
   VISUAL_SCALE: 1.3,
+  /**
+   * Steepest a fish ever tilts, in radians (~35°). Fish mirror horizontally to
+   * change direction and only ever pitch within this, so none is drawn upside
+   * down no matter which way it swims.
+   */
+  MAX_PITCH: 0.62,
 } as const;
 
 const CONTROL_SCHEMES = [
@@ -160,9 +160,8 @@ const NET_MAX_EXTRAPOLATION = 0.4;
 export class GameEngine {
   private ctx: CanvasRenderingContext2D;
   private images = new Map<number, HTMLImageElement>();
-  private reef: Reef = buildReef(BALANCE.WORLD_W, BALANCE.WORLD_H);
-  /** The reef, pre-rendered once. Null only if the device refused the memory. */
-  private backdrop: HTMLCanvasElement | null = null;
+  /** The static background image. */
+  private backdrop: HTMLImageElement | null = null;
 
   private locals = new Map<string, Fish>();
   private remotes = new Map<string, Fish>();
@@ -228,7 +227,6 @@ export class GameEngine {
     this.resize();
     this.initBubbles();
     this.loadImages();
-    this.backdrop = bakeReef(this.reef);
     if (this.simulateAI) this.seedEnemies();
   }
 
@@ -421,6 +419,29 @@ export class GameEngine {
     // Away from the edges, and away from whatever just ate them.
     fish.x = BALANCE.WORLD_W * (0.25 + Math.random() * 0.5);
     fish.y = BALANCE.WORLD_H * (0.25 + Math.random() * 0.5);
+  }
+
+  /**
+   * Starts the reef over at the size the players are *now*.
+   *
+   * The spawner sizes every fish against `referenceSize()`, the average of
+   * everyone alive — so a reef grown around a size-150 player is still full of
+   * size-150 fish the moment that player restarts at size 6. Nothing culls
+   * them either: they are recycled only when they drift out of view, so a fresh
+   * run opened surrounded by leftover giants from the last one and died to the
+   * first thing it touched.
+   *
+   * Only meaningful for whoever owns the AI. A guest's population is replaced
+   * wholesale by the host's next snapshot regardless.
+   */
+  resetReef() {
+    if (!this.simulateAI) return;
+    this.enemies.clear();
+    this.boss = null;
+    this.bossTimer = 0;
+    this.bossLife = 0;
+    this.particles = [];
+    this.seedEnemies();
   }
 
   localFish(id: string): Fish | undefined {
@@ -935,7 +956,7 @@ export class GameEngine {
       // AI fish
       for (const [id, enemy] of this.enemies) {
         if (!overlaps(me, enemy)) continue;
-        if (me.size > enemy.size * BALANCE.EAT_MARGIN) {
+        if (canEat(me, enemy)) {
           // Removed straight away so eating feels instant. If we are a guest,
           // the host is told and confirms it to everyone else; the worst case
           // is that two players briefly both believe they got the same fish.
@@ -945,7 +966,7 @@ export class GameEngine {
           this.burst(enemy.x, enemy.y, 12);
           this.config.onEnemyEaten(id);
           this.config.onEat(me.score, me.size);
-        } else if (enemy.size > me.size * BALANCE.EAT_MARGIN && !invulnerable) {
+        } else if (canEat(enemy, me) && !invulnerable) {
           this.kill(myId, me, FISH_ASSETS[enemy.asset].name);
           return;
         } else {
@@ -978,12 +999,12 @@ export class GameEngine {
         // *loses*. Both clients run this same check on their own player, so
         // having the victim announce the death is the only arrangement where
         // the two can never disagree about who ate whom.
-        if (other.size > me.size * BALANCE.EAT_MARGIN) {
+        if (canEat(other, me)) {
           if (invulnerable) continue;
           this.kill(myId, me, other.name ?? 'another fish', otherId);
           return;
         }
-        if (me.size <= other.size * BALANCE.EAT_MARGIN) separate(me, other);
+        if (!canEat(me, other)) separate(me, other);
       }
     });
   }
@@ -1101,12 +1122,27 @@ export class GameEngine {
   }
 
   private async loadImages() {
-    const total = FISH_ASSETS.length;
+    const total = FISH_ASSETS.length + 1;
     let loaded = 0;
     const done = () => {
       loaded++;
       this.config.onProgress?.(loaded / total);
     };
+
+    const bg = new Image();
+    // WebP, for the same reason the fish are: the JPEG was 775 KB — more than
+    // the entire rest of this bundle's assets put together — for an image that
+    // is then stretched over a 3000x2200 world and never seen at native size.
+    // The WebP is 125 KB and indistinguishable once scaled.
+    //
+    // BASE_URL rather than a bare filename so it resolves under any deploy
+    // prefix, the same way fishSrc() does.
+    bg.src = `${import.meta.env.BASE_URL}bg.webp`;
+    bg.onload = () => {
+      this.backdrop = bg;
+      done();
+    };
+    bg.onerror = done;
 
     FISH_ASSETS.forEach((_, index) => {
       const img = new Image();
@@ -1155,7 +1191,8 @@ export class GameEngine {
     if (this.backdrop) {
       ctx.drawImage(this.backdrop, 0, 0, BALANCE.WORLD_W, BALANCE.WORLD_H);
     } else {
-      drawFallbackWater(ctx, this.reef);
+      ctx.fillStyle = '#0a4468';
+      ctx.fillRect(0, 0, BALANCE.WORLD_W, BALANCE.WORLD_H);
     }
 
     ctx.strokeStyle = 'rgba(255,255,255,0.18)';
@@ -1178,9 +1215,22 @@ export class GameEngine {
     }
     ctx.globalAlpha = 1;
 
-    this.enemies.forEach((f) => this.drawFish(f, false));
-    if (this.boss) this.drawBoss();
-    this.remotes.forEach((f) => !f.dead && this.drawFish(f, false, true));
+    // AI fish stay "alive" out to CULL_RING (2.1x the view radius) so the
+    // population doesn't visibly pop in and out — but that means most of them
+    // sit well outside what the camera can actually see. Each one drawn costs
+    // a save/rotate/drawImage plus a stroked+filled text label, which is real
+    // money on a mobile GPU; skipping the ones the player can't see is what
+    // keeps a crowded reef from stuttering on a phone.
+    const margin = 300;
+    const left = this.cameraX - this.viewW / 2 - margin;
+    const right = this.cameraX + this.viewW / 2 + margin;
+    const top = this.cameraY - this.viewH / 2 - margin;
+    const bottom = this.cameraY + this.viewH / 2 + margin;
+    const onScreen = (f: Fish) => f.x > left && f.x < right && f.y > top && f.y < bottom;
+
+    this.enemies.forEach((f) => onScreen(f) && this.drawFish(f, false));
+    if (this.boss && onScreen(this.boss)) this.drawBoss();
+    this.remotes.forEach((f) => !f.dead && onScreen(f) && this.drawFish(f, false, true));
     this.locals.forEach((f) => !f.dead && this.drawFish(f, true));
 
     ctx.restore();
@@ -1192,18 +1242,44 @@ export class GameEngine {
 
     ctx.save();
     ctx.translate(fish.x, fish.y);
-    ctx.rotate(fish.angle);
-    // Sprites face right; rotating past vertical would otherwise draw them
-    // upside down, so mirror instead of rotating all the way round.
-    if (Math.abs(fish.angle) > Math.PI / 2) ctx.scale(1, -1);
+
+    /**
+     * Sprites are drawn facing right and must stay belly-down whichever way
+     * the fish swims.
+     *
+     * This used to rotate by the full heading and then mirror *vertically*
+     * once past ±90°, which is the flipping that got reported: the sprite is
+     * upside down for the whole left-hand semicircle, and the correction snaps
+     * on at the instant the fish crosses vertical rather than easing in.
+     *
+     * Mirroring horizontally instead keeps the fish the right way up through
+     * every heading — a fish swimming left is the same fish facing the other
+     * way. The remaining rotation is pitch only, measured against the
+     * horizontal and clamped, so a fish climbing or diving still angles into
+     * the direction it is going without ever standing on its nose.
+     */
+    const facingLeft = Math.cos(fish.angle) < 0;
+    const pitch = clamp(
+      Math.atan2(Math.sin(fish.angle), Math.abs(Math.cos(fish.angle))),
+      -BALANCE.MAX_PITCH,
+      BALANCE.MAX_PITCH,
+    );
+    // Scale before rotate: the mirror flips the x axis, so the sprite's nose
+    // points left while `pitch` keeps meaning "down the screen is positive".
+    if (facingLeft) ctx.scale(-1, 1);
+    ctx.rotate(pitch);
     if (fish.opacity !== undefined) ctx.globalAlpha = fish.opacity;
+
+    // Every dimension below comes off bodyRadius, so the ring, the sprite and
+    // the label stay glued to the fish at any size.
+    const body = bodyRadius(fish.size);
 
     if (isLocal) {
       const age = now - fish.bornAt;
       if (age < BALANCE.SPAWN_PROTECTION) {
         const pulse = Math.sin(age * 8) * 0.5 + 0.5;
         ctx.beginPath();
-        ctx.arc(0, 0, fish.size * 1.5 + pulse * 12, 0, Math.PI * 2);
+        ctx.arc(0, 0, body * 1.35 + pulse * 12, 0, Math.PI * 2);
         ctx.fillStyle = `rgba(255,255,255,${0.15 + pulse * 0.25})`;
         ctx.fill();
       }
@@ -1212,14 +1288,13 @@ export class GameEngine {
     const img = this.images.get(fish.asset);
     if (img) {
       const aspect = img.naturalWidth / img.naturalHeight || 1;
-      const visual = 10 + Math.pow(fish.size, 0.75) * BALANCE.VISUAL_SCALE;
-      const w = visual * 2.5;
+      const w = body * SPRITE_HALF_W * 2;
       const h = w / aspect;
       ctx.drawImage(img, -w / 2, -h / 2, w, h);
     } else {
       ctx.fillStyle = isLocal ? '#4ade80' : '#94a3b8';
       ctx.beginPath();
-      ctx.arc(0, 0, fish.size, 0, Math.PI * 2);
+      ctx.arc(0, 0, body, 0, Math.PI * 2);
       ctx.fill();
     }
     ctx.restore();
@@ -1227,10 +1302,10 @@ export class GameEngine {
     // Labels are drawn upright, outside the fish's own rotation.
     if (fish.kind === 'boss') return;
     ctx.save();
-    ctx.translate(fish.x, fish.y - fish.size - 14);
+    ctx.translate(fish.x, fish.y - body * 0.95 - 14);
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.font = `bold ${Math.max(13, fish.size * 0.45)}px system-ui, sans-serif`;
+    ctx.font = `bold ${Math.max(13, body * 0.42)}px system-ui, sans-serif`;
     ctx.lineWidth = 3;
     ctx.strokeStyle = 'rgba(0,0,0,0.45)';
     ctx.fillStyle = isLocal ? '#bbf7d0' : isRemotePlayer ? '#fde68a' : '#ffffff';
@@ -1246,12 +1321,13 @@ export class GameEngine {
     ctx.save();
     ctx.globalAlpha = boss.opacity ?? 1;
     ctx.translate(boss.x, boss.y);
-    const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, boss.size * 1.4);
+    const aura = bodyRadius(boss.size) * 1.5;
+    const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, aura);
     grad.addColorStop(0, 'rgba(255,0,0,0.25)');
     grad.addColorStop(1, 'rgba(255,0,0,0)');
     ctx.fillStyle = grad;
     ctx.beginPath();
-    ctx.arc(0, 0, boss.size * 1.4, 0, Math.PI * 2);
+    ctx.arc(0, 0, aura, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
     this.drawFish(boss, false);
@@ -1264,6 +1340,42 @@ function clamp(v: number, lo: number, hi: number) {
   return v < lo ? lo : v > hi ? hi : v;
 }
 
+/**
+ * How big a fish actually *looks*, in world units.
+ *
+ * `size` is the abstract score-like quantity that grows by area; the sprite is
+ * drawn from this compressed curve so that a size-200 whale is impressive
+ * rather than screen-filling. Everything the player can see — the sprite, the
+ * hitbox, the name label, the spawn ring — has to be derived from this one
+ * function or they drift apart as fish grow. They used to: collision scaled
+ * linearly with `size` while the art scaled with `size^0.75`, so by size 150
+ * the hitbox was about twice the width of the fish and you were eaten by open
+ * water.
+ */
+export function bodyRadius(size: number): number {
+  return 10 + Math.pow(size, 0.75) * BALANCE.VISUAL_SCALE;
+}
+
+/** Half-width and half-height of the drawn sprite, at `bodyRadius` scale. */
+const SPRITE_HALF_W = 1.25;
+
+/**
+ * Who eats whom.
+ *
+ * The player reads sizes off the labels, which are floored to whole numbers, so
+ * the rule is stated in exactly those terms: if the number over their head is
+ * lower than the number over yours, you eat them. The old rule needed a 6%
+ * edge, which at size 50 meant a fish showing "49" was uneatable and at size
+ * 150 a fish showing "141" was — the bigger you got, the more the game
+ * disagreed with its own HUD.
+ *
+ * Equal displayed sizes mean neither can eat the other, so two evenly matched
+ * fish still bump apart rather than trading a coin flip on floating point noise.
+ */
+function canEat(predator: Fish, prey: Fish): boolean {
+  return Math.floor(predator.size) > Math.floor(prey.size);
+}
+
 /** Keeps the camera inside the world, or centres it when the view is bigger. */
 function clampView(target: number, view: number, world: number) {
   if (view >= world) return world / 2;
@@ -1272,14 +1384,25 @@ function clampView(target: number, view: number, world: number) {
 
 /**
  * Fish are longer than they are tall, so a circle is a poor hitbox: it lets a
- * fish be eaten by something level with its tail. This stretches the test into
- * an ellipse that matches the sprite.
+ * fish be eaten by something level with its tail. This is an ellipse sized off
+ * `bodyRadius`, the same curve the sprite is drawn from, and deliberately a
+ * little tighter than the art — the sprites carry transparent padding, and a
+ * hitbox that stops just inside the visible fish reads as fair, where one that
+ * reaches past it reads as broken.
  */
+const HIT_X = 1;
+const HIT_Y = 0.62;
+
+function contactRadii(a: Fish, b: Fish): { rx: number; ry: number } {
+  const reach = bodyRadius(a.size) + bodyRadius(b.size);
+  return { rx: reach * HIT_X, ry: reach * HIT_Y };
+}
+
 function overlaps(a: Fish, b: Fish): boolean {
-  const dx = (a.x - b.x) / 1.4;
-  const dy = (a.y - b.y) / 0.8;
-  const reach = (a.size + b.size) * 0.8;
-  return dx * dx + dy * dy < reach * reach;
+  const { rx, ry } = contactRadii(a, b);
+  const dx = (a.x - b.x) / rx;
+  const dy = (a.y - b.y) / ry;
+  return dx * dx + dy * dy < 1;
 }
 
 /** Two fish that cannot eat each other push apart instead of overlapping. */
@@ -1287,7 +1410,8 @@ function separate(a: Fish, b: Fish) {
   const dx = a.x - b.x;
   const dy = a.y - b.y;
   const dist = Math.hypot(dx, dy) || 1;
-  const overlap = (a.size + b.size) * 0.8 - dist;
+  const { rx } = contactRadii(a, b);
+  const overlap = rx - dist;
   if (overlap <= 0) return;
   a.x += (dx / dist) * overlap * 0.5;
   a.y += (dy / dist) * overlap * 0.5;

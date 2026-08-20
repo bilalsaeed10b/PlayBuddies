@@ -9,7 +9,7 @@ import { GameEngine } from '../../game/engine';
 import { Level } from '../../types';
 import { getLevels } from '../../game/levels';
 import { RemoteSmoother, snapshotOf, worthSending, RemoteSnapshot } from '../../game/netSync';
-import { toggleFullscreen, isTouchDevice } from '../../game/fullscreen';
+import { IN_IFRAME, toggleFullscreen, isTouchDevice } from '../../game/fullscreen';
 import TouchControls from './TouchControls';
 import { MessageSquare, RefreshCw, Smartphone, Monitor, Gem, ArrowLeft, Settings, Users, Maximize2, Minimize2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -1910,13 +1910,16 @@ export default function Game({
                   <button onClick={() => onBack?.()} className="flex-1 py-4 bg-zinc-900 border border-white/5 rounded-xl text-xs font-bold text-zinc-500 hover:text-white transition-colors">BACK TO MENU</button>
                 </div>
 
-                <button
-                  onClick={() => requestFullscreen(!isFull)}
-                  className="w-full py-3 bg-zinc-900 border border-white/5 rounded-xl text-xs font-bold text-zinc-400 hover:text-white transition-colors flex items-center justify-center gap-2"
-                >
-                  {isFull ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
-                  {isFull ? 'EXIT FULL SCREEN' : 'FULL SCREEN'}
-                </button>
+                {/* Standalone only — embedded, the host's bar owns full screen. */}
+                {!IN_IFRAME && (
+                  <button
+                    onClick={() => requestFullscreen(!isFull)}
+                    className="w-full py-3 bg-zinc-900 border border-white/5 rounded-xl text-xs font-bold text-zinc-400 hover:text-white transition-colors flex items-center justify-center gap-2"
+                  >
+                    {isFull ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+                    {isFull ? 'EXIT FULL SCREEN' : 'FULL SCREEN'}
+                  </button>
+                )}
 
                 <div className="p-2 bg-black/40 rounded border border-zinc-800 font-mono text-[10px] text-zinc-500 text-left">
                   <div>ROOM: {roomId}</div>
@@ -2007,7 +2010,14 @@ export default function Game({
               />
             </div>
 
-            <div className="flex gap-2 pointer-events-auto">
+            {/*
+              Embedded, PlayBuddies floats its own Invite / Full screen / End
+              Game bar over this corner at a z-index nothing inside the frame
+              can beat, so this row starts below it. Full screen is not repeated
+              there either: the host already provides one, and two buttons in a
+              single corner is the overlap.
+            */}
+            <div className={`flex gap-2 pointer-events-auto ${IN_IFRAME ? 'mt-14' : ''}`}>
               {onBack && (
                 <button
                   onClick={onBack}
@@ -2023,13 +2033,15 @@ export default function Game({
               >
                 INVITE
               </button>
-              <button
-                onClick={() => requestFullscreen(!isFull)}
-                className="p-2 bg-black/50 border border-white/10 rounded-lg hover:bg-white/10 transition-colors"
-                title={isFull ? 'Exit Full Screen' : 'Full Screen'}
-              >
-                {isFull ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
-              </button>
+              {!IN_IFRAME && (
+                <button
+                  onClick={() => requestFullscreen(!isFull)}
+                  className="p-2 bg-black/50 border border-white/10 rounded-lg hover:bg-white/10 transition-colors"
+                  title={isFull ? 'Exit Full Screen' : 'Full Screen'}
+                >
+                  {isFull ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
+                </button>
+              )}
               {isTouch && (
                 <button
                   onClick={() => setUseTilt(!useTilt)}

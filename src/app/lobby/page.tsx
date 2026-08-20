@@ -265,20 +265,6 @@ function LobbyContent() {
       if (e.source !== gameFrameRef.current?.contentWindow) return;
       const on = Boolean(data.value);
       setIsPseudoFull(on);
-
-      /**
-       * Try the real thing too.
-       *
-       * A postMessage handler carries no user activation, so this request is
-       * usually rejected — but the game only asks while it is itself handling a
-       * touch, and browsers that propagate activation into the frame's parent
-       * will grant it. When they do, the address bar goes away, which is the
-       * difference between "the frame is bigger" and actually fullscreen.
-       * When they don't, the fixed-position path above has already covered it.
-       */
-      const target = gameShellRef.current ?? document.documentElement;
-      if (on) target.requestFullscreen?.().catch(() => {});
-      else if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
     };
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
@@ -396,17 +382,7 @@ function LobbyContent() {
    * left phones with a slightly bigger box and no way to fill the screen.
    */
   const toggleFullScreen = () => {
-    const next = !isPseudoFull;
-    setIsPseudoFull(next);
-
-    const target = gameShellRef.current ?? document.documentElement;
-    if (next) {
-      target.requestFullscreen?.().catch(() => {
-        /* denied — the fixed-position path already covers it */
-      });
-    } else if (document.fullscreenElement) {
-      document.exitFullscreen?.().catch(() => {});
-    }
+    setIsPseudoFull((prev) => !prev);
   };
 
   /**

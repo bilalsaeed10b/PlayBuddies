@@ -3,10 +3,11 @@ import { ArrowLeft, Maximize2, Minimize2, Settings, Wifi, WifiOff } from 'lucide
 import { GameEngine } from '../engine/GameEngine';
 import Joystick from '../components/Joystick';
 import { GameSettings, NetMessage, PlayerPacket } from '../types/game';
-import { Mesh } from '../net/mesh';
+// Type-only: the runtime value is pulled in by the dynamic import below, so
+// neither the mesh nor the Firebase SDK it depends on lands in the main bundle.
+import type { Mesh } from '../net/mesh';
 import { audioService } from '../services/audio';
-import { toggleFullscreen } from '../fullscreen';
-import { db, doc, setDoc, onSnapshot } from '../firebase';
+import { IN_IFRAME, toggleFullscreen } from '../fullscreen';
 
 /**
  * How often each client publishes itself, and how often the host publishes the
@@ -168,8 +169,27 @@ export default function GameView({
     let enemyTimer = 0;
     let supervisorTimer = 0;
     let fallbackTimer = 0;
+    /**
+     * Set by the cleanup below. The whole networking half of this effect is
+     * loaded asynchronously now (see the import comment in App.tsx — the
+     * Firebase SDK and the mesh that depends on it are only worth fetching for
+     * an online match), so the component can perfectly well unmount while that
+     * import is still in flight. Without this flag, a match the player has
+     * already left would come up moments later with live timers and an open
+     * peer connection that nothing holds a handle to any more.
+     */
+    let disposed = false;
 
-    if (online && roomId && uid) {
+    // roomId and uid arrive as parameters so they stay narrowed to `string`.
+    // The `online && roomId && uid` check at the call site used to do that job
+    // inline; splitting the body out into its own function loses the narrowing.
+    const startNetworking = async (roomId: string, uid: string) => {
+      const [{ Mesh }, { db, doc, setDoc, onSnapshot }] = await Promise.all([
+        import('../net/mesh'),
+        import('../firebase'),
+      ]);
+      if (disposed) return;
+
       mesh = new Mesh(
         roomId,
         uid,
@@ -290,6 +310,13 @@ export default function GameView({
         if (!packet) return;
         setDoc(doc(db, 'lobbies', roomId, 'updates', uid), { p: packet, n: Date.now() }).catch(() => {});
       }, 1000 / FALLBACK_HZ);
+    };
+
+    if (online && roomId && uid) {
+      // Deliberately not awaited: the reef starts rendering immediately and the
+      // networking attaches to it a moment later, rather than the whole match
+      // waiting on a download.
+      void startNetworking(roomId, uid).catch((e) => console.error('Could not start networking', e));
     }
 
     const board = window.setInterval(() => {
@@ -297,6 +324,7 @@ export default function GameView({
     }, 500);
 
     return () => {
+      disposed = true;
       clearTimeout(settle);
       window.clearInterval(playerTimer);
       window.clearInterval(enemyTimer);
@@ -337,7 +365,13 @@ export default function GameView({
   }, [ready, settings.bgmVolume]);
 
   useEffect(() => {
-    const onChange = () => setIsFull(Boolean(document.fullscreenElement));
+    // The authoritative signal that the browser actually finished entering or
+    // leaving real fullscreen — unlike our own 200ms guess below, this fires
+    // exactly when the viewport has settled, orientation lock included.
+    const onChange = () => {
+      setIsFull(Boolean(document.fullscreenElement));
+      engineRef.current?.resize();
+    };
     document.addEventListener('fullscreenchange', onChange);
     return () => document.removeEventListener('fullscreenchange', onChange);
   }, []);
@@ -345,12 +379,17 @@ export default function GameView({
   const fullscreen = (on: boolean) => {
     if (rootRef.current) toggleFullscreen(rootRef.current, on);
     setIsFull(on);
+    // Covers the CSS-only fallback path (iOS, or a denied fullscreen request),
+    // where 'fullscreenchange' above never fires at all.
     setTimeout(() => engineRef.current?.resize(), 200);
   };
 
   const respawn = () => {
     setDefeat(null);
     localIds.forEach((id) => engineRef.current?.respawn(id));
+    // After the seats are back at starting size, so the reef is rebuilt around
+    // the new reference rather than the one the last run ended on.
+    engineRef.current?.resetReef();
   };
 
   const me = scoreboard.find((r) => r.local);
@@ -371,14 +410,14 @@ export default function GameView({
 
       {/* HUD */}
       <div className="pointer-events-none absolute inset-x-0 top-0 z-20 flex items-start justify-between p-3 gap-3">
-        <div className="rounded-2xl border border-black/10 bg-white/50 px-4 py-2 shadow-sm backdrop-blur-md">
+        <div className="rounded-2xl border border-black/10 bg-white/80 px-4 py-2 shadow-sm">
           <p className="text-[10px] font-bold uppercase tracking-widest text-slate-600">Size</p>
           <p className="text-2xl font-black leading-none text-emerald-700">{Math.floor(me?.size ?? 0)}</p>
           <p className="text-[11px] font-bold text-slate-500">{me?.score ?? 0} pts</p>
         </div>
 
         {scoreboard.length > 1 && (
-          <div className="hidden sm:block rounded-2xl border border-black/10 bg-white/50 px-3 py-2 shadow-sm backdrop-blur-md">
+          <div className="hidden sm:block rounded-2xl border border-black/10 bg-white/80 px-3 py-2 shadow-sm">
             {scoreboard.slice(0, 5).map((row, i) => (
               <div
                 key={row.id}
@@ -392,10 +431,17 @@ export default function GameView({
           </div>
         )}
 
-        <div className="pointer-events-auto flex items-center gap-2">
+        {/*
+          PlayBuddies paints its own Invite / Full screen / End Game controls
+          over the top-right of this iframe at a higher z-index than anything
+          in here can reach, so our own buttons sat underneath them and could
+          not be tapped. Dropping below that bar is the only fix available from
+          inside the frame — the host's chrome is not ours to move.
+        */}
+        <div className={`pointer-events-auto flex items-center gap-2 ${IN_IFRAME ? 'mt-14' : ''}`}>
           {online && (
             <div
-              className="rounded-xl border border-black/10 bg-white/50 p-2 text-slate-700 backdrop-blur-md"
+              className="rounded-xl border border-black/10 bg-white/80 p-2 text-slate-700"
               title={
                 link === 'alone'
                   ? 'Nobody else in the room yet'
@@ -413,21 +459,21 @@ export default function GameView({
           )}
           <button
             onClick={onOpenSettings}
-            className="rounded-xl border border-black/10 bg-white/50 p-2 text-slate-800 backdrop-blur-md transition-colors hover:bg-white/80"
+            className="rounded-xl border border-black/10 bg-white/80 p-2 text-slate-800 transition-colors hover:bg-white"
             title="Settings"
           >
             <Settings size={18} />
           </button>
           <button
             onClick={() => fullscreen(!isFull)}
-            className="rounded-xl border border-black/10 bg-white/50 p-2 text-slate-800 backdrop-blur-md transition-colors hover:bg-white/80"
+            className="rounded-xl border border-black/10 bg-white/80 p-2 text-slate-800 transition-colors hover:bg-white"
             title={isFull ? 'Exit full screen' : 'Full screen'}
           >
             {isFull ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
           </button>
           <button
             onClick={onExit}
-            className="rounded-xl border border-black/10 bg-white/50 p-2 text-slate-800 backdrop-blur-md transition-colors hover:bg-white/80"
+            className="rounded-xl border border-black/10 bg-white/80 p-2 text-slate-800 transition-colors hover:bg-white"
             title="Leave"
           >
             <ArrowLeft size={18} />

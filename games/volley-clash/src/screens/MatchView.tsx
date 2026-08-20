@@ -6,13 +6,15 @@
  * which is what keeps the simulation testable and the netcode swappable.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, Maximize2, Settings as SettingsIcon, Trophy, Wifi, WifiOff } from 'lucide-react';
+import { ArrowLeft, Settings as SettingsIcon, Trophy, Wifi, WifiOff } from 'lucide-react';
 import TouchPad, { PadState } from '../components/TouchPad';
-import { toggleFullscreen } from '../fullscreen';
+import { IN_IFRAME, toggleFullscreen } from '../fullscreen';
 import { CHARACTERS } from '../game/characters';
 import { POWER_META, TEAM_COLORS, arenaFor } from '../game/rules';
 import { MatchEngine, Seat } from '../engine/MatchEngine';
-import { Mesh } from '../net/mesh';
+// Type-only: the runtime value comes from the dynamic import below, keeping the
+// mesh and the Firebase SDK it depends on out of the main bundle.
+import type { Mesh } from '../net/mesh';
 import { audioService } from '../services/audio';
 import {
   GameSettings,
@@ -134,6 +136,13 @@ export default function MatchView({
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
 
+  // Power-up frequency is the one match rule that can be retuned mid-game: the
+  // rest (target score, win-by-two) would change what the players are already
+  // playing for, so those are read once when the engine is built.
+  useEffect(() => {
+    engineRef.current?.setPowerRate(settings.powerRate);
+  }, [settings.powerRate]);
+
   // ── keyboard ─────────────────────────────────────────────────────────────
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
@@ -211,7 +220,9 @@ export default function MatchView({
       arena: arenaFor(seats.length),
       seats,
       targetPoints: settingsRef.current.targetPoints,
+      winByTwo: settingsRef.current.winByTwo,
       powerUps: settingsRef.current.powerUps,
+      powerRate: settingsRef.current.powerRate,
       isHost,
       onPoint: (_team, sc) => setScore(sc),
       onOver: (winner) => {
@@ -304,35 +315,53 @@ export default function MatchView({
     const uid = config.uid;
     if (!online || !roomId || !uid) return;
 
-    const mesh = new Mesh(
-      roomId,
-      uid,
-      (from, raw) => {
-        const msg = raw as NetMessage;
-        const engine = engineRef.current;
-        if (!engine) return;
+    // The mesh drags in the Firebase SDK for its signalling, so it is fetched
+    // only now — on the online path — rather than by every solo player. See the
+    // import comment in App.tsx.
+    let disposed = false;
+    let mesh: Mesh | null = null;
+    let leave: (() => void) | undefined;
 
-        if (msg.t === 's' && !isHost) {
-          engine.applySnapshot(msg as Snapshot);
-        } else if (msg.t === 'i' && isHost) {
-          remoteInputs.current.set(from, unpackInput(msg.d));
-        } else if (msg.t === 'bye') {
-          remoteInputs.current.delete(msg.id);
-          engine.handOverToAI(msg.id);
-        }
-      },
-      (connected) => setPeers(connected.length),
-    );
-    meshRef.current = mesh;
-    mesh.setPeers(config.people.map((p) => p.uid));
+    void import('../net/mesh')
+      .then(({ Mesh }) => {
+        // The match can be left while this import is still in flight; without
+        // this guard the connection would open with nothing left to close it.
+        if (disposed) return;
 
-    const leave = () => mesh.broadcast({ t: 'bye', id: uid });
-    window.addEventListener('pagehide', leave);
+        mesh = new Mesh(
+          roomId,
+          uid,
+          (from, raw) => {
+            const msg = raw as NetMessage;
+            const engine = engineRef.current;
+            if (!engine) return;
+
+            if (msg.t === 's' && !isHost) {
+              engine.applySnapshot(msg as Snapshot);
+            } else if (msg.t === 'i' && isHost) {
+              remoteInputs.current.set(from, unpackInput(msg.d));
+            } else if (msg.t === 'bye') {
+              remoteInputs.current.delete(msg.id);
+              engine.handOverToAI(msg.id);
+            }
+          },
+          (connected) => setPeers(connected.length),
+        );
+        meshRef.current = mesh;
+        mesh.setPeers(config.people.map((p) => p.uid));
+
+        leave = () => mesh?.broadcast({ t: 'bye', id: uid });
+        window.addEventListener('pagehide', leave);
+      })
+      .catch((e) => console.error('Could not open the connection', e));
 
     return () => {
-      window.removeEventListener('pagehide', leave);
-      leave();
-      mesh.close();
+      disposed = true;
+      if (leave) {
+        window.removeEventListener('pagehide', leave);
+        leave();
+      }
+      mesh?.close();
       meshRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -394,8 +423,15 @@ export default function MatchView({
         </div>
       )}
 
-      {/* ── top-right controls ── */}
-      <div className="absolute right-3 top-3 z-20 flex gap-2">
+      {/*
+        ── top-right controls ──
+        PlayBuddies paints its own Invite / Full screen / End Game bar over this
+        corner at a z-index above the iframe, so ours has to sit below it or it
+        cannot be tapped at all. Full screen is deliberately not repeated here:
+        the platform already offers it, and two buttons fighting over the same
+        corner is what caused the overlap.
+      */}
+      <div className={`absolute right-3 z-20 flex gap-2 ${IN_IFRAME ? 'top-20' : 'top-3'}`}>
         {online && (
           <div
             className="flex items-center gap-1.5 rounded-2xl border border-white/20 bg-black/45 px-3 py-2 text-xs font-bold text-white backdrop-blur-md"
@@ -405,13 +441,6 @@ export default function MatchView({
             {isHost ? 'host' : 'guest'}
           </div>
         )}
-        <button
-          onClick={() => toggleFullscreen(shellRef.current ?? document.documentElement, !document.fullscreenElement)}
-          className="rounded-2xl border border-white/20 bg-black/45 p-2.5 text-white backdrop-blur-md"
-          title="Full screen"
-        >
-          <Maximize2 className="h-5 w-5" />
-        </button>
         <button
           onClick={onOpenSettings}
           className="rounded-2xl border border-white/20 bg-black/45 p-2.5 text-white backdrop-blur-md"
@@ -435,7 +464,12 @@ export default function MatchView({
             // The Fullscreen API only grants a request that is handling a real
             // user gesture, and the first touch of the match is one. Once only,
             // so quitting fullscreen on purpose is respected.
-            if (document.fullscreenElement) return;
+            //
+            // Skipped when embedded: PlayBuddies drives fullscreen for the whole
+            // frame, and a game that grabs it from underneath leaves the two
+            // disagreeing about what is fullscreen and strands the host's bar
+            // on top of the court.
+            if (IN_IFRAME || document.fullscreenElement) return;
             toggleFullscreen(shellRef.current ?? document.documentElement, true);
           }}
         />

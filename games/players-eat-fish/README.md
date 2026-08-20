@@ -1,4 +1,4 @@
-# Fish Eat Fish
+# Go Eat Fish
 
 An underwater arena for up to eight players. Start as a minnow, eat anything
 smaller, avoid anything bigger.

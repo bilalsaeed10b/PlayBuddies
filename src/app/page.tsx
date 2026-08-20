@@ -532,7 +532,27 @@ function GameCard({
   index: number;
 }) {
   const [isHovered, setIsHovered] = useState(false);
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const { user } = useAuthStore();
+  const router = useRouter();
   const accent = gameAccent(game);
+
+  const handleGameClick = async () => {
+    if (isLoggingIn) return;
+    if (user) {
+      router.push("/dashboard");
+    } else {
+      setIsLoggingIn(true);
+      try {
+        await signInWithPopup(auth, googleProvider);
+        router.push("/dashboard");
+      } catch (error) {
+        console.error("Login failed:", error);
+      } finally {
+        setIsLoggingIn(false);
+      }
+    }
+  };
 
   return (
     <motion.div
@@ -542,13 +562,22 @@ function GameCard({
       transition={{ delay: index * 0.1, type: "spring", stiffness: 100 }}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
-      className={`game-card relative group rounded-2xl overflow-hidden cursor-pointer ${game.featured ? "md:col-span-2 md:row-span-2" : ""
+      onClick={handleGameClick}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          handleGameClick();
+        }
+      }}
+      className={`game-card relative group rounded-2xl overflow-hidden cursor-pointer select-none ${game.featured ? "md:col-span-2 md:row-span-2" : ""
         }`}
       style={{ background: `${accent.from}14` }}
     >
       {/* Gradient border on hover */}
       <motion.div
-        className="absolute inset-0 rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-500"
+        className="absolute inset-0 rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none"
         style={{
           background: `linear-gradient(135deg, ${accent.from}66, transparent, ${accent.to}66)`,
           padding: "1px",
@@ -633,10 +662,10 @@ function GameCard({
           </div>
         </div>
 
-        {/* Floating Play Button for featured or hover state */}
+        {/* Floating Play Button / Loader for featured or hover state */}
         <motion.div
           initial={{ opacity: 0, scale: 0.5, rotate: -45 }}
-          animate={{ opacity: isHovered ? 1 : 0, scale: isHovered ? 1 : 0.5, rotate: isHovered ? 0 : -45 }}
+          animate={{ opacity: isHovered || isLoggingIn ? 1 : 0, scale: isHovered || isLoggingIn ? 1 : 0.5, rotate: isHovered ? 0 : -45 }}
           transition={{ duration: 0.4, type: "spring" }}
           className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-20 pointer-events-none"
         >
@@ -644,7 +673,11 @@ function GameCard({
             className="w-20 h-20 rounded-full flex items-center justify-center shadow-[0_0_40px_rgba(255,255,255,0.3)] border-2 border-white/20"
             style={{ backgroundImage: `linear-gradient(to right, ${accent.from}, ${accent.to})` }}
           >
-            <Play size={32} className="text-white fill-white ml-2" />
+            {isLoggingIn ? (
+              <Loader2 size={32} className="text-white animate-spin" />
+            ) : (
+              <Play size={32} className="text-white fill-white ml-2" />
+            )}
           </div>
         </motion.div>
 

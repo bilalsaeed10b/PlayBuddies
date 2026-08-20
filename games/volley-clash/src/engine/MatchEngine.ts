@@ -45,7 +45,10 @@ export interface EngineConfig {
   arena: Arena;
   seats: Seat[];
   targetPoints: number;
+  winByTwo: boolean;
   powerUps: boolean;
+  /** Multiplier on how often power-ups drop. 1 is the stock pace. */
+  powerRate: number;
   isHost: boolean;
   onPoint?: (team: Team, score: [number, number], call: string) => void;
   onOver?: (team: Team) => void;
@@ -201,8 +204,21 @@ export class MatchEngine {
   }
 
   private armPowerTimer() {
-    this.powerTimer =
+    const gap =
       BALANCE.POWER_EVERY_MIN + Math.random() * (BALANCE.POWER_EVERY_MAX - BALANCE.POWER_EVERY_MIN);
+    // The setting is a *frequency* multiplier, so it divides the wait: 2 means
+    // twice as often, which is half the gap. Guarded against zero so a slider
+    // dragged to the bottom cannot produce an infinite timer.
+    this.powerTimer = gap / Math.max(0.05, this.cfg.powerRate);
+  }
+
+  /** Lets the settings panel retune a match already in progress. */
+  setPowerRate(rate: number) {
+    const previous = this.cfg.powerRate;
+    this.cfg.powerRate = rate;
+    // Rescale whatever is left to run, so dragging the slider takes effect on
+    // the pending drop instead of only on the one after it.
+    if (previous > 0 && rate > 0) this.powerTimer *= previous / rate;
   }
 
   // ── the loop ──────────────────────────────────────────────────────────────
@@ -215,9 +231,11 @@ export class MatchEngine {
    * here, so a caller never has to know which is which.
    */
   update(elapsed: number, inputs: Map<string, Input>) {
-    // Match point runs slightly slowed. It is pure theatre and it is free.
-    const slow = this.isMatchPoint() && this.phase === 'rally' ? BALANCE.MATCH_POINT_SLOWMO : 1;
-    this.acc += Math.min(elapsed, 0.25) * slow;
+    // Real time, always. Match point used to run at 0.72x as "theatre", but the
+    // condition that triggered it latched on for the whole end of the match
+    // rather than firing for a moment, so the game simply went sluggish from
+    // roughly match point onward and never recovered.
+    this.acc += Math.min(elapsed, 0.25);
 
     let steps = 0;
     while (this.acc >= BALANCE.FIXED_DT && steps < BALANCE.MAX_STEPS) {
@@ -384,9 +402,20 @@ export class MatchEngine {
 
     // Magnus: spin pushes the ball perpendicular to its travel. Small, but it
     // is what makes a hit taken on the run curve rather than fly straight.
+    //
+    // Rotating the velocity vector is the whole implementation, and it has to
+    // be exactly that — a rotation preserves speed, so spin can only ever
+    // redirect the ball, never speed it up or hold it against gravity. See
+    // MAGNUS_TURN for what happened when this was written as two sequential
+    // component updates instead.
     if (b.spin !== 0) {
-      b.vx += -BALANCE.MAGNUS * b.spin * b.vy * dt * 60;
-      b.vy += BALANCE.MAGNUS * b.spin * b.vx * dt * 60;
+      const theta = BALANCE.MAGNUS_TURN * b.spin * dt;
+      const cos = Math.cos(theta);
+      const sin = Math.sin(theta);
+      const vx = b.vx;
+      const vy = b.vy;
+      b.vx = vx * cos - vy * sin;
+      b.vy = vx * sin + vy * cos;
       b.spin *= Math.pow(BALANCE.SPIN_DECAY, dt);
     }
 
@@ -502,10 +531,7 @@ export class MatchEngine {
     // good server from running away with a seven-point match.
     this.serving = team === 0 ? 1 : 0;
 
-    const other = team === 0 ? 1 : 0;
-    const won =
-      this.score[team] >= this.cfg.targetPoints && this.score[team] - this.score[other] >= BALANCE.WIN_BY;
-    if (won || this.score[team] >= BALANCE.HARD_CAP) {
+    if (this.wins(team) || this.score[team] >= BALANCE.HARD_CAP) {
       this.phase = 'over';
       this.winner = team;
       this.say(`${TEAM_COLORS[team].name.toUpperCase()} WINS`);
@@ -678,9 +704,27 @@ export class MatchEngine {
     return this.powers.some((p) => p.kind === kind && (team === undefined || p.team === team));
   }
 
+  /** Would this score take the match for `team`? */
+  private wins(team: Team, score = this.score[team]): boolean {
+    const other = this.score[team === 0 ? 1 : 0];
+    if (score < this.cfg.targetPoints) return false;
+    return this.cfg.winByTwo ? score - other >= BALANCE.WIN_BY : true;
+  }
+
+  /**
+   * True only when somebody can actually win with the *next* point.
+   *
+   * This used to be `score >= target - 1` for either side, which is a different
+   * question entirely: it latched on the moment anyone reached 6 of 7 and never
+   * cleared, so at 6-6 — where under win-by-two nobody is close to winning — the
+   * game still announced match point. It also drove a permanent slow motion over
+   * the whole end of every match.
+   */
   isMatchPoint() {
-    const t = this.cfg.targetPoints;
-    return this.phase !== 'over' && (this.score[0] >= t - 1 || this.score[1] >= t - 1);
+    if (this.phase === 'over') return false;
+    return ([0, 1] as Team[]).some(
+      (t) => this.wins(t, this.score[t] + 1) || this.score[t] + 1 >= BALANCE.HARD_CAP,
+    );
   }
 
   private say(text: string) {

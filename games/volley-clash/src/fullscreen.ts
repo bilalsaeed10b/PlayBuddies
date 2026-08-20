@@ -47,20 +47,12 @@ export function toggleFullscreen(el: HTMLElement, on: boolean) {
 
   if (!on) {
     el.style.cssText = el.style.cssText.replace(IMMERSIVE, '');
-    if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
     unlockOrientation();
     return;
   }
 
-  if (typeof el.requestFullscreen === 'function') {
-    el.requestFullscreen()
-      .then(lockLandscape)
-      // Denied (no user gesture, or a permissions policy) — CSS covers it.
-      .catch(() => applyImmersive(el));
-  } else {
-    // iOS. Nothing to call, so make the element cover the viewport ourselves.
-    applyImmersive(el);
-  }
+  applyImmersive(el);
+  lockLandscape();
 }
 
 function applyImmersive(el: HTMLElement) {

@@ -60,8 +60,25 @@ export const BALANCE = {
   /** Ball bounces off the floor with this much energy retained (higher = bouncier). */
   FLOOR_BOUNCE: 0.72,
   NET_BOUNCE: 0.68,
-  /** Sideways force from spin, perpendicular to travel. Small on purpose. */
-  MAGNUS: 0.00026,
+  /**
+   * How sharply spin curves the ball, in radians per second per unit of spin.
+   *
+   * Magnus force acts perpendicular to travel, which means it does no work: it
+   * bends the flight path without adding or removing speed. So it is applied as
+   * a rotation of the velocity vector, and this number is a *turn rate* — not
+   * the acceleration it used to be.
+   *
+   * That distinction was the bug. The old version added the sideways force to
+   * vx and then computed the vertical term from the *already updated* vx, which
+   * is not a rotation at all: it bled vertical velocity away every step. At
+   * full spin it cancelled about 85% of gravity, so a hard-hit ball stopped
+   * falling and hung in the air, drifting sideways in proportion to how fast
+   * the player who hit it was moving — the ball appeared to follow them around.
+   *
+   * At MAX_SPIN this is ~0.63 rad/s, and spin decays quickly, so a whole flight
+   * bends by perhaps 20°. Visible, never silly.
+   */
+  MAGNUS_TURN: 0.0007,
   /** How much of the hitter's horizontal speed becomes spin. */
   SPIN_FROM_HIT: 0.55,
   MAX_SPIN: 900,
@@ -179,10 +196,9 @@ export const BALANCE = {
   // ── match ───────────────────────────────────────────────────────────────
   SERVE_DELAY: 1.3,
   POINT_DELAY: 1.2,
+  /** The lead needed to take the match, when the win-by-two setting is on. */
   WIN_BY: 2,
   HARD_CAP: 11,
-  /** Below this many points to go, the last rally runs slightly slowed. */
-  MATCH_POINT_SLOWMO: 0.72,
 
   // ── power-ups ───────────────────────────────────────────────────────────
   POWER_EVERY_MIN: 12,

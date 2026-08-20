@@ -132,7 +132,20 @@ export interface GameSettings {
   controlScheme: number;
   /** Points needed to win: 5, 7 or 11. */
   targetPoints: number;
+  /**
+   * Require a two-point lead to take the match.
+   *
+   * Off by default: "First to 7" should mean first to 7. With this on, 7-6 is
+   * not a win and play continues until someone is two clear — the volleyball
+   * rule, kept as an option for anyone who wants it.
+   */
+  winByTwo: boolean;
   powerUps: boolean;
+  /**
+   * How often power-ups drop, as a multiplier on the base interval. 1 is the
+   * stock pace; 2 is twice as often; 0.5 is half.
+   */
+  powerRate: number;
 }
 
 /** One character's state on the wire. Order matters — see MatchEngine.snapshot. */

@@ -12,11 +12,7 @@ import {
   Settings as SettingsIcon,
   Users,
 } from 'lucide-react';
-import { toggleFullscreen } from './fullscreen';
-import {
-  auth, db, onAuthStateChanged,
-  doc, onSnapshot, updateDoc,
-} from './firebase';
+import { IN_IFRAME, toggleFullscreen } from './fullscreen';
 import {
   FISH_ASSETS,
   FISH_CATEGORIES,
@@ -96,35 +92,61 @@ export default function App() {
   }, [settings]);
 
   // ── platform session ─────────────────────────────────────────────────────
+  //
+  // Firebase is imported dynamically, and only down the online path.
+  //
+  // The SDK is 826 KB — more than three times the rest of this game put
+  // together — and a solo run never makes a single call into it. Statically
+  // imported it was a `modulepreload` in the built HTML, so every player
+  // downloaded all of it before the reef could appear. Now the chunk is only
+  // fetched when there is actually a lobby to talk to.
   useEffect(() => {
     if (!online) return;
+    let unsubscribe: (() => void) | undefined;
+    let cancelled = false;
     // Same origin as the platform, so the player is already signed in; this
     // just picks the session up rather than asking them to log in twice.
-    return onAuthStateChanged(auth, (user) => {
-      setUid(user?.uid ?? null);
-      setAuthChecked(true);
+    void import('./firebase').then(({ auth, onAuthStateChanged }) => {
+      if (cancelled) return;
+      unsubscribe = onAuthStateChanged(auth, (user) => {
+        setUid(user?.uid ?? null);
+        setAuthChecked(true);
+      });
     });
+    return () => {
+      cancelled = true;
+      unsubscribe?.();
+    };
   }, [online]);
 
   useEffect(() => {
     if (!online || !uid) return;
-    return onSnapshot(
-      doc(db, 'lobbies', handoff.room),
-      (snap) => {
-        if (!snap.exists()) {
-          setLobbyError('That lobby is gone.');
-          return;
-        }
-        const data = snap.data() as { hostId: string; players: Record<string, LobbyPerson>; matchStarted?: boolean };
-        if (!data.players?.[uid]) {
-          setLobbyError("You're not in this lobby.");
-          return;
-        }
-        setLobbyError(null);
-        setLobby(data);
-      },
-      () => setLobbyError('Lost contact with the lobby.'),
-    );
+    let unsubscribe: (() => void) | undefined;
+    let cancelled = false;
+    void import('./firebase').then(({ db, doc, onSnapshot }) => {
+      if (cancelled) return;
+      unsubscribe = onSnapshot(
+        doc(db, 'lobbies', handoff.room),
+        (snap) => {
+          if (!snap.exists()) {
+            setLobbyError('That lobby is gone.');
+            return;
+          }
+          const data = snap.data() as { hostId: string; players: Record<string, LobbyPerson>; matchStarted?: boolean };
+          if (!data.players?.[uid]) {
+            setLobbyError("You're not in this lobby.");
+            return;
+          }
+          setLobbyError(null);
+          setLobby(data);
+        },
+        () => setLobbyError('Lost contact with the lobby.'),
+      );
+    });
+    return () => {
+      cancelled = true;
+      unsubscribe?.();
+    };
   }, [online, uid, handoff.room]);
 
   const people = useMemo<LobbyPerson[]>(
@@ -156,6 +178,9 @@ export default function App() {
         setUnlocked((u) => [...u, index]);
       }
       try {
+        // Already loaded by the session effect on this path; the import cache
+        // makes this a no-op lookup rather than a second fetch.
+        const { db, doc, updateDoc } = await import('./firebase');
         await updateDoc(doc(db, 'lobbies', handoff.room), { [`players.${uid}.fishIndex`]: index });
       } catch (e) {
         console.error('Could not save fish choice', e);
@@ -167,6 +192,7 @@ export default function App() {
   const startMatch = useCallback(async () => {
     if (!isHost) return;
     try {
+      const { db, doc, updateDoc } = await import('./firebase');
       await updateDoc(doc(db, 'lobbies', handoff.room), { matchStarted: true });
     } catch (e) {
       console.error('Could not start the match', e);
@@ -344,7 +370,9 @@ function Shell({
 }) {
   return (
     <div className="mx-auto flex h-full w-full max-w-6xl flex-col gap-3 p-3 sm:gap-4 sm:p-6">
-      <div className="flex shrink-0 items-center justify-between gap-2">
+      {/* The shop is reachable from the embedded room screen, so this row has
+          to clear the host's floating bar the same way that one does. */}
+      <div className={`flex shrink-0 items-center justify-between gap-2 ${IN_IFRAME ? 'mt-14' : ''}`}>
         <button onClick={onBack} className="glass-dark shrink-0 rounded-2xl p-3">
           <ArrowLeft className="h-5 w-5" />
         </button>
@@ -377,7 +405,7 @@ function FishGrid({
   mode: 'shop' | 'pick';
 }) {
   return (
-    <div className="space-y-8">
+    <div className="space-y-5">
       {FISH_CATEGORIES.map((category) => {
         const entries = FISH_ASSETS.map((fish, index) => ({ fish, index })).filter(
           (e) => e.fish.category === category,
@@ -385,11 +413,11 @@ function FishGrid({
         if (!entries.length) return null;
 
         return (
-          <section key={category} className="space-y-3">
-            <h3 className="border-b border-black/10 pb-2 text-[11px] font-black uppercase tracking-[0.2em] text-emerald-700/80">
+          <section key={category} className="space-y-2">
+            <h3 className="border-b border-black/10 pb-1.5 text-[10px] sm:text-[11px] font-black uppercase tracking-[0.2em] text-emerald-700/80">
               {category} class
             </h3>
-            <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-6 sm:gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2 sm:gap-3">
               {entries.map(({ fish, index }) => {
                 const isUnlocked = unlocked.includes(index);
                 const taken = takenBy[index];
@@ -401,23 +429,23 @@ function FishGrid({
                     key={index}
                     onClick={() => onPick(index)}
                     disabled={Boolean(taken) || (mode === 'shop' && (isUnlocked || !affordable))}
-                    className={`relative flex flex-col items-center gap-1 overflow-hidden rounded-2xl border p-2 transition-colors ${
+                    className={`relative flex flex-col items-center gap-1 overflow-hidden rounded-xl sm:rounded-2xl border p-1.5 sm:p-2 transition-all ${
                       taken
                         ? 'cursor-not-allowed border-rose-400/40 opacity-40'
                         : isSelected
-                          ? 'border-emerald-500 bg-emerald-500/20 shadow-[0_0_0_3px_rgba(16,185,129,0.2)]'
+                          ? 'border-emerald-500 bg-emerald-500/20 shadow-[0_0_0_3px_rgba(16,185,129,0.2)] scale-[1.02]'
                           : isUnlocked
-                            ? 'border-black/10 bg-white/40 hover:bg-white/70'
+                            ? 'border-black/10 bg-white/40 hover:bg-white/70 active:scale-95'
                             : 'border-amber-400/40 bg-amber-400/10'
                     }`}
                   >
                     {!isUnlocked && (
                       <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-black/55 backdrop-blur-[1px]">
-                        <Lock className="mb-0.5 h-4 w-4 text-amber-300" />
-                        <span className="text-[10px] font-black text-amber-300">{fish.price}</span>
+                        <Lock className="mb-0.5 h-3.5 w-3.5 text-amber-300" />
+                        <span className="text-[9px] font-black text-amber-300">{fish.price}</span>
                       </div>
                     )}
-                    <div className="flex h-14 items-center justify-center">
+                    <div className="flex h-11 sm:h-14 items-center justify-center">
                       <img
                         src={fishSrc(index)}
                         alt={fish.name}
@@ -425,15 +453,15 @@ function FishGrid({
                         className="max-h-full max-w-full object-contain"
                       />
                     </div>
-                    <span className="w-full truncate text-center text-[10px] font-bold uppercase tracking-wide">
+                    <span className="w-full truncate text-center text-[9px] sm:text-[10px] font-bold uppercase tracking-wide">
                       {fish.name}
                     </span>
-                    <span className="text-[10px] font-bold text-slate-500">size {fish.size}</span>
+                    <span className="text-[9px] sm:text-[10px] font-bold text-slate-500">size {fish.size}</span>
                     {taken && (
-                      <span className="w-full truncate text-[9px] font-bold uppercase text-rose-500">{taken}</span>
+                      <span className="w-full truncate text-[8px] sm:text-[9px] font-bold uppercase text-rose-500">{taken}</span>
                     )}
                     {mode === 'shop' && isUnlocked && (
-                      <span className="flex items-center gap-1 text-[10px] font-bold text-emerald-600">
+                      <span className="flex items-center gap-1 text-[9px] sm:text-[10px] font-bold text-emerald-600">
                         <Check className="h-3 w-3" /> owned
                       </span>
                     )}
@@ -534,7 +562,7 @@ function RoomScreen({
 
   if (error) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-3 overflow-y-auto p-8 text-center">
+      <div className="flex h-full flex-col items-center justify-center gap-3 overflow-y-auto p-6 text-center">
         <h2 className="text-2xl font-black">{error}</h2>
         <p className="text-sm text-slate-600">Head back to the PlayBuddies lobby and try again.</p>
       </div>
@@ -554,46 +582,42 @@ function RoomScreen({
   const iAmReady = myFish !== undefined && myFish !== null;
 
   return (
-    <div className="mx-auto flex h-full w-full max-w-6xl flex-col gap-3 p-3 sm:gap-4 sm:p-6">
-      <div className="flex shrink-0 items-center justify-between gap-2">
-        <h2 className="min-w-0 truncate text-lg font-black tracking-tight sm:text-2xl">Pick your fish</h2>
-        <div className="flex shrink-0 items-center gap-2">
-          <button onClick={onShop} className="glass-dark flex items-center gap-2 rounded-2xl px-3 py-2 font-bold text-amber-600">
+    <div className="mx-auto flex h-full w-full max-w-6xl flex-col gap-2 p-2 sm:gap-4 sm:p-5">
+      {/* Header */}
+      <div className="flex shrink-0 items-center justify-between gap-2 px-1">
+        <div className="flex items-center gap-2 min-w-0">
+          <h2 className="min-w-0 truncate text-base font-black tracking-tight sm:text-2xl">Pick your fish</h2>
+          {myFish !== undefined && myFish !== null && (
+            <span className="hidden sm:inline-flex items-center gap-1 rounded-full bg-emerald-500/20 px-2.5 py-0.5 text-xs font-bold text-emerald-800">
+              <Check className="h-3 w-3" /> Ready
+            </span>
+          )}
+        </div>
+        {/*
+          Embedded, PlayBuddies floats its own Invite / Full screen / End Game
+          bar over this corner above anything this frame can reach, so the row
+          starts below it. Full screen is dropped there too — the host already
+          has one, and two in the same corner is the overlap itself.
+        */}
+        <div className={`flex shrink-0 items-center gap-1.5 sm:gap-2 ${IN_IFRAME ? 'mt-14' : ''}`}>
+          <button onClick={onShop} className="glass-dark flex items-center gap-1.5 rounded-xl px-2.5 py-1.5 text-xs sm:text-sm font-bold text-amber-600">
             <Coins className="h-4 w-4" /> {coins}
           </button>
-          <button onClick={onFullscreen} className="glass-dark rounded-2xl p-2.5" title="Full screen">
-            <Maximize2 className="h-5 w-5" />
-          </button>
-          <button onClick={onSettings} className="glass-dark rounded-2xl p-2.5">
-            <SettingsIcon className="h-5 w-5" />
+          {!IN_IFRAME && (
+            <button onClick={onFullscreen} className="glass-dark rounded-xl p-2" title="Full screen">
+              <Maximize2 className="h-4 w-4 sm:h-5 sm:w-5" />
+            </button>
+          )}
+          <button onClick={onSettings} className="glass-dark rounded-xl p-2">
+            <SettingsIcon className="h-4 w-4 sm:h-5 sm:w-5" />
           </button>
         </div>
       </div>
 
-      {/* On a phone the start button is pinned below the fold otherwise — which
-          is precisely what made it unreachable. It now sits above the picker on
-          small screens and moves to the sidebar from `lg` up. */}
-      <div className="glass-dark shrink-0 rounded-2xl p-3 lg:hidden">
-        {isHost ? (
-          <button
-            onClick={onStart}
-            disabled={!iAmReady}
-            className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 py-3 text-base font-black text-white shadow-lg transition-transform active:scale-95 disabled:opacity-40"
-          >
-            <Play className="h-5 w-5 fill-current" /> DIVE IN
-          </button>
-        ) : (
-          <p className="text-center text-sm font-bold text-slate-500">
-            {iAmReady ? 'Waiting for the host…' : 'Pick a fish to be ready.'}
-          </p>
-        )}
-      </div>
-
-      {/* Explicit rows: a grid's default `auto` rows size to their content, so
-          the picker would grow past the screen instead of scrolling inside it.
-          minmax(0,1fr) is what lets the overflow-y-auto below actually bite. */}
-      <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[auto_minmax(0,1fr)] gap-3 sm:gap-4 lg:grid-cols-3 lg:grid-rows-[minmax(0,1fr)]">
-        <div className="glass-dark order-2 min-h-0 overflow-y-auto overscroll-contain rounded-[2rem] p-3 sm:p-6 lg:order-1 lg:col-span-2">
+      {/* Main Grid: Responsive for Portrait and Landscape */}
+      <div className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-3 landscape:grid-cols-3 gap-2 sm:gap-4">
+        {/* Fish Picker */}
+        <div className="glass-dark min-h-0 flex-1 overflow-y-auto overscroll-contain rounded-2xl md:rounded-[2rem] landscape:rounded-[2rem] p-2.5 sm:p-5 md:col-span-2 landscape:col-span-2">
           <FishGrid
             unlocked={unlocked}
             coins={coins}
@@ -604,27 +628,29 @@ function RoomScreen({
           />
         </div>
 
-        <div className="order-1 flex min-h-0 flex-col gap-3 sm:gap-4 lg:order-2">
-          <div className="glass-dark flex min-h-0 max-h-48 flex-col rounded-[2rem] p-4 sm:p-5 lg:max-h-none lg:flex-1">
-            <h3 className="mb-3 flex shrink-0 items-center gap-2 text-[11px] font-black uppercase tracking-[0.2em] text-slate-500">
-              <Users className="h-4 w-4" /> In the water ({people.length})
+        {/* Players & Action Column */}
+        <div className="flex min-h-0 flex-col gap-2 sm:gap-3 md:col-span-1 landscape:col-span-1">
+          {/* Players List */}
+          <div className="glass-dark flex min-h-0 flex-1 flex-col rounded-2xl md:rounded-[2rem] landscape:rounded-[2rem] p-3 sm:p-4">
+            <h3 className="mb-2 flex shrink-0 items-center gap-1.5 text-[10px] sm:text-[11px] font-black uppercase tracking-[0.2em] text-slate-500">
+              <Users className="h-3.5 w-3.5" /> In the water ({people.length})
             </h3>
-            <div className="min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain pr-1">
+            <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto overscroll-contain pr-0.5">
               {people.map((p) => (
-                <div key={p.uid} className="flex items-center gap-3 rounded-2xl border border-black/5 bg-white/40 p-3">
-                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-black/10 bg-white/60 p-1">
+                <div key={p.uid} className="flex items-center gap-2.5 rounded-xl border border-black/5 bg-white/40 p-2 sm:p-2.5">
+                  <div className="flex h-8 w-8 sm:h-10 sm:w-10 shrink-0 items-center justify-center rounded-lg border border-black/10 bg-white/60 p-1">
                     {p.fishIndex !== undefined && p.fishIndex !== null ? (
                       <img src={fishSrc(p.fishIndex)} alt="" className="max-h-full max-w-full object-contain" />
                     ) : (
-                      <FishIcon className="h-5 w-5 text-slate-400" />
+                      <FishIcon className="h-4 w-4 text-slate-400" />
                     )}
                   </div>
-                  <div className="min-w-0">
-                    <p className="flex items-center gap-1 truncate text-sm font-bold">
+                  <div className="min-w-0 flex-1">
+                    <p className="flex items-center gap-1 truncate text-xs sm:text-sm font-bold">
                       {p.displayName}
-                      {p.uid === hostId && <Crown className="h-3.5 w-3.5 shrink-0 text-amber-500" />}
+                      {p.uid === hostId && <Crown className="h-3 w-3 shrink-0 text-amber-500" />}
                     </p>
-                    <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">
+                    <p className="text-[9px] sm:text-[10px] font-bold uppercase tracking-widest text-slate-500">
                       {p.uid === uid ? 'You' : p.fishIndex !== undefined && p.fishIndex !== null ? 'Ready' : 'Choosing…'}
                     </p>
                   </div>
@@ -633,28 +659,31 @@ function RoomScreen({
             </div>
           </div>
 
-          <div className="glass-dark hidden shrink-0 rounded-[2rem] p-5 lg:block">
+          {/* Action Button */}
+          <div className="glass-dark shrink-0 rounded-2xl md:rounded-[2rem] landscape:rounded-[2rem] p-2.5 sm:p-4">
             {isHost ? (
               <>
                 <button
                   onClick={onStart}
                   disabled={!iAmReady}
-                  className="flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-600 py-4 text-lg font-black text-white shadow-lg transition-transform active:scale-95 disabled:opacity-40"
+                  className="flex w-full items-center justify-center gap-2 rounded-xl sm:rounded-2xl bg-emerald-600 py-2.5 sm:py-3.5 text-sm sm:text-base font-black text-white shadow-lg transition-transform active:scale-95 disabled:opacity-40"
                 >
-                  <Play className="h-5 w-5 fill-current" /> DIVE IN
+                  <Play className="h-4 w-4 sm:h-5 sm:w-5 fill-current" /> DIVE IN
                 </button>
-                <p className="mt-2 text-center text-[11px] text-slate-500">
+                <p className="mt-1.5 text-center text-[10px] text-slate-500">
                   {!iAmReady
-                    ? 'Pick your own fish first.'
+                    ? 'Pick your fish first.'
                     : everyonePicked
-                      ? 'Everyone is ready.'
-                      : 'Some players are still choosing — they can join the moment they pick.'}
+                      ? 'Everyone is ready!'
+                      : 'You can dive in now or wait for others.'}
                 </p>
               </>
             ) : (
-              <p className="text-center text-sm font-bold text-slate-500">
-                {!iAmReady ? 'Pick a fish to be ready.' : 'Waiting for the host…'}
-              </p>
+              <div className="text-center py-1">
+                <p className="text-xs sm:text-sm font-bold text-slate-600">
+                  {!iAmReady ? '👉 Pick a fish above' : '⏳ Waiting for host to start…'}
+                </p>
+              </div>
             )}
           </div>
         </div>

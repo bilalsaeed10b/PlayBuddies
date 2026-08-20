@@ -14,7 +14,13 @@ const nextConfig: NextConfig = {
   env: {
     NEXT_PUBLIC_BASE_PATH: basePath,
   },
-  allowedDevOrigins: ["192.168.100.243", "192.168.100.243:3000", "localhost:3000"],
+  allowedDevOrigins: [
+    "192.168.100.52",
+    "192.168.100.52:3000",
+    "192.168.100.243",
+    "192.168.100.243:3000",
+    "localhost:3000",
+  ],
 };
 
 export default nextConfig;

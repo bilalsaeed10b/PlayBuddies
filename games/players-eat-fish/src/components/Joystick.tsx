@@ -87,7 +87,7 @@ export default function Joystick({
       {origin && (
         <>
           <div
-            className="pointer-events-none absolute rounded-full border-2 border-white/50 bg-white/10 backdrop-blur-sm"
+            className="pointer-events-none absolute rounded-full border-2 border-white/50 bg-white/15"
             style={{
               width: RADIUS * 2,
               height: RADIUS * 2,
