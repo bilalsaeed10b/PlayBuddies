@@ -23,6 +23,7 @@
  */
 import type { BattleEngine } from './BattleEngine';
 import { ARENA, BALANCE, CARDS, CardId, clamp } from '../game/rules';
+import { rockRadius } from '../game/sea';
 import type { Shot, Team } from '../types/game';
 
 export interface Tier {
@@ -247,7 +248,9 @@ function blocked(
     if (y > ARENA.seaY || x < -200 || x > ARENA.w + 200) return false;
     for (const rock of engine.rocks) {
       if (rock.hp <= 0) continue;
-      if (Math.hypot(x - rock.x, y - rock.y) < rock.r + BALANCE.BALL_R) return true;
+      // Same worn radius the ballistics use, so the bot does not refuse an arc
+      // over a rock that is no longer there.
+      if (Math.hypot(x - rock.x, y - rock.y) < rockRadius(rock) + BALANCE.BALL_R) return true;
     }
   }
   return false;

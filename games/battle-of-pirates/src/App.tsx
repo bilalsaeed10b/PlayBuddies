@@ -219,15 +219,21 @@ export default function App() {
   /**
    * A fresh seed and a fresh coin toss for every match.
    *
-   * Both are drawn once, when the battle screen opens, and the host is the one
-   * whose draw counts online -- it sends the two numbers and the guest builds
-   * the identical match from them.
+   * Both are drawn once, and the host is the one whose draw counts online --
+   * it sends the two numbers and the guest builds the identical match from
+   * them.
+   *
+   * They are rolled at the door, on the way *out* of a battle, and never while
+   * one is running. The obvious version bumped a key from an effect keyed on
+   * the view, which fires one render after the battle has already mounted: the
+   * engine kept the seed it was built with while the start packet went out
+   * carrying the new one. The guest then built a different match, and every
+   * shot that arrived was thrown away by the seed check in applyShot -- a
+   * duel where neither side ever saw the other fire, which is exactly what a
+   * broken turn order looks like from the inside.
    */
-  const [matchKey, setMatchKey] = useState(0);
-  useEffect(() => {
-    if (view === 'game') setMatchKey((n) => n + 1);
-  }, [view]);
-  const session = useMemo(() => ({ seed: randomSeed(), first: coinFlip() }), [matchKey]);
+  const [session, setSession] = useState(() => ({ seed: randomSeed(), first: coinFlip() }));
+  const rollSession = useCallback(() => setSession({ seed: randomSeed(), first: coinFlip() }), []);
 
   const buy = useCallback(
     (index: number) => {
@@ -287,11 +293,12 @@ export default function App() {
   const leaveBattle = useCallback(() => {
     setOfflineMatch(false);
     setView(online ? 'room' : 'menu');
+    rollSession();
     if (!online || !isHost) return;
     void import('./firebase')
       .then(({ db, doc, updateDoc }) => updateDoc(doc(db, 'lobbies', handoff.room), { matchStarted: false }))
       .catch((e) => console.error('Could not reset the match flag', e));
-  }, [online, isHost, handoff.room]);
+  }, [online, isHost, handoff.room, rollSession]);
 
   // -- into the battle --------------------------------------------------------
 
@@ -400,6 +407,7 @@ export default function App() {
 
   const openOffline = (players: number) => {
     audioService.unlock();
+    rollSession();
     setOfflineMatch(true);
     setSeatCount(players);
     setSeatSkin({});

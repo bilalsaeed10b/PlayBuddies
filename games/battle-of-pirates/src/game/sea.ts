@@ -15,7 +15,7 @@
  * game can do; three baked sprites drawn with an alpha and a scale look the
  * same and cost a blit.
  */
-import { Arena, mulberry32 } from './rules';
+import { Arena, BALANCE, mulberry32 } from './rules';
 import type { Rock } from '../types/game';
 
 /** Deterministic, so two players in a room see the same horizon. */
@@ -249,14 +249,26 @@ export function drawWaves(ctx: CanvasRenderingContext2D, arena: Arena, clock: nu
 // -- rocks ------------------------------------------------------------------
 
 /**
- * A rock, drawn live because there are at most three of them and they change
- * shape as they are chipped away. The silhouette comes from the rock's own
- * seed, so the same rock is the same rock on both screens.
+ * How much rock is left, after the chipping.
+ *
+ * Exported because the simulation has to agree with the picture. Only the
+ * drawing used to shrink, so a rock two hits in still swallowed shots through
+ * forty pixels of water that plainly had nothing in it -- the kind of miss a
+ * player reads as the game cheating. Ballistics and paint now ask the same
+ * question and get the same number.
  */
-export function drawRock(ctx: CanvasRenderingContext2D, rock: Rock, maxHp: number) {
+export function rockRadius(rock: Rock): number {
+  return rock.r * (0.55 + 0.45 * (rock.hp / BALANCE.ROCK_HP));
+}
+
+/**
+ * A rock, drawn live because there are only ever one or two of them and they
+ * change shape as they are chipped away. The silhouette comes from the rock's
+ * own seed, so the same rock is the same rock on both screens.
+ */
+export function drawRock(ctx: CanvasRenderingContext2D, rock: Rock, waterY: number) {
   const rnd = mulberry32(rock.seed);
-  const wear = 0.55 + 0.45 * (rock.hp / maxHp);
-  const r = rock.r * wear;
+  const r = rockRadius(rock);
 
   ctx.save();
   ctx.translate(rock.x, rock.y);
@@ -281,11 +293,16 @@ export function drawRock(ctx: CanvasRenderingContext2D, rock: Rock, maxHp: numbe
   ctx.ellipse(-r * 0.14, -r * 0.42, r * 0.62, r * 0.3, -0.2, 0, Math.PI * 2);
   ctx.fill();
 
-  // Foam collar where it meets the water.
+  // Foam collar, drawn where the waterline actually crosses this rock rather
+  // than at a fixed fraction of its radius. On the small rocks those were the
+  // same place; on a rock tall enough to stop a shot, the fixed offset put the
+  // foam a hull's height under the surface.
+  const collar = Math.max(-r * 0.82, Math.min(r * 0.82, waterY - rock.y));
+  const collarW = Math.sqrt(Math.max(0, r * r - collar * collar)) * 1.06;
   ctx.strokeStyle = 'rgba(232, 250, 255, 0.55)';
   ctx.lineWidth = 4;
   ctx.beginPath();
-  ctx.ellipse(0, r * 0.5, r * 1.06, r * 0.24, 0, 0, Math.PI * 2);
+  ctx.ellipse(0, collar, collarW, Math.max(6, collarW * 0.16), 0, 0, Math.PI * 2);
   ctx.stroke();
   ctx.restore();
 }

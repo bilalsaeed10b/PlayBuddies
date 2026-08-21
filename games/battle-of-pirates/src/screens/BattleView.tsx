@@ -107,7 +107,23 @@ export default function BattleView({
   /** Shots that arrived before the engine existed. */
   const queued = useRef<NetPacket[]>([]);
 
-  const localTeams = useMemo(() => new Set(config.localTeams), [config.localTeams]);
+  /**
+   * Everything below keys on numbers, never on the config object.
+   *
+   * App rebuilds `config` from scratch on every render, and it re-renders on
+   * every lobby snapshot, so its arrays are a different array each time even
+   * when the match has not changed by a single field. That is fine for the
+   * HUD and fatal for the wire: an effect that lists an array identity in its
+   * dependencies tears the link down and opens a new one, and closing a link
+   * writes a `bye`. Mid-match, the other player was told their opponent had
+   * abandoned ship and handed the wheel to a bot -- over and over, for as long
+   * as the lobby kept ticking.
+   */
+  const localTeamsKey = config.localTeams.join(',');
+  const remoteTeam = (1 - (config.localTeams[0] ?? 0)) as Team;
+  const { aiLevel } = config;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const localTeams = useMemo(() => new Set(config.localTeams), [localTeamsKey]);
   /** Read once a frame from a ref, so a media-query change cannot rebuild the loop. */
   const coarseRef = useRef(false);
   coarseRef.current = coarse;
@@ -173,19 +189,26 @@ export default function BattleView({
         return;
       }
       if (packet.t === 'bye') {
-        const gone = (1 - (config.localTeams[0] ?? 0)) as Team;
-        engineRef.current?.handOverToAI(gone, config.aiLevel);
+        engineRef.current?.handOverToAI(remoteTeam, aiLevel);
         setNotice('They abandoned ship. A bot has the wheel.');
         return;
       }
       if (packet.t !== 'shot') return;
+      // A turn doubles as a start packet. The host's document holds exactly one
+      // write at a time, so a guest that arrives after the opening shot finds a
+      // turn where the negotiation was; the seed and the first shooter travel
+      // on it, which is everything a match is built from.
+      if (packet.first !== undefined) {
+        const opening = { seed: packet.s, first: packet.first };
+        setSession((current) => current ?? opening);
+      }
       const engine = engineRef.current;
       // The engine drops a shot stamped with a different seed, so a leftover
       // document from an earlier match cannot replay itself here.
       if (engine) engine.applyShot(packet);
       else queued.current.push(packet);
     },
-    [config.localTeams, config.aiLevel],
+    [remoteTeam, aiLevel],
   );
 
   useEffect(() => {
@@ -206,6 +229,9 @@ export default function BattleView({
           config.peerUid as string,
           handlePacket,
           (message) => setNotice(message),
+          // The host's terms ride along on every turn it writes, not only on
+          // the start packet that the next write replaces.
+          config.isHost ? { first: config.first } : undefined,
         );
         linkRef.current = link;
 

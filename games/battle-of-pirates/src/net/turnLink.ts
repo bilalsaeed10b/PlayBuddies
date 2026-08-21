@@ -34,6 +34,15 @@ export class TurnLink {
     private peerUid: string,
     private onPacket: (packet: NetPacket) => void,
     private onError?: (message: string) => void,
+    /**
+     * Fields merged into every packet this side writes.
+     *
+     * The host stamps the match's opening terms here. Each write replaces the
+     * document rather than adding to it, so without this the start packet is
+     * destroyed by the first shot that follows it and a late subscriber has
+     * nothing to build a match from.
+     */
+    private stamp?: Record<string, number>,
   ) {
     this.ready = this.open();
   }
@@ -49,7 +58,7 @@ export class TurnLink {
       this.write = async (packet: NetPacket) => {
         // setDoc, not update: the document may not exist yet, and each turn
         // completely replaces the last one anyway.
-        await setDoc(mine, packet);
+        await setDoc(mine, this.stamp ? { ...this.stamp, ...packet } : packet);
       };
 
       // Clear whatever the previous match left behind before anyone can read

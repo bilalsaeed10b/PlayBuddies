@@ -164,6 +164,20 @@ export interface ShotPacket {
   d1: number;
   /** Whose turn it is next. Stated, never inferred. */
   o: Team;
+  /**
+   * Who fired first in this match, stamped by the host onto every turn it
+   * sends.
+   *
+   * A player's update document is *replaced* by each write, so the moment the
+   * host takes its opening shot, the start packet it wrote is gone. A guest
+   * that subscribed a second later -- a slow phone, a reconnect, a reload --
+   * found a turn where the negotiation should have been and sat on "waiting
+   * for the host" for the rest of the match. With this, and the seed already
+   * in `s`, a turn is a start packet too.
+   *
+   * Absent on the guest's own turns, which nobody needs it from.
+   */
+  first?: Team;
 }
 
 /** Sent on the way out so the opponent's ship is taken over rather than abandoned. */

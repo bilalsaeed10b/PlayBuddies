@@ -18,7 +18,7 @@
  *    therefore deal themselves the same match with nothing to negotiate, and
  *    the wire carries turns rather than state.
  */
-import { fxSprites, bakeSea, drawFallbackSea, drawRock, drawWaves } from '../game/sea';
+import { fxSprites, bakeSea, drawFallbackSea, drawRock, drawWaves, rockRadius } from '../game/sea';
 import { SHIPS, drawShip } from '../game/ships';
 import {
   ARENA,
@@ -96,7 +96,6 @@ interface Ring {
 }
 
 const STEP = 1 / 120;
-const ROCK_HP = 3;
 const PARTICLE_CAP = 420;
 const RING_CAP = 14;
 /** Barrel length, so the ball leaves the muzzle rather than the deck. */
@@ -222,17 +221,36 @@ export class BattleEngine {
     return mulberry32((this.cfg.seed ^ Math.imul(turn, 0x9e3779b1)) >>> 0);
   }
 
+  /**
+   * The reef between the two anchors.
+   *
+   * Every rock here is tall enough to stand in the way of a level shot -- see
+   * ROCK_R_MIN -- so the flat trade across the water is no longer the only
+   * shot in the game. Going over the top, dropping a mortar on the far side,
+   * or boring straight through are now the three answers, and picking one is
+   * the turn's real decision.
+   *
+   * Two things keep that from tipping into a wall. The band is held clear of
+   * either hull at its furthest drift, and each rock is capped to half of its
+   * own slot, so a pair reads as a reef with water between rather than one
+   * unbroken ridge. The cap never falls below the blocking floor: a rock that
+   * cannot block is not worth drawing.
+   */
   private spawnRocks(rnd: () => number) {
     const count = BALANCE.ROCK_MIN + Math.floor(rnd() * (BALANCE.ROCK_MAX - BALANCE.ROCK_MIN + 1));
-    const lo = ARENA.anchor[0] + 340;
-    const hi = ARENA.anchor[1] - 340;
+    const lo = ARENA.anchor[0] + BALANCE.ROCK_MARGIN;
+    const hi = ARENA.anchor[1] - BALANCE.ROCK_MARGIN;
     const slot = (hi - lo) / count;
+    const maxR = Math.max(BALANCE.ROCK_R_MIN, Math.min(BALANCE.ROCK_R_MAX, slot * 0.5));
     for (let i = 0; i < count; i++) {
+      const r = BALANCE.ROCK_R_MIN + rnd() * (maxR - BALANCE.ROCK_R_MIN);
       this.rocks.push({
-        x: lo + slot * i + slot * (0.2 + rnd() * 0.6),
+        // Centred in its own slot with a little wander, rather than anywhere
+        // in the band: two rocks that land on top of each other are one rock.
+        x: lo + slot * (i + 0.5) + slot * (rnd() - 0.5) * 0.34,
         y: ARENA.seaY - 6 - rnd() * 26,
-        r: 40 + rnd() * 34,
-        hp: ROCK_HP,
+        r,
+        hp: BALANCE.ROCK_HP,
         seed: (rnd() * 0xffffff) | 0,
       });
     }
@@ -554,7 +572,7 @@ export class BattleEngine {
     if (!p.pierce) {
       for (const rock of this.rocks) {
         if (rock.hp <= 0) continue;
-        const t = segmentCircle(p.x, p.y, nx, ny, rock.x, rock.y, rock.r + p.r);
+        const t = segmentCircle(p.x, p.y, nx, ny, rock.x, rock.y, rockRadius(rock) + p.r);
         if (t !== null && t < best) {
           best = t;
           kind = 'rock';
@@ -1045,7 +1063,7 @@ export class BattleEngine {
 
     drawWaves(ctx, ARENA, this.clock, q.waves);
 
-    for (const rock of this.rocks) if (rock.hp > 0) drawRock(ctx, rock, ROCK_HP);
+    for (const rock of this.rocks) if (rock.hp > 0) drawRock(ctx, rock, ARENA.seaY);
     for (const side of [0, 1] as Team[]) this.drawOneShip(ctx, side, q);
 
     this.drawProjectiles(ctx, q);

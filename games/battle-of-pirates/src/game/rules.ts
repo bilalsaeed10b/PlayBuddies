@@ -23,16 +23,35 @@ export interface Arena {
  * a guessing game, and a scrolling view on a phone is unreadable anyway.
  * The generous headroom is deliberate: a lofted mortar leaves the top of the
  * frame, and an off-screen ball needs somewhere to be.
+ *
+ * The water is wide on purpose. At the old thousand pixels between anchors,
+ * two thirds of the power dial reached the enemy and the reef sat inside a
+ * three-hundred-pixel strip that a flat shot cleared by accident; the duel was
+ * decided on elevation alone. The anchors now sit far enough apart that the
+ * bottom of the dial genuinely falls short, which is what gives power a say.
+ * They stay one rock's clearance inside the frame at full drift, so neither
+ * hull can wander off the edge of the picture.
  */
 export const ARENA: Arena = {
-  w: 1600,
+  w: 1800,
   h: 900,
   seaY: 690,
-  anchor: [300, 1300],
+  anchor: [270, 1530],
 };
 
 export const BALANCE = {
-  GRAVITY: 1400,
+  /**
+   * Gravity, eased to match the wider water.
+   *
+   * The power dial is only a decision while both ends of it mean something.
+   * At 1400 across the old thousand pixels, anything under about half power
+   * fell short; across the new twelve hundred and sixty it was two thirds,
+   * and a dial where you always drag to the same place is not a dial. This
+   * hands that range back without touching what full power does at the
+   * muzzle, and it buys the thing a bigger sea wants anyway: a longer, higher
+   * arc you have time to read on the way over the reef.
+   */
+  GRAVITY: 1250,
   /** Speed at full power, in world px/s. */
   MAX_SPEED: 1760,
   /** Minimum, so a fumbled tap still leaves the barrel. */
@@ -69,7 +88,29 @@ export const BALANCE = {
   BOB_SPEED: 1.35,
 
   ROCK_MIN: 1,
-  ROCK_MAX: 3,
+  ROCK_MAX: 2,
+  /** Hits a rock takes before it crumbles. It visibly wears down with each. */
+  ROCK_HP: 3,
+  /**
+   * Rock size, in world pixels of radius.
+   *
+   * The floor is the whole point. A muzzle sits 46px above the waterline and a
+   * level shot crosses the middle barely lower than that, so the old 40px
+   * rocks were scenery: the ball went over the top of them and the two cards
+   * that exist to beat rock -- the mortar and the bore shot -- bought you
+   * nothing. Anything from here up stands in the way of a flat shot, which is
+   * what makes going over one a decision rather than a formality.
+   */
+  ROCK_R_MIN: 96,
+  ROCK_R_MAX: 134,
+  /**
+   * How far the reef keeps clear of an anchor.
+   *
+   * Measured against a hull at its furthest drift plus its own half-width,
+   * with a rock at full radius on top, so no rock can ever spawn inside the
+   * ship that has to shoot past it.
+   */
+  ROCK_MARGIN: 420,
 
   /** Seconds a player gets to aim before the shot goes off on its own. */
   TURN_TIME: 30,
