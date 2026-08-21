@@ -159,7 +159,7 @@ export default function DashboardPage() {
     e.preventDefault();
     const code = normalizeRoomCode(joinCode);
     if (!isValidRoomCode(code)) {
-      setJoinError("That code doesn't look right — it's 6 letters and numbers.");
+      setJoinError("That code doesn't look right. It's 6 letters and numbers.");
       return;
     }
     setJoinError("");

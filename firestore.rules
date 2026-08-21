@@ -54,10 +54,68 @@ service cloud.firestore {
                     && incoming().email is string
                     && incoming().email.size() <= 320;
 
-      // Stats are awarded by trusted code, never self-reported, so a client
-      // cannot inflate its own win count.
+      /**
+       * A match result: one game played, at most one win.
+       *
+       * This used to be refused outright, on the grounds that stats belong to
+       * trusted code. There is no trusted code: PlayBuddies is a static site
+       * with no server and no Cloud Functions, so refusing the write did not
+       * make the counters trustworthy, it only made them permanently zero.
+       *
+       * What is enforced instead is the shape of an honest match. A write may
+       * add one game and no more, may add a win only alongside that game, and
+       * can never take either counter backwards. Inflating a record therefore
+       * costs one request per fake game rather than one request for all of
+       * them, which is the most a client-only site can ask for.
+       */
+      function statsStep() {
+        let before = resource.data.get('stats', { 'gamesPlayed': 0, 'wins': 0 });
+        let after = incoming().stats;
+        let playedBefore = before.get('gamesPlayed', 0);
+        let winsBefore = before.get('wins', 0);
+        return after.keys().hasOnly(['gamesPlayed', 'wins'])
+               && after.gamesPlayed is int
+               && after.wins is int
+               && after.gamesPlayed == playedBefore + 1
+               && after.wins >= winsBefore
+               && after.wins <= winsBefore + 1
+               && after.wins <= after.gamesPlayed;
+      }
+
+      /**
+       * The wallet. Coins are points with no cash value, so the ceiling here is
+       * only there to stop a junk write, not to protect an asset.
+       *
+       * The per-write gain is deliberately loose. Two of the three games hand
+       * out a flat prize of around a hundred, but Go Eat Fish pays a share of
+       * the run's score, and a long run has no ceiling worth naming. A cap set
+       * tight to the flat prizes would have rejected the write at the end of a
+       * good run, and because the client would then keep retrying with a
+       * balance the rules had already refused, that account's coins would have
+       * stopped saving for good. Refusing obvious junk is worth having;
+       * refusing a good run is not. Spending is unbounded downward, since that
+       * is a purchase.
+       */
+      function walletStep() {
+        let coins = incoming().get('coins', 0);
+        let unlocks = incoming().get('unlocks', {});
+        // The first write is the one that brings a balance up from the browser
+        // it used to live in, and that can be any size. Capping it would have
+        // quietly confiscated the coins of everyone who played before this
+        // existed, which is the exact complaint this change is here to fix.
+        let seeded = 'coins' in resource.data;
+        return coins is int
+               && coins >= 0
+               && coins <= 10000000
+               && (!seeded || coins <= resource.data.coins + 5000)
+               && unlocks is map
+               && unlocks.size() <= 12;
+      }
+
       allow update: if isSelf(userId)
-                    && !touched().hasAny(['stats', 'uid', 'createdAt', 'friendCode']);
+                    && !touched().hasAny(['uid', 'createdAt', 'friendCode'])
+                    && (!touched().hasAny(['stats']) || statsStep())
+                    && (!touched().hasAny(['coins', 'unlocks']) || walletStep());
 
       allow delete: if false;
     }

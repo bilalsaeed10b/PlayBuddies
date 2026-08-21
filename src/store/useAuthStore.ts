@@ -14,6 +14,8 @@ interface AuthState {
   setUser: (user: User | null) => void;
   setLoading: (loading: boolean) => void;
   setStats: (stats: UserStats) => void;
+  /** Drop the cache so the next dashboard visit reads fresh counters. */
+  clearStats: () => void;
 }
 
 export const useAuthStore = create<AuthState>((set) => ({
@@ -24,5 +26,6 @@ export const useAuthStore = create<AuthState>((set) => ({
   setUser: (user) => set({ user }),
   setLoading: (loading) => set({ loading }),
   setStats: (stats) => set({ stats, statsFetchedAt: Date.now() }),
+  clearStats: () => set({ stats: null, statsFetchedAt: 0 }),
 }));
 

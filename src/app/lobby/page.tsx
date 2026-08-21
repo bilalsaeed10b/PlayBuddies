@@ -11,6 +11,7 @@ import { useFriends } from "@/hooks/useFriends";
 import { useLobbyPresence, useFriendsOnline } from "@/hooks/usePresence";
 import { normalizeRoomCode, isValidRoomCode, LOBBY_TTL_MS, inviteTimestamps } from "@/lib/rooms";
 import { rememberLobby, forgetLobby } from "@/lib/lastLobby";
+import { cleanWallet, EMPTY_WALLET, readWallet, recordMatch, writeWallet, type Wallet } from "@/lib/wallet";
 import type { Lobby, LobbyMessage, LobbyPlayer } from "@/types/game";
 import {
   doc,
@@ -52,6 +53,7 @@ function LobbyContent() {
   const roomId = normalizeRoomCode(searchParams.get("room") || "");
   const router = useRouter();
   const user = useAuthStore((s) => s.user);
+  const clearStats = useAuthStore((s) => s.clearStats);
 
   const [lobby, setLobby] = useState<Lobby | null>(null);
   const [messages, setMessages] = useState<LobbyMessage[]>([]);
@@ -67,6 +69,17 @@ function LobbyContent() {
   const gameFrameRef = useRef<HTMLIFrameElement>(null);
   /** The wrapper that goes fullscreen — the frame plus its floating controls. */
   const gameShellRef = useRef<HTMLDivElement>(null);
+
+  /**
+   * The player's purse, held here rather than in the game.
+   *
+   * A ref, not state: nothing on this page renders it, and putting it in state
+   * would repaint the lobby every time a coin was earned. The iframe's src is
+   * built during render, so a repaint there is not free, it is a reload of the
+   * running game.
+   */
+  const walletRef = useRef<Wallet>(EMPTY_WALLET);
+  const walletLoaded = useRef(false);
 
   const presentUids = useLobbyPresence(roomId);
   const { friends } = useFriends(isInviteModalOpen);
@@ -248,27 +261,92 @@ function LobbyContent() {
   }, []);
 
   /**
-   * Games ask the page to expand them, because they cannot do it themselves:
-   * iOS has no Element.requestFullscreen, and even where the API exists it only
-   * blows up the iframe's own document while this page's chrome stays wrapped
-   * around it. Stretching the frame to the viewport here is the one approach
-   * that works on every device.
+   * Hand the current wallet down to the game.
    *
-   * The message is only ever a boolean, and it is only acted on when it came
-   * from this lobby's own iframe — a page cannot talk its way into anything by
-   * posting at us.
+   * The game asks on boot rather than the page pushing on load, because a
+   * frame that has not run its scripts yet has nothing listening, and "wait a
+   * moment and hope" is not a handshake.
+   */
+  const sendWallet = useCallback(async () => {
+    const frame = gameFrameRef.current?.contentWindow;
+    if (!frame) return;
+    if (user && !walletLoaded.current) {
+      try {
+        walletRef.current = await readWallet(user.uid);
+        walletLoaded.current = true;
+      } catch (err) {
+        console.error("Could not read the wallet:", err);
+      }
+    }
+    frame.postMessage(
+      {
+        source: "playbuddies-host",
+        type: "wallet",
+        coins: walletRef.current.coins,
+        unlocks: walletRef.current.unlocks,
+      },
+      "*",
+    );
+  }, [user]);
+
+  // A different account gets a different purse, so drop the cached one.
+  useEffect(() => {
+    walletLoaded.current = false;
+    walletRef.current = EMPTY_WALLET;
+  }, [user?.uid]);
+
+  /**
+   * Everything a game says to the page it is embedded in.
+   *
+   * A game is sandboxed in an iframe and signed in to nothing, so it cannot
+   * read or write the player's account itself. It asks, and this page answers.
+   * Every message is checked against this lobby's own frame first, so another
+   * page cannot talk its way into a coin balance by posting at us.
+   *
+   *   fullscreen    Expand me. Games cannot do this alone: iOS has no
+   *                 Element.requestFullscreen, and even where the API exists it
+   *                 only blows up the iframe's own document while this page's
+   *                 chrome stays wrapped around it.
+   *   wallet-request  I have booted, what does this player own?
+   *   wallet-save   Their balance changed, please keep it.
+   *   result        A match finished, and whether this player won it.
    */
   useEffect(() => {
     const onMessage = (e: MessageEvent) => {
       const data = e.data;
-      if (!data || data.source !== "playbuddies-game" || data.type !== "fullscreen") return;
+      if (!data || data.source !== "playbuddies-game") return;
       if (e.source !== gameFrameRef.current?.contentWindow) return;
-      const on = Boolean(data.value);
-      setIsPseudoFull(on);
+
+      if (data.type === "fullscreen") {
+        setIsPseudoFull(Boolean(data.value));
+        return;
+      }
+
+      if (data.type === "wallet-request") {
+        void sendWallet();
+        return;
+      }
+
+      if (data.type === "wallet-save") {
+        if (!user) return;
+        const next = cleanWallet({ coins: data.coins, unlocks: data.unlocks });
+        walletRef.current = next;
+        void writeWallet(user.uid, next).catch((err) =>
+          console.error("Could not save the wallet:", err),
+        );
+        return;
+      }
+
+      if (data.type === "result") {
+        if (!user) return;
+        void recordMatch(user.uid, Boolean(data.won))
+          .then(clearStats)
+          .catch((err) => console.error("Could not record the match:", err));
+      }
     };
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, []);
+  }, [user, sendWallet, clearStats]);
 
   const copyLink = () => {
     navigator.clipboard.writeText(window.location.href).catch(() => {});
@@ -645,7 +723,7 @@ function LobbyContent() {
                     : "bg-white/10 text-white hover:bg-white/20"
                 }`}
               >
-                {me.isReady ? "Ready ✓" : "Not ready — click when set"}
+                {me.isReady ? "Ready ✓" : "Not ready. Click when set"}
               </button>
             )}
           </div>

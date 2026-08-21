@@ -55,6 +55,15 @@ interface Props {
   onExit: () => void;
   /** Called with the final score whenever a local player is eaten. */
   onRunEnded: (score: number) => void;
+  /**
+   * The run is over for this device, and whether it ended on top.
+   *
+   * Separate from onRunEnded, which fires once per fish: with three
+   * players sharing a keyboard that is three deaths and would have been
+   * counted as three games. A reef has no finish line, so topping the
+   * board when the last local fish goes down is what counts as winning it.
+   */
+  onMatchOver: (won: boolean) => void;
 }
 
 export default function GameView({
@@ -69,6 +78,7 @@ export default function GameView({
   onOpenSettings,
   onExit,
   onRunEnded,
+  onMatchOver,
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -138,6 +148,7 @@ export default function GameView({
         // not freeze the others — the screen only comes up once nobody is left.
         if (engineRef.current?.allLocalsDead()) {
           setDefeat({ by: killedBy, score: fish?.score ?? 0 });
+          onMatchOver(engineRef.current.leaderboard()[0]?.local === true);
         }
 
         if (!eaterId || !size) return;
@@ -447,7 +458,7 @@ export default function GameView({
                   ? 'Nobody else in the room yet'
                   : link === 'direct'
                     ? `Direct connection to ${peerCount} player(s)`
-                    : 'Direct connection failed — using the slower fallback'
+                    : 'Direct connection failed. Using the slower fallback'
               }
             >
               {link === 'relayed' ? (

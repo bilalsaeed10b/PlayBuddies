@@ -22,6 +22,7 @@ import {
 import { GameSettings } from './types/game';
 import GameView, { LobbyPerson } from './screens/GameView';
 import { audioService } from './services/audio';
+import { GameWallet, reportResult } from './platform/wallet';
 
 /**
  * The platform owns the lobby.
@@ -79,23 +80,41 @@ export default function App() {
    */
   const [offlineMatch, setOfflineMatch] = useState(false);
 
-  const [coins, setCoins] = useState(() => Number(localStorage.getItem('fishy_coins') || 0));
-  const [unlocked, setUnlocked] = useState<number[]>(() => {
-    const saved = localStorage.getItem('fishy_unlocked');
-    const parsed: number[] = saved ? JSON.parse(saved) : [];
-    return [...new Set([...parsed, ...STARTER_FISH])];
-  });
+  /**
+   * The purse belongs to the account, not to this browser.
+   *
+   * localStorage is read first so the shop is never blank while the handshake
+   * with PlayBuddies is in flight, and written on every change so the game
+   * still works opened on its own. It is a cache now rather than the record.
+   */
+  const wallet = useMemo(() => new GameWallet('players-eat-fish', 'fishy_unlocked'), []);
+  const [coins, setCoins] = useState(() => wallet.current.coins);
+  const [unlocked, setUnlocked] = useState<number[]>(() => [
+    ...new Set([...wallet.current.unlocks, ...STARTER_FISH]),
+  ]);
+  /** Nothing is saved until the account has answered, or declined to. */
+  const [walletReady, setWalletReady] = useState(false);
+
+  useEffect(() => {
+    wallet.open((purse) => {
+      setCoins(purse.coins);
+      setUnlocked([...new Set([...purse.unlocks, ...STARTER_FISH])]);
+      setWalletReady(true);
+    });
+    return () => wallet.close();
+  }, [wallet]);
   const [settings, setSettings] = useState<GameSettings>(() => {
     const saved = localStorage.getItem('fishy_settings');
     return saved ? { ...DEFAULT_SETTINGS, ...JSON.parse(saved) } : DEFAULT_SETTINGS;
   });
 
+  // Held back until the handshake settles: saving the placeholder balance the
+  // moment the game booted would write a stale number straight over the real
+  // one, which is how an account ends up back at zero.
   useEffect(() => {
-    localStorage.setItem('fishy_coins', String(coins));
-  }, [coins]);
-  useEffect(() => {
-    localStorage.setItem('fishy_unlocked', JSON.stringify(unlocked));
-  }, [unlocked]);
+    if (!walletReady) return;
+    wallet.save({ coins, unlocks: unlocked });
+  }, [walletReady, coins, unlocked, wallet]);
   useEffect(() => {
     localStorage.setItem('fishy_settings', JSON.stringify(settings));
     audioService.setVolumes(settings.bgmVolume, settings.sfxVolume);
@@ -272,6 +291,7 @@ export default function App() {
           onOpenSettings={() => setShowSettings(true)}
           onExit={leaveWater}
           onRunEnded={awardCoins}
+          onMatchOver={reportResult}
         />
         {showSettings && (
           <SettingsPanel settings={settings} onChange={setSettings} onClose={() => setShowSettings(false)} />
@@ -563,7 +583,7 @@ function SoloSelect({
   };
 
   return (
-    <Shell title={`Player ${seat + 1} — pick a fish`} coins={coins} onBack={onBack}>
+    <Shell title={`Player ${seat + 1}: pick a fish`} coins={coins} onBack={onBack}>
       <FishGrid unlocked={unlocked} coins={coins} onPick={pick} selected={null} takenBy={takenBy} mode="pick" />
     </Shell>
   );

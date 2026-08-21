@@ -7,7 +7,7 @@
   "minPlayers": 1,
   "maxPlayers": 2,
   "estimatedDuration": "3-6 min",
-  "controls": "Drag back from your ship and let go to fire — mouse or finger. Arrows fine-tune, Space fires.",
+  "controls": "Drag back from your ship with a mouse or a finger and let go to fire. Arrows fine-tune, Space fires.",
   "thumbnail": "thumb.svg",
   "accent": {
     "from": "#0ea5e9",

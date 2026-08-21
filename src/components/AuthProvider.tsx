@@ -77,13 +77,23 @@ async function syncUserDocuments(user: User) {
     { merge: true },
   );
 
+  // Whether to seed the counters is decided by the private document itself,
+  // never by the public profile. Keying it off the profile meant that anyone
+  // whose profile went missing had their games played and wins written back to
+  // zero on the next sign-in, and the rules now refuse that write outright, so
+  // the whole reconciliation would fail with it.
+  const userRef = doc(db, "users", user.uid);
+  const userSnap = await getDoc(userRef);
+
   await setDoc(
-    doc(db, "users", user.uid),
+    userRef,
     {
       uid: user.uid,
       email: user.email,
       lastLogin: serverTimestamp(),
-      ...(profileSnap.exists() ? {} : { createdAt: serverTimestamp(), stats: { gamesPlayed: 0, wins: 0 } }),
+      ...(userSnap.exists()
+        ? {}
+        : { createdAt: serverTimestamp(), stats: { gamesPlayed: 0, wins: 0 }, coins: 0, unlocks: {} }),
     },
     { merge: true },
   );

@@ -25,7 +25,7 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "PlayBuddies — Play Games With Friends",
+  title: "PlayBuddies | Play Games With Friends",
   description:
     "The ultimate multiplayer gaming platform. Log in with Google, invite your friends, and play browser games together in real-time. No downloads needed.",
   keywords: [
@@ -37,7 +37,7 @@ export const metadata: Metadata = {
   ],
   authors: [{ name: "Bilal Saeed" }],
   openGraph: {
-    title: "PlayBuddies — Play Games With Friends",
+    title: "PlayBuddies | Play Games With Friends",
     description: "The ultimate multiplayer gaming platform.",
     type: "website",
   },

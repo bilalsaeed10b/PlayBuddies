@@ -16,6 +16,7 @@ import { MessageSquare, RefreshCw, Smartphone, Monitor, Gem, ArrowLeft, Settings
 import { motion, AnimatePresence } from 'motion/react';
 import confetti from 'canvas-confetti';
 import { playJumpSound, playCollectSound, playDeathSound, playWinSound } from '../../game/sounds';
+import { reportResult } from '../../platform/result';
 
 const CANVAS_WIDTH = 800;
 const CANVAS_HEIGHT = 600;
@@ -23,14 +24,21 @@ const CANVAS_HEIGHT = 600;
 /**
  * How often our own state goes on the wire.
  *
- * 30/s over the DataChannel is comfortably more than the smoother needs to
- * reconstruct smooth motion, and it is free — the packets never touch a server.
- * The Firestore numbers are deliberately stingy: those writes are billed, and
- * with 2k players online a per-frame write would be the single largest line on
- * the bill. 10/s keeps the fallback playable; once WebRTC is up it drops to a
- * 1/s heartbeat so a peer that reconnects mid-level still finds a position.
+ * 60/s over the DataChannel, which is the rate the physics runs at, so the
+ * partner's client is never told about a frame that already happened. It was
+ * 30/s on the theory that the smoother could invent the frames in between, and
+ * it can, but every invented frame is a guess that has to be corrected when
+ * the truth turns up. Halving the guessing is the cheapest latency there is:
+ * these packets never touch a server and each one is a couple of hundred
+ * bytes, so the whole stream is around 12 KB/s.
+ *
+ * The Firestore numbers are deliberately stingy by comparison: those writes
+ * are billed, and with 2k players online a per-frame write would be the single
+ * largest line on the bill. 10/s keeps the fallback playable; once WebRTC is
+ * up it drops to a 1/s heartbeat so a peer that reconnects mid-level still
+ * finds a position.
  */
-const DC_SYNC_INTERVAL_MS = 1000 / 30;
+const DC_SYNC_INTERVAL_MS = 1000 / 60;
 const FS_SYNC_ACTIVE_MS = 100;
 const FS_SYNC_IDLE_MS = 1000;
 
@@ -72,6 +80,15 @@ export default function Game({
   // useState triggered a full React re-render on every single animation frame.
   const screenShakeRef = useRef(0);
   const [levelIndex, setLevelIndex] = useState(startLevelIndex);
+  /**
+   * Did either player die on this attempt?
+   *
+   * The dashboard wants a win or a loss per level, and a death here is a
+   * retry rather than the end of anything: counting each one as its own
+   * game would put a hundred losses on a level somebody eventually beat.
+   * Clearing a level without dying is the win.
+   */
+  const diedThisAttempt = useRef(false);
   const [userId, setUserId] = useState<string | null>(null);
   const [roomId, setRoomId] = useState(initialRoomId || '');
   const [role, setRole] = useState<'fire' | 'water' | 'both' | null>(initialGameMode === 'single' ? 'both' : null);
@@ -129,6 +146,18 @@ export default function Game({
   const rtcRef = useRef<RTCPeerConnection | null>(null);
   const dcRef = useRef<RTCDataChannel | null>(null);
   const [rtcConnected, setRtcConnected] = useState(false);
+  /**
+   * The same flag, readable from inside the render loop.
+   *
+   * The loop only wants it to decide how often to fall back to Firestore, but
+   * listing the state in its dependencies meant the moment the peer connection
+   * came up, the whole loop was torn down and rebuilt: a cancelled animation
+   * frame and a fresh closure, right at the point in the match where the two
+   * players had just started moving. A ref carries the value without making
+   * the loop care that it changed.
+   */
+  const rtcConnectedRef = useRef(false);
+  rtcConnectedRef.current = rtcConnected;
   /** Holds the partner's authoritative state and eases the drawn player toward it. */
   const remoteRef = useRef(new RemoteSmoother());
   /** Last snapshot actually put on the wire, so identical frames aren't re-sent. */
@@ -455,6 +484,8 @@ export default function Game({
 
     let unsubRoom: (() => void) | null = null;
     const addedCandidates = new Set<string>();
+    /** Seen, but not addable yet: the remote description has not landed. */
+    const pendingCandidates: string[] = [];
 
     const initWebRTC = async () => {
       const pc = new RTCPeerConnection({
@@ -510,19 +541,59 @@ export default function Game({
           .catch(console.error);
       };
 
-      const dc = pc.createDataChannel('game-sync', { negotiated: true, id: 0 });
+      // Unordered and unreliable, on purpose, and the single biggest thing
+      // wrong with this game's netcode until now.
+      //
+      // A DataChannel defaults to reliable and ordered, which is TCP's
+      // behaviour: one lost packet blocks every packet behind it until the
+      // retransmit lands. For a stream of positions that is precisely the
+      // wrong trade. The partner froze for as long as the recovery took and
+      // then jumped to catch up, and the queue behind the lost packet was
+      // already worthless by the time it arrived, because a newer position had
+      // long since been sent.
+      //
+      // netSync.ts was written against an unordered channel and says so in its
+      // own comments. It just never got one. The other two games on the
+      // platform have always configured theirs this way.
+      const dc = pc.createDataChannel('game-sync', {
+        negotiated: true,
+        id: 0,
+        ordered: false,
+        maxRetransmits: 0,
+      });
       dcRef.current = dc;
       setupDataChannel(dc);
 
+      /**
+       * Feed the peer connection whatever candidates have turned up.
+       *
+       * A candidate cannot be added before the remote description exists, and
+       * the two arrive in whatever order the database delivers them. The old
+       * version marked every candidate as handled the moment it saw it and
+       * then let the add fail into console.error, so any candidate that
+       * happened to arrive first was thrown away for good. Losing the one
+       * candidate that would have paired is the difference between a direct
+       * connection and half a second of Firestore latency for the whole match.
+       *
+       * They are held instead, and flushed once there is something to add them
+       * to.
+       */
       const applyRemoteCandidates = (candidates: Record<string, string> | null) => {
-        if (!candidates) return;
-        for (const cStr of Object.values(candidates)) {
-          if (addedCandidates.has(cStr)) continue;
-          addedCandidates.add(cStr);
+        if (candidates) {
+          for (const cStr of Object.values(candidates)) {
+            if (addedCandidates.has(cStr)) continue;
+            addedCandidates.add(cStr);
+            pendingCandidates.push(cStr);
+          }
+        }
+        if (!pc.currentRemoteDescription || pendingCandidates.length === 0) return;
+
+        const queue = pendingCandidates.splice(0, pendingCandidates.length);
+        for (const cStr of queue) {
           try {
             pc.addIceCandidate(new RTCIceCandidate(JSON.parse(cStr))).catch(console.error);
           } catch {
-            /* malformed candidate — skip it */
+            /* malformed candidate: nothing to retry */
           }
         }
       };
@@ -539,11 +610,18 @@ export default function Game({
           console.error('[WebRTC] Error creating offer', err);
         }
 
-        unsubRoom = dbOnValue(theirsRef, (snap) => {
+        unsubRoom = dbOnValue(theirsRef, async (snap) => {
           const data = snap.val();
           if (!data) return;
+          // Awaited, not fired and forgotten: the candidates below are only
+          // addable once this has actually landed, and the answer usually
+          // arrives in the same update as the first of them.
           if (data.desc && pc.signalingState === 'have-local-offer') {
-            pc.setRemoteDescription(new RTCSessionDescription(data.desc)).catch(console.error);
+            try {
+              await pc.setRemoteDescription(new RTCSessionDescription(data.desc));
+            } catch (err) {
+              console.error('[WebRTC] Error applying answer', err);
+            }
           }
           applyRemoteCandidates(data.candidates);
         });
@@ -676,7 +754,7 @@ export default function Game({
         // Firestore is the fallback for when the peer connection never forms
         // (symmetric NAT, corporate proxy). Every write here is billed, so it
         // idles right down once the DataChannel is carrying the traffic.
-        const fsInterval = rtcConnected ? FS_SYNC_IDLE_MS : FS_SYNC_ACTIVE_MS;
+        const fsInterval = rtcConnectedRef.current ? FS_SYNC_IDLE_MS : FS_SYNC_ACTIVE_MS;
         if (wallClock - lastUpdateRef.current > fsInterval) {
           const pRef = doc(db, 'lobbies', roomId, 'updates', userId);
           setDoc(pRef, { ...state, role }, { merge: true }).catch(console.error);
@@ -716,7 +794,7 @@ export default function Game({
     return () => {
       if (gameLoopRef.current) cancelAnimationFrame(gameLoopRef.current);
     };
-  }, [gameStarted, engine, role, roomId, userId, isGameOver, gameMode, rtcConnected]);
+  }, [gameStarted, engine, role, roomId, userId, isGameOver, gameMode]);
 
   const handleWin = () => {
     if (isGameOver) return;
@@ -733,7 +811,9 @@ export default function Game({
     // Notify parent of completion
     if (!customLevel) {
       onComplete?.(levels[levelIndex].id);
+      reportResult(!diedThisAttempt.current);
     }
+    diedThisAttempt.current = false;
 
     setTimeout(() => {
       if (customLevel) {
@@ -765,6 +845,7 @@ export default function Game({
   const handleDeath = () => {
     if (isGameOver) return;
     setIsGameOver(true);
+    diedThisAttempt.current = true;
 
     playDeathSound();
 
@@ -2210,7 +2291,7 @@ export default function Game({
                       <div className="space-y-2 text-xs text-zinc-400">
                         <div className="flex items-center gap-3">
                           <span className="w-16 shrink-0 font-bold text-white">Left half</span>
-                          <span>Touch anywhere and drag — the stick appears under your thumb. Left and right only.</span>
+                          <span>Touch anywhere and drag. The stick appears under your thumb. Left and right only.</span>
                         </div>
                         <div className="flex items-center gap-3">
                           <span className="w-16 shrink-0 font-bold text-white">Right half</span>

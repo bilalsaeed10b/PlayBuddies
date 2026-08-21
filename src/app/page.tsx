@@ -3,6 +3,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { signInWithPopup } from "firebase/auth";
 import { auth, googleProvider } from "@/lib/firebase";
@@ -761,7 +762,7 @@ function FeaturesSection() {
       icon: Shield,
       title: "Anti-Cheat Protection",
       description:
-        "Server-authoritative game state. The server is the single source of truth — no funny business.",
+        "Server-authoritative game state. The server is the single source of truth, so there is no funny business.",
       gradient: "from-green-500 to-emerald-500",
       glow: "shadow-green-500/20",
     },
@@ -769,7 +770,7 @@ function FeaturesSection() {
       icon: Globe,
       title: "Play Anywhere",
       description:
-        "Works on any device with a browser. Desktop, tablet, or phone — just share a link and play.",
+        "Works on any device with a browser. Desktop, tablet, or phone. Just share a link and play.",
       gradient: "from-purple-500 to-violet-500",
       glow: "shadow-purple-500/20",
     },
@@ -990,7 +991,7 @@ function TestimonialsSection() {
       name: "Mike T.",
       avatar: "🏆",
       role: "Party Host",
-      text: "I host game nights every weekend now. Just send a link and everyone's in — no accounts, no hassle.",
+      text: "I host game nights every weekend now. Just send a link and everyone is in. No accounts, no hassle.",
       gradient: "from-blue-500 to-cyan-500",
     },
   ];
@@ -1163,14 +1164,17 @@ function Footer() {
 
           {/* Links */}
           <div className="flex items-center gap-8">
-            {["Privacy", "Terms", "Contact"].map((link) => (
-              <a
-                key={link}
-                href="#"
+            {[
+              { label: "Privacy", href: "/privacy" },
+              { label: "Terms", href: "/terms" },
+            ].map((link) => (
+              <Link
+                key={link.label}
+                href={link.href}
                 className="text-sm text-text-muted hover:text-white transition-colors"
               >
-                {link}
-              </a>
+                {link.label}
+              </Link>
             ))}
           </div>
 

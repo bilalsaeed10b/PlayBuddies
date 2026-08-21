@@ -500,7 +500,7 @@ export default function MatchView({
             <h2 className="text-3xl font-black">{over.winner === myTeam ? 'You win!' : 'You lost'}</h2>
             <p className="text-5xl font-black tabular-nums">
               <span style={{ color: TEAM_COLORS[0].light }}>{score[0]}</span>
-              <span className="opacity-40"> — </span>
+              <span className="opacity-40"> / </span>
               <span style={{ color: TEAM_COLORS[1].light }}>{score[1]}</span>
             </p>
             <button

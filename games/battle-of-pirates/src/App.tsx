@@ -17,6 +17,7 @@ import { FREE_SHIPS, SHIPS, drawShip } from './game/ships';
 import { TEAM_COLORS } from './game/rules';
 import { TIERS } from './engine/ai';
 import { audioService } from './services/audio';
+import { GameWallet, reportResult } from './platform/wallet';
 import BattleView, { MatchConfig } from './screens/BattleView';
 import type { Seat } from './engine/BattleEngine';
 import type { GameSettings, Team } from './types/game';
@@ -103,12 +104,30 @@ export default function App() {
   const [offlineMatch, setOfflineMatch] = useState(false);
   const [aiLevel, setAiLevel] = useState(1);
 
-  const [coins, setCoins] = useState(() => Number(localStorage.getItem('fishy_coins') || 0));
-  const [owned, setOwned] = useState<number[]>(() => {
-    const saved = localStorage.getItem('pirates_owned');
-    const parsed: number[] = saved ? JSON.parse(saved) : [];
-    return [...new Set([...parsed, ...FREE_SHIPS])];
-  });
+  /**
+   * The purse belongs to the account, not to this browser.
+   *
+   * localStorage is still read first so the shop is never blank while the
+   * handshake with PlayBuddies is in flight, and it is still written on every
+   * change so the game works opened on its own. It is a cache now rather than
+   * the record.
+   */
+  const wallet = useMemo(() => new GameWallet('battle-of-pirates', 'pirates_owned'), []);
+  const [coins, setCoins] = useState(() => wallet.current.coins);
+  const [owned, setOwned] = useState<number[]>(() => [
+    ...new Set([...wallet.current.unlocks, ...FREE_SHIPS]),
+  ]);
+  /** Nothing is saved until the account has answered, or declined to. */
+  const [walletReady, setWalletReady] = useState(false);
+
+  useEffect(() => {
+    wallet.open((purse) => {
+      setCoins(purse.coins);
+      setOwned([...new Set([...purse.unlocks, ...FREE_SHIPS])]);
+      setWalletReady(true);
+    });
+    return () => wallet.close();
+  }, [wallet]);
   const [settings, setSettings] = useState<GameSettings>(() => {
     const saved = localStorage.getItem('pirates_settings');
     return saved ? { ...DEFAULT_SETTINGS, ...JSON.parse(saved) } : DEFAULT_SETTINGS;
@@ -117,8 +136,14 @@ export default function App() {
   // The coin balance is shared with the rest of PlayBuddies on purpose. Coins
   // earned in one game are worth something in the next, which is the only
   // thing that makes a single-player shop feel like part of a platform.
-  useEffect(() => localStorage.setItem('fishy_coins', String(coins)), [coins]);
-  useEffect(() => localStorage.setItem('pirates_owned', JSON.stringify(owned)), [owned]);
+  //
+  // Held back until the handshake settles: saving the placeholder balance the
+  // moment the game booted would write a stale number straight over the real
+  // one, which is how an account ends up back at zero.
+  useEffect(() => {
+    if (!walletReady) return;
+    wallet.save({ coins, unlocks: owned });
+  }, [walletReady, coins, owned, wallet]);
   useEffect(() => {
     localStorage.setItem('pirates_settings', JSON.stringify(settings));
     audioService.setVolumes(settings.bgmVolume, settings.sfxVolume);
@@ -277,6 +302,7 @@ export default function App() {
     // Something for turning up, more for winning, and a bonus for coming
     // through it with your hull mostly intact.
     setCoins((c) => c + (won ? 95 : 30) + (won ? Math.round(hpLeft / 3) : 0));
+    reportResult(won);
   }, []);
 
   /**

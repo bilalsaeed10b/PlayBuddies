@@ -17,6 +17,7 @@ import { CHARACTERS, Character, FREE_CHARACTERS, drawCharacter } from './game/ch
 import { BALANCE, TEAM_COLORS } from './game/rules';
 import { TIERS } from './engine/ai';
 import { audioService } from './services/audio';
+import { GameWallet, reportResult } from './platform/wallet';
 import MatchView, { MatchConfig, Person } from './screens/MatchView';
 import { GameSettings, Team } from './types/game';
 
@@ -97,22 +98,45 @@ export default function App() {
   const [offlineMatch, setOfflineMatch] = useState(false);
   const [aiLevel, setAiLevel] = useState(1);
 
-  const [coins, setCoins] = useState(() => Number(localStorage.getItem('fishy_coins') || 0));
-  const [owned, setOwned] = useState<number[]>(() => {
-    const saved = localStorage.getItem('volley_owned');
-    const parsed: number[] = saved ? JSON.parse(saved) : [];
-    return [...new Set([...parsed, ...FREE_CHARACTERS])];
-  });
+  /**
+   * The purse belongs to the account, not to this browser.
+   *
+   * localStorage is read first so the shop is never blank while the handshake
+   * with PlayBuddies is in flight, and written on every change so the game
+   * still works opened on its own. It is a cache now rather than the record.
+   */
+  const wallet = useMemo(() => new GameWallet('volley-clash', 'volley_owned'), []);
+  const [coins, setCoins] = useState(() => wallet.current.coins);
+  const [owned, setOwned] = useState<number[]>(() => [
+    ...new Set([...wallet.current.unlocks, ...FREE_CHARACTERS]),
+  ]);
+  /** Nothing is saved until the account has answered, or declined to. */
+  const [walletReady, setWalletReady] = useState(false);
+
+  useEffect(() => {
+    wallet.open((purse) => {
+      setCoins(purse.coins);
+      setOwned([...new Set([...purse.unlocks, ...FREE_CHARACTERS])]);
+      setWalletReady(true);
+    });
+    return () => wallet.close();
+  }, [wallet]);
   const [settings, setSettings] = useState<GameSettings>(() => {
     const saved = localStorage.getItem('volley_settings');
     return saved ? { ...DEFAULT_SETTINGS, ...JSON.parse(saved) } : DEFAULT_SETTINGS;
   });
 
-  // The coin balance is shared with the rest of PlayBuddies on purpose — coins
+  // The coin balance is shared with the rest of PlayBuddies on purpose. Coins
   // earned in one game are worth something in the next, which is the only thing
   // that makes a single-player shop feel like part of a platform.
-  useEffect(() => localStorage.setItem('fishy_coins', String(coins)), [coins]);
-  useEffect(() => localStorage.setItem('volley_owned', JSON.stringify(owned)), [owned]);
+  //
+  // Held back until the handshake settles: saving the placeholder balance the
+  // moment the game booted would write a stale number straight over the real
+  // one, which is how an account ends up back at zero.
+  useEffect(() => {
+    if (!walletReady) return;
+    wallet.save({ coins, unlocks: owned });
+  }, [walletReady, coins, owned, wallet]);
   useEffect(() => {
     localStorage.setItem('volley_settings', JSON.stringify(settings));
     audioService.setVolumes(settings.bgmVolume, settings.sfxVolume);
@@ -248,6 +272,7 @@ export default function App() {
     // Something for turning up, more for winning, and a bonus for a close one.
     const margin = Math.abs(score[0] - score[1]);
     setCoins((c) => c + (won ? 90 : 30) + (margin <= 2 ? 25 : 0));
+    reportResult(won);
   }, []);
 
   /**
@@ -504,7 +529,7 @@ function Menu({
           onClick={onSolo}
           className="flex w-full items-center justify-center gap-2 rounded-2xl bg-amber-400 py-4 text-lg font-black text-slate-900 transition-transform active:scale-95"
         >
-          <Play className="h-5 w-5 fill-current" /> Solo — you vs the bot
+          <Play className="h-5 w-5 fill-current" /> Solo: you vs the bot
         </button>
 
         <div className="space-y-2">
@@ -528,7 +553,7 @@ function Menu({
           onClick={onCouch}
           className="w-full rounded-2xl border border-white/25 bg-white/10 py-4 font-black transition-colors hover:bg-white/20"
         >
-          Offline 1v1 — two players, one PC
+          Offline 1v1: two players, one PC
           <span className="mt-1 block text-[11px] font-bold normal-case tracking-normal text-white/50">
             Player 1 on A / D / W · Player 2 on the arrow keys
           </span>
@@ -536,7 +561,7 @@ function Menu({
 
         <div className="rounded-2xl bg-black/25 p-3 text-center text-xs leading-relaxed text-white/50">
           <p className="mb-1 font-black uppercase tracking-[0.15em] text-white/40">Controls</p>
-          <p>Move left and right, jump. That is it — where the ball hits you decides where it goes.</p>
+          <p>Move left and right, jump. That is it. Where the ball hits you decides where it goes.</p>
           <p className="mt-1">Touchscreen: drag the left half to move, tap the right half to jump.</p>
           <p className="mt-2 text-white/40">
             Playing online? Start a lobby on PlayBuddies and pick this game. Two players face off; three or four
@@ -719,7 +744,7 @@ function OfflinePick({
     if (Object.keys(next).length >= seatCount) onDone(next);
   };
 
-  const title = seatCount > 1 ? `Player ${seat + 1} — pick a character` : 'Pick your character';
+  const title = seatCount > 1 ? `Player ${seat + 1}: pick a character` : 'Pick your character';
   return (
     <Shell title={title} coins={coins} onBack={onBack}>
       <CharacterGrid owned={owned} coins={coins} selected={null} takenBy={takenBy} onPick={pick} />
