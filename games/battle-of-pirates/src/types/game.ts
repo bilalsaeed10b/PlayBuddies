@@ -130,6 +130,36 @@ export interface StartPacket {
 }
 
 /**
+ * Sent the instant a shot leaves the barrel -- before its outcome is known,
+ * before the ball has even reached the top of its arc.
+ *
+ * A ShotPacket, below, used to be the only thing that ever went out, and it
+ * is only written once a turn is fully resolved: the flight has landed, the
+ * impact has settled, wind and drift have rolled for next turn. On a
+ * screen-filling arena that whole sequence is two to four seconds, and the
+ * far side never saw a single frame of it until all of that had already
+ * happened *and* crossed the network -- their own replay of the shot then
+ * started from scratch on top of that. A shot that took three seconds to
+ * land took six to be seen fire at all, which is the "delay" in multiplayer.
+ *
+ * This carries only the input -- what was aimed, not what it did -- so the
+ * far side can start animating in step with the shooter, off by network
+ * latency alone. The ShotPacket still follows once the outcome is known and
+ * is still what the receiver trusts for HP, wind and drift; this only lets
+ * the picture start moving before that arrives.
+ */
+export interface FirePacket {
+  t: 'fire';
+  n: number;
+  s: number;
+  a: number;
+  p: number;
+  c: CardId;
+  /** See ShotPacket.first -- carried here too so the earliest possible message can seed a late guest's session. */
+  first?: Team;
+}
+
+/**
  * A resolved turn: what was fired, and the state it left behind.
  *
  * The shooter is authoritative for its own shot. It carries the outcome rather
@@ -192,4 +222,4 @@ export interface IdlePacket {
   n: number;
 }
 
-export type NetPacket = StartPacket | ShotPacket | ByePacket | IdlePacket;
+export type NetPacket = StartPacket | FirePacket | ShotPacket | ByePacket | IdlePacket;

@@ -35,6 +35,7 @@ import type {
   Control,
   Phase,
   Projectile,
+  FirePacket,
   Rock,
   Ship,
   Shot,
@@ -62,8 +63,11 @@ export interface EngineConfig {
   onPhase?: (phase: Phase) => void;
   onTurn?: (team: Team, hand: CardId[]) => void;
   onHp?: (hp: [number, number]) => void;
-  /** A shot this device is responsible for, resolved and ready to send. */
-  onLocalShot?: (packet: ShotPacket) => void;
+  /**
+   * A packet this device is responsible for, ready to send: the instant
+   * preview when a shot is fired, and again with the outcome once it lands.
+   */
+  onLocalShot?: (packet: FirePacket | ShotPacket) => void;
   onOver?: (winner: Team) => void;
   onSfx?: (kind: Sfx, power?: number) => void;
 }
@@ -160,13 +164,46 @@ export class BattleEngine {
 
   /** Burn stacks as they stood before the current shot, so a firebomb cannot tick on itself. */
   private burnBefore: [number, number] = [0, 0];
-  /** A shot that arrived over the wire and is waiting for a turn to land in. */
+  /** The preview of the other side's shot: what was fired, before its outcome is known. */
+  private pendingFire: FirePacket | null = null;
+  /** The other side's shot, fully resolved -- HP, wind, drift, next turn. */
   private pendingRemote: ShotPacket | null = null;
-  /** Set while the flight currently in the air came from the wire. */
-  private resolving: ShotPacket | null = null;
+  /**
+   * True from the moment a remote shot starts flying until its outcome is
+   * known, whichever order the preview and the outcome arrive in.
+   *
+   * Set so the impact phase knows to hold the picture rather than guess if
+   * the outcome is still in flight over the network when the local hold
+   * would otherwise have ended it.
+   */
+  private awaitingOutcome = false;
+  /**
+   * How long this side has been holding at the end of the impact phase,
+   * waiting for an outcome that hasn't shown up.
+   *
+   * Every other source of applyShot/applyFire eventually gets its packet;
+   * the one that doesn't is a partner who vanished between firing and
+   * landing. Without a ceiling on the wait, that seat's screen freezes on
+   * the impact for good, since nothing else in the engine ever calls
+   * resolve() on its own. handOverToAI() clears this the moment a bye or a
+   * dropped connection is actually noticed; this is the fallback for a
+   * partner who is gone but hasn't been declared so yet.
+   */
+  private outcomeWait = 0;
+  /**
+   * Did fire() send a preview for the shot currently resolving?
+   *
+   * Almost always yes. The one time it doesn't is a partner's shot that was
+   * still in the air over the wire when they dropped and their seat flipped
+   * from 'remote' to 'ai' -- fire() saw 'remote' and stayed quiet, resolve()
+   * sees 'ai' and would otherwise reuse a sequence number that was never
+   * actually sent for this shot.
+   */
+  private firedPreviewThisShot = false;
   private lastShot: Shot | null = null;
   /** Counted separately: one is what we have sent, the other what we have seen. */
   private localSeq = 0;
+  private remoteFireSeq = 0;
   private remoteSeq = 0;
 
   // Viewport transform, recomputed on resize.
@@ -359,6 +396,22 @@ export class BattleEngine {
     this.lastShotHit[team] = false;
     this.burnBefore = [this.ships[0].burn, this.ships[1].burn];
 
+    // Sent before a single physics step has run. Only for a shot this device
+    // actually owns -- not a replay of what the wire just handed us, and not
+    // this device's own bot firing on behalf of a partner who is still here.
+    this.firedPreviewThisShot = Boolean(this.cfg.onLocalShot) && ship.control !== 'remote';
+    if (this.firedPreviewThisShot) {
+      this.localSeq += 1;
+      this.cfg.onLocalShot!({
+        t: 'fire',
+        n: this.localSeq,
+        s: this.cfg.seed,
+        a: round3(angle),
+        p: round3(power),
+        c: card.id,
+      });
+    }
+
     if (card.heal) {
       ship.hp = Math.min(BALANCE.MAX_HP, ship.hp + card.heal);
       this.cfg.onHp?.(this.hp);
@@ -402,11 +455,28 @@ export class BattleEngine {
   }
 
   /**
-   * A turn that arrived over the wire.
+   * The preview of a shot that just left the other side's barrel.
    *
-   * It is not played immediately: our own explosion may still be settling, and
-   * firing into that would show two shots at once. It waits for the turn it
-   * belongs to and is picked up in update().
+   * Picked up in update() the instant it's this seat's turn to receive it,
+   * which starts the flight animating in step with the shooter rather than
+   * waiting for their whole resolution to cross the wire first. It is not
+   * itself trusted for the outcome -- ShotPacket still is -- only for what
+   * to point the barrel at and when to let go.
+   */
+  applyFire(packet: FirePacket) {
+    if (packet.s !== this.cfg.seed) return;
+    if (packet.n <= this.remoteFireSeq) return;
+    this.remoteFireSeq = packet.n;
+    this.pendingFire = packet;
+  }
+
+  /**
+   * A turn that arrived over the wire, fully resolved.
+   *
+   * Usually this lands while the preview above is already animating and just
+   * waits to be picked up once that flight settles. If the preview was lost
+   * or came from a peer old enough not to send one, this doubles as its own
+   * trigger -- it carries the same angle and power a FirePacket would have.
    */
   applyShot(packet: ShotPacket) {
     // A player's update document outlives the match that wrote it, so the
@@ -424,7 +494,9 @@ export class BattleEngine {
     ship.control = 'ai';
     ship.aiLevel = level;
     ship.name = `${ship.name} (adrift)`;
+    this.pendingFire = null;
     this.pendingRemote = null;
+    this.awaitingOutcome = false;
     if (this.phase === 'aim' && this.turn === team) this.botTimer = BALANCE.BOT_THINK;
   }
 
@@ -464,12 +536,17 @@ export class BattleEngine {
       const ship = this.ships[this.turn];
 
       if (ship.control === 'remote') {
-        const packet = this.pendingRemote;
-        if (packet) {
-          this.pendingRemote = null;
-          this.resolving = packet;
-          this.fire({ angle: packet.a, power: packet.p, card: packet.c });
-        }
+        // Whichever arrived first triggers the flight -- the preview, or,
+        // failing that, the fully resolved packet, which carries the same
+        // aim and doubles as its own trigger. Either way `this.pendingRemote`
+        // is left exactly as it was: still null if only the preview has
+        // shown up, or holding the outcome that resolve() will read once the
+        // flight settles.
+        const trigger = this.pendingFire ?? this.pendingRemote;
+        if (!trigger) return;
+        this.pendingFire = null;
+        this.awaitingOutcome = this.pendingRemote === null;
+        this.fire({ angle: trigger.a, power: trigger.p, card: trigger.c });
         return;
       }
 
@@ -491,7 +568,22 @@ export class BattleEngine {
 
     if (this.phase === 'impact') {
       this.phaseTimer -= dt;
-      if (this.phaseTimer <= 0) this.resolve();
+      if (this.phaseTimer <= 0) {
+        // The local hold is over, but if this was a remote shot started from
+        // a preview, its outcome might genuinely not be here yet -- hold the
+        // picture rather than guess. In practice the two arrive within a
+        // frame of each other: this side's own hold and the shooter's send
+        // both start from the same shot and run for close to the same
+        // length of time, so the wait, when it happens at all, is a network
+        // round trip, not the multi-second one this replaced. The ceiling
+        // below is only for a partner who went quiet mid-turn.
+        if (this.awaitingOutcome && !this.pendingRemote) {
+          this.outcomeWait += dt;
+          if (this.outcomeWait < BALANCE.OUTCOME_TIMEOUT) return;
+          this.awaitingOutcome = false;
+        }
+        this.resolve();
+      }
     }
   }
 
@@ -658,8 +750,10 @@ export class BattleEngine {
    * whole reason the two clients never have to agree on a float.
    */
   private resolve() {
-    const packet = this.resolving;
-    this.resolving = null;
+    const packet = this.pendingRemote;
+    this.pendingRemote = null;
+    this.awaitingOutcome = false;
+    this.outcomeWait = 0;
 
     for (const side of [0, 1] as Team[]) {
       const ship = this.ships[side];
@@ -706,7 +800,11 @@ export class BattleEngine {
       if (this.cfg.onLocalShot && this.lastShot && this.ships[shooter].control !== 'remote') {
         this.cfg.onLocalShot({
           t: 'shot',
-          n: ++this.localSeq,
+          // The same number the preview went out under, so the two halves of
+          // this shot correlate on the far side -- unless there was no
+          // preview to match (see firedPreviewThisShot), in which case this
+          // is the first anyone has heard of the shot and needs a fresh one.
+          n: this.firedPreviewThisShot ? this.localSeq : ++this.localSeq,
           s: this.cfg.seed,
           a: round3(this.lastShot.angle),
           p: round3(this.lastShot.power),

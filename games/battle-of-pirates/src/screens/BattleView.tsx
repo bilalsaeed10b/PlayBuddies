@@ -193,20 +193,25 @@ export default function BattleView({
         setNotice('They abandoned ship. A bot has the wheel.');
         return;
       }
-      if (packet.t !== 'shot') return;
+      if (packet.t !== 'fire' && packet.t !== 'shot') return;
       // A turn doubles as a start packet. The host's document holds exactly one
       // write at a time, so a guest that arrives after the opening shot finds a
       // turn where the negotiation was; the seed and the first shooter travel
-      // on it, which is everything a match is built from.
+      // on it, which is everything a match is built from. Carried on the
+      // preview too, since that is now usually the first thing to arrive.
       if (packet.first !== undefined) {
         const opening = { seed: packet.s, first: packet.first };
         setSession((current) => current ?? opening);
       }
       const engine = engineRef.current;
-      // The engine drops a shot stamped with a different seed, so a leftover
+      // The engine drops a packet stamped with a different seed, so a leftover
       // document from an earlier match cannot replay itself here.
-      if (engine) engine.applyShot(packet);
-      else queued.current.push(packet);
+      if (!engine) {
+        queued.current.push(packet);
+        return;
+      }
+      if (packet.t === 'fire') engine.applyFire(packet);
+      else engine.applyShot(packet);
     },
     [remoteTeam, aiLevel],
   );
@@ -293,7 +298,8 @@ export default function BattleView({
     });
     engineRef.current = engine;
     for (const packet of queued.current) {
-      if (packet.t === 'shot') engine.applyShot(packet);
+      if (packet.t === 'fire') engine.applyFire(packet);
+      else if (packet.t === 'shot') engine.applyShot(packet);
     }
     queued.current = [];
 

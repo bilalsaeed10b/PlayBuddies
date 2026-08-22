@@ -22,7 +22,7 @@
  * without ever moving the point of aim off the target.
  */
 import type { BattleEngine } from './BattleEngine';
-import { ARENA, BALANCE, CARDS, CardId, clamp } from '../game/rules';
+import { ARENA, BALANCE, CARDS, CardId, CardMeta, clamp } from '../game/rules';
 import { rockRadius } from '../game/sea';
 import type { Shot, Team } from '../types/game';
 
@@ -123,28 +123,57 @@ export function chooseShot(engine: BattleEngine, team: Team, level: number, brai
  * board first: patch a hull that is about to go under, and reach for the
  * lobbing or rock-piercing shot when there is a rock in the way.
  */
+/**
+ * The furthest a card could possibly travel, at full power and the angle
+ * that maximises range for its own speed and gravity. Not how the ballistics
+ * actually get solved -- solve() below does that, angle by angle -- just a
+ * cheap ceiling to rule a card out before spending any real work on it.
+ *
+ * Mortar and grapeshot both trade range for what they're good at up close,
+ * which means the water is now wide enough that either can be flatly
+ * unreachable from the anchors. Without this check the bot judged every card
+ * on damage alone and happily spent a turn heaving a mortar into the sea
+ * fifteen ship-lengths short of anything, which reads as broken rather than
+ * as the card doing what it says on the tin.
+ */
+function maxReach(card: CardMeta, dropHeight: number): number {
+  const g = BALANCE.GRAVITY * card.gravity;
+  const v = BALANCE.MAX_SPEED * card.speed;
+  return (v / g) * Math.sqrt(v * v + Math.max(0, 2 * g * dropHeight));
+}
+
 function pickCard(engine: BattleEngine, team: Team, tier: Tier): CardId {
   const hand = engine.hand;
   if (!tier.reads) return hand[Math.floor(Math.random() * hand.length)] ?? 'round';
 
   const me = engine.ships[team];
+  const foe = engine.ships[(1 - team) as Team];
   if (me.hp <= 38 && hand.includes('patch')) return 'patch';
 
   const rocksInTheWay = engine.rocks.some((r) => {
     if (r.hp <= 0) return false;
-    const lo = Math.min(me.x, engine.ships[(1 - team) as Team].x);
-    const hi = Math.max(me.x, engine.ships[(1 - team) as Team].x);
+    const lo = Math.min(me.x, foe.x);
+    const hi = Math.max(me.x, foe.x);
     return r.x > lo && r.x < hi;
   });
-  if (rocksInTheWay) {
-    if (hand.includes('bore')) return 'bore';
-    if (hand.includes('mortar')) return 'mortar';
-  }
+  // Bore is the only card built to ignore a rock outright; reaching for a
+  // mortar here used to make sense when it was the long lob that cleared one
+  // from any range, but it no longer reaches far enough to be a dependable
+  // answer to a rock that is anywhere near the enemy.
+  if (rocksInTheWay && hand.includes('bore')) return 'bore';
 
   if (me.hp <= 55 && hand.includes('patch')) return 'patch';
 
-  // Otherwise the biggest stick in hand, counting a fan as its total weight.
-  return [...hand].sort(
+  // Distance to the target rules out anything that cannot physically arrive,
+  // one card-length of slack for the height difference the bob and the drift
+  // put between the two decks.
+  const distance = Math.abs(foe.x - me.x);
+  const inReach = hand.filter((id) => maxReach(CARDS[id], 60) >= distance);
+  const pool = inReach.length > 0 ? inReach : hand;
+
+  // The biggest stick that can actually land, counting a fan as its total
+  // weight.
+  return [...pool].sort(
     (a, b) => CARDS[b].damage * CARDS[b].shots - CARDS[a].damage * CARDS[a].shots,
   )[0];
 }

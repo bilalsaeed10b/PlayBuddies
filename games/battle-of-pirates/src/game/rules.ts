@@ -24,34 +24,35 @@ export interface Arena {
  * The generous headroom is deliberate: a lofted mortar leaves the top of the
  * frame, and an off-screen ball needs somewhere to be.
  *
- * The water is wide on purpose. At the old thousand pixels between anchors,
- * two thirds of the power dial reached the enemy and the reef sat inside a
- * three-hundred-pixel strip that a flat shot cleared by accident; the duel was
- * decided on elevation alone. The anchors now sit far enough apart that the
- * bottom of the dial genuinely falls short, which is what gives power a say.
- * They stay one rock's clearance inside the frame at full drift, so neither
- * hull can wander off the edge of the picture.
+ * The water is wide on purpose, and wider again than the first pass at this.
+ * At a thousand pixels between anchors, two thirds of the power dial reached
+ * the enemy; a first widening to 1260 fixed that but a good aim from the deck
+ * could still all but guarantee a hit once elevation was solved once. At 1600
+ * the far ship is a small target at the top of the dial and nowhere near one
+ * at the bottom, so range is a real problem to solve on every single shot, not
+ * just once per match. The anchors stay one rock's clearance inside the frame
+ * at full drift, so neither hull can wander off the edge of the picture.
  */
 export const ARENA: Arena = {
-  w: 1800,
+  w: 2200,
   h: 900,
   seaY: 690,
-  anchor: [270, 1530],
+  anchor: [300, 1900],
 };
 
 export const BALANCE = {
   /**
-   * Gravity, eased to match the wider water.
+   * Gravity, eased again to match the wider water.
    *
    * The power dial is only a decision while both ends of it mean something.
-   * At 1400 across the old thousand pixels, anything under about half power
-   * fell short; across the new twelve hundred and sixty it was two thirds,
-   * and a dial where you always drag to the same place is not a dial. This
-   * hands that range back without touching what full power does at the
-   * muzzle, and it buys the thing a bigger sea wants anyway: a longer, higher
-   * arc you have time to read on the way over the reef.
+   * Retuned so the bottom third of the dial still falls short of a
+   * stationary enemy and the top comfortably clears one who has drifted
+   * away, at the new sixteen-hundred-pixel gap between anchors. It also
+   * buys the thing a wide sea wants: a longer, higher arc, more time to
+   * read the wind before it lands, and more room for a mortar's much
+   * steeper drop to actually mean something.
    */
-  GRAVITY: 1250,
+  GRAVITY: 1050,
   /** Speed at full power, in world px/s. */
   MAX_SPEED: 1760,
   /** Minimum, so a fumbled tap still leaves the barrel. */
@@ -92,17 +93,20 @@ export const BALANCE = {
   /** Hits a rock takes before it crumbles. It visibly wears down with each. */
   ROCK_HP: 3,
   /**
-   * Rock size, in world pixels of radius.
+   * Rock size, in world pixels of radius -- the hitbox is a true circle, so
+   * this is both how wide a rock reads on screen and, what actually matters,
+   * how high its crest stands over the water.
    *
-   * The floor is the whole point. A muzzle sits 46px above the waterline and a
-   * level shot crosses the middle barely lower than that, so the old 40px
-   * rocks were scenery: the ball went over the top of them and the two cards
-   * that exist to beat rock -- the mortar and the bore shot -- bought you
-   * nothing. Anything from here up stands in the way of a flat shot, which is
-   * what makes going over one a decision rather than a formality.
+   * A muzzle sits 46px above the waterline and a hull's own deck line is 62px
+   * up. The first pass at this put a rock's crest 90 to 140px up, enough to
+   * stop a shot fired flat off the barrel but not by much -- a slightly
+   * raised aim still skimmed the top of a small one. This puts the crest 145
+   * to 195px up: taller than a hull is high, so nothing at deck-level elevation
+   * gets past one, and the only way through the water it sits in is over the
+   * top or straight through it on a bore shot.
    */
-  ROCK_R_MIN: 96,
-  ROCK_R_MAX: 134,
+  ROCK_R_MIN: 140,
+  ROCK_R_MAX: 190,
   /**
    * How far the reef keeps clear of an anchor.
    *
@@ -116,6 +120,14 @@ export const BALANCE = {
   TURN_TIME: 30,
   /** Beat between the explosion settling and the next player getting the helm. */
   IMPACT_HOLD: 1.35,
+  /**
+   * How long to hold the picture after a remote shot's local flight has
+   * settled, waiting for its authoritative outcome to cross the wire, before
+   * giving up on it arriving and computing the turn's end locally instead.
+   * Generous next to the round trip it is actually covering -- this is the
+   * fallback for a partner who has gone quiet mid-turn, not the common case.
+   */
+  OUTCOME_TIMEOUT: 6,
   /** How long the bot pretends to think, so a shot never appears from nowhere. */
   BOT_THINK: 1.1,
   /** Wind can change by at most this much between turns. */
@@ -164,37 +176,68 @@ export interface CardMeta {
  * across the bottom of a phone at a size a thumb can hit. Weighting the plain
  * round highest keeps the baseline shot common: the interesting cards are
  * interesting because they are not the default.
+ *
+ * `speed` is also, in effect, a range dial: at a fixed gravity and a fixed
+ * launch angle, how far a ball goes scales with the square of its muzzle
+ * velocity, so a card at 0.8x speed does not fly "a bit less far", it lands
+ * at roughly two thirds the distance. That is what separates grapeshot from
+ * mortar below from round shot -- three different fights at three different
+ * ranges, not one card with a bigger number on it.
  */
 export const CARDS: Record<CardId, CardMeta> = {
   round: {
     id: 'round', name: 'Round Shot', glyph: 'O', weight: 30,
-    blurb: 'The honest one. Slightly heavier powder.',
+    blurb: 'The honest one. Full powder, full range.',
     shots: 1, spread: 0, damage: 1.1, blast: 1, gravity: 1, speed: 1,
   },
   chain: {
     id: 'chain', name: 'Chain Shot', glyph: 'oo', weight: 16,
-    blurb: 'Two balls on a chain. Both can bite.',
+    blurb: 'Two balls on a chain, same range as round shot. Both can bite.',
     shots: 2, spread: 0.05, damage: 0.62, blast: 0.85, gravity: 1, speed: 1,
   },
+  /**
+   * A close-range shotgun, not a weaker round shot. At 0.72x speed it needs
+   * the better part of full power just to reach a stationary enemy at all --
+   * comfortably short of the wind-eaten, half-power shots round shot manages
+   * -- so the five-pellet forgiveness is only worth anything once the drift
+   * of the turn has actually brought the two hulls close together.
+   */
   grape: {
     id: 'grape', name: 'Grapeshot', glyph: '::', weight: 15,
-    blurb: 'Five pellets, wide fan. Forgiving aim, small teeth.',
-    shots: 5, spread: 0.15, damage: 0.3, blast: 0.55, gravity: 1, speed: 0.97,
+    blurb: 'A close-range fan of five. Needs the enemy properly near.',
+    shots: 5, spread: 0.15, damage: 0.32, blast: 0.55, gravity: 1, speed: 0.72,
   },
+  /**
+   * The finisher. `speed` is the whole redesign: at 0.9x, full power at a
+   * clean angle just barely tags the near rail of a stationary enemy and
+   * nothing more -- the far rail is already out of reach -- so it rewards
+   * actually closing the distance rather than lobbing it from the anchor all
+   * match, the way the old long-range mortar did. What survives from that
+   * old version is the steep drop (`gravity` stays high) and the payoff for
+   * pulling it off: this is the hardest hitting card in the deck by a wide
+   * margin.
+   */
   mortar: {
     id: 'mortar', name: 'Mortar', glyph: 'V', weight: 13,
-    blurb: 'Drops like a stone. Huge blast, lobs over rocks.',
-    shots: 1, spread: 0, damage: 1.4, blast: 1.65, gravity: 1.75, speed: 1.12,
+    blurb: 'Devastating up close. Barely reaches their bow at full power.',
+    shots: 1, spread: 0, damage: 1.75, blast: 1.5, gravity: 1.75, speed: 0.9,
   },
   firebomb: {
     id: 'firebomb', name: 'Firebomb', glyph: '*', weight: 11,
-    blurb: 'Lights the deck. Burns for two of their turns.',
-    shots: 1, spread: 0, damage: 0.8, blast: 1.15, gravity: 1, speed: 1, burn: 2,
+    blurb: 'Lights the deck at full range. Burns for three of their turns.',
+    shots: 1, spread: 0, damage: 0.8, blast: 1.15, gravity: 1, speed: 1, burn: 3,
   },
+  /**
+   * The reef's answer. Every other card either goes over a rock or stops at
+   * it; this is the one that does not care it is there. The faster, flatter
+   * flight is deliberate too -- windproof already means the gauge stops
+   * mattering, and a shot that visibly refuses to bend for either the rock
+   * or the wind reads as a punch, not a lob.
+   */
   bore: {
     id: 'bore', name: 'Bore Shot', glyph: '>', weight: 9,
-    blurb: 'Punches straight through rock. Ignores the wind.',
-    shots: 1, spread: 0, damage: 1.2, blast: 0.9, gravity: 0.9, speed: 1.15,
+    blurb: 'Fast, flat, and straight through rock. Ignores the wind.',
+    shots: 1, spread: 0, damage: 1.2, blast: 0.9, gravity: 0.85, speed: 1.3,
     pierce: true, windproof: true,
   },
   patch: {
