@@ -213,14 +213,75 @@ export const BALANCE = {
   DURATION: { rocket: Infinity, feather: 8, giant: 7, freeze: 4 } as const,
 
   // ── net ─────────────────────────────────────────────────────────────────
+  //
+  // The rule this whole section is built around: *nobody ever waits for the
+  // wire to see their own character move.* Every machine simulates the entire
+  // match; the network only corrects it. A packet that goes missing costs
+  // accuracy, never responsiveness.
   /** Snapshots per second from the host. */
-  SNAPSHOT_HZ: 20,
-  /** Input packets per second from each client. */
-  INPUT_HZ: 30,
-  /** How fast a client's own character is pulled back toward the host's truth. */
-  RECONCILE: 6,
-  /** How fast remote characters and the ball chase the last snapshot. */
-  INTERP: 18,
+  SNAPSHOT_HZ: 30,
+  /**
+   * How often a guest tells the host where its own body actually is.
+   *
+   * Guests are authoritative over their own body — see MatchEngine.applyBody.
+   * Sending the body as well as the input is what removes the last source of
+   * delay: with input alone the host has to re-derive the position from a
+   * bitmask that is already one trip old, and every dropped packet becomes a
+   * visible stutter on everybody else's screen.
+   */
+  BODY_HZ: 30,
+  /**
+   * Floor on how often input is repeated when nothing is changing.
+   *
+   * Input is sent the instant a key changes state, so this is only a heartbeat
+   * against packet loss on an unreliable channel — not the input rate.
+   */
+  INPUT_HEARTBEAT_HZ: 10,
+  /** Round-trip probes per second. Feeds the extrapolation below. */
+  PING_HZ: 1,
+  /**
+   * How far a received packet may be extrapolated forward, in seconds.
+   *
+   * Everything on the wire is already old by one trip when it arrives, so it is
+   * run forward by that much before being used. Past this the estimate is worse
+   * than the local simulation and it is dropped.
+   */
+  MAX_EXTRAP: 0.3,
+  /** How fast remote characters and the ball are eased onto their target. */
+  INTERP: 22,
+  /**
+   * Error, in pixels, a machine tolerates on a body it does not own before it
+   * bothers correcting it at all. Below this the local simulation is right.
+   */
+  BODY_TOLERANCE: 3,
+  /** Above this the ease is abandoned and the body is snapped. */
+  BODY_SNAP: 260,
+  /**
+   * The same two numbers for a guest's *own* body, which it owns.
+   *
+   * Wildly looser on purpose. A character that is nudged under your own thumb
+   * feels broken even when the nudge is technically more accurate, so the host
+   * only gets to move you when the two simulations have genuinely come apart —
+   * a serve reset, or a correction big enough that ignoring it would put you on
+   * the wrong side of the ball.
+   */
+  OWN_TOLERANCE: 90,
+  OWN_SNAP: 340,
+  /** Ball error tolerated before correcting, and the error that forces a snap. */
+  BALL_TOLERANCE: 12,
+  BALL_SNAP: 320,
+  /** Seconds without a snapshot before a guest says so on screen. */
+  STALL_WARN: 1.5,
+  /**
+   * Seconds without a snapshot before a guest runs the rules itself.
+   *
+   * A guest cannot score, serve or spawn power-ups, so a host that vanishes
+   * used to leave everyone else staring at a frozen court until they gave up
+   * and quit. Taking over is not always *right* — two guests could take over at
+   * once and drift apart — but a game that keeps playing beats a game that has
+   * stopped, and the roster change that follows a real disconnect resolves it.
+   */
+  STALL_PROMOTE: 6,
 
   // ── simulation ──────────────────────────────────────────────────────────
   FIXED_DT: 1 / 120,

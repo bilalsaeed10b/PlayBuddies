@@ -236,25 +236,44 @@ The platform is a static site. There is no authority to run the ball on, and a
 peer-to-peer game where both sides simulate the ball desynchronises within
 about four seconds.
 
-**The host simulates. Everyone else sends inputs and renders.**
+**The host owns the rules. Everyone owns their own body. Every machine
+simulates the whole match, and the wire only corrects it.**
 
-- **R9.1** Transport is the existing `Mesh` — a WebRTC full mesh signalled
-  through Realtime Database. It is copied, not shared, because each game is an
-  independent Vite app; the copy is small and the alternative is a workspace
-  package the build script would have to understand.
-- **R9.2** Clients send a 1-byte input bitmask at 30 Hz. Nothing else.
-- **R9.3** The host broadcasts a snapshot at 20 Hz: ball, every player, score,
-  phase, active power-ups.
-- **R9.4** Clients **predict their own character** from their own input
-  immediately, then ease toward the host's position for that character. A
-  player must never feel their own input lag.
-- **R9.5** Remote characters and the ball are interpolated toward the last
-  snapshot. No extrapolation — a mispredicted ball that snaps back is worse
-  than a ball 50 ms behind.
-- **R9.6** The host is the lobby host, read from the lobby document, never from
-  a query parameter.
-- **R9.7** If the host leaves, the match ends cleanly with a message. Host
-  migration mid-rally is not worth the complexity for a 7-point match.
+- **R9.1** Transport is `Link`, which carries the same messages two ways: a
+  WebRTC full mesh signalled through Realtime Database, and — for any peer the
+  mesh has not reached — a relay through `lobbies/{room}/updates/{uid}`. There
+  is no TURN server on this platform, so a mesh-only game does not connect at
+  all for a real share of players, and "doesn't connect" must degrade to "plays
+  with more latency", never to a frozen court.
+- **R9.2** The mesh retries, with backoff, for as long as the peer is in the
+  room. A handshake that fails once is normal; giving up on it is not.
+- **R9.3** Clients send their own body — position, velocity, flags — together
+  with their input bitmask, at 30 Hz **and on the frame any key changes**. The
+  host places that character where its owner says it is, within a clamp to the
+  court and to a legal speed. Deriving a guest's position from an input byte
+  that is already a round trip old is what made a guest's character feel like
+  it was wading.
+- **R9.4** The host broadcasts a snapshot at 30 Hz: ball, every player *and
+  what each of them is pressing*, score, phase, active power-ups.
+- **R9.5** Clients **predict their own character** from their own input
+  immediately. A player must never feel their own input lag: the correction to
+  your own body is ignored below 90 px, applied at a third of the rate, and
+  never allowed to move you at all except after a serve reset.
+- **R9.6** Everything received is extrapolated forward by the measured half
+  round trip before it is used, and characters are corrected by feeding back
+  the *offset* they owe rather than by easing them toward a stale point. The
+  earlier "no extrapolation" rule was written when packets carried no input; it
+  cost the game roughly a round trip of accuracy on every body on screen.
+- **R9.7** A client plays its own contacts the instant they happen, and ignores
+  the host's account of the ball until the host has had time to see that
+  contact. The alternative reads as the hit not registering.
+- **R9.8** The host is the lobby host, read from the lobby document, never from
+  a query parameter — and authority follows it in place, without rebuilding the
+  match, when the lobby elects a new one.
+- **R9.9** A guest that has heard nothing from the host for six seconds runs
+  the rules itself, and hands them straight back when the host returns. Nobody
+  but the host can serve the ball, so waiting politely means watching a court
+  where nothing happens at all.
 
 ## 10. Platform contract
 

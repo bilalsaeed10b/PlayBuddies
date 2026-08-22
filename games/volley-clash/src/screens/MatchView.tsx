@@ -10,18 +10,18 @@ import { ArrowLeft, Settings as SettingsIcon, Trophy, Wifi, WifiOff } from 'luci
 import TouchPad, { PadState } from '../components/TouchPad';
 import { IN_IFRAME, toggleFullscreen } from '../fullscreen';
 import { CHARACTERS } from '../game/characters';
-import { POWER_META, TEAM_COLORS, arenaFor } from '../game/rules';
+import { BALANCE, POWER_META, TEAM_COLORS, arenaFor } from '../game/rules';
 import { MatchEngine, Seat } from '../engine/MatchEngine';
 import { QualityGovernor } from '../game/quality';
 // Type-only: the runtime value comes from the dynamic import below, keeping the
-// mesh and the Firebase SDK it depends on out of the main bundle.
-import type { Mesh } from '../net/mesh';
+// wire and the Firebase SDK it depends on out of the main bundle.
+import type { Link, LinkStatus } from '../net/link';
 import { audioService } from '../services/audio';
 import {
+  BodyMessage,
   GameSettings,
   Input,
   NO_INPUT,
-  NetMessage,
   Snapshot,
   Team,
   packInput,
@@ -48,6 +48,31 @@ export interface MatchConfig {
   localTeams: Record<string, Team>;
   /** Extra AI seats to fill the court. */
   bots: { id: string; team: Team; character: number; level: number; name: string }[];
+}
+
+/**
+ * How long a remote seat may go unheard before it is stood up, and before its
+ * character is handed to a bot.
+ *
+ * A phone changing cell is a two-second hole in the wire and a perfectly normal
+ * thing to play through, so the second number is generous — and the seat is
+ * handed straight back the moment its owner speaks again.
+ */
+const QUIET_MS = 1500;
+const DROPPED_MS = 8000;
+
+/**
+ * Whether a packet is older than one already seen from the same sender.
+ *
+ * The channel is unordered, so this is needed at all. The second clause is what
+ * makes it safe: a sender that reloads or remounts starts counting from one
+ * again, and a plain `n <= last` test would then reject everything it ever sent
+ * for the rest of the match. A big jump backwards is a new counter, not an old
+ * packet.
+ */
+function isStale(last: number | undefined, n: number): boolean {
+  if (last === undefined) return false;
+  return n <= last && n > last - 60;
 }
 
 /**
@@ -78,12 +103,17 @@ export default function MatchView({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const shellRef = useRef<HTMLDivElement>(null);
   const engineRef = useRef<MatchEngine | null>(null);
-  const meshRef = useRef<Mesh | null>(null);
+  const linkRef = useRef<Link | null>(null);
 
   const [score, setScore] = useState<[number, number]>([0, 0]);
   const [powers, setPowers] = useState<{ kind: string; team: Team; left: number }[]>([]);
   const [over, setOver] = useState<{ winner: Team } | null>(null);
-  const [peers, setPeers] = useState(0);
+  const [wire, setWire] = useState<{ peers: number; relayed: number; rtt: number; stalled: boolean }>({
+    peers: 0,
+    relayed: 0,
+    rtt: 0,
+    stalled: false,
+  });
   const [touch, setTouch] = useState(false);
 
   const online = Boolean(config.roomId && config.uid);
@@ -134,6 +164,23 @@ export default function MatchView({
   /** Written by the touch pad, read by the render loop. Never causes a render. */
   const padRef = useRef<PadState>({ left: false, right: false, jump: false });
   const remoteInputs = useRef(new Map<string, Input>());
+  /**
+   * When each remote seat was last heard from, and the newest packet it sent.
+   *
+   * The channel is unordered — that is what keeps it from stalling to
+   * retransmit a position that is already stale — so a packet that arrives out
+   * of order has to be recognised and dropped rather than believed.
+   */
+  const heardAt = useRef(new Map<string, number>());
+  const heardSeq = useRef(new Map<string, number>());
+  /** The roster as of this render, for the connection to read when it opens. */
+  const peopleRef = useRef(config.people);
+  peopleRef.current = config.people;
+  /** `performance.now()` of the last snapshot from the host. Guests only. */
+  const lastSnapshotAt = useRef(performance.now());
+  /** Whether a snapshot has ever arrived, which is a different thing entirely. */
+  const heardHost = useRef(false);
+  const stalledRef = useRef(false);
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
 
@@ -254,9 +301,14 @@ export default function MatchView({
 
     let raf = 0;
     let last = performance.now();
+    // Nobody has been heard from yet at kick-off, and a seat must not be handed
+    // to a bot for that. The clock on every remote seat starts here.
+    const mountedAt = last;
+    lastSnapshotAt.current = last;
     let sinceSnapshot = 0;
-    let sinceInput = 0;
+    let sinceBody = 0;
     let seq = 0;
+    let lastSent = -1;
 
     const frame = (now: number) => {
       raf = requestAnimationFrame(frame);
@@ -279,24 +331,101 @@ export default function MatchView({
       });
       // Remote seats keep their last known input until a newer packet lands.
       // Zeroing them between packets makes every other player stutter.
-      for (const [id, input] of remoteInputs.current) if (!inputs.has(id)) inputs.set(id, input);
+      //
+      // Up to a point: a seat nobody has heard from in a second and a half is
+      // not still holding the key down, it is gone, and simulating it sprinting
+      // into the wall for the rest of the match is worse than standing it up.
+      const quietAt = now - QUIET_MS;
+      for (const [id, input] of remoteInputs.current) {
+        if (inputs.has(id)) continue;
+        inputs.set(id, (heardAt.current.get(id) ?? 0) > quietAt ? input : NO_INPUT);
+      }
+      // Host only. A guest hears about everyone else through the host's
+      // snapshots, never directly, so silence from a peer says nothing at all
+      // about whether that player is still there — and acting on it would hand
+      // the host's own character to a bot while the match ran perfectly.
+      if (online && engine.isHost) {
+        for (const seat of seats) {
+          if (seat.control !== 'remote') continue;
+          const heard = heardAt.current.get(seat.id) ?? mountedAt;
+          if (now - heard > DROPPED_MS) {
+            engine.handOverToAI(seat.id);
+            engine.forget(seat.id);
+            remoteInputs.current.delete(seat.id);
+          }
+        }
+      }
 
       engine.update(dt, inputs);
       engine.render(ctx, q);
 
-      if (online && meshRef.current) {
-        if (isHost) {
+      if (online && linkRef.current) {
+        const link = linkRef.current;
+        if (engine.isHost) {
           sinceSnapshot += dt;
-          if (sinceSnapshot >= 1 / 20) {
+          if (sinceSnapshot >= 1 / BALANCE.SNAPSHOT_HZ) {
             sinceSnapshot = 0;
-            meshRef.current.broadcast(engine.snapshot());
+            link.send(engine.snapshot(), true);
           }
         } else {
-          sinceInput += dt;
-          if (sinceInput >= 1 / 30) {
-            sinceInput = 0;
-            const mine = inputs.get(config.localIds[0]) ?? NO_INPUT;
-            meshRef.current.broadcast({ t: 'i', d: packInput(mine), n: ++seq });
+          sinceBody += dt;
+          const mine = inputs.get(config.localIds[0]) ?? NO_INPUT;
+          const bits = packInput(mine);
+          // Sent on the frame the key changes, not on the next tick of a timer.
+          // A fixed 30Hz send adds up to 33ms of pure waiting to every single
+          // press, on top of the trip itself, and it is the kind of delay a
+          // player feels without being able to name.
+          if (bits !== lastSent || sinceBody >= 1 / BALANCE.BODY_HZ) {
+            sinceBody = 0;
+            lastSent = bits;
+            const body = engine.bodyPacket(config.localIds[0]);
+            if (body) {
+              link.send(
+                {
+                  t: 'b',
+                  d: body,
+                  i: bits,
+                  ts: Date.now(),
+                  n: ++seq,
+                  k: engine.lastAppliedTick,
+                } satisfies BodyMessage,
+                true,
+              );
+            }
+          }
+        }
+
+        // A host that has gone quiet is not a slow host. Nobody but the host
+        // can score, serve or spawn, so a guest left waiting on one is watching
+        // a frozen court — which is exactly what "multiplayer doesn't work"
+        // looked like from the other side.
+        if (!engine.isHost) {
+          const quiet = (now - lastSnapshotAt.current) / 1000;
+          // "Reconnecting" is only honest once there was a connection. Before
+          // the first snapshot the badge already says we are still connecting.
+          const stalled = heardHost.current && quiet > BALANCE.STALL_WARN;
+          if (stalled !== stalledRef.current) {
+            stalledRef.current = stalled;
+            setWire((w) => ({ ...w, stalled }));
+          }
+          // Opening a data channel can legitimately take a couple of tries, so
+          // a match that has not started yet is given twice as long as one that
+          // was running a moment ago.
+          const patience = heardHost.current ? BALANCE.STALL_PROMOTE : BALANCE.STALL_PROMOTE * 2;
+          if (quiet > patience) {
+            console.warn('[net] host silent for', quiet.toFixed(1), 's — running the match here');
+            engine.promote();
+            lastSnapshotAt.current = now;
+            stalledRef.current = false;
+            setWire((w) => ({ ...w, stalled: false }));
+            // Anyone we cannot hear either gets a bot, so the match has an
+            // opponent rather than a statue. The seat goes straight back to
+            // them if they turn up again.
+            for (const seat of seats) {
+              if (seat.control === 'remote' && (heardAt.current.get(seat.id) ?? 0) < now - QUIET_MS) {
+                engine.handOverToAI(seat.id);
+              }
+            }
           }
         }
       }
@@ -320,8 +449,20 @@ export default function MatchView({
       window.removeEventListener('orientationchange', fit);
       engineRef.current = null;
     };
+    // `isHost` is deliberately not a dependency. The lobby can elect a new host
+    // mid-match — the platform does exactly that when a host walks away — and
+    // rebuilding the engine for it would throw away the score along with the
+    // rally in progress. Authority is handed over in place instead; see below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [seats, isHost, online]);
+  }, [seats, online]);
+
+  /** Follows the lobby's choice of host without disturbing the match. */
+  useEffect(() => {
+    const engine = engineRef.current;
+    if (!engine || !online) return;
+    if (isHost) engine.promote();
+    else engine.demote();
+  }, [isHost, online]);
 
   // ── the wire ─────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -329,42 +470,84 @@ export default function MatchView({
     const uid = config.uid;
     if (!online || !roomId || !uid) return;
 
-    // The mesh drags in the Firebase SDK for its signalling, so it is fetched
+    // The wire drags in the Firebase SDK for its signalling, so it is fetched
     // only now — on the online path — rather than by every solo player. See the
     // import comment in App.tsx.
     let disposed = false;
-    let mesh: Mesh | null = null;
+    let link: Link | null = null;
     let leave: (() => void) | undefined;
 
-    void import('../net/mesh')
-      .then(({ Mesh }) => {
+    void import('../net/link')
+      .then(({ Link }) => {
         // The match can be left while this import is still in flight; without
         // this guard the connection would open with nothing left to close it.
         if (disposed) return;
 
-        mesh = new Mesh(
+        link = new Link(
           roomId,
           uid,
-          (from, raw) => {
-            const msg = raw as NetMessage;
+          (from, msg) => {
             const engine = engineRef.current;
             if (!engine) return;
+            // Half the round trip: how long this packet has been travelling,
+            // and therefore how far its contents have to be run forward before
+            // they describe the present.
+            const lag = (link?.rttTo(from) ?? 0) / 2000;
 
-            if (msg.t === 's' && !isHost) {
-              engine.applySnapshot(msg as Snapshot);
-            } else if (msg.t === 'i' && isHost) {
-              remoteInputs.current.set(from, unpackInput(msg.d));
-            } else if (msg.t === 'bye') {
-              remoteInputs.current.delete(msg.id);
-              engine.handOverToAI(msg.id);
+            switch (msg.t) {
+              case 's':
+                // A snapshot from the room's real host, while we are running
+                // the match ourselves, means it came back. Stand down: two
+                // machines scoring the same rally is worse than a pause was.
+                if (engine.isHost && !isHost && from === config.hostId) {
+                  console.warn('[net] host is back — handing the match back');
+                  engine.demote();
+                  // Their character was handed to a bot while they were gone.
+                  engine.reclaim(from);
+                }
+                if (engine.isHost) break;
+                lastSnapshotAt.current = performance.now();
+                heardHost.current = true;
+                if (stalledRef.current) {
+                  stalledRef.current = false;
+                  setWire((w) => ({ ...w, stalled: false }));
+                }
+                engine.applySnapshot(msg as Snapshot, lag);
+                break;
+              case 'b':
+                // A guest's own account of itself. The input rides along so the
+                // host can keep simulating it between packets.
+                if (isStale(heardSeq.current.get(from), msg.n)) break;
+                heardSeq.current.set(from, msg.n);
+                heardAt.current.set(from, performance.now());
+                // Back from a dropout: their seat is theirs again.
+                engine.reclaim(from);
+                remoteInputs.current.set(from, unpackInput(msg.i));
+                engine.applyBody(from, msg.d, msg.k, lag);
+                break;
+              case 'i':
+                heardAt.current.set(from, performance.now());
+                remoteInputs.current.set(from, unpackInput(msg.d));
+                break;
+              case 'bye':
+                remoteInputs.current.delete(msg.id);
+                engine.forget(msg.id);
+                engine.handOverToAI(msg.id);
+                break;
             }
           },
-          (connected) => setPeers(connected.length),
+          (status: LinkStatus) =>
+            setWire((w) => ({
+              ...w,
+              peers: status.direct.length,
+              relayed: status.relayed.length,
+              rtt: Math.round(status.rtt),
+            })),
         );
-        meshRef.current = mesh;
-        mesh.setPeers(config.people.map((p) => p.uid));
+        linkRef.current = link;
+        link.setPeers(peopleRef.current.map((p) => p.uid));
 
-        leave = () => mesh?.broadcast({ t: 'bye', id: uid });
+        leave = () => link?.send({ t: 'bye', id: uid });
         window.addEventListener('pagehide', leave);
       })
       .catch((e) => console.error('Could not open the connection', e));
@@ -375,20 +558,37 @@ export default function MatchView({
         window.removeEventListener('pagehide', leave);
         leave();
       }
-      mesh?.close();
-      meshRef.current = null;
+      link?.close();
+      linkRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [online, config.roomId, config.uid, isHost]);
+  }, [online, config.roomId, config.uid]);
 
-  // A player who vanishes from the lobby hands their character to a bot rather
-  // than leaving it standing in the sand for the rest of the match.
+  /**
+   * Keeps the connection set in step with the room.
+   *
+   * This is the one that mattered most. The peer list used to be handed over
+   * exactly once, in the callback of a dynamic import, and never again — so a
+   * roster that changed by so much as a re-render after the match began left
+   * the mesh connecting to nobody, with no error anywhere to say so. A player
+   * who joined, left and came back, or simply arrived while the import was
+   * still in flight, was invisible for the rest of the match.
+   *
+   * A player who vanishes from the lobby hands their character to a bot rather
+   * than leaving it standing in the sand for the rest of the match.
+   */
   useEffect(() => {
+    if (!online) return;
+    linkRef.current?.setPeers(config.people.map((p) => p.uid));
+
     const engine = engineRef.current;
-    if (!engine || !online) return;
+    if (!engine) return;
     const present = new Set(config.people.map((p) => p.uid));
     for (const seat of seats) {
-      if (seat.control === 'remote' && !present.has(seat.id)) engine.handOverToAI(seat.id);
+      if (seat.control === 'remote' && !present.has(seat.id)) {
+        engine.forget(seat.id);
+        engine.handOverToAI(seat.id);
+      }
     }
   }, [config.people, seats, online]);
 
@@ -449,10 +649,22 @@ export default function MatchView({
         {online && (
           <div
             className="flex items-center gap-1.5 rounded-2xl border border-white/20 bg-black/45 px-3 py-2 text-xs font-bold text-white backdrop-blur-md"
-            title={peers > 0 ? `${peers} peer(s) connected` : 'Connecting to the other players…'}
+            title={
+              wire.peers + wire.relayed === 0
+                ? 'Connecting to the other players…'
+                : `${wire.peers} direct, ${wire.relayed} relayed · ${wire.rtt}ms round trip`
+            }
           >
-            {peers > 0 ? <Wifi className="h-4 w-4 text-emerald-400" /> : <WifiOff className="h-4 w-4 text-amber-400" />}
-            {isHost ? 'host' : 'guest'}
+            {wire.peers + wire.relayed > 0 ? (
+              <Wifi className={`h-4 w-4 ${wire.relayed > 0 ? 'text-amber-300' : 'text-emerald-400'}`} />
+            ) : (
+              <WifiOff className="h-4 w-4 text-rose-400" />
+            )}
+            {/* The number players actually want during a competitive match is
+                the round trip, not a peer count. It appears as soon as there is
+                one to show. */}
+            {wire.rtt > 0 ? `${wire.rtt}ms` : isHost ? 'host' : 'guest'}
+            {wire.stalled && <span className="text-amber-300">· reconnecting</span>}
           </div>
         )}
         <button

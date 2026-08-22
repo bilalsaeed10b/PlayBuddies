@@ -163,18 +163,49 @@ export type PlayerPacket = [
   vy: number,
   r: number,
   flags: number,
+  /**
+   * What that character is pressing, as packInput.
+   *
+   * Four bytes that buy more than any amount of smoothing: with them a guest
+   * runs everyone else through the real movement code instead of coasting them
+   * along their last known velocity, so a player who stops, turns or jumps is
+   * seen doing it rather than seen sliding until the next packet says otherwise.
+   */
+  input: number,
 ];
 
 export type BallPacket = [x: number, y: number, vx: number, vy: number, spin: number];
+
+/**
+ * One body, as its *owner* sees it.
+ *
+ * Same six numbers as a PlayerPacket, and deliberately so: a guest describes
+ * itself to the host in exactly the language the host describes everyone in.
+ */
+export type BodyPacket = PlayerPacket;
+
+/** Bit positions inside the flags byte of a PlayerPacket / BodyPacket. */
+export const F_GROUND = 1;
+export const F_FACING = 2;
+export const F_DASH = 4;
 
 export type PowerPacket = [kind: PowerKind, team: Team, left: number];
 
 export type FloatPacket = [kind: PowerKind, x: number, y: number];
 
-/** Host → everyone, 20 times a second. */
+/** Host → everyone, SNAPSHOT_HZ times a second. */
 export interface Snapshot {
   t: 's';
   n: number;
+  /**
+   * The host's clock when this was built, in ms.
+   *
+   * Not used as a clock — the two machines never agree on one. It is used as a
+   * *stopwatch*: the receiver measures how long the packet spent in flight from
+   * its own round-trip estimate and runs the contents forward by that much, so
+   * what it draws is where the ball is now rather than where it was.
+   */
+  ts: number;
   b: BallPacket;
   /** Keyed by player id so a seat re-order can never scramble the court. */
   p: Record<string, PlayerPacket>;
@@ -188,10 +219,44 @@ export interface Snapshot {
   sv: Team;
 }
 
+/**
+ * Guest → host: where I am, what I am pressing, and when I said so.
+ *
+ * The body and the input travel together in one packet because the host needs
+ * both: the body to place the character exactly, the input to keep simulating
+ * it between packets instead of freezing it until the next one lands.
+ */
+export interface BodyMessage {
+  t: 'b';
+  /** The sender's own body. */
+  d: BodyPacket;
+  /** Input bitmask, as packInput. */
+  i: number;
+  /** Sender's clock in ms, for the same stopwatch trick as Snapshot.ts. */
+  ts: number;
+  /** Monotonic sequence. The channel is unordered, so stale packets are dropped. */
+  n: number;
+  /**
+   * The last snapshot tick this sender had applied.
+   *
+   * How the host dates a claim without the two machines sharing a clock: a
+   * body described before the court was reset is describing the last rally.
+   */
+  k: number;
+}
+
 export type NetMessage =
   | Snapshot
+  | BodyMessage
   /** Client → host: input bitmask plus a sequence number. */
   | { t: 'i'; d: number; n: number }
+  /**
+   * Round-trip probe, and its echo. `n` is the prober's clock in ms, and `to`
+   * is who the echo belongs to — the relay carries it to the whole room, and
+   * only the machine that sent the probe can read that number as a time.
+   */
+  | { t: 'q'; n: number }
+  | { t: 'a'; n: number; to: string }
   /** Host → everyone: a point was scored, with the shout to display. */
   | { t: 'pt'; team: Team; sc: [number, number]; call: string }
   /** Anyone → everyone: I am leaving, hand my seat to the AI. */

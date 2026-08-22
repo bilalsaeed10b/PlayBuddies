@@ -18,18 +18,59 @@ import { rtdb, dbRef, dbSet, dbPush, dbOnValue, dbOnDisconnect, dbRemove } from 
  *
  * Offer/answer roles are decided by comparing uids, so both sides independently
  * agree on who calls whom and glare never happens.
+ *
+ * **A failed handshake is not the end of it.** With only STUN and no TURN, a
+ * first attempt across two unhelpful NATs fails often enough that "multiplayer
+ * doesn't work" was the normal experience rather than the rare one. Every peer
+ * now retries with backoff, forever, and each attempt tears the old connection
+ * down and negotiates a genuinely new one. The watcher that reads the other
+ * side's signalling outlives those attempts, so a peer that restarts on its own
+ * is noticed and answered rather than ignored.
  */
 
 const ICE_SERVERS: RTCIceServer[] = [
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun1.l.google.com:19302' },
+  { urls: 'stun:stun.cloudflare.com:3478' },
 ];
 
-interface Peer {
+/** Retry backoff, in ms, indexed by attempt. The last entry repeats. */
+const BACKOFF = [700, 1500, 3000, 5000, 8000];
+
+/** How long a connection may sit in `disconnected` before it is rebuilt. */
+const DISCONNECT_GRACE = 3500;
+
+/**
+ * How long an attempt gets to open its channel before it is written off.
+ *
+ * Waiting for `connectionState === 'failed'` is not good enough on its own:
+ * ICE can sit in `checking` for the better part of a minute before the browser
+ * admits defeat, and a player staring at a dead court for that long has already
+ * quit. This is also what covers the asymmetric case, where our side of the
+ * handshake is fine and the other side quietly gave up.
+ */
+const OPEN_DEADLINE = 9000;
+
+interface Attempt {
   pc: RTCPeerConnection;
   dc: RTCDataChannel;
-  stop: () => void;
+  /** Candidates from the other side that this attempt has already taken. */
   seen: Set<string>;
+  dead: boolean;
+  /** Fires if the channel never opens. Cleared the moment it does. */
+  deadline: number | null;
+}
+
+interface Peer {
+  /** The live negotiation, replaced wholesale on every retry. */
+  attempt: Attempt | null;
+  /** Stops the signalling watcher. Outlives individual attempts. */
+  unwatch: () => void;
+  /** Their last description this peer has acted on, to spot a restart. */
+  lastDesc: string | null;
+  tries: number;
+  retryTimer: number | null;
+  graceTimer: number | null;
 }
 
 export class Mesh {
@@ -56,26 +97,35 @@ export class Mesh {
 
     for (const [id, peer] of this.peers) {
       if (!wanted.has(id)) {
-        peer.stop();
+        this.teardown(id, peer);
         this.peers.delete(id);
         this.announce();
       }
     }
     for (const id of wanted) {
-      if (!this.peers.has(id)) this.connect(id);
+      if (!this.peers.has(id)) this.open(id);
     }
   }
 
   get connectedPeers(): string[] {
-    return [...this.peers.entries()].filter(([, p]) => p.dc.readyState === 'open').map(([id]) => id);
+    return [...this.peers.entries()]
+      .filter(([, p]) => p.attempt?.dc.readyState === 'open')
+      .map(([id]) => id);
+  }
+
+  /** Peers we are still trying to reach. The caller relays for these. */
+  get pendingPeers(): string[] {
+    return [...this.peers.entries()]
+      .filter(([, p]) => p.attempt?.dc.readyState !== 'open')
+      .map(([id]) => id);
   }
 
   broadcast(msg: unknown) {
     const data = JSON.stringify(msg);
     for (const peer of this.peers.values()) {
-      if (peer.dc.readyState === 'open') {
+      if (peer.attempt?.dc.readyState === 'open') {
         try {
-          peer.dc.send(data);
+          peer.attempt.dc.send(data);
         } catch {
           /* channel closed between the check and the send */
         }
@@ -83,19 +133,20 @@ export class Mesh {
     }
   }
 
-  sendTo(id: string, msg: unknown) {
-    const peer = this.peers.get(id);
-    if (peer?.dc.readyState !== 'open') return;
+  sendTo(id: string, msg: unknown): boolean {
+    const dc = this.peers.get(id)?.attempt?.dc;
+    if (dc?.readyState !== 'open') return false;
     try {
-      peer.dc.send(JSON.stringify(msg));
+      dc.send(JSON.stringify(msg));
+      return true;
     } catch {
-      /* ignore */
+      return false;
     }
   }
 
   close() {
     this.closed = true;
-    for (const peer of this.peers.values()) peer.stop();
+    for (const [id, peer] of this.peers) this.teardown(id, peer);
     this.peers.clear();
     dbRemove(dbRef(rtdb, `signaling/${this.roomId}/${this.selfId}`)).catch(() => {});
   }
@@ -104,12 +155,108 @@ export class Mesh {
     this.onPeersChanged?.(this.connectedPeers);
   }
 
-  private connect(peerId: string) {
-    const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+  private teardown(id: string, peer: Peer) {
+    peer.unwatch();
+    this.killAttempt(peer);
+    if (peer.retryTimer !== null) clearTimeout(peer.retryTimer);
+    if (peer.graceTimer !== null) clearTimeout(peer.graceTimer);
+    dbRemove(dbRef(rtdb, `signaling/${this.roomId}/${this.selfId}/${id}`)).catch(() => {});
+  }
 
+  private killAttempt(peer: Peer) {
+    const a = peer.attempt;
+    if (!a) return;
+    a.dead = true;
+    peer.attempt = null;
+    if (a.deadline !== null) clearTimeout(a.deadline);
+    try {
+      a.dc.close();
+    } catch {
+      /* already gone */
+    }
+    try {
+      a.pc.close();
+    } catch {
+      /* already gone */
+    }
+  }
+
+  /**
+   * Starts watching a peer, and keeps watching it for as long as it is in the
+   * room. Individual connection attempts come and go underneath this.
+   */
+  private open(peerId: string) {
+    // Lower uid calls, higher uid answers. Both sides compute the same answer
+    // from data they already have, so no coordination round trip is needed.
+    const iCall = this.selfId < peerId;
+    const theirsRef = dbRef(rtdb, `signaling/${this.roomId}/${peerId}/${this.selfId}`);
+
+    const peer: Peer = {
+      attempt: null,
+      unwatch: () => {},
+      lastDesc: null,
+      tries: 0,
+      retryTimer: null,
+      graceTimer: null,
+    };
+    this.peers.set(peerId, peer);
+
+    peer.unwatch = dbOnValue(theirsRef, (snap) => {
+      const data = snap.val() as
+        | { desc?: RTCSessionDescriptionInit; candidates?: Record<string, string> }
+        | null;
+      if (this.closed || this.peers.get(peerId) !== peer) return;
+      if (!data?.desc) return;
+
+      const sdp = data.desc.sdp ?? '';
+      if (sdp !== peer.lastDesc) {
+        peer.lastDesc = sdp;
+        if (!iCall) {
+          // Their offer — and every offer is a fresh session, including the one
+          // that arrives because *they* gave up on the last attempt. Answering
+          // it on the old connection is what used to leave one side happily
+          // "connected" to a peer that had already moved on.
+          this.attempt(peerId, peer, false, data.desc);
+        } else if (peer.attempt && peer.attempt.pc.signalingState === 'have-local-offer') {
+          void peer.attempt.pc
+            .setRemoteDescription(new RTCSessionDescription(data.desc))
+            .catch((err) => console.error('[mesh] answer rejected by', peerId, err));
+        }
+      }
+
+      this.takeCandidates(peer, data.candidates);
+    });
+
+    if (iCall) this.attempt(peerId, peer, true);
+  }
+
+  private takeCandidates(peer: Peer, candidates?: Record<string, string> | null) {
+    const a = peer.attempt;
+    if (!a || !candidates) return;
+    for (const raw of Object.values(candidates)) {
+      if (a.seen.has(raw)) continue;
+      a.seen.add(raw);
+      try {
+        a.pc.addIceCandidate(new RTCIceCandidate(JSON.parse(raw))).catch(() => {});
+      } catch {
+        /* malformed candidate — skip */
+      }
+    }
+  }
+
+  /** One connection attempt. Replaces whatever was there before. */
+  private attempt(peerId: string, peer: Peer, iCall: boolean, offer?: RTCSessionDescriptionInit) {
+    if (this.closed) return;
+    this.killAttempt(peer);
+    if (peer.graceTimer !== null) {
+      clearTimeout(peer.graceTimer);
+      peer.graceTimer = null;
+    }
+
+    const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
     // Pre-negotiated channel: both sides create it with the same id, so there
     // is no ondatachannel race to lose.
-    const dc = pc.createDataChannel('fish', {
+    const dc = pc.createDataChannel('play', {
       negotiated: true,
       id: 0,
       // Position updates are worthless the moment a newer one exists, so drop
@@ -117,13 +264,33 @@ export class Mesh {
       ordered: false,
       maxRetransmits: 0,
     });
+    const a: Attempt = { pc, dc, seen: new Set(), dead: false, deadline: null };
+    peer.attempt = a;
+    a.deadline = window.setTimeout(() => {
+      a.deadline = null;
+      if (!a.dead && dc.readyState !== 'open') this.retry(peerId, peer, iCall);
+    }, OPEN_DEADLINE);
 
-    const seen = new Set<string>();
     const mineRef = dbRef(rtdb, `signaling/${this.roomId}/${this.selfId}/${peerId}`);
-    const theirsRef = dbRef(rtdb, `signaling/${this.roomId}/${peerId}/${this.selfId}`);
+    // A retry must not inherit the previous attempt's candidates: they point at
+    // ports that are already closed, and the other side would spend its whole
+    // ICE budget on them.
+    dbRemove(mineRef).catch(() => {});
 
-    dc.onopen = () => this.announce();
-    dc.onclose = () => this.announce();
+    dc.onopen = () => {
+      if (a.dead) return;
+      peer.tries = 0;
+      if (a.deadline !== null) {
+        clearTimeout(a.deadline);
+        a.deadline = null;
+      }
+      this.announce();
+    };
+    dc.onclose = () => {
+      if (a.dead) return;
+      this.announce();
+      this.retry(peerId, peer, iCall);
+    };
     dc.onmessage = (e) => {
       try {
         this.onMessage(peerId, JSON.parse(e.data));
@@ -133,81 +300,84 @@ export class Mesh {
     };
 
     pc.onicecandidate = (e) => {
-      if (!e.candidate) return;
-      dbPush(dbRef(rtdb, `signaling/${this.roomId}/${this.selfId}/${peerId}/candidates`),
-        JSON.stringify(e.candidate.toJSON()))
+      if (!e.candidate || a.dead) return;
+      dbPush(
+        dbRef(rtdb, `signaling/${this.roomId}/${this.selfId}/${peerId}/candidates`),
+        JSON.stringify(e.candidate.toJSON()),
+      )
         // Loud on purpose. A permission error here means the database rules
         // were never deployed, and the symptom players see is "multiplayer
         // doesn't work" with nothing in the console to explain it.
         .catch((err) => console.error('[mesh] could not publish ICE candidate:', err));
     };
 
-    // Lower uid calls, higher uid answers. Both sides compute the same answer
-    // from data they already have, so no coordination round trip is needed.
-    const iCall = this.selfId < peerId;
-
-    const applyCandidates = (candidates?: Record<string, string> | null) => {
-      if (!candidates) return;
-      for (const raw of Object.values(candidates)) {
-        if (seen.has(raw)) continue;
-        seen.add(raw);
-        try {
-          pc.addIceCandidate(new RTCIceCandidate(JSON.parse(raw))).catch(() => {});
-        } catch {
-          /* malformed candidate — skip */
+    pc.onconnectionstatechange = () => {
+      if (a.dead) return;
+      const state = pc.connectionState;
+      if (state === 'failed') {
+        this.retry(peerId, peer, iCall);
+      } else if (state === 'disconnected') {
+        // Usually a blip. Give it a moment to come back on its own before
+        // paying for a whole new handshake.
+        if (peer.graceTimer === null) {
+          peer.graceTimer = window.setTimeout(() => {
+            peer.graceTimer = null;
+            if (!a.dead && pc.connectionState !== 'connected') this.retry(peerId, peer, iCall);
+          }, DISCONNECT_GRACE);
         }
+      } else if (state === 'connected' && peer.graceTimer !== null) {
+        clearTimeout(peer.graceTimer);
+        peer.graceTimer = null;
       }
     };
 
-    const unsub = dbOnValue(theirsRef, async (snap) => {
-      const data = snap.val() as { desc?: RTCSessionDescriptionInit; candidates?: Record<string, string> } | null;
-      if (!data) return;
+    void (async () => {
       try {
-        if (data.desc) {
-          if (iCall && pc.signalingState === 'have-local-offer') {
-            await pc.setRemoteDescription(new RTCSessionDescription(data.desc));
-          } else if (!iCall && pc.signalingState === 'stable' && !pc.currentRemoteDescription) {
-            await pc.setRemoteDescription(new RTCSessionDescription(data.desc));
-            const answer = await pc.createAnswer();
-            await pc.setLocalDescription(answer);
-            await dbSet(dbRef(rtdb, `signaling/${this.roomId}/${this.selfId}/${peerId}/desc`), {
-              type: answer.type,
-              sdp: answer.sdp,
-            });
-          }
+        if (iCall) {
+          const local = await pc.createOffer();
+          if (a.dead) return;
+          await pc.setLocalDescription(local);
+          await dbSet(dbRef(rtdb, `signaling/${this.roomId}/${this.selfId}/${peerId}/desc`), {
+            type: local.type,
+            sdp: local.sdp,
+          });
+        } else if (offer) {
+          await pc.setRemoteDescription(new RTCSessionDescription(offer));
+          if (a.dead) return;
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+          await dbSet(dbRef(rtdb, `signaling/${this.roomId}/${this.selfId}/${peerId}/desc`), {
+            type: answer.type,
+            sdp: answer.sdp,
+          });
         }
-        applyCandidates(data.candidates);
       } catch (err) {
         console.error('[mesh] negotiation failed with', peerId, err);
+        this.retry(peerId, peer, iCall);
       }
-    });
+    })();
+  }
 
-    if (iCall) {
-      (async () => {
-        try {
-          const offer = await pc.createOffer();
-          await pc.setLocalDescription(offer);
-          await dbSet(dbRef(rtdb, `signaling/${this.roomId}/${this.selfId}/${peerId}/desc`), {
-            type: offer.type,
-            sdp: offer.sdp,
-          });
-        } catch (err) {
-          console.error('[mesh] offer failed for', peerId, err);
-        }
-      })();
-    }
+  /**
+   * Schedules another attempt.
+   *
+   * Only the caller side re-offers. If the answerer gave up first it simply
+   * waits: the caller's next offer is a new description, and the watcher above
+   * turns that into a fresh attempt on this side too.
+   */
+  private retry(peerId: string, peer: Peer, iCall: boolean) {
+    if (this.closed || this.peers.get(peerId) !== peer || peer.retryTimer !== null) return;
+    this.killAttempt(peer);
+    this.announce();
+    if (!iCall) return;
 
-    const stop = () => {
-      unsub();
-      try {
-        dc.close();
-      } catch {
-        /* already gone */
-      }
-      pc.close();
-      dbRemove(mineRef).catch(() => {});
-    };
-
-    this.peers.set(peerId, { pc, dc, stop, seen });
+    const wait = BACKOFF[Math.min(peer.tries, BACKOFF.length - 1)];
+    peer.tries++;
+    peer.retryTimer = window.setTimeout(() => {
+      peer.retryTimer = null;
+      if (this.closed || this.peers.get(peerId) !== peer) return;
+      peer.lastDesc = null;
+      this.attempt(peerId, peer, true);
+    }, wait);
   }
 }

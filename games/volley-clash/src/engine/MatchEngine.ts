@@ -22,7 +22,11 @@ import type { Quality } from '../game/quality';
 import {
   ActivePower,
   Ball,
+  BodyPacket,
   Control,
+  F_DASH,
+  F_FACING,
+  F_GROUND,
   FloatingPower,
   Input,
   NO_INPUT,
@@ -31,6 +35,8 @@ import {
   PowerKind,
   Snapshot,
   Team,
+  packInput,
+  unpackInput,
 } from '../types/game';
 
 export interface Seat {
@@ -57,6 +63,23 @@ export interface EngineConfig {
   onWhistle?: () => void;
 }
 
+/**
+ * One body as the machine that owns it last described it, dead-reckoned
+ * forward. `age` is how far it has already been run past the packet it came
+ * from, so a target for a peer that has gone quiet can be frozen rather than
+ * extrapolated into the next county.
+ */
+interface TargetBody {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  r: number;
+  onGround: boolean;
+  facing: 1 | -1;
+  age: number;
+}
+
 interface Particle {
   x: number;
   y: number;
@@ -69,6 +92,133 @@ interface Particle {
 }
 
 const POWER_KINDS: PowerKind[] = ['rocket', 'feather', 'giant', 'freeze'];
+
+/** What the ball ran into during one step. The caller decides what it means. */
+interface BallEvents {
+  /** x of the wall it bounced off, or null. */
+  wallX: number | null;
+  net: boolean;
+  floor: boolean;
+  /** True when the floor contact still had enough speed left to bounce. */
+  hopped: boolean;
+}
+
+/**
+ * The ball's physics, and nothing else.
+ *
+ * Pulled out of the engine so the *predicted* ball — the host's last word, run
+ * forward by however long the packet spent in flight — travels through exactly
+ * the same arithmetic as the real one. A second, approximate integrator for
+ * network use would be a second set of bugs, and the two would disagree
+ * precisely when it matters: at speed, near the floor.
+ */
+function integrateBall(b: Ball, dt: number, gravity: number, arena: Arena): BallEvents {
+  const { w, floor, netX, netW, netTop } = arena;
+  const R = BALANCE.BALL_R;
+  const events: BallEvents = { wallX: null, net: false, floor: false, hopped: false };
+
+  b.vy += gravity * dt;
+
+  // Magnus: spin pushes the ball perpendicular to its travel. Small, but it
+  // is what makes a hit taken on the run curve rather than fly straight.
+  //
+  // Rotating the velocity vector is the whole implementation, and it has to
+  // be exactly that — a rotation preserves speed, so spin can only ever
+  // redirect the ball, never speed it up or hold it against gravity. See
+  // MAGNUS_TURN for what happened when this was written as two sequential
+  // component updates instead.
+  if (b.spin !== 0) {
+    const theta = BALANCE.MAGNUS_TURN * b.spin * dt;
+    const cos = Math.cos(theta);
+    const sin = Math.sin(theta);
+    const vx = b.vx;
+    const vy = b.vy;
+    b.vx = vx * cos - vy * sin;
+    b.vy = vx * sin + vy * cos;
+    b.spin *= Math.pow(BALANCE.SPIN_DECAY, dt);
+  }
+
+  const speed = Math.hypot(b.vx, b.vy);
+  if (speed > BALANCE.BALL_MAX_SPEED) {
+    const k = BALANCE.BALL_MAX_SPEED / speed;
+    b.vx *= k;
+    b.vy *= k;
+  }
+
+  b.x += b.vx * dt;
+  b.y += b.vy * dt;
+
+  if (b.x < R) {
+    b.x = R;
+    b.vx = Math.abs(b.vx) * BALANCE.WALL_BOUNCE;
+    events.wallX = R;
+  } else if (b.x > w - R) {
+    b.x = w - R;
+    b.vx = -Math.abs(b.vx) * BALANCE.WALL_BOUNCE;
+    events.wallX = w - R;
+  }
+  if (b.y < R) {
+    b.y = R;
+    b.vy = Math.abs(b.vy) * BALANCE.WALL_BOUNCE;
+  }
+
+  // Net: a solid bar, not a plane. Clipping the tape and dribbling over is a
+  // real outcome and it is the best moment the game has.
+  const nx = clamp(b.x, netX - netW / 2, netX + netW / 2);
+  const ny = clamp(b.y, netTop, floor);
+  const dx = b.x - nx;
+  const dy = b.y - ny;
+  const d = Math.hypot(dx, dy);
+  if (d < R && d > 0.0001) {
+    const push = (R - d) / d;
+    b.x += dx * push;
+    b.y += dy * push;
+    const nrmX = dx / d;
+    const nrmY = dy / d;
+    const dot = b.vx * nrmX + b.vy * nrmY;
+    b.vx = (b.vx - 2 * dot * nrmX) * BALANCE.NET_BOUNCE;
+    b.vy = (b.vy - 2 * dot * nrmY) * BALANCE.NET_BOUNCE;
+    events.net = true;
+  }
+
+  if (b.y >= floor - R) {
+    b.y = floor - R;
+    events.floor = true;
+    if (b.vy > 80) {
+      b.vy = -Math.abs(b.vy) * BALANCE.FLOOR_BOUNCE;
+      b.vx *= 0.92;
+      events.hopped = true;
+    } else {
+      b.vy = 0;
+      b.vx *= 0.8;
+    }
+  }
+
+  return events;
+}
+
+/**
+ * A body, run forward on nothing but its own momentum.
+ *
+ * Used for characters somebody else owns, between the packets that describe
+ * them. No input is guessed and no friction is applied: a running player keeps
+ * running, a jumping player keeps falling, and the correction that follows
+ * cleans up the difference. Guessing that they let go of the key is what makes
+ * a remote character judder every time a packet lands.
+ */
+function driftBody(t: TargetBody, dt: number, floor: number) {
+  t.x += t.vx * dt;
+  if (!t.onGround) {
+    t.vy += BALANCE.PLAYER_GRAVITY * dt;
+    t.y += t.vy * dt;
+    if (t.y >= floor) {
+      t.y = floor;
+      t.vy = 0;
+      t.onGround = true;
+    }
+  }
+  t.age += dt;
+}
 
 export class MatchEngine {
   readonly arena: Arena;
@@ -108,14 +258,51 @@ export class MatchEngine {
   private offX = 0;
   private offY = 0;
 
-  /** Targets from the newest snapshot. Empty on the host. */
-  private target: { ball: Ball | null; players: Map<string, { x: number; y: number; r: number }> } = {
-    ball: null,
-    players: new Map(),
+  /**
+   * Where the network says things are, kept live.
+   *
+   * Not "the last packet" — a packet is already old when it lands, and a target
+   * that stands still between packets is what a stuttering opponent actually
+   * is. Each of these is dead-reckoned forward every frame with the same
+   * physics the real thing uses, and the visible body is eased onto it.
+   *
+   * On a guest this holds everyone the host described. On the host it holds
+   * only the guests, each as *they* described themselves.
+   */
+  private target = {
+    ball: null as (Ball & { age: number }) | null,
+    /**
+     * How far each character is from where the network last said it was, as an
+     * offset still owed to it rather than a place to walk to.
+     *
+     * This is the difference between a body that is *corrected* and one that is
+     * *driven*. Every character here is already being simulated with its real
+     * input — that is what the input byte in each packet buys — so the local
+     * simulation is the best account of how it is moving. All that is left for
+     * the network to say is "you are a few pixels off", and that is fed back in
+     * over about a tenth of a second. Easing toward a target position instead
+     * would throw the good simulation away and replace it with a stale point,
+     * which is what makes a corrected character skate.
+     */
+    fix: new Map<string, { x: number; y: number }>(),
   };
+
+  /** Whether this machine is running the rules. Mutable: see promote(). */
+  private host: boolean;
+  /** `performance.now()` of the last contact made by a body this machine owns. */
+  private lastOwnedHit = -Infinity;
+  /** Tick of the last snapshot applied, echoed back so the host can date our claims. */
+  private appliedTick = 0;
+  /** Tick at which this host last reset the court. Older body claims are ignored. */
+  private resetTick = 0;
+  /** What each character was last seen pressing, packed. Goes out in snapshots. */
+  private lastInput = new Map<string, number>();
+  /** What the network last said each character is pressing. */
+  private netInputs = new Map<string, Input>();
 
   constructor(cfg: EngineConfig) {
     this.cfg = cfg;
+    this.host = cfg.isHost;
     this.arena = cfg.arena;
     this.ball = { x: cfg.arena.netX, y: cfg.arena.floor - 320, vx: 0, vy: 0, spin: 0, lastTeam: null, lastHitter: null };
 
@@ -161,7 +348,26 @@ export class MatchEngine {
     p.name = `${p.name} (bot)`;
   }
 
+  /**
+   * Hands a seat back to the human whose connection dropped.
+   *
+   * A blip on a phone changing cell is a few seconds long and perfectly normal.
+   * Without this, surviving one cost you the rest of the match: your character
+   * stayed a bot and your keys drove nothing on anybody else's screen.
+   */
+  reclaim(id: string) {
+    const p = this.players.find((q) => q.id === id);
+    if (!p || p.control !== 'ai') return;
+    p.control = 'remote';
+    p.name = p.name.replace(/ \(bot\)$/, '');
+  }
+
   private resetPositions() {
+    // Guests are authoritative over their own bodies, so the host has to be
+    // able to date its own reset: a body claim sent before this moment is
+    // describing the last rally and is dropped rather than applied.
+    this.resetTick = this.tick;
+    this.target.fix.clear();
     const { netX, w, floor } = this.arena;
     for (const team of [0, 1] as Team[]) {
       const mates = this.players.filter((p) => p.team === team);
@@ -251,7 +457,10 @@ export class MatchEngine {
 
     this.shake *= Math.pow(0.02, elapsed);
     this.callLeft = Math.max(0, this.callLeft - elapsed);
-    if (!this.cfg.isHost) this.reconcile(elapsed, inputs);
+    // Both sides correct: a guest is pulled onto the host's world, and the host
+    // is pulled onto each guest's account of its own body. The target map is
+    // empty for everything this machine owns, so one call covers both.
+    this.correct(elapsed);
   }
 
   private step(dt: number, inputs: Map<string, Input>) {
@@ -259,14 +468,23 @@ export class MatchEngine {
 
     if (this.phase === 'point' || this.phase === 'serve') {
       this.phaseTimer -= dt;
-      if (this.cfg.isHost && this.phaseTimer <= 0) {
+      if (this.host && this.phaseTimer <= 0) {
         if (this.phase === 'point') this.beginServe();
         else this.phase = 'rally';
       }
     }
 
     for (const p of this.players) {
-      const input = p.control === 'ai' ? this.aiInput(p, dt) : (inputs.get(p.id) ?? NO_INPUT);
+      // Local seats read the keyboard, AI seats think, and everyone else uses
+      // the last input that reached us — from their own packets if we are the
+      // host, from the host's snapshot if we are not. Falling back to "nothing
+      // pressed" is what makes a remote player stutter to a halt between
+      // packets and then jump to catch up.
+      const input =
+        p.control === 'ai'
+          ? this.aiInput(p, dt)
+          : (inputs.get(p.id) ?? this.netInputs.get(p.id) ?? NO_INPUT);
+      this.lastInput.set(p.id, packInput(input));
       this.movePlayer(p, input, dt);
     }
     this.separatePlayers();
@@ -398,82 +616,17 @@ export class MatchEngine {
 
   private moveBall(dt: number) {
     const b = this.ball;
-    const { w, floor, netX, netW, netTop } = this.arena;
-    const R = BALANCE.BALL_R;
+    const hit = integrateBall(b, dt, this.ballGravity(), this.arena);
 
-    b.vy += this.ballGravity() * dt;
-
-    // Magnus: spin pushes the ball perpendicular to its travel. Small, but it
-    // is what makes a hit taken on the run curve rather than fly straight.
-    //
-    // Rotating the velocity vector is the whole implementation, and it has to
-    // be exactly that — a rotation preserves speed, so spin can only ever
-    // redirect the ball, never speed it up or hold it against gravity. See
-    // MAGNUS_TURN for what happened when this was written as two sequential
-    // component updates instead.
-    if (b.spin !== 0) {
-      const theta = BALANCE.MAGNUS_TURN * b.spin * dt;
-      const cos = Math.cos(theta);
-      const sin = Math.sin(theta);
-      const vx = b.vx;
-      const vy = b.vy;
-      b.vx = vx * cos - vy * sin;
-      b.vy = vx * sin + vy * cos;
-      b.spin *= Math.pow(BALANCE.SPIN_DECAY, dt);
-    }
-
-    const speed = Math.hypot(b.vx, b.vy);
-    if (speed > BALANCE.BALL_MAX_SPEED) {
-      const k = BALANCE.BALL_MAX_SPEED / speed;
-      b.vx *= k;
-      b.vy *= k;
-    }
-
-    b.x += b.vx * dt;
-    b.y += b.vy * dt;
-
-    if (b.x < R) {
-      b.x = R;
-      b.vx = Math.abs(b.vx) * BALANCE.WALL_BOUNCE;
-      this.puff(R, b.y, '#ffffff', 5, 120);
-    } else if (b.x > w - R) {
-      b.x = w - R;
-      b.vx = -Math.abs(b.vx) * BALANCE.WALL_BOUNCE;
-      this.puff(w - R, b.y, '#ffffff', 5, 120);
-    }
-    if (b.y < R) {
-      b.y = R;
-      b.vy = Math.abs(b.vy) * BALANCE.WALL_BOUNCE;
-    }
-
-    // Net: a solid bar, not a plane. Clipping the tape and dribbling over is a
-    // real outcome and it is the best moment the game has.
-    const nx = clamp(b.x, netX - netW / 2, netX + netW / 2);
-    const ny = clamp(b.y, netTop, floor);
-    const dx = b.x - nx;
-    const dy = b.y - ny;
-    const d = Math.hypot(dx, dy);
-    if (d < R && d > 0.0001) {
-      const push = (R - d) / d;
-      b.x += dx * push;
-      b.y += dy * push;
-      const nrmX = dx / d;
-      const nrmY = dy / d;
-      const dot = b.vx * nrmX + b.vy * nrmY;
-      b.vx = (b.vx - 2 * dot * nrmX) * BALANCE.NET_BOUNCE;
-      b.vy = (b.vy - 2 * dot * nrmY) * BALANCE.NET_BOUNCE;
-      this.puff(b.x, b.y, '#ffffff', 6, 160);
-    }
-
-    if (b.y >= floor - R) {
-      b.y = floor - R;
-
+    if (hit.wallX !== null) this.puff(hit.wallX, b.y, '#ffffff', 5, 120);
+    if (hit.net) this.puff(b.x, b.y, '#ffffff', 6, 160);
+    if (hit.floor) {
       /**
        * The touch *is* the point.
        *
-       * The bounce below used to gate it — the rally only ended once the ball
-       * had dribbled to a near-stop, so both sides simply kept playing it off
-       * the sand and AI-vs-AI rallies ran to 187 touches without a single point
+       * The bounce used to gate it — the rally only ended once the ball had
+       * dribbled to a near-stop, so both sides simply kept playing it off the
+       * sand and AI-vs-AI rallies ran to 187 touches without a single point
        * being scored. In volleyball the floor ends the rally the instant it is
        * touched, full stop.
        *
@@ -483,20 +636,13 @@ export class MatchEngine {
        * rally-only, so nobody can play these bounces.
        */
       this.land();
-
-      if (b.vy > 80) {
-        b.vy = -Math.abs(b.vy) * BALANCE.FLOOR_BOUNCE;
-        b.vx *= 0.92;
-        this.puff(b.x, floor, '#e7c489', 8, 180);
-      } else {
-        b.vy = 0;
-        b.vx *= 0.8;
-      }
+      if (hit.hopped) this.puff(b.x, this.arena.floor, '#e7c489', 8, 180);
     }
 
     this.trail.push({ x: b.x, y: b.y });
     if (this.trail.length > 16) this.trail.shift();
   }
+
 
   /** Ball down. Only the host turns that into a point. */
   private land() {
@@ -504,7 +650,7 @@ export class MatchEngine {
     const scorer: Team = this.ball.x < this.arena.netX ? 1 : 0;
     this.puff(this.ball.x, this.arena.floor, '#e7c489', 22, 260);
     this.shake = Math.max(this.shake, 7);
-    if (!this.cfg.isHost) {
+    if (!this.host) {
       // A client shows the bounce but waits to be told the score. Guessing here
       // is how two screens end up disagreeing about who won.
       this.phase = 'point';
@@ -623,6 +769,9 @@ export class MatchEngine {
 
     p.hitCd = BALANCE.HIT_COOLDOWN;
     this.touches++;
+    // Noted so applySnapshot can tell a host that has not seen this hit yet
+    // from one that has. See the ball exception there.
+    if (p.control === 'local') this.lastOwnedHit = Date.now();
 
     const outgoing = Math.hypot(b.vx, b.vy);
     const heat = clamp(outgoing / BALANCE.BALL_MAX_SPEED, 0, 1);
@@ -649,7 +798,7 @@ export class MatchEngine {
     // Never in the opening rally: the first point of a match should be a clean
     // test of who can actually play, with nothing falling out of the sky.
     const opening = this.score[0] + this.score[1] === 0;
-    if (this.cfg.isHost && this.touches > 0 && !opening) {
+    if (this.host && this.touches > 0 && !opening) {
       this.powerTimer -= dt;
       if (this.powerTimer <= 0) {
         this.armPowerTimer();
@@ -736,6 +885,52 @@ export class MatchEngine {
   }
 
   // ── networking ────────────────────────────────────────────────────────────
+  //
+  // Three rules, and everything here follows from them.
+  //
+  // 1. **Every machine simulates the whole match.** Nothing waits for a packet
+  //    to move. A dropped packet costs accuracy, never response.
+  // 2. **You own your own body.** The host owns the ball, the score and the
+  //    clock; each player owns where their own character is. Nobody's character
+  //    is ever dragged around under their own thumb to satisfy a machine on the
+  //    other side of the country.
+  // 3. **A packet is old on arrival.** Everything received is run forward by
+  //    the measured trip time before it is believed, so what is drawn is where
+  //    things are *now*, not where they were.
+
+  /** True when this machine is running the rules. */
+  get isHost() {
+    return this.host;
+  }
+
+  /**
+   * Takes over the rules mid-match.
+   *
+   * Used when the host has gone quiet: see BALANCE.STALL_PROMOTE. Everything
+   * the promoted machine needs is already in hand — it has been simulating the
+   * whole match all along — so this is just permission to start scoring.
+   */
+  promote() {
+    if (this.host) return;
+    this.host = true;
+    this.target.ball = null;
+    this.target.fix.clear();
+  }
+
+  /**
+   * Gives the rules back.
+   *
+   * The lobby's host is the host; taking over was only ever a stand-in for one
+   * that had gone quiet. When it starts talking again two machines are scoring
+   * the same match, and the one that was elected by the lobby is the one both
+   * of them should be listening to.
+   */
+  demote() {
+    if (!this.host) return;
+    this.host = false;
+    this.target.ball = null;
+    this.target.fix.clear();
+  }
 
   snapshot(): Snapshot {
     const p: Snapshot['p'] = {};
@@ -746,12 +941,14 @@ export class MatchEngine {
         Math.round(q.vx),
         Math.round(q.vy),
         Math.round(q.r),
-        (q.onGround ? 1 : 0) | (q.facing === 1 ? 2 : 0) | (q.dashLeft > 0 ? 4 : 0),
+        (q.onGround ? F_GROUND : 0) | (q.facing === 1 ? F_FACING : 0) | (q.dashLeft > 0 ? F_DASH : 0),
+        this.lastInput.get(q.id) ?? 0,
       ];
     }
     return {
       t: 's',
       n: this.tick,
+      ts: Date.now(),
       b: [
         Math.round(this.ball.x),
         Math.round(this.ball.y),
@@ -769,19 +966,44 @@ export class MatchEngine {
     };
   }
 
+  /** This machine's own body, for the host to place exactly. */
+  bodyPacket(id: string): BodyPacket | null {
+    const p = this.players.find((q) => q.id === id);
+    if (!p) return null;
+    return [
+      Math.round(p.x),
+      Math.round(p.y),
+      Math.round(p.vx),
+      Math.round(p.vy),
+      Math.round(p.r),
+      (p.onGround ? F_GROUND : 0) | (p.facing === 1 ? F_FACING : 0) | (p.dashLeft > 0 ? F_DASH : 0),
+      this.lastInput.get(p.id) ?? 0,
+    ];
+  }
+
+  /** The snapshot this machine has acted on, echoed in every body packet. */
+  get lastAppliedTick() {
+    return this.appliedTick;
+  }
+
   /**
-   * Takes the host's word for the rules and stores positions as *targets*
-   * rather than truth. Snapping straight to them at 20 Hz looks like a
-   * slideshow; `reconcile` eases toward them every frame instead.
+   * Takes the host's word for the rules, and its word about bodies as a target
+   * rather than as truth.
+   *
+   * `lag` is the one-way trip time in seconds — half the measured round trip.
+   * Everything in the packet is that old, so it is run forward by that much
+   * before it is used.
    */
-  applySnapshot(s: Snapshot) {
-    if (this.cfg.isHost) return;
+  applySnapshot(s: Snapshot, lag = 0) {
+    if (this.host) return;
 
     const wasOver = this.phase === 'over';
+    const wasPhase = this.phase;
     this.score = s.sc;
     this.phase = s.ph;
     this.phaseTimer = s.tm;
     this.serving = s.sv;
+    this.appliedTick = s.n;
     if (!wasOver && s.ph === 'over') {
       this.winner = this.score[0] > this.score[1] ? 0 : 1;
       this.cfg.onOver?.(this.winner);
@@ -790,52 +1012,229 @@ export class MatchEngine {
     this.powers = s.pw.map(([kind, team, left]) => ({ kind, team, left: left < 0 ? Infinity : left }));
     this.floating = s.fl.map(([kind, x, y]) => ({ kind, x, y, vy: BALANCE.POWER_FALL, spin: 0 }));
 
-    this.target.ball = {
-      x: s.b[0], y: s.b[1], vx: s.b[2], vy: s.b[3], spin: s.b[4],
-      lastTeam: this.ball.lastTeam, lastHitter: this.ball.lastHitter,
-    };
-    this.target.players.clear();
+    // The host rebuilds the court between points — everyone back to their
+    // starting spot, ball back in the server's hands. There is nothing to ease
+    // toward there: the two simulations are not drifting apart, they are
+    // starting again, and easing would drag every character across the sand.
+    const restart = wasPhase !== 'serve' && s.ph === 'serve';
+    const drift = Math.min(lag, BALANCE.MAX_EXTRAP);
+
     for (const [id, d] of Object.entries(s.p)) {
-      this.target.players.set(id, { x: d[0], y: d[1], r: d[4] });
       const local = this.players.find((q) => q.id === id);
-      if (local && local.control !== 'local') {
-        // Remote bodies take the host's velocity outright — there is nothing to
-        // predict for them, so the smoothest result is to follow exactly.
-        local.vx = d[2];
-        local.vy = d[3];
-        local.onGround = (d[5] & 1) !== 0;
-        local.facing = (d[5] & 2) !== 0 ? 1 : -1;
+      const target: TargetBody = {
+        x: d[0],
+        y: d[1],
+        vx: d[2],
+        vy: d[3],
+        r: d[4],
+        onGround: (d[5] & F_GROUND) !== 0,
+        facing: (d[5] & F_FACING) !== 0 ? 1 : -1,
+        age: 0,
+      };
+      driftBody(target, drift, this.arena.floor);
+      if (!local) continue;
+      // Everyone but us is simulated from the input that came with the packet,
+      // so between snapshots they keep running, stopping and jumping the way
+      // their own machine says they are — not coasting on a stale velocity.
+      if (local.control !== 'local') this.netInputs.set(id, unpackInput(d[6] ?? 0));
+
+      if (restart) {
+        // Snap, including our own body. This is the one moment the host is
+        // allowed to move you, and both sides agree it is coming.
+        local.x = d[0];
+        local.y = d[1];
+        local.vx = 0;
+        local.vy = 0;
+        local.onGround = true;
+        local.jumpHeld = -1;
+        local.dashLeft = 0;
+        local.hitCd = 0;
+        local.facing = target.facing;
+        this.target.fix.delete(id);
+      } else {
+        if (local.control !== 'local') {
+          local.vy = target.vy;
+          local.onGround = target.onGround;
+          local.facing = target.facing;
+        }
+        this.owe(local, target);
+      }
+      local.r = d[4];
+    }
+
+    /**
+     * The ball, with one exception.
+     *
+     * A guest plays its own contacts the instant they happen — that is the
+     * whole point of simulating locally — so for one round trip afterwards the
+     * host is still describing a ball that has not been hit yet. Believing it
+     * would yank the ball back out of your own hands and then hand it to you
+     * again a moment later, which reads as the hit not registering.
+     *
+     * So a snapshot that left the host before our contact is ignored *for the
+     * ball only*. The score, the phase and everybody's body in the same packet
+     * are still taken: none of them are in dispute.
+     */
+    const hostSawOurHit = Date.now() - lag * 1000 >= this.lastOwnedHit;
+    if (restart || hostSawOurHit) {
+      const ball: Ball & { age: number } = {
+        x: s.b[0],
+        y: s.b[1],
+        vx: s.b[2],
+        vy: s.b[3],
+        spin: s.b[4],
+        lastTeam: this.ball.lastTeam,
+        lastHitter: this.ball.lastHitter,
+        age: 0,
+      };
+      integrateBall(ball, drift, this.ballGravity(), this.arena);
+      this.target.ball = ball;
+      if (restart) {
+        this.ball.x = ball.x;
+        this.ball.y = ball.y;
+        this.ball.vx = ball.vx;
+        this.ball.vy = ball.vy;
+        this.ball.spin = ball.spin;
+        this.trail.length = 0;
       }
     }
   }
 
   /**
-   * Pulls the local simulation toward the host's last word.
+   * A guest's own account of where it is. Host side.
    *
-   * The player's own character is eased far more gently than everyone else's:
-   * a character that snaps under your own thumb feels broken even when it is
-   * technically more accurate.
+   * Taken at face value, within reason. The alternative — deriving the position
+   * from the input bitmask and hoping the two simulations agree — is a round
+   * trip of error on the one body whose owner is watching it most closely, and
+   * it is what made a guest's character feel like it was wading.
+   *
+   * `tick` is the last snapshot that guest had applied when it spoke. A claim
+   * made before the court was reset predates the reset and is discarded, or the
+   * guest would drag itself back to where it stood during the last rally.
    */
-  private reconcile(dt: number, inputs: Map<string, Input>) {
-    const hard = 1 - Math.pow(0.001, dt * (BALANCE.INTERP / 10));
-    const soft = 1 - Math.pow(0.001, dt * (BALANCE.RECONCILE / 10));
+  applyBody(id: string, d: BodyPacket, tick: number, lag = 0) {
+    if (!this.host) return;
+    const p = this.players.find((q) => q.id === id);
+    if (!p || p.control !== 'remote') return;
+    if (tick < this.resetTick) return;
+
+    const target: TargetBody = {
+      x: d[0],
+      y: d[1],
+      vx: d[2],
+      vy: d[3],
+      r: p.r,
+      onGround: (d[5] & F_GROUND) !== 0,
+      facing: (d[5] & F_FACING) !== 0 ? 1 : -1,
+      age: 0,
+    };
+    driftBody(target, Math.min(lag, BALANCE.MAX_EXTRAP), this.arena.floor);
+
+    // Trust, bounded. A body outside its own half or through the floor is not a
+    // disagreement about physics, it is a broken or edited client, and the
+    // clamp costs nothing to apply.
+    const { netX, netW, w, floor } = this.arena;
+    const lo = p.team === 0 ? p.r : netX + netW / 2 + p.r;
+    const hi = p.team === 0 ? netX - netW / 2 - p.r : w - p.r;
+    target.x = clamp(target.x, lo, hi);
+    target.y = clamp(target.y, 0, floor);
+    target.vx = clamp(target.vx, -BALANCE.DASH_SPEED * 1.2, BALANCE.DASH_SPEED * 1.2);
+
+    this.owe(p, target);
+    p.onGround = target.onGround;
+    p.facing = target.facing;
+    p.vy = target.vy;
+  }
+
+  /**
+   * Records how far a character is from where the network says it is.
+   *
+   * Small differences are ignored outright: nudging a body by two pixels is
+   * visible without being more correct. Large ones skip the smoothing and snap
+   * — sliding a character a third of the way across the court to catch up looks
+   * far worse, and by then the two simulations have genuinely come apart rather
+   * than merely drifted.
+   */
+  private owe(p: Player, t: TargetBody) {
+    const mine = p.control === 'local';
+    const dx = t.x - p.x;
+    const dy = t.y - p.y;
+    const gap = Math.hypot(dx, dy);
+
+    if (gap > (mine ? BALANCE.OWN_SNAP : BALANCE.BODY_SNAP)) {
+      p.x = t.x;
+      p.y = t.y;
+      p.vx = t.vx;
+      p.vy = t.vy;
+      this.target.fix.delete(p.id);
+    } else if (gap > (mine ? BALANCE.OWN_TOLERANCE : BALANCE.BODY_TOLERANCE)) {
+      this.target.fix.set(p.id, { x: dx, y: dy });
+    } else {
+      this.target.fix.delete(p.id);
+    }
+  }
+
+  /** Drops what is owed to a seat whose owner has gone. */
+  forget(id: string) {
+    this.target.fix.delete(id);
+    this.netInputs.delete(id);
+  }
+
+  /**
+   * Feeds the ball onto the host's account of it, and pays back what is owed to
+   * every character.
+   *
+   * The ball and the characters are corrected differently on purpose. The ball
+   * has no input to predict, so the host's last word can be run forward exactly
+   * and followed. A character does have input — it arrives with every packet —
+   * so the local simulation is already right about how it is moving, and all
+   * the network has to add is the small offset it has drifted by.
+   */
+  private correct(dt: number) {
+    const ease = 1 - Math.pow(0.001, dt * (BALANCE.INTERP / 10));
 
     if (this.target.ball) {
       const t = this.target.ball;
-      this.ball.x += (t.x - this.ball.x) * hard;
-      this.ball.y += (t.y - this.ball.y) * hard;
-      this.ball.vx = t.vx;
-      this.ball.vy = t.vy;
-      this.ball.spin = t.spin;
+      if (t.age < BALANCE.MAX_EXTRAP) integrateBall(t, dt, this.ballGravity(), this.arena);
+      t.age += dt;
+
+      const gap = Math.hypot(t.x - this.ball.x, t.y - this.ball.y);
+      if (gap > BALANCE.BALL_SNAP) {
+        this.ball.x = t.x;
+        this.ball.y = t.y;
+        this.ball.vx = t.vx;
+        this.ball.vy = t.vy;
+        this.ball.spin = t.spin;
+        this.trail.length = 0;
+      } else if (gap > BALANCE.BALL_TOLERANCE) {
+        this.ball.x += (t.x - this.ball.x) * ease;
+        this.ball.y += (t.y - this.ball.y) * ease;
+        // Velocity is taken outright while a correction is running: easing the
+        // position onto a target the ball is not actually chasing is how a
+        // corrected ball ends up curving through the air on its way there.
+        this.ball.vx = t.vx;
+        this.ball.vy = t.vy;
+        this.ball.spin = t.spin;
+      }
     }
 
-    for (const p of this.players) {
-      const t = this.target.players.get(p.id);
-      if (!t) continue;
-      const k = inputs.has(p.id) ? soft : hard;
-      p.x += (t.x - p.x) * k;
-      p.y += (t.y - p.y) * k;
-      p.r = t.r;
+    for (const [id, owed] of this.target.fix) {
+      const p = this.players.find((q) => q.id === id);
+      if (!p) {
+        this.target.fix.delete(id);
+        continue;
+      }
+      // Your own body is paid back far more slowly than anyone else's. A
+      // correction you can feel under your own thumb reads as the game fighting
+      // you, which in a competitive match is worse than being slightly wrong.
+      const rate = p.control === 'local' ? ease * 0.35 : ease;
+      const dx = owed.x * rate;
+      const dy = owed.y * rate;
+      p.x += dx;
+      p.y += dy;
+      owed.x -= dx;
+      owed.y -= dy;
+      if (Math.abs(owed.x) + Math.abs(owed.y) < 0.5) this.target.fix.delete(id);
     }
   }
 
