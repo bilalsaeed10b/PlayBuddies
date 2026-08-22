@@ -50,6 +50,8 @@ export interface LinkStatus {
   missing: string[];
   /** Best round-trip estimate in ms across everyone we can reach. */
   rtt: number;
+  /** Why peer-to-peer is not happening, when it is not. Fit to show a player. */
+  reason: string | null;
 }
 
 type Handler = (from: string, msg: NetMessage) => void;
@@ -70,6 +72,7 @@ export class Link {
   private seen = new Map<string, number>();
   private pendingState: NetMessage | null = null;
   private pendingEvents: NetMessage[] = [];
+  private reason: string | null = null;
   private closed = false;
 
   constructor(
@@ -83,6 +86,10 @@ export class Link {
       selfId,
       (from, raw) => this.receive(from, raw as NetMessage),
       () => this.publishStatus(),
+      (_peerId, verdict) => {
+        this.reason = verdict;
+        this.publishStatus();
+      },
     );
 
     this.pingTimer = window.setInterval(() => this.ping(), 1000 / BALANCE.PING_HZ);
@@ -208,6 +215,9 @@ export class Link {
       relayed,
       missing: this.peers.filter((id) => !directSet.has(id) && !relayedSet.has(id)),
       rtt: this.rtt,
+      // Only worth saying while it is still true: a peer that came up on a
+      // retry should not leave a stale explanation on screen.
+      reason: direct.length === this.peers.length ? null : this.reason,
     });
   }
 

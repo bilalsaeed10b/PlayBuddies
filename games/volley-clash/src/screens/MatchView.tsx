@@ -108,11 +108,18 @@ export default function MatchView({
   const [score, setScore] = useState<[number, number]>([0, 0]);
   const [powers, setPowers] = useState<{ kind: string; team: Team; left: number }[]>([]);
   const [over, setOver] = useState<{ winner: Team } | null>(null);
-  const [wire, setWire] = useState<{ peers: number; relayed: number; rtt: number; stalled: boolean }>({
+  const [wire, setWire] = useState<{
+    peers: number;
+    relayed: number;
+    rtt: number;
+    stalled: boolean;
+    reason: string | null;
+  }>({
     peers: 0,
     relayed: 0,
     rtt: 0,
     stalled: false,
+    reason: null,
   });
   const [touch, setTouch] = useState(false);
 
@@ -542,6 +549,7 @@ export default function MatchView({
               peers: status.direct.length,
               relayed: status.relayed.length,
               rtt: Math.round(status.rtt),
+              reason: status.reason,
             })),
         );
         linkRef.current = link;
@@ -645,8 +653,11 @@ export default function MatchView({
         the platform already offers it, and two buttons fighting over the same
         corner is what caused the overlap.
       */}
-      <div className={`absolute right-3 z-20 flex gap-2 ${IN_IFRAME ? 'top-20' : 'top-3'}`}>
-        {online && (
+      <div
+        className={`absolute right-3 z-20 flex flex-col items-end gap-2 ${IN_IFRAME ? 'top-20' : 'top-3'}`}
+      >
+        <div className="flex gap-2">
+          {online && (
           <div
             className="flex items-center gap-1.5 rounded-2xl border border-white/20 bg-black/45 px-3 py-2 text-xs font-bold text-white backdrop-blur-md"
             title={
@@ -672,18 +683,26 @@ export default function MatchView({
             {wire.stalled && <span className="text-amber-300">· reconnecting</span>}
           </div>
         )}
-        <button
-          onClick={onOpenSettings}
-          className="rounded-2xl border border-white/20 bg-black/45 p-2.5 text-white backdrop-blur-md"
-        >
-          <SettingsIcon className="h-5 w-5" />
-        </button>
-        <button
-          onClick={onExit}
-          className="rounded-2xl border border-white/20 bg-black/45 p-2.5 text-white backdrop-blur-md"
-        >
-          <ArrowLeft className="h-5 w-5" />
-        </button>
+          <button
+            onClick={onOpenSettings}
+            className="rounded-2xl border border-white/20 bg-black/45 p-2.5 text-white backdrop-blur-md"
+          >
+            <SettingsIcon className="h-5 w-5" />
+          </button>
+          <button
+            onClick={onExit}
+            className="rounded-2xl border border-white/20 bg-black/45 p-2.5 text-white backdrop-blur-md"
+          >
+            <ArrowLeft className="h-5 w-5" />
+          </button>
+        </div>
+        {online && wire.reason && (
+          // The verdict, on screen, because the person wondering why the game
+          // says relay is not the person with DevTools open.
+          <div className="max-w-[220px] rounded-xl border border-amber-300/30 bg-black/55 px-2.5 py-1.5 text-right text-[10px] font-semibold leading-tight text-amber-200 backdrop-blur-md">
+            {wire.reason}
+          </div>
+        )}
       </div>
 
       {/* ── touch controls ── */}

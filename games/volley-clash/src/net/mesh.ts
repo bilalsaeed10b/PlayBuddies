@@ -104,6 +104,8 @@ interface Peer {
   tries: number;
   retryTimer: number | null;
   graceTimer: number | null;
+  /** Whether this peer's failure has already been reported. */
+  told: boolean;
 }
 
 export class Mesh {
@@ -115,6 +117,14 @@ export class Mesh {
     private selfId: string,
     private onMessage: (from: string, msg: unknown) => void,
     private onPeersChanged?: (connected: string[]) => void,
+    /**
+     * Why peer-to-peer is not happening, in a few words fit to show a player.
+     *
+     * Reported at most once per peer. The console carries the detail; this is
+     * for the person looking at the game, who has no reason to open DevTools
+     * and every reason to wonder why it says relay.
+     */
+    private onTrouble?: (peerId: string, verdict: string) => void,
   ) {
     // Clear anything a previous session in this room left behind, and make sure
     // a crashed tab doesn't strand its half of every negotiation.
@@ -228,6 +238,7 @@ export class Mesh {
       attempt: null,
       unwatch: () => {},
       lastDesc: null,
+      told: false,
       tries: 0,
       retryTimer: null,
       graceTimer: null,
@@ -341,15 +352,21 @@ export class Mesh {
         }, OPEN_DEADLINE);
         return;
       }
+      const blocked = !a.gathered.has('srflx');
+      const verdict = blocked ? 'STUN blocked on this network' : 'this pair needs a TURN server';
       console.warn(
         `[mesh] no channel to ${peerId} after ${OPEN_DEADLINE}ms — ice: ${pc.iceConnectionState},` +
           ` gathering: ${pc.iceGatheringState},` +
           ` ours: [${[...a.gathered].join(', ') || 'nothing'}],` +
           ` theirs: [${[...typesOf(a.seen)].join(', ') || 'nothing'}]`,
-        a.gathered.has('srflx')
-          ? 'Both sides are reachable from outside but no route between them was found: this pair needs a TURN server.'
-          : 'No server-reflexive candidate at all — STUN is being blocked on this network.',
+        blocked
+          ? 'No server-reflexive candidate at all — STUN is being blocked on this network.'
+          : 'Both sides are reachable from outside but no route between them was found: this pair needs a TURN server.',
       );
+      if (!peer.told) {
+        peer.told = true;
+        this.onTrouble?.(peerId, verdict);
+      }
       this.retry(peerId, peer, iCall);
     }, OPEN_DEADLINE);
 
