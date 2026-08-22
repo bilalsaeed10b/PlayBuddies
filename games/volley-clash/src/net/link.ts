@@ -38,6 +38,17 @@ import { Mesh } from './mesh';
  */
 const RELAY_HZ = 8;
 const FAST_RELAY_HZ = 20;
+
+/**
+ * The key a player's relay slot lives under, inside their own signalling node.
+ *
+ * A tilde cannot appear in a Firebase uid, so this can never collide with a
+ * real peer.
+ */
+const RELAY_SLOT = '~relay';
+
+/** What the signalling schema allows in that slot: 20000 characters, less headroom. */
+const SLOT_LIMIT = 19000;
 /** Events (a `bye`, say) queued for the next relay write, at most. */
 const MAX_EVENTS = 8;
 
@@ -57,7 +68,7 @@ export interface LinkStatus {
 type Handler = (from: string, msg: NetMessage) => void;
 
 interface RelayApi {
-  write: (payload: string, seq: number) => Promise<void>;
+  write: (batch: NetMessage[], seq: number) => Promise<void>;
   stop: () => void;
 }
 
@@ -73,6 +84,8 @@ export class Link {
   private pendingState: NetMessage | null = null;
   private pendingEvents: NetMessage[] = [];
   private reason: string | null = null;
+  /** Set by the signalling relay, so its per-peer listeners follow the roster. */
+  private watchRelayPeers: ((uids: string[]) => void) | null = null;
   private closed = false;
 
   constructor(
@@ -99,6 +112,7 @@ export class Link {
   setPeers(uids: string[]) {
     this.peers = uids.filter((u) => u && u !== this.selfId);
     this.mesh.setPeers(this.peers);
+    this.watchRelayPeers?.(this.peers);
     this.publishStatus();
   }
 
@@ -235,7 +249,7 @@ export class Link {
     // Firestore document write and a listener fan-out — the difference between
     // a fallback that plays and one that merely functions. Measured on a real
     // match, the Firestore path alone was a 669ms round trip.
-    if (await this.openFastRelay()) {
+    if ((await this.openFastRelay()) || (await this.openSignallingRelay())) {
       this.relayTimer = window.setInterval(() => void this.flushRelay(), 1000 / FAST_RELAY_HZ);
       return;
     }
@@ -274,8 +288,8 @@ export class Link {
       );
 
       this.relay = {
-        write: async (payload, seq) => {
-          await setDoc(mine, { m: payload, n: seq, at: Date.now() });
+        write: async (batch, seq) => {
+          await setDoc(mine, { m: JSON.stringify(batch), n: seq, at: Date.now() });
         },
         stop,
       };
@@ -330,8 +344,8 @@ export class Link {
       );
 
       this.relay = {
-        write: async (payload, seq) => {
-          await dbSet(mine, { m: payload, n: seq });
+        write: async (batch, seq) => {
+          await dbSet(mine, { m: JSON.stringify(batch), n: seq });
         },
         stop: () => {
           stop();
@@ -342,6 +356,92 @@ export class Link {
     } catch (err) {
       // Almost always PERMISSION_DENIED, meaning the rules are not deployed.
       console.warn('[link] fast relay unavailable:', err);
+      return false;
+    }
+  }
+
+  /**
+   * The fast fallback again, over a path that is already permitted.
+   *
+   * The clean `relay/{room}/{uid}` node above needs rules published before it
+   * works. This one needs nothing: the deployed signalling rules already let a
+   * player write `signaling/{room}/{self}/{anything}/desc` as a `{type, sdp}`
+   * pair of strings, and let anyone in the room read it. A reserved key that no
+   * uid can collide with gives every player one writable slot on the same
+   * websocket, which is all a relay is.
+   *
+   * It is someone else's schema and it is used deliberately, because the
+   * alternative is a player being told to go and publish database rules before
+   * their game stops feeling broken. When the proper node does exist, the
+   * method above wins and this is never reached.
+   */
+  private async openSignallingRelay(): Promise<boolean> {
+    try {
+      const { rtdb, dbRef, dbSet, dbOnValue, dbRemove } = await import('../firebase');
+      if (this.closed) return false;
+
+      const slot = (uid: string) => `signaling/${this.roomId}/${uid}/${RELAY_SLOT}/desc`;
+      const mine = dbRef(rtdb, slot(this.selfId));
+      await dbSet(mine, { type: 'r', sdp: '[]' });
+      if (this.closed) return false;
+
+      // One listener per peer rather than one on the room: the room node also
+      // carries every ICE candidate anyone pushes, and watching all of it would
+      // re-deliver the whole handshake on every one of them.
+      const stops: (() => void)[] = [];
+      const listen = (uid: string) =>
+        dbOnValue(
+          dbRef(rtdb, slot(uid)),
+          (snap) => {
+            const entry = snap.val() as { sdp?: string } | null;
+            if (typeof entry?.sdp !== 'string') return;
+            let batch: NetMessage[];
+            try {
+              batch = JSON.parse(entry.sdp) as NetMessage[];
+            } catch {
+              return;
+            }
+            // The sequence number rides inside the payload here, as the slot
+            // itself only has room for the two fields the schema allows.
+            const first = batch[0] as { rn?: number } | undefined;
+            if (typeof first?.rn === 'number') {
+              if (this.isReplay(uid, first.rn)) return;
+              this.seen.set(uid, first.rn);
+            }
+            for (const msg of batch) if ((msg as { rn?: number }).rn === undefined) this.receive(uid, msg);
+          },
+          (err: unknown) => console.error('[link] signalling relay dropped:', err),
+        );
+
+      this.watchRelayPeers = (uids) => {
+        while (stops.length) stops.pop()?.();
+        for (const uid of uids) if (uid !== this.selfId) stops.push(listen(uid));
+      };
+      this.watchRelayPeers(this.peers);
+
+      this.relay = {
+        write: async (batch, seq) => {
+          // `[{rn}, …messages]` — the marker carries the sequence, because the
+          // slot itself has room only for the two fields the schema allows.
+          let body = JSON.stringify([{ rn: seq }, ...batch]);
+          if (body.length > SLOT_LIMIT) {
+            // Only the newest state is worth keeping if it will not all fit,
+            // and silently sending nothing would be worse than sending less.
+            console.warn('[link] relay payload over the slot limit; sending state only');
+            body = JSON.stringify([{ rn: seq }, ...batch.slice(0, 1)]);
+          }
+          await dbSet(mine, { type: 'r', sdp: body });
+        },
+        stop: () => {
+          while (stops.length) stops.pop()?.();
+          this.watchRelayPeers = null;
+          dbRemove(mine).catch(() => {});
+        },
+      };
+      console.warn('[link] relaying over the signalling channel — publish database.rules.json for the dedicated one');
+      return true;
+    } catch (err) {
+      console.warn('[link] signalling relay unavailable:', err);
       return false;
     }
   }
@@ -375,7 +475,7 @@ export class Link {
     if (batch.length === 0) return;
 
     try {
-      await this.relay.write(JSON.stringify(batch), ++this.relaySeq);
+      await this.relay.write(batch, ++this.relaySeq);
     } catch (err) {
       console.error('[link] relay write failed:', err);
     }

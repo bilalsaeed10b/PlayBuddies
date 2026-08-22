@@ -52,15 +52,25 @@ const BACKOFF = [700, 1500, 3000, 5000, 8000];
 const DISCONNECT_GRACE = 3500;
 
 /**
- * How long an attempt gets to open its channel before it is written off.
+ * How long an attempt with *no sign of progress* gets before it is written off.
  *
- * Waiting for `connectionState === 'failed'` is not good enough on its own:
- * ICE can sit in `checking` for the better part of a minute before the browser
- * admits defeat, and a player staring at a dead court for that long has already
- * quit. This is also what covers the asymmetric case, where our side of the
- * handshake is fine and the other side quietly gave up.
+ * This was 9 seconds, applied to every attempt on both sides regardless of what
+ * ICE was doing, and it was the whole bug. A handshake that would have
+ * succeeded in twelve seconds — an ordinary outcome on a slow link to a distant
+ * STUN server — was torn down at nine, restarted, and torn down again, forever.
+ * The game never connected and fell back to the relay, while the version
+ * *without* any of this retry machinery connected fine, just slowly.
+ *
+ * So it is now a backstop rather than a policy. An attempt that is checking
+ * candidate pairs, or connected and merely slow to open its channel, is making
+ * progress and is left alone for another window. Genuine failure arrives on its
+ * own as `connectionState === 'failed'`, which is handled separately and
+ * immediately.
  */
-const OPEN_DEADLINE = 9000;
+const OPEN_DEADLINE = 20000;
+
+/** How many extra windows an attempt that is still making progress may have. */
+const MAX_EXTENSIONS = 2;
 
 interface Attempt {
   pc: RTCPeerConnection;
@@ -92,6 +102,8 @@ interface Attempt {
   dead: boolean;
   /** Fires if the channel never opens. Cleared the moment it does. */
   deadline: number | null;
+  /** Windows already granted to an attempt that was still making progress. */
+  extensions: number;
 }
 
 interface Peer {
@@ -101,6 +113,16 @@ interface Peer {
   unwatch: () => void;
   /** Their last description this peer has acted on, to spot a restart. */
   lastDesc: string | null;
+  /**
+   * An answer that arrived before there was a local offer to attach it to.
+   *
+   * Held rather than discarded. A retry rebuilds the connection asynchronously
+   * — `createOffer` is a promise — and an answer landing inside that window
+   * used to be thrown away *and* marked as seen, so the caller sat on an
+   * unanswered offer until its next timeout. On a link where the handshake was
+   * already slow, that is a loop that never terminates.
+   */
+  pendingDesc: RTCSessionDescriptionInit | null;
   tries: number;
   retryTimer: number | null;
   graceTimer: number | null;
@@ -238,6 +260,7 @@ export class Mesh {
       attempt: null,
       unwatch: () => {},
       lastDesc: null,
+      pendingDesc: null,
       told: false,
       tries: 0,
       retryTimer: null,
@@ -254,19 +277,18 @@ export class Mesh {
 
       const sdp = data.desc.sdp ?? '';
       if (sdp !== peer.lastDesc) {
-        peer.lastDesc = sdp;
         if (!iCall) {
           // Their offer — and every offer is a fresh session, including the one
           // that arrives because *they* gave up on the last attempt. Answering
           // it on the old connection is what used to leave one side happily
           // "connected" to a peer that had already moved on.
+          peer.lastDesc = sdp;
           this.attempt(peerId, peer, false, data.desc);
-        } else if (peer.attempt && peer.attempt.pc.signalingState === 'have-local-offer') {
-          const a = peer.attempt;
-          void a.pc
-            .setRemoteDescription(new RTCSessionDescription(data.desc))
-            .then(() => this.flushCandidates(a))
-            .catch((err) => console.error('[mesh] answer rejected by', peerId, err));
+        } else {
+          // Their answer. Applied the moment our offer is on the table, and
+          // kept until then.
+          peer.pendingDesc = data.desc;
+          this.applyAnswer(peerId, peer);
         }
       }
 
@@ -274,6 +296,26 @@ export class Mesh {
     });
 
     if (iCall) this.attempt(peerId, peer, true);
+  }
+
+  /**
+   * Applies a held answer, if there is one and we are ready for it.
+   *
+   * Called both when an answer arrives and when our own offer finishes being
+   * set, because either can happen first.
+   */
+  private applyAnswer(peerId: string, peer: Peer) {
+    const a = peer.attempt;
+    const desc = peer.pendingDesc;
+    if (!a || a.dead || !desc) return;
+    if (a.pc.signalingState !== 'have-local-offer') return;
+
+    peer.pendingDesc = null;
+    peer.lastDesc = desc.sdp ?? '';
+    void a.pc
+      .setRemoteDescription(new RTCSessionDescription(desc))
+      .then(() => this.flushCandidates(a))
+      .catch((err) => console.error('[mesh] answer rejected by', peerId, err));
   }
 
   private takeCandidates(peer: Peer, candidates?: Record<string, string> | null) {
@@ -313,6 +355,9 @@ export class Mesh {
   private attempt(peerId: string, peer: Peer, iCall: boolean, offer?: RTCSessionDescriptionInit) {
     if (this.closed) return;
     this.killAttempt(peer);
+    // Anything held from the last attempt answered an offer that no longer
+    // exists. The peer will answer this one.
+    peer.pendingDesc = null;
     if (peer.graceTimer !== null) {
       clearTimeout(peer.graceTimer);
       peer.graceTimer = null;
@@ -337,26 +382,40 @@ export class Mesh {
       gathered: new Set(),
       dead: false,
       deadline: null,
+      extensions: 0,
     };
     peer.attempt = a;
-    a.deadline = window.setTimeout(() => {
+
+    /**
+     * The backstop.
+     *
+     * Only the caller runs one. The answerer cannot start a new negotiation of
+     * its own — `retry` returns immediately for it — so all a timeout there
+     * achieves is destroying a half-built connection the caller may still be
+     * completing, and then waiting for an offer anyway. Both sides running this
+     * is what turned one slow handshake into a permanent restart loop.
+     */
+    const watchdog = () => {
       a.deadline = null;
       if (a.dead || dc.readyState === 'open') return;
-      // ICE is connected and only the channel is late. Killing that would throw
-      // away a working route over a slow SCTP handshake, so it gets one more
-      // window rather than a retry.
-      if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
-        a.deadline = window.setTimeout(() => {
-          a.deadline = null;
-          if (!a.dead && dc.readyState !== 'open') this.retry(peerId, peer, iCall);
-        }, OPEN_DEADLINE);
+
+      const ice = pc.iceConnectionState;
+      // `checking` means candidate pairs are actively being tested, and
+      // `connected`/`completed` means only the data channel is late. Both are
+      // progress, and tearing either down loses a connection that was on its
+      // way. Real failure arrives as `failed` and is handled the moment it does.
+      const working = ice === 'checking' || ice === 'connected' || ice === 'completed';
+      if (working && a.extensions < MAX_EXTENSIONS) {
+        a.extensions++;
+        a.deadline = window.setTimeout(watchdog, OPEN_DEADLINE);
         return;
       }
+
       const blocked = !a.gathered.has('srflx');
       const verdict = blocked ? 'STUN blocked on this network' : 'this pair needs a TURN server';
       console.warn(
-        `[mesh] no channel to ${peerId} after ${OPEN_DEADLINE}ms — ice: ${pc.iceConnectionState},` +
-          ` gathering: ${pc.iceGatheringState},` +
+        `[mesh] no channel to ${peerId} after ${OPEN_DEADLINE * (a.extensions + 1)}ms —` +
+          ` ice: ${ice}, gathering: ${pc.iceGatheringState},` +
           ` ours: [${[...a.gathered].join(', ') || 'nothing'}],` +
           ` theirs: [${[...typesOf(a.seen)].join(', ') || 'nothing'}]`,
         blocked
@@ -368,7 +427,8 @@ export class Mesh {
         this.onTrouble?.(peerId, verdict);
       }
       this.retry(peerId, peer, iCall);
-    }, OPEN_DEADLINE);
+    };
+    if (iCall) a.deadline = window.setTimeout(watchdog, OPEN_DEADLINE);
 
     const mineRef = dbRef(rtdb, `signaling/${this.roomId}/${this.selfId}/${peerId}`);
     // A retry must not inherit the previous attempt's candidates: they point at
@@ -437,6 +497,8 @@ export class Mesh {
           const local = await pc.createOffer();
           if (a.dead) return;
           await pc.setLocalDescription(local);
+          // An answer may already be waiting — see Peer.pendingDesc.
+          this.applyAnswer(peerId, peer);
           await dbSet(dbRef(rtdb, `signaling/${this.roomId}/${this.selfId}/${peerId}/desc`), {
             type: local.type,
             sdp: local.sdp,
