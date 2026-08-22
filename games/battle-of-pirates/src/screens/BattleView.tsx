@@ -92,6 +92,27 @@ export default function BattleView({
   const [wind, setWind] = useState(0);
   const [over, setOver] = useState<{ winner: Team } | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  /**
+   * True while the wire itself is the problem -- it never opened, or it dropped
+   * mid-match -- as opposed to an ordinary notice like a partner going idle.
+   *
+   * Without this, the only way out of "Could not reach the other ship." was
+   * leaving the whole match: a page that fails to open a link once (a chunk
+   * that didn't finish loading, a deploy landing mid-request, one dropped
+   * packet) never got a second attempt. Bumping `wireGeneration` below tears
+   * the link down and opens a fresh one without touching the battle itself,
+   * which is still running fine locally on both sides the whole time.
+   */
+  const [connectionLost, setConnectionLost] = useState(false);
+  const [wireGeneration, setWireGeneration] = useState(0);
+  /** Set right before a retry tears the old link down, so its cleanup knows not to announce a bye for a partner who is still here. */
+  const retryingRef = useRef(false);
+  const retryConnection = useCallback(() => {
+    retryingRef.current = true;
+    setConnectionLost(false);
+    setNotice(null);
+    setWireGeneration((n) => n + 1);
+  }, []);
   const [dragging, setDragging] = useState(false);
   const [coarse, setCoarse] = useState(false);
   const [compact, setCompact] = useState(false);
@@ -233,7 +254,13 @@ export default function BattleView({
           config.uid as string,
           config.peerUid as string,
           handlePacket,
-          (message) => setNotice(message),
+          (message) => {
+            setNotice(message);
+            // Every message TurnLink reports on its own -- the open failing,
+            // the listener dropping, a send bouncing -- means the link itself
+            // needs a fresh attempt, not just an acknowledgement.
+            setConnectionLost(true);
+          },
           // The host's terms ride along on every turn it writes, not only on
           // the start packet that the next write replaces.
           config.isHost ? { first: config.first } : undefined,
@@ -251,15 +278,17 @@ export default function BattleView({
       .catch((err) => {
         console.error('Could not open the wire', err);
         setNotice('Could not reach the other ship.');
+        setConnectionLost(true);
       });
 
     return () => {
       disposed = true;
       if (leave) window.removeEventListener('pagehide', leave);
-      link?.close();
+      link?.close(!retryingRef.current);
+      retryingRef.current = false;
       linkRef.current = null;
     };
-  }, [online, config.roomId, config.uid, config.peerUid, config.isHost, config.seed, config.first, handlePacket]);
+  }, [online, config.roomId, config.uid, config.peerUid, config.isHost, config.seed, config.first, handlePacket, wireGeneration]);
 
   // -- the engine and the loop -----------------------------------------------
 
@@ -508,10 +537,23 @@ export default function BattleView({
     return (
       <div className="flex h-[100dvh] w-full flex-col items-center justify-center gap-3 bg-[#04121f] text-white">
         <Loader2 className="h-10 w-10 animate-spin text-amber-300" />
-        <p className="font-bold text-white/80">Waiting for the host to weigh anchor.</p>
-        <button onClick={onExit} className="mt-2 rounded-2xl border border-white/20 bg-white/5 px-5 py-2 text-sm font-bold">
-          Back
-        </button>
+        <p className="font-bold text-white/80">
+          {connectionLost ? 'Lost contact before the match could start.' : 'Waiting for the host to weigh anchor.'}
+        </p>
+        {notice && connectionLost && <p className="text-xs text-amber-200/80">{notice}</p>}
+        <div className="mt-2 flex gap-2">
+          {connectionLost && (
+            <button
+              onClick={retryConnection}
+              className="rounded-2xl bg-amber-400 px-5 py-2 text-sm font-bold text-slate-900"
+            >
+              Try again
+            </button>
+          )}
+          <button onClick={onExit} className="rounded-2xl border border-white/20 bg-white/5 px-5 py-2 text-sm font-bold">
+            Back
+          </button>
+        </div>
       </div>
     );
   }
@@ -583,9 +625,19 @@ export default function BattleView({
       )}
 
       {notice && (
-        <div className="pointer-events-none absolute inset-x-0 bottom-[124px] z-30 flex justify-center px-4">
-          <div className="rounded-xl border border-amber-300/40 bg-slate-950/85 px-4 py-2 text-center text-xs font-bold text-amber-200">
+        <div
+          className={`absolute inset-x-0 bottom-[124px] z-30 flex justify-center px-4 ${connectionLost ? '' : 'pointer-events-none'}`}
+        >
+          <div className="flex items-center gap-3 rounded-xl border border-amber-300/40 bg-slate-950/85 px-4 py-2 text-center text-xs font-bold text-amber-200">
             {notice}
+            {connectionLost && (
+              <button
+                onClick={retryConnection}
+                className="rounded-lg bg-amber-400 px-2.5 py-1 text-[11px] font-black text-slate-900"
+              >
+                Retry
+              </button>
+            )}
           </div>
         </div>
       )}

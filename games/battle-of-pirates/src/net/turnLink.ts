@@ -110,13 +110,18 @@ export class TurnLink {
     });
   }
 
-  close() {
+  /**
+   * @param announce Tell the other side to give the wheel to a bot, because
+   * this player has actually gone. Left true for every real departure. The
+   * one caller that passes false is a reconnect: that link is being replaced
+   * by a fresh one a moment later, and announcing a bye in between would send
+   * a partner who is still here to a bot for no reason.
+   */
+  close(announce = true) {
     if (this.closed) return;
     this.closed = true;
     this.unsubscribe?.();
     this.unsubscribe = null;
-    // Best effort: tell the other side to give the wheel to a bot rather than
-    // waiting out a turn clock for someone who has gone.
-    this.write?.({ t: 'bye', n: Date.now() }).catch(() => {});
+    if (announce) this.write?.({ t: 'bye', n: Date.now() }).catch(() => {});
   }
 }
