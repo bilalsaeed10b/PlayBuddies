@@ -664,6 +664,11 @@ export default function MatchView({
                 the round trip, not a peer count. It appears as soon as there is
                 one to show. */}
             {wire.rtt > 0 ? `${wire.rtt}ms` : isHost ? 'host' : 'guest'}
+            {/* Named, not just coloured. "Amber means relayed" is knowledge
+                nobody has at the moment they need it, and the difference
+                between the two paths is the difference between a game that
+                feels instant and one that does not. */}
+            {wire.relayed > 0 && <span className="text-amber-300">· relay</span>}
             {wire.stalled && <span className="text-amber-300">· reconnecting</span>}
           </div>
         )}

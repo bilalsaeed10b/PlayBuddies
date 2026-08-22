@@ -22,8 +22,22 @@ import { BALANCE } from '../game/rules';
 import { NetMessage } from '../types/game';
 import { Mesh } from './mesh';
 
-/** Relay writes per second, per player. Deliberately below the mesh's rate. */
+/**
+ * Relay writes per second, per player.
+ *
+ * Two rates, because the two paths cost completely different things. A
+ * Firestore write is billed per document write, so that path is paced
+ * conservatively. A Realtime Database write is a message on a socket that is
+ * already open and is billed by bandwidth, so it can run fast enough that the
+ * pacing itself stops being a source of delay.
+ *
+ * That pacing is not free latency-wise: at 8Hz a snapshot waits up to 125ms
+ * just for the next write, and the reply to a round-trip probe waits again on
+ * the other side. Two of those are most of the difference between a relayed
+ * match that is slow and one that is unplayable.
+ */
 const RELAY_HZ = 8;
+const FAST_RELAY_HZ = 20;
 /** Events (a `bye`, say) queued for the next relay write, at most. */
 const MAX_EVENTS = 8;
 
@@ -206,9 +220,19 @@ export class Link {
    * already running.
    */
   private async openRelay() {
+    // Realtime Database first. It is the same websocket the signalling already
+    // holds open, so a message costs one push over a live socket rather than a
+    // Firestore document write and a listener fan-out — the difference between
+    // a fallback that plays and one that merely functions. Measured on a real
+    // match, the Firestore path alone was a 669ms round trip.
+    if (await this.openFastRelay()) {
+      this.relayTimer = window.setInterval(() => void this.flushRelay(), 1000 / FAST_RELAY_HZ);
+      return;
+    }
     try {
       const { db, doc, setDoc, collection, onSnapshot } = await import('../firebase');
       if (this.closed) return;
+      console.warn('[link] falling back to the Firestore relay — deploy database.rules.json for the faster one');
 
       const mine = doc(db, 'lobbies', this.roomId, 'updates', this.selfId);
       const stop = onSnapshot(
@@ -225,8 +249,7 @@ export class Link {
             // from being mistaken for a fresh one. A counter that jumps a long
             // way *backwards* is a peer that reloaded, not a replay — treating
             // that as stale would silence them for the rest of the match.
-            const last = this.seen.get(from);
-            if (last !== undefined && data.n <= last && data.n > last - 60) continue;
+            if (this.isReplay(from, data.n)) continue;
             this.seen.set(from, data.n);
             let batch: NetMessage[];
             try {
@@ -251,6 +274,78 @@ export class Link {
     } catch (err) {
       console.error('[link] could not arm the relay:', err);
     }
+  }
+
+  /**
+   * The fast fallback, over Realtime Database.
+   *
+   * Returns false if the rules for it are not deployed, in which case the
+   * caller uses the Firestore relay instead. That is deliberate: this path
+   * needs a `relay` node in database.rules.json, and a game that broke for
+   * everyone until someone remembered to publish rules would be a worse bug
+   * than the one being fixed.
+   */
+  private async openFastRelay(): Promise<boolean> {
+    try {
+      const { rtdb, dbRef, dbSet, dbOnValue, dbOnDisconnect, dbRemove } = await import('../firebase');
+      if (this.closed) return false;
+
+      const mine = dbRef(rtdb, `relay/${this.roomId}/${this.selfId}`);
+      // One probe write, to find out whether the rules for this path exist
+      // before committing the match to it.
+      await dbSet(mine, { m: '[]', n: 0 });
+      if (this.closed) return false;
+      dbOnDisconnect(mine).remove().catch(() => {});
+
+      const stop = dbOnValue(
+        dbRef(rtdb, `relay/${this.roomId}`),
+        (snap) => {
+          const all = snap.val() as Record<string, { m?: string; n?: number }> | null;
+          if (!all) return;
+          for (const [from, entry] of Object.entries(all)) {
+            if (from === this.selfId) continue;
+            if (typeof entry?.m !== 'string' || typeof entry.n !== 'number') continue;
+            if (this.isReplay(from, entry.n)) continue;
+            this.seen.set(from, entry.n);
+            let batch: NetMessage[];
+            try {
+              batch = JSON.parse(entry.m) as NetMessage[];
+            } catch {
+              continue;
+            }
+            for (const msg of batch) this.receive(from, msg);
+          }
+        },
+        (err: unknown) => console.error('[link] fast relay dropped:', err),
+      );
+
+      this.relay = {
+        write: async (payload, seq) => {
+          await dbSet(mine, { m: payload, n: seq });
+        },
+        stop: () => {
+          stop();
+          dbRemove(mine).catch(() => {});
+        },
+      };
+      return true;
+    } catch (err) {
+      // Almost always PERMISSION_DENIED, meaning the rules are not deployed.
+      console.warn('[link] fast relay unavailable:', err);
+      return false;
+    }
+  }
+
+  /**
+   * Whether a sequence number has already been acted on.
+   *
+   * A big jump *backwards* is a peer that reloaded and started counting again,
+   * not a replayed message — treating that as stale would silence them for the
+   * rest of the match.
+   */
+  private isReplay(from: string, n: number): boolean {
+    const last = this.seen.get(from);
+    return last !== undefined && n <= last && n > last - 60;
   }
 
   private async flushRelay() {

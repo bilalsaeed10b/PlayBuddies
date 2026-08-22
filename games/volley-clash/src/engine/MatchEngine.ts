@@ -299,6 +299,16 @@ export class MatchEngine {
   private lastInput = new Map<string, number>();
   /** What the network last said each character is pressing. */
   private netInputs = new Map<string, Input>();
+  /**
+   * How old the newest packet was when it arrived, in seconds.
+   *
+   * Every threshold below is judged against this. A 400px disagreement about a
+   * ball travelling 1500px/s is what a third of a second of latency *looks
+   * like* — it is not two simulations coming apart, and snapping the ball for
+   * it produces the teleporting that makes a slow connection unplayable rather
+   * than merely slow.
+   */
+  private lastLag = 0;
 
   constructor(cfg: EngineConfig) {
     this.cfg = cfg;
@@ -995,6 +1005,7 @@ export class MatchEngine {
    * before it is used.
    */
   applySnapshot(s: Snapshot, lag = 0) {
+    this.lastLag = lag;
     if (this.host) return;
 
     const wasOver = this.phase === 'over';
@@ -1117,6 +1128,7 @@ export class MatchEngine {
     const p = this.players.find((q) => q.id === id);
     if (!p || p.control !== 'remote') return;
     if (tick < this.resetTick) return;
+    this.lastLag = lag;
 
     const target: TargetBody = {
       x: d[0],
@@ -1161,7 +1173,8 @@ export class MatchEngine {
     const dy = t.y - p.y;
     const gap = Math.hypot(dx, dy);
 
-    if (gap > (mine ? BALANCE.OWN_SNAP : BALANCE.BODY_SNAP)) {
+    const explained = Math.hypot(t.vx, t.vy) * (this.lastLag + 1 / BALANCE.SNAPSHOT_HZ);
+    if (gap > Math.max(mine ? BALANCE.OWN_SNAP : BALANCE.BODY_SNAP, explained)) {
       p.x = t.x;
       p.y = t.y;
       p.vx = t.vx;
@@ -1199,7 +1212,10 @@ export class MatchEngine {
       t.age += dt;
 
       const gap = Math.hypot(t.x - this.ball.x, t.y - this.ball.y);
-      if (gap > BALANCE.BALL_SNAP) {
+      // What the last packet's age could account for on its own, at the speed
+      // the ball is actually travelling.
+      const explained = Math.hypot(t.vx, t.vy) * (this.lastLag + 1 / BALANCE.SNAPSHOT_HZ);
+      if (gap > Math.max(BALANCE.BALL_SNAP, explained)) {
         this.ball.x = t.x;
         this.ball.y = t.y;
         this.ball.vx = t.vx;
@@ -1207,8 +1223,11 @@ export class MatchEngine {
         this.ball.spin = t.spin;
         this.trail.length = 0;
       } else if (gap > BALANCE.BALL_TOLERANCE) {
-        this.ball.x += (t.x - this.ball.x) * ease;
-        this.ball.y += (t.y - this.ball.y) * ease;
+        // Further out, closed faster — but always closed, never jumped. This is
+        // what keeps a relayed match readable instead of strobing.
+        const k = Math.min(1, ease * (1 + gap / 240));
+        this.ball.x += (t.x - this.ball.x) * k;
+        this.ball.y += (t.y - this.ball.y) * k;
         // Velocity is taken outright while a correction is running: easing the
         // position onto a target the ball is not actually chasing is how a
         // corrected ball ends up curving through the air on its way there.

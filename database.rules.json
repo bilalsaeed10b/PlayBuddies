@@ -43,6 +43,17 @@
         }
       }
     },
+    "relay": {
+      "$roomId": {
+        ".read": "auth != null",
+        "$uid": {
+          ".write": "auth != null && auth.uid === $uid",
+          "m": { ".validate": "newData.isString() && newData.val().length <= 8000" },
+          "n": { ".validate": "newData.isNumber()" },
+          "$other": { ".validate": false }
+        }
+      }
+    },
     "$other": {
       ".read": false,
       ".write": false

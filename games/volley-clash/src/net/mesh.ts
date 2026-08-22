@@ -34,6 +34,17 @@ const ICE_SERVERS: RTCIceServer[] = [
   { urls: 'stun:stun.cloudflare.com:3478' },
 ];
 
+/** The candidate types inside a set of raw candidate JSON, for diagnostics. */
+function typesOf(raw: Set<string>): Set<string> {
+  const out = new Set<string>();
+  for (const one of raw) {
+    // "candidate:… typ srflx …" — the type is the token after `typ`.
+    const match = /typ (\w+)/.exec(one);
+    if (match) out.add(match[1]);
+  }
+  return out;
+}
+
 /** Retry backoff, in ms, indexed by attempt. The last entry repeats. */
 const BACKOFF = [700, 1500, 3000, 5000, 8000];
 
@@ -54,8 +65,30 @@ const OPEN_DEADLINE = 9000;
 interface Attempt {
   pc: RTCPeerConnection;
   dc: RTCDataChannel;
-  /** Candidates from the other side that this attempt has already taken. */
+  /** Candidates from the other side that this attempt has already taken in. */
   seen: Set<string>;
+  /**
+   * Candidates that arrived before there was a remote description to attach
+   * them to.
+   *
+   * `addIceCandidate` rejects outright until `setRemoteDescription` has
+   * resolved, and the answer and the first candidates almost always arrive in
+   * the same signalling update — so without somewhere to put them, the entire
+   * opening batch is thrown away. They are never re-sent, because the sender
+   * has no idea anything was lost, and the connection then has nothing to try
+   * but the local half of the pair. That is not a connection that fails loudly;
+   * it is one that quietly never happens.
+   */
+  queued: string[];
+  /**
+   * Candidate types this side gathered, e.g. `host`, `srflx`, `relay`.
+   *
+   * The single most useful thing to know when a connection does not happen. No
+   * `srflx` at all means STUN never answered and the network is blocking it;
+   * `srflx` on both sides that still never connects means the two NATs will not
+   * talk without a relay, which no amount of retrying will change.
+   */
+  gathered: Set<string>;
   dead: boolean;
   /** Fires if the channel never opens. Cleared the moment it does. */
   deadline: number | null;
@@ -218,8 +251,10 @@ export class Mesh {
           // "connected" to a peer that had already moved on.
           this.attempt(peerId, peer, false, data.desc);
         } else if (peer.attempt && peer.attempt.pc.signalingState === 'have-local-offer') {
-          void peer.attempt.pc
+          const a = peer.attempt;
+          void a.pc
             .setRemoteDescription(new RTCSessionDescription(data.desc))
+            .then(() => this.flushCandidates(a))
             .catch((err) => console.error('[mesh] answer rejected by', peerId, err));
         }
       }
@@ -236,8 +271,27 @@ export class Mesh {
     for (const raw of Object.values(candidates)) {
       if (a.seen.has(raw)) continue;
       a.seen.add(raw);
+      a.queued.push(raw);
+    }
+    this.flushCandidates(a);
+  }
+
+  /**
+   * Hands over every candidate held back, once there is a remote description
+   * for them to belong to. Safe to call at any time; it does nothing until
+   * there is.
+   */
+  private flushCandidates(a: Attempt) {
+    if (a.dead || !a.pc.remoteDescription || a.queued.length === 0) return;
+    const batch = a.queued.splice(0, a.queued.length);
+    for (const raw of batch) {
       try {
-        a.pc.addIceCandidate(new RTCIceCandidate(JSON.parse(raw))).catch(() => {});
+        a.pc
+          .addIceCandidate(new RTCIceCandidate(JSON.parse(raw)))
+          // Loud, because a rejected candidate is a route to the other player
+          // being thrown away, and the symptom is a game that silently plays
+          // over the slow path instead.
+          .catch((err) => console.warn('[mesh] candidate rejected:', err));
       } catch {
         /* malformed candidate — skip */
       }
@@ -264,11 +318,39 @@ export class Mesh {
       ordered: false,
       maxRetransmits: 0,
     });
-    const a: Attempt = { pc, dc, seen: new Set(), dead: false, deadline: null };
+    const a: Attempt = {
+      pc,
+      dc,
+      seen: new Set(),
+      queued: [],
+      gathered: new Set(),
+      dead: false,
+      deadline: null,
+    };
     peer.attempt = a;
     a.deadline = window.setTimeout(() => {
       a.deadline = null;
-      if (!a.dead && dc.readyState !== 'open') this.retry(peerId, peer, iCall);
+      if (a.dead || dc.readyState === 'open') return;
+      // ICE is connected and only the channel is late. Killing that would throw
+      // away a working route over a slow SCTP handshake, so it gets one more
+      // window rather than a retry.
+      if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
+        a.deadline = window.setTimeout(() => {
+          a.deadline = null;
+          if (!a.dead && dc.readyState !== 'open') this.retry(peerId, peer, iCall);
+        }, OPEN_DEADLINE);
+        return;
+      }
+      console.warn(
+        `[mesh] no channel to ${peerId} after ${OPEN_DEADLINE}ms — ice: ${pc.iceConnectionState},` +
+          ` gathering: ${pc.iceGatheringState},` +
+          ` ours: [${[...a.gathered].join(', ') || 'nothing'}],` +
+          ` theirs: [${[...typesOf(a.seen)].join(', ') || 'nothing'}]`,
+        a.gathered.has('srflx')
+          ? 'Both sides are reachable from outside but no route between them was found: this pair needs a TURN server.'
+          : 'No server-reflexive candidate at all — STUN is being blocked on this network.',
+      );
+      this.retry(peerId, peer, iCall);
     }, OPEN_DEADLINE);
 
     const mineRef = dbRef(rtdb, `signaling/${this.roomId}/${this.selfId}/${peerId}`);
@@ -301,6 +383,7 @@ export class Mesh {
 
     pc.onicecandidate = (e) => {
       if (!e.candidate || a.dead) return;
+      if (e.candidate.type) a.gathered.add(e.candidate.type);
       dbPush(
         dbRef(rtdb, `signaling/${this.roomId}/${this.selfId}/${peerId}/candidates`),
         JSON.stringify(e.candidate.toJSON()),
@@ -344,6 +427,9 @@ export class Mesh {
         } else if (offer) {
           await pc.setRemoteDescription(new RTCSessionDescription(offer));
           if (a.dead) return;
+          // Their candidates may already be waiting: the offer and the first of
+          // them arrive together far more often than not.
+          this.flushCandidates(a);
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);
           await dbSet(dbRef(rtdb, `signaling/${this.roomId}/${this.selfId}/${peerId}/desc`), {
