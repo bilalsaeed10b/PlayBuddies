@@ -492,6 +492,14 @@ export default function MatchView({
   useEffect(() => {
     const engine = engineRef.current;
     if (!engine || !online) return;
+    // Only worth a line in the console when it actually changes something —
+    // every match hits this once at mount as a no-op, confirming what the
+    // engine was already built with.
+    if (engine.isHost !== isHost) {
+      console.warn(
+        `[net] lobby reassigned the host — this machine is now ${isHost ? 'authoritative' : 'a guest'}`,
+      );
+    }
     if (isHost) engine.promote();
     else engine.demote();
   }, [isHost, online]);

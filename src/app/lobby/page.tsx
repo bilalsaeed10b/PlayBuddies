@@ -48,6 +48,20 @@ const CHAT_LIMIT = 50;
 const MAX_MESSAGE_LENGTH = 200;
 const CHAT_COOLDOWN_MS = 1000;
 
+/**
+ * How long the host must be absent from presence before someone else claims
+ * the room.
+ *
+ * Presence comes from RTDB `onDisconnect`, which fires on the server the
+ * instant a socket closes — including the brief, ordinary reconnect a phone
+ * does on a cell handoff or a wifi-to-data switch, exactly the kind of network
+ * a player without a stable connection has. Without a grace period, that one
+ * dropped frame was enough to hand the room to someone else *and delete the
+ * real host's own player record*, which from the host's side looked like the
+ * match simply breaking under them for no reason.
+ */
+const HOST_MIGRATION_GRACE_MS = 6000;
+
 function LobbyContent() {
   const searchParams = useSearchParams();
   const roomId = normalizeRoomCode(searchParams.get("room") || "");
@@ -233,8 +247,10 @@ function LobbyContent() {
   }, [user, roomId]);
 
   // ── Host migration ────────────────────────────────────────────────────────
-  // If the host's presence drops, the longest-present remaining player claims
-  // the room. Without this a host leaving stranded everyone permanently.
+  // If the host's presence drops and *stays* dropped, the longest-present
+  // remaining player claims the room. Without this a host leaving stranded
+  // everyone permanently. With no grace period, it also fired on a presence
+  // blip that recovered on its own a moment later — see HOST_MIGRATION_GRACE_MS.
   useEffect(() => {
     if (!lobby || !user || presentUids.size === 0) return;
     if (lobby.hostId === user.uid) return;
@@ -246,10 +262,16 @@ function LobbyContent() {
 
     if (candidates[0]?.uid !== user.uid) return;
 
-    updateDoc(doc(db, "lobbies", roomId), {
-      hostId: user.uid,
-      [`players.${lobby.hostId}`]: deleteField(),
-    }).catch((e) => console.error("Host migration failed", e));
+    // Cancelled by this effect's own cleanup the moment `presentUids` changes
+    // again — including the moment it changes because the host came back.
+    const timer = setTimeout(() => {
+      updateDoc(doc(db, "lobbies", roomId), {
+        hostId: user.uid,
+        [`players.${lobby.hostId}`]: deleteField(),
+      }).catch((e) => console.error("Host migration failed", e));
+    }, HOST_MIGRATION_GRACE_MS);
+
+    return () => clearTimeout(timer);
   }, [lobby, presentUids, user, roomId]);
 
   useEffect(() => {
