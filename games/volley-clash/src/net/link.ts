@@ -106,7 +106,22 @@ export class Link {
     );
 
     this.pingTimer = window.setInterval(() => this.ping(), 1000 / BALANCE.PING_HZ);
-    void this.openRelay();
+    const openedAt = Date.now();
+    // The signalling-relay fallback writes into the same node Mesh's own
+    // constructor just told Firebase to wipe — see Mesh.ready. Waiting for that
+    // wipe to be acknowledged first is cheap here: it is normally settled long
+    // before the mesh even finishes gathering its first candidate.
+    void this.mesh.ready
+      .then(() => this.openRelay())
+      .then((path) => {
+        if (this.closed) return;
+        // Which of the three fallbacks actually engaged, and how long the whole
+        // chain took from construction. The dominant cost here in practice is
+        // downloading this game's own Firebase chunk for the first time in the
+        // session, not the round trips inside openRelay itself — this is what
+        // tells us, from a real session, whether that guess is right.
+        console.log(`[link] relay armed (${path}) after ${Date.now() - openedAt}ms`);
+      });
   }
 
   setPeers(uids: string[]) {
@@ -236,26 +251,32 @@ export class Link {
   }
 
   /**
-   * Opens the fallback.
+   * Opens the fallback, and reports which of the three paths took.
    *
-   * Firebase is imported here rather than at the top so that a match whose mesh
-   * comes straight up never pays for the Firestore half of the SDK on the
-   * critical path — the relay is armed in the background while the game is
-   * already running.
+   * Firebase itself is not lazily loaded here — `Mesh` already imports it
+   * statically for the signalling it needs regardless of whether a relay ever
+   * runs, so the whole SDK is already a forced dependency of an online match
+   * before this file runs at all. What genuinely happens here in the
+   * background, while the mesh negotiates in parallel, is the handful of
+   * round trips each fallback needs to find out whether it is even usable.
    */
-  private async openRelay() {
+  private async openRelay(): Promise<'rtdb' | 'signalling-relay' | 'firestore' | 'unavailable'> {
     // Realtime Database first. It is the same websocket the signalling already
     // holds open, so a message costs one push over a live socket rather than a
     // Firestore document write and a listener fan-out — the difference between
     // a fallback that plays and one that merely functions. Measured on a real
     // match, the Firestore path alone was a 669ms round trip.
-    if ((await this.openFastRelay()) || (await this.openSignallingRelay())) {
+    if (await this.openFastRelay()) {
       this.relayTimer = window.setInterval(() => void this.flushRelay(), 1000 / FAST_RELAY_HZ);
-      return;
+      return 'rtdb';
+    }
+    if (await this.openSignallingRelay()) {
+      this.relayTimer = window.setInterval(() => void this.flushRelay(), 1000 / FAST_RELAY_HZ);
+      return 'signalling-relay';
     }
     try {
       const { db, doc, setDoc, collection, onSnapshot } = await import('../firebase');
-      if (this.closed) return;
+      if (this.closed) return 'unavailable';
       console.warn('[link] falling back to the Firestore relay — deploy database.rules.json for the faster one');
 
       const mine = doc(db, 'lobbies', this.roomId, 'updates', this.selfId);
@@ -295,8 +316,10 @@ export class Link {
       };
 
       this.relayTimer = window.setInterval(() => void this.flushRelay(), 1000 / RELAY_HZ);
+      return 'firestore';
     } catch (err) {
       console.error('[link] could not arm the relay:', err);
+      return 'unavailable';
     }
   }
 

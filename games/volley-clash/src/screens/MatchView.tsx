@@ -57,9 +57,21 @@ export interface MatchConfig {
  * A phone changing cell is a two-second hole in the wire and a perfectly normal
  * thing to play through, so the second number is generous — and the seat is
  * handed straight back the moment its owner speaks again.
+ *
+ * DROPPED_MS used to be 8 seconds, and it was wrong: it is measured from the
+ * moment the match *engine* starts, which is before the wire has even begun
+ * connecting. Entering an online match downloads this game's own Firebase
+ * chunk for the first time that session — several hundred KB, on whatever
+ * connection the player has — then opens a database socket, then attempts
+ * WebRTC, then falls back to a relay if that fails. None of that is optional
+ * and none of it is instant, and 8 seconds was not a fair trial for it: a
+ * connection that would have come up fine in 10 or 12 seconds was declared
+ * dead and handed to a bot before it had a real chance. This is what "the
+ * bot controlled the other person" turned out to be — not a broken
+ * connection, an impatient clock.
  */
 const QUIET_MS = 1500;
-const DROPPED_MS = 8000;
+const DROPPED_MS = 20000;
 
 /**
  * Whether a packet is older than one already seen from the same sender.
@@ -121,6 +133,11 @@ export default function MatchView({
     stalled: false,
     reason: null,
   });
+  // The render loop reads this rather than `wire` directly — it is not in that
+  // effect's dependency list, since putting it there would rebuild the engine
+  // (and reset the score) on every connection status change.
+  const wireRef = useRef(wire);
+  wireRef.current = wire;
   const [touch, setTouch] = useState(false);
 
   const online = Boolean(config.roomId && config.uid);
@@ -356,6 +373,14 @@ export default function MatchView({
           if (seat.control !== 'remote') continue;
           const heard = heardAt.current.get(seat.id) ?? mountedAt;
           if (now - heard > DROPPED_MS) {
+            // This used to happen silently. It is the single most confusing
+            // thing that can occur in a match — a real player's seat starts
+            // moving on its own — and it deserves a paper trail explaining why.
+            console.warn(
+              `[net] no contact from ${seat.name} (${seat.id}) for ${Math.round((now - heard) / 1000)}s` +
+                ` — handing their seat to a bot. Link status at the time:`,
+              wireRef.current,
+            );
             engine.handOverToAI(seat.id);
             engine.forget(seat.id);
             remoteInputs.current.delete(seat.id);

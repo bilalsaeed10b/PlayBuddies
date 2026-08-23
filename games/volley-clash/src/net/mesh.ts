@@ -55,22 +55,27 @@ const DISCONNECT_GRACE = 3500;
  * How long an attempt with *no sign of progress* gets before it is written off.
  *
  * This was 9 seconds, applied to every attempt on both sides regardless of what
- * ICE was doing, and it was the whole bug. A handshake that would have
- * succeeded in twelve seconds — an ordinary outcome on a slow link to a distant
- * STUN server — was torn down at nine, restarted, and torn down again, forever.
- * The game never connected and fell back to the relay, while the version
- * *without* any of this retry machinery connected fine, just slowly.
+ * ICE was doing, and it was a bug: a handshake that would have succeeded in
+ * twelve seconds — an ordinary outcome on a slow link to a distant STUN server
+ * — was torn down at nine, restarted, and torn down again, forever.
  *
- * So it is now a backstop rather than a policy. An attempt that is checking
- * candidate pairs, or connected and merely slow to open its channel, is making
- * progress and is left alone for another window. Genuine failure arrives on its
- * own as `connectionState === 'failed'`, which is handled separately and
- * immediately.
+ * The fix for that overshot. Widening it to 20 seconds with two extensions
+ * meant a caller stuck in `checking` — which is exactly what "no TURN server"
+ * looks like, and does not resolve itself no matter how long it is given —
+ * could take a full 60 seconds before its first retry. The caller trying
+ * again does not fix a pair that structurally cannot connect, so there is
+ * nothing to buy by waiting that long; what matters is finding out fast and
+ * telling the relay to carry the match, which DROPPED_MS in MatchView.tsx
+ * does on its own timer. That timer was 8 seconds — shorter than even the
+ * first window here — so on every connection that failed rather than merely
+ * being slow, a real player's seat was handed to a bot before this file ever
+ * got a chance to retry or report why. The two numbers have to be read
+ * together; see the note by DROPPED_MS.
  */
-const OPEN_DEADLINE = 20000;
+const OPEN_DEADLINE = 6000;
 
 /** How many extra windows an attempt that is still making progress may have. */
-const MAX_EXTENSIONS = 2;
+const MAX_EXTENSIONS = 1;
 
 interface Attempt {
   pc: RTCPeerConnection;
@@ -133,6 +138,20 @@ interface Peer {
 export class Mesh {
   private peers = new Map<string, Peer>();
   private closed = false;
+  /**
+   * Resolves once the constructor's own signalling wipe has settled.
+   *
+   * That wipe removes this whole session's `signaling/{room}/{self}` node —
+   * deliberately, to clear anything a crashed tab left behind — and it is
+   * fire-and-forget by nature, since nothing in this class waits on it. But
+   * `Link` writes a relay slot under that same node moments later, and a write
+   * issued before the wipe is acknowledged risks being the thing that gets
+   * wiped. The Firebase SDK preserves per-connection write order, which is
+   * probably why this has not been observed to bite in practice — but
+   * "probably" is not a foundation to build a relay's own safety net on, so
+   * anything that shares this node waits on this instead of on luck.
+   */
+  readonly ready: Promise<void>;
 
   constructor(
     private roomId: string,
@@ -152,7 +171,9 @@ export class Mesh {
     // a crashed tab doesn't strand its half of every negotiation.
     const mine = dbRef(rtdb, `signaling/${roomId}/${selfId}`);
     dbOnDisconnect(mine).remove().catch(() => {});
-    dbRemove(mine).catch((err) => console.error('[mesh] signalling unavailable:', err));
+    this.ready = dbRemove(mine)
+      .catch((err) => console.error('[mesh] signalling unavailable:', err))
+      .then(() => undefined);
   }
 
   /** Reconciles the connection set against the room roster. Safe to call on every roster change. */

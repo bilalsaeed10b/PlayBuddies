@@ -280,8 +280,13 @@ export const BALANCE = {
    * and quit. Taking over is not always *right* — two guests could take over at
    * once and drift apart — but a game that keeps playing beats a game that has
    * stopped, and the roster change that follows a real disconnect resolves it.
+   *
+   * MatchView doubles this for a guest that has *never* heard from the host —
+   * see the note by DROPPED_MS in MatchView.tsx for why the first contact
+   * needs a longer allowance than a drop mid-match. Kept in step with that
+   * number by hand: this doubled is meant to land close to it.
    */
-  STALL_PROMOTE: 6,
+  STALL_PROMOTE: 10,
 
   // ── simulation ──────────────────────────────────────────────────────────
   FIXED_DT: 1 / 120,
