@@ -22,7 +22,7 @@
  * without ever moving the point of aim off the target.
  */
 import type { BattleEngine } from './BattleEngine';
-import { ARENA, BALANCE, CARDS, CardId, CardMeta, clamp } from '../game/rules';
+import { ARENA, BALANCE, CARDS, CardId, CardMeta, clamp, elevOf, elevRange } from '../game/rules';
 import { rockRadius } from '../game/sea';
 import type { Shot, Team } from '../types/game';
 
@@ -89,13 +89,20 @@ export function chooseShot(engine: BattleEngine, team: Team, level: number, brai
   const facing = engine.facing(team);
   const options: Shot[] = [];
 
-  // Lofting over a rock is worth doing on purpose, so both arcs are tried and
-  // the one with a clear line wins. A bot that fires flat into the same rock
-  // three turns running is the fastest way to look broken.
+  // Lofting over the mountain is worth doing on purpose, so both arcs are
+  // tried and the one with a clear line wins. A bot that fires flat into the
+  // same mountain three turns running is the fastest way to look broken.
+  const [loElev, hiElev] = elevRange(card);
   for (const high of [false, true]) {
     for (const power of POWERS) {
       const angle = solve(engine, team, aimX, targetY, power, meta.gravity, meta.speed, Boolean(meta.windproof), high);
       if (angle === null) continue;
+      // Mortar cannot leave the barrel below 45 degrees, same as a human's
+      // aim pad -- without this the solver's flat root would have the bot
+      // firing mortars the engine's own fire() would just clamp away from
+      // the target it was aimed at.
+      const elev = elevOf(angle, facing);
+      if (elev < loElev || elev > hiElev) continue;
       if (!meta.pierce && blocked(engine, team, angle, power, meta.gravity, meta.speed, Boolean(meta.windproof))) continue;
       options.push({ angle, power, card });
     }
@@ -150,17 +157,17 @@ function pickCard(engine: BattleEngine, team: Team, tier: Tier): CardId {
   const foe = engine.ships[(1 - team) as Team];
   if (me.hp <= 38 && hand.includes('patch')) return 'patch';
 
-  const rocksInTheWay = engine.rocks.some((r) => {
+  const mountainInTheWay = engine.rocks.some((r) => {
     if (r.hp <= 0) return false;
     const lo = Math.min(me.x, foe.x);
     const hi = Math.max(me.x, foe.x);
     return r.x > lo && r.x < hi;
   });
-  // Bore is the only card built to ignore a rock outright; reaching for a
-  // mortar here used to make sense when it was the long lob that cleared one
-  // from any range, but it no longer reaches far enough to be a dependable
-  // answer to a rock that is anywhere near the enemy.
-  if (rocksInTheWay && hand.includes('bore')) return 'bore';
+  // Bore is the only card built to ignore the mountain outright, whatever the
+  // angle. Mortar could clear it too, but only from within its own locked
+  // band -- see elevRange -- which the options loop above already tries and
+  // discards on its own merits, so this only needs the one sure thing.
+  if (mountainInTheWay && hand.includes('bore')) return 'bore';
 
   if (me.hp <= 55 && hand.includes('patch')) return 'patch';
 

@@ -11,7 +11,7 @@ import AimPad, { Aim } from '../components/AimPad';
 import CardHand, { HAND_HEIGHT, HAND_HEIGHT_COMPACT } from '../components/CardHand';
 import { BattleEngine, Seat } from '../engine/BattleEngine';
 import { Brain, chooseShot, newBrain } from '../engine/ai';
-import { BALANCE, CardId, TEAM_COLORS, clamp } from '../game/rules';
+import { BALANCE, CardId, TEAM_COLORS, angleOf, clamp, elevOf, elevRange } from '../game/rules';
 import { QualityGovernor } from '../game/quality';
 import { SHIPS } from '../game/ships';
 import { IN_IFRAME, toggleFullscreen } from '../fullscreen';
@@ -41,15 +41,6 @@ export interface MatchConfig {
 interface Session {
   seed: number;
   first: Team;
-}
-
-/** Elevation, in radians above the horizon, from a world angle. */
-function elevOf(angle: number, facing: 1 | -1): number {
-  return facing > 0 ? -angle : angle + Math.PI;
-}
-
-function angleOf(elev: number, facing: 1 | -1): number {
-  return facing > 0 ? -elev : elev - Math.PI;
 }
 
 export default function BattleView({
@@ -166,7 +157,8 @@ export default function BattleView({
     const rate = (keys.ShiftLeft || keys.ShiftRight ? 0.16 : 0.6) * dt;
     if (keys.ArrowUp) elev += rate;
     if (keys.ArrowDown) elev -= rate;
-    engine.aimAngle = angleOf(clamp(elev, 0.06, 1.53), facing);
+    const [loElev, hiElev] = elevRange(engine.selected);
+    engine.aimAngle = angleOf(clamp(elev, loElev, hiElev), facing);
 
     const powerRate = (keys.ShiftLeft || keys.ShiftRight ? 0.12 : 0.45) * dt;
     if (keys.ArrowRight) engine.aimPower = clamp(engine.aimPower + powerRate, 0.06, 1);
@@ -645,6 +637,7 @@ export default function BattleView({
       <AimPad
         enabled={canAim}
         facing={facing}
+        selectedCard={selected}
         bottomInset={showHand ? handHeight : 8}
         onAim={onAim}
         onDragChange={onDragChange}

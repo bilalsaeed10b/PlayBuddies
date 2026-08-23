@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { CardId, elevRange } from '../game/rules';
 
 /**
  * Aiming, which is the entire control scheme.
@@ -35,13 +36,10 @@ interface Drag {
   elev: number;
 }
 
-/** Elevation limits, in radians above the horizon. */
-const MIN_ELEV = 0.06;
-const MAX_ELEV = 1.53;
-
 export default function AimPad({
   enabled,
   facing,
+  selectedCard,
   bottomInset,
   onAim,
   onDragChange,
@@ -51,6 +49,8 @@ export default function AimPad({
   enabled: boolean;
   /** 1 if the firing ship points right, -1 if it points left. */
   facing: 1 | -1;
+  /** Mortar aims within a narrower elevation band than everything else -- see elevRange. */
+  selectedCard: CardId;
   /** Height of the card hand, so the pad does not fight it for touches. */
   bottomInset: number;
   /** Called on every move. Cheap on purpose: it writes straight into the engine. */
@@ -114,13 +114,15 @@ export default function AimPad({
 
       // Elevation is measured in the ship's own frame, so the same gesture
       // means the same shot on both sides of the water. Screen y grows
-      // downward, hence the negation.
+      // downward, hence the negation. The band itself depends on the card in
+      // hand -- mortar cannot be dragged flatter than 45 degrees.
       const forward = pullX * facing;
-      const elev = Math.min(MAX_ELEV, Math.max(MIN_ELEV, Math.atan2(-pullY, forward)));
+      const [loElev, hiElev] = elevRange(selectedCard);
+      const elev = Math.min(hiElev, Math.max(loElev, Math.atan2(-pullY, forward)));
       const angle = facing > 0 ? -elev : -(Math.PI - elev);
       return { angle, power, elev };
     },
-    [facing],
+    [facing, selectedCard],
   );
 
   const publish = useCallback(() => {

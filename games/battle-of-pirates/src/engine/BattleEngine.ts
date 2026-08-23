@@ -26,8 +26,11 @@ import {
   CARDS,
   CardId,
   TEAM_COLORS,
+  angleOf,
   clamp,
   dealHand,
+  elevOf,
+  elevRange,
   mulberry32,
 } from '../game/rules';
 import type { Quality } from '../game/quality';
@@ -259,38 +262,31 @@ export class BattleEngine {
   }
 
   /**
-   * The reef between the two anchors.
+   * The mountain between the two anchors.
    *
-   * Every rock here is tall enough to stand in the way of a level shot -- see
-   * ROCK_R_MIN -- so the flat trade across the water is no longer the only
-   * shot in the game. Going over the top, dropping a mortar on the far side,
-   * or boring straight through are now the three answers, and picking one is
-   * the turn's real decision.
+   * One landmass, not a reef of two or three -- tall enough (see ROCK_R_MIN)
+   * that nothing at a working elevation skims past it. Going over the top,
+   * dropping a mortar on the far side, or boring straight through are the
+   * three answers, and picking one is the turn's real decision.
    *
-   * Two things keep that from tipping into a wall. The band is held clear of
-   * either hull at its furthest drift, and each rock is capped to half of its
-   * own slot, so a pair reads as a reef with water between rather than one
-   * unbroken ridge. The cap never falls below the blocking floor: a rock that
-   * cannot block is not worth drawing.
+   * It spawns within a band held clear of either hull at its furthest drift,
+   * with a little wander so it is not the same shot every match, but always
+   * roughly amidships -- there is only the one, and putting it near either
+   * anchor would just hand that side a free flat lane down the far side.
    */
   private spawnRocks(rnd: () => number) {
-    const count = BALANCE.ROCK_MIN + Math.floor(rnd() * (BALANCE.ROCK_MAX - BALANCE.ROCK_MIN + 1));
     const lo = ARENA.anchor[0] + BALANCE.ROCK_MARGIN;
     const hi = ARENA.anchor[1] - BALANCE.ROCK_MARGIN;
-    const slot = (hi - lo) / count;
-    const maxR = Math.max(BALANCE.ROCK_R_MIN, Math.min(BALANCE.ROCK_R_MAX, slot * 0.5));
-    for (let i = 0; i < count; i++) {
-      const r = BALANCE.ROCK_R_MIN + rnd() * (maxR - BALANCE.ROCK_R_MIN);
-      this.rocks.push({
-        // Centred in its own slot with a little wander, rather than anywhere
-        // in the band: two rocks that land on top of each other are one rock.
-        x: lo + slot * (i + 0.5) + slot * (rnd() - 0.5) * 0.34,
-        y: ARENA.seaY - 6 - rnd() * 26,
-        r,
-        hp: BALANCE.ROCK_HP,
-        seed: (rnd() * 0xffffff) | 0,
-      });
-    }
+    const mid = (lo + hi) / 2;
+    const wander = (hi - lo) * 0.22;
+    const r = BALANCE.ROCK_R_MIN + rnd() * (BALANCE.ROCK_R_MAX - BALANCE.ROCK_R_MIN);
+    this.rocks.push({
+      x: clamp(mid + (rnd() * 2 - 1) * wander, lo, hi),
+      y: ARENA.seaY - 6 - rnd() * 26,
+      r,
+      hp: BALANCE.ROCK_HP,
+      seed: (rnd() * 0xffffff) | 0,
+    });
   }
 
   // -- geometry ---------------------------------------------------------------
@@ -388,7 +384,14 @@ export class BattleEngine {
     const team = this.turn;
     const ship = this.ships[team];
     const card = CARDS[shot.card] ?? CARDS.round;
-    const angle = shot.angle;
+    // The aim pad, the keyboard and the bot's solver all already respect a
+    // card's elevation band, but this is the one place every source of a shot
+    // -- including whatever a peer's client claims it fired -- actually has to
+    // pass through, so it is the one place the mortar's lock is guaranteed
+    // rather than merely usually true.
+    const facing = this.facing(team);
+    const [loElev, hiElev] = elevRange(card.id);
+    const angle = angleOf(clamp(elevOf(shot.angle, facing), loElev, hiElev), facing);
     const power = clamp(shot.power, 0.05, 1);
 
     ship.lastAim = { angle, power };

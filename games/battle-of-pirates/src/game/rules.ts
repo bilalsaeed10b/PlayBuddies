@@ -24,20 +24,22 @@ export interface Arena {
  * The generous headroom is deliberate: a lofted mortar leaves the top of the
  * frame, and an off-screen ball needs somewhere to be.
  *
- * The water is wide on purpose, and wider again than the first pass at this.
- * At a thousand pixels between anchors, two thirds of the power dial reached
- * the enemy; a first widening to 1260 fixed that but a good aim from the deck
- * could still all but guarantee a hit once elevation was solved once. At 1600
- * the far ship is a small target at the top of the dial and nowhere near one
- * at the bottom, so range is a real problem to solve on every single shot, not
- * just once per match. The anchors stay one rock's clearance inside the frame
- * at full drift, so neither hull can wander off the edge of the picture.
+ * The water is wide on purpose, and wider again than the first two passes at
+ * this. A thousand pixels between anchors let two thirds of the power dial
+ * reach the enemy outright; 1260 fixed that but a good aim from the deck
+ * could still all but guarantee a hit once elevation was solved once; 1600
+ * made range a real problem to solve on every shot, not just once a match.
+ * At 1850 that problem stays live even after the mountain in the middle
+ * forces the elevation choice too -- flat is no longer an option at all, so
+ * the water has to carry the whole burden of range on its own, and it needs
+ * the extra room to do it in. The anchors stay clear of the frame's edge at
+ * full drift either way.
  */
 export const ARENA: Arena = {
-  w: 2200,
+  w: 2450,
   h: 900,
   seaY: 690,
-  anchor: [300, 1900],
+  anchor: [300, 2150],
 };
 
 export const BALANCE = {
@@ -76,10 +78,11 @@ export const BALANCE = {
   MAX_TURN_DAMAGE: 62,
   BURN_PER_TURN: 7,
 
-  HULL_W: 224,
+  /** Trimmed down from the first pass at this: a smaller silhouette is a harder one to land on. */
+  HULL_W: 200,
   HULL_H: 78,
-  /** Muzzle offset from the hull centre, toward the enemy. */
-  MUZZLE_X: 74,
+  /** Muzzle offset from the hull centre, toward the enemy. Scaled with HULL_W. */
+  MUZZLE_X: 66,
   MUZZLE_Y: -46,
   /** How far a ship may wander from its anchor, and how far per turn. */
   DRIFT_MAX: 135,
@@ -88,33 +91,31 @@ export const BALANCE = {
   BOB_AMP: 10,
   BOB_SPEED: 1.35,
 
-  ROCK_MIN: 1,
-  ROCK_MAX: 2,
-  /** Hits a rock takes before it crumbles. It visibly wears down with each. */
+  /** Hits the mountain takes before it crumbles. It visibly wears down with each. */
   ROCK_HP: 3,
   /**
-   * Rock size, in world pixels of radius -- the hitbox is a true circle, so
-   * this is both how wide a rock reads on screen and, what actually matters,
-   * how high its crest stands over the water.
+   * The mountain's size, in world pixels of radius -- the hitbox is a true
+   * circle, so this is both how wide it reads on screen and, what actually
+   * matters, how high its crest stands over the water.
    *
-   * A muzzle sits 46px above the waterline and a hull's own deck line is 62px
-   * up. The first pass at this put a rock's crest 90 to 140px up, enough to
-   * stop a shot fired flat off the barrel but not by much -- a slightly
-   * raised aim still skimmed the top of a small one. This puts the crest 145
-   * to 195px up: taller than a hull is high, so nothing at deck-level elevation
-   * gets past one, and the only way through the water it sits in is over the
-   * top or straight through it on a bore shot.
+   * Two rocks with a crest 145 to 195px up were still a reef: tall enough to
+   * stop a flat shot, short enough that a middling elevation cleared them
+   * with room to spare. This is one mountain instead, crest 360 to 420px up
+   * -- close to what it takes to clear at the top of the power dial, the way
+   * the arc in a photo of a near-miss actually reads. Nothing at a working
+   * elevation skims this one; going over it is a real commitment of power and
+   * angle both, and the only way through instead of over is still a bore shot.
    */
-  ROCK_R_MIN: 140,
-  ROCK_R_MAX: 190,
+  ROCK_R_MIN: 380,
+  ROCK_R_MAX: 440,
   /**
-   * How far the reef keeps clear of an anchor.
+   * How far the mountain keeps clear of an anchor.
    *
    * Measured against a hull at its furthest drift plus its own half-width,
-   * with a rock at full radius on top, so no rock can ever spawn inside the
-   * ship that has to shoot past it.
+   * with the mountain at full radius on top and room to spare, so it can
+   * never spawn inside the reach of the ship that has to shoot past it.
    */
-  ROCK_MARGIN: 420,
+  ROCK_MARGIN: 780,
 
   /** Seconds a player gets to aim before the shot goes off on its own. */
   TURN_TIME: 30,
@@ -196,31 +197,36 @@ export const CARDS: Record<CardId, CardMeta> = {
     shots: 2, spread: 0.05, damage: 0.62, blast: 0.85, gravity: 1, speed: 1,
   },
   /**
-   * A close-range shotgun, not a weaker round shot. At 0.72x speed it needs
-   * the better part of full power just to reach a stationary enemy at all --
-   * comfortably short of the wind-eaten, half-power shots round shot manages
-   * -- so the five-pellet forgiveness is only worth anything once the drift
-   * of the turn has actually brought the two hulls close together.
+   * A close-range shotgun, not a weaker round shot. At 0.78x speed -- nudged
+   * up when the water itself widened to 1850, so a full-power shot can still
+   * physically reach the far rail when the turn's drift has actually brought
+   * the two hulls close, rather than falling short even then -- it is still
+   * comfortably shorter than the wind-eaten, half-power shots round shot
+   * manages. The five-pellet forgiveness only pays off once the range is
+   * genuinely closed.
    */
   grape: {
     id: 'grape', name: 'Grapeshot', glyph: '::', weight: 15,
     blurb: 'A close-range fan of five. Needs the enemy properly near.',
-    shots: 5, spread: 0.15, damage: 0.32, blast: 0.55, gravity: 1, speed: 0.72,
+    shots: 5, spread: 0.15, damage: 0.32, blast: 0.55, gravity: 1, speed: 0.78,
   },
   /**
-   * The finisher. `speed` is the whole redesign: at 0.9x, full power at a
-   * clean angle just barely tags the near rail of a stationary enemy and
-   * nothing more -- the far rail is already out of reach -- so it rewards
-   * actually closing the distance rather than lobbing it from the anchor all
-   * match, the way the old long-range mortar did. What survives from that
-   * old version is the steep drop (`gravity` stays high) and the payoff for
-   * pulling it off: this is the hardest hitting card in the deck by a wide
-   * margin.
+   * The finisher, and the only card the mountain cannot make flinch. `elevRange`
+   * below locks it to a 45-to-90-degree barrel, below -- it cannot fire the flat
+   * shot at all, only a lob or a near-vertical drop -- so it never competes with
+   * round shot on the same trajectory. What used to pay for that restriction was
+   * range: the old mortar, unrestricted, still only just reached a stationary
+   * enemy at full power. Locked to the one angle band, it can afford to actually
+   * carry: at 1.1x speed its 45-degree ceiling clears the water with room to
+   * spare, and it still has real reach most of the way to 90, where it becomes a
+   * near-vertical drop for whatever has drifted in close. `gravity` stays high,
+   * so the drop itself is still the steepest in the deck, and the payoff for
+   * threading it is unchanged: hardest hitting card here by a wide margin.
    */
   mortar: {
     id: 'mortar', name: 'Mortar', glyph: 'V', weight: 13,
-    blurb: 'Devastating up close. Barely reaches their bow at full power.',
-    shots: 1, spread: 0, damage: 1.75, blast: 1.5, gravity: 1.75, speed: 0.9,
+    blurb: 'Steep shots only, forty-five degrees or more. Hits hardest, carries far for it.',
+    shots: 1, spread: 0, damage: 1.75, blast: 1.5, gravity: 1.4, speed: 1.1,
   },
   firebomb: {
     id: 'firebomb', name: 'Firebomb', glyph: '*', weight: 11,
@@ -251,6 +257,36 @@ export const CARD_ORDER: CardId[] = ['round', 'chain', 'grape', 'mortar', 'fireb
 
 export function clamp(n: number, lo: number, hi: number): number {
   return n < lo ? lo : n > hi ? hi : n;
+}
+
+/** Elevation, in radians above the horizon, from a world angle. */
+export function elevOf(angle: number, facing: 1 | -1): number {
+  return facing > 0 ? -angle : angle + Math.PI;
+}
+
+/** The inverse of elevOf, for handing an elevation back to the engine. */
+export function angleOf(elev: number, facing: 1 | -1): number {
+  return facing > 0 ? -elev : elev - Math.PI;
+}
+
+/** Every card but one can fire almost flat through nearly straight up. */
+const ELEV_MIN = 0.06;
+const ELEV_MAX = 1.53;
+/** Mortar's whole redesign: a lob or a near-vertical drop, never flatter than that. */
+const MORTAR_ELEV_MIN = Math.PI / 4;
+const MORTAR_ELEV_MAX = Math.PI / 2;
+
+/**
+ * The elevation band a card may leave the barrel within, in radians above the
+ * horizon.
+ *
+ * The single source of truth for the mortar's angle lock: the aim pad, the
+ * keyboard, the engine's own fire() and the bot's solver all read this rather
+ * than each hard-coding the pair of numbers, so a shot fired from any of them
+ * lands inside the same band every other one would have allowed.
+ */
+export function elevRange(card: CardId): [number, number] {
+  return card === 'mortar' ? [MORTAR_ELEV_MIN, MORTAR_ELEV_MAX] : [ELEV_MIN, ELEV_MAX];
 }
 
 /**

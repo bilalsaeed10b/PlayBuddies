@@ -246,25 +246,28 @@ export function drawWaves(ctx: CanvasRenderingContext2D, arena: Arena, clock: nu
   ctx.restore();
 }
 
-// -- rocks ------------------------------------------------------------------
+// -- the mountain -------------------------------------------------------------
 
 /**
- * How much rock is left, after the chipping.
+ * How much mountain is left, after the chipping.
  *
  * Exported because the simulation has to agree with the picture. Only the
- * drawing used to shrink, so a rock two hits in still swallowed shots through
- * forty pixels of water that plainly had nothing in it -- the kind of miss a
- * player reads as the game cheating. Ballistics and paint now ask the same
- * question and get the same number.
+ * drawing used to shrink, so a mountain two hits in still swallowed shots
+ * through forty pixels of water that plainly had nothing in it -- the kind of
+ * miss a player reads as the game cheating. Ballistics and paint now ask the
+ * same question and get the same number.
  */
 export function rockRadius(rock: Rock): number {
   return rock.r * (0.55 + 0.45 * (rock.hp / BALANCE.ROCK_HP));
 }
 
 /**
- * A rock, drawn live because there are only ever one or two of them and they
- * change shape as they are chipped away. The silhouette comes from the rock's
- * own seed, so the same rock is the same rock on both screens.
+ * The mountain, drawn live because there is only ever the one and it changes
+ * shape as it is chipped away. A round boulder reads as an island; this is a
+ * wide base tapering to a single jagged summit instead, biased to keep most
+ * of its outline inside the collision circle so what looks solid mostly is.
+ * The silhouette comes from the rock's own seed, so it is the same mountain
+ * on both screens.
  */
 export function drawRock(ctx: CanvasRenderingContext2D, rock: Rock, waterY: number) {
   const rnd = mulberry32(rock.seed);
@@ -273,36 +276,51 @@ export function drawRock(ctx: CanvasRenderingContext2D, rock: Rock, waterY: numb
   ctx.save();
   ctx.translate(rock.x, rock.y);
 
-  ctx.fillStyle = '#3b4551';
+  const baseY = r * 0.66;
+  const halfBase = r * 0.98;
+  const summitX = (rnd() - 0.5) * r * 0.28;
+  const summitY = -r * 0.98;
+
+  ctx.fillStyle = '#38422f';
   ctx.beginPath();
-  const points = 9;
-  for (let i = 0; i < points; i++) {
-    const a = (Math.PI * 2 * i) / points;
-    const rr = r * (0.72 + rnd() * 0.42);
-    const px = Math.cos(a) * rr;
-    const py = Math.sin(a) * rr * 0.86;
-    if (i === 0) ctx.moveTo(px, py);
-    else ctx.lineTo(px, py);
-  }
+  ctx.moveTo(-halfBase, baseY);
+  ctx.lineTo(-halfBase * 0.62 - rnd() * r * 0.08, -r * 0.4 - rnd() * r * 0.1);
+  ctx.lineTo(-halfBase * 0.2 - rnd() * r * 0.06, -r * 0.68 - rnd() * r * 0.08);
+  ctx.lineTo(summitX, summitY);
+  ctx.lineTo(halfBase * 0.3 + rnd() * r * 0.06, -r * 0.6 - rnd() * r * 0.08);
+  ctx.lineTo(halfBase * 0.68 + rnd() * r * 0.08, -r * 0.28 - rnd() * r * 0.1);
+  ctx.lineTo(halfBase, baseY);
   ctx.closePath();
   ctx.fill();
 
-  // Lit top face, so it reads as stone rather than as a hole in the water.
-  ctx.fillStyle = '#5b6675';
+  // Lit face, catching the light from the same side the sun sits on.
+  ctx.fillStyle = '#54654a';
   ctx.beginPath();
-  ctx.ellipse(-r * 0.14, -r * 0.42, r * 0.62, r * 0.3, -0.2, 0, Math.PI * 2);
+  ctx.moveTo(summitX, summitY);
+  ctx.lineTo(halfBase * 0.3, -r * 0.6);
+  ctx.lineTo(summitX + r * 0.1, -r * 0.5);
+  ctx.closePath();
   ctx.fill();
 
-  // Foam collar, drawn where the waterline actually crosses this rock rather
-  // than at a fixed fraction of its radius. On the small rocks those were the
-  // same place; on a rock tall enough to stop a shot, the fixed offset put the
-  // foam a hull's height under the surface.
+  // A pale cap right at the summit -- the one part of it that never gets wet.
+  ctx.fillStyle = 'rgba(238, 244, 240, 0.88)';
+  ctx.beginPath();
+  ctx.moveTo(summitX, summitY);
+  ctx.lineTo(summitX + r * 0.13, summitY + r * 0.24);
+  ctx.lineTo(summitX - r * 0.13, summitY + r * 0.22);
+  ctx.closePath();
+  ctx.fill();
+
+  // Foam collar, drawn where the waterline actually crosses the mountain
+  // rather than at a fixed fraction of its radius. On the old small rocks
+  // those were the same place; on something tall enough to stop a shot, the
+  // fixed offset put the foam a hull's height under the surface.
   const collar = Math.max(-r * 0.82, Math.min(r * 0.82, waterY - rock.y));
   const collarW = Math.sqrt(Math.max(0, r * r - collar * collar)) * 1.06;
   ctx.strokeStyle = 'rgba(232, 250, 255, 0.55)';
-  ctx.lineWidth = 4;
+  ctx.lineWidth = 5;
   ctx.beginPath();
-  ctx.ellipse(0, collar, collarW, Math.max(6, collarW * 0.16), 0, 0, Math.PI * 2);
+  ctx.ellipse(0, collar, collarW, Math.max(7, collarW * 0.14), 0, 0, Math.PI * 2);
   ctx.stroke();
   ctx.restore();
 }
