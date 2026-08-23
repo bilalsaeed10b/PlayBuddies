@@ -237,7 +237,14 @@ export class Link {
   private publishStatus() {
     const direct = this.mesh.connectedPeers;
     const directSet = new Set(direct);
-    const relayed = this.peers.filter((id) => !directSet.has(id) && this.rtts.has(id));
+    // A peer counts as relayed the moment anything at all has arrived from
+    // them over it — not only once a round-trip probe happens to have landed.
+    // Gameplay itself proves the relay works; a slow first ping should not
+    // leave the badge claiming there is no connection while a rally is
+    // already in progress.
+    const relayed = this.peers.filter(
+      (id) => !directSet.has(id) && (this.seen.has(id) || this.rtts.has(id)),
+    );
     const relayedSet = new Set(relayed);
     this.onStatus?.({
       direct,
@@ -295,7 +302,7 @@ export class Link {
             // way *backwards* is a peer that reloaded, not a replay — treating
             // that as stale would silence them for the rest of the match.
             if (this.isReplay(from, data.n)) continue;
-            this.seen.set(from, data.n);
+            this.markSeen(from, data.n);
             let batch: NetMessage[];
             try {
               batch = JSON.parse(data.m) as NetMessage[];
@@ -353,7 +360,7 @@ export class Link {
             if (from === this.selfId) continue;
             if (typeof entry?.m !== 'string' || typeof entry.n !== 'number') continue;
             if (this.isReplay(from, entry.n)) continue;
-            this.seen.set(from, entry.n);
+            this.markSeen(from, entry.n);
             let batch: NetMessage[];
             try {
               batch = JSON.parse(entry.m) as NetMessage[];
@@ -429,7 +436,7 @@ export class Link {
             const first = batch[0] as { rn?: number } | undefined;
             if (typeof first?.rn === 'number') {
               if (this.isReplay(uid, first.rn)) return;
-              this.seen.set(uid, first.rn);
+              this.markSeen(uid, first.rn);
             }
             for (const msg of batch) if ((msg as { rn?: number }).rn === undefined) this.receive(uid, msg);
           },
@@ -479,6 +486,20 @@ export class Link {
   private isReplay(from: string, n: number): boolean {
     const last = this.seen.get(from);
     return last !== undefined && n <= last && n > last - 60;
+  }
+
+  /**
+   * Records that a peer has been heard from over the relay, and — the first
+   * time, for this peer — tells the badge immediately.
+   *
+   * Without the "first time" guard this would fire on every packet, which the
+   * fast relay delivers up to 20 times a second; the badge only needs to know
+   * once that the peer has gone from silent to reachable.
+   */
+  private markSeen(id: string, n: number) {
+    const first = !this.seen.has(id);
+    this.seen.set(id, n);
+    if (first) this.publishStatus();
   }
 
   private async flushRelay() {
