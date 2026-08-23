@@ -77,6 +77,22 @@ const OPEN_DEADLINE = 6000;
 /** How many extra windows an attempt that is still making progress may have. */
 const MAX_EXTENSIONS = 1;
 
+/**
+ * How long `Mesh.ready` waits for the startup wipe before giving up on it.
+ *
+ * The Realtime Database SDK does not time out a write on its own: on a network
+ * that cannot reach it at all — some carriers and corporate networks block it
+ * outright — `dbRemove` here simply never resolves or rejects, it queues
+ * forever waiting for a socket that is never coming. Every consumer of `ready`
+ * ultimately gates the relay fallback that is supposed to be the guaranteed
+ * way to still play the match, so a promise that can hang forever here is a
+ * promise that can hang the whole match forever. `ready` settles either way,
+ * so a genuinely unreachable Realtime Database at least gets a chance to fail
+ * over to the Firestore relay instead of stalling silently until DROPPED_MS
+ * hands both seats to bots.
+ */
+const READY_TIMEOUT = 3000;
+
 interface Attempt {
   pc: RTCPeerConnection;
   dc: RTCDataChannel;
@@ -171,9 +187,22 @@ export class Mesh {
     // a crashed tab doesn't strand its half of every negotiation.
     const mine = dbRef(rtdb, `signaling/${roomId}/${selfId}`);
     dbOnDisconnect(mine).remove().catch(() => {});
-    this.ready = dbRemove(mine)
-      .catch((err) => console.error('[mesh] signalling unavailable:', err))
-      .then(() => undefined);
+    this.ready = new Promise<void>((resolve) => {
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        resolve();
+      };
+      window.setTimeout(() => {
+        if (settled) return;
+        console.warn(`[mesh] signalling wipe still pending after ${READY_TIMEOUT}ms — proceeding anyway`);
+        finish();
+      }, READY_TIMEOUT);
+      dbRemove(mine)
+        .catch((err) => console.error('[mesh] signalling unavailable:', err))
+        .then(finish);
+    });
   }
 
   /** Reconciles the connection set against the room roster. Safe to call on every roster change. */

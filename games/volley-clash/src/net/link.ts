@@ -52,6 +52,48 @@ const SLOT_LIMIT = 19000;
 /** Events (a `bye`, say) queued for the next relay write, at most. */
 const MAX_EVENTS = 8;
 
+/**
+ * How long each Realtime Database relay probe gets before it is treated as
+ * unusable and the next fallback is tried instead.
+ *
+ * The RTDB SDK has no timeout of its own: a `set()` issued while the socket
+ * cannot connect at all queues forever rather than rejecting, because from the
+ * SDK's point of view the write is merely waiting for connectivity that may
+ * yet arrive. On a network that blocks Realtime Database outright — this
+ * happens on some carriers and corporate networks — that means `await`ing the
+ * probe never returns, and the Firestore relay behind it, which is supposed
+ * to be the one path that always works, is never even attempted. Racing the
+ * probe against this instead turns "hangs forever" into "fails over in three
+ * seconds", which is what a fallback chain is for.
+ */
+const RTDB_PROBE_TIMEOUT = 3000;
+
+/** Settles with `true` on success, `false` on rejection or on timing out. */
+function probeOk(p: Promise<unknown>): Promise<boolean> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const timer = window.setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      resolve(false);
+    }, RTDB_PROBE_TIMEOUT);
+    p.then(
+      () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(true);
+      },
+      () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(false);
+      },
+    );
+  });
+}
+
 export interface LinkStatus {
   /** Peers on an open data channel. */
   direct: string[];
@@ -346,8 +388,9 @@ export class Link {
 
       const mine = dbRef(rtdb, `relay/${this.roomId}/${this.selfId}`);
       // One probe write, to find out whether the rules for this path exist
-      // before committing the match to it.
-      await dbSet(mine, { m: '[]', n: 0 });
+      // before committing the match to it — and, via probeOk, whether
+      // Realtime Database is reachable at all.
+      if (!(await probeOk(dbSet(mine, { m: '[]', n: 0 })))) return false;
       if (this.closed) return false;
       dbOnDisconnect(mine).remove().catch(() => {});
 
@@ -412,7 +455,7 @@ export class Link {
 
       const slot = (uid: string) => `signaling/${this.roomId}/${uid}/${RELAY_SLOT}/desc`;
       const mine = dbRef(rtdb, slot(this.selfId));
-      await dbSet(mine, { type: 'r', sdp: '[]' });
+      if (!(await probeOk(dbSet(mine, { type: 'r', sdp: '[]' })))) return false;
       if (this.closed) return false;
 
       // One listener per peer rather than one on the room: the room node also
