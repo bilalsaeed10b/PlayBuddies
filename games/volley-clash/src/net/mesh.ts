@@ -52,30 +52,20 @@ const BACKOFF = [700, 1500, 3000, 5000, 8000];
 const DISCONNECT_GRACE = 3500;
 
 /**
- * How long an attempt with *no sign of progress* gets before it is written off.
+ * How often the watchdog checks in on an attempt that has not yet opened.
  *
- * This was 9 seconds, applied to every attempt on both sides regardless of what
- * ICE was doing, and it was a bug: a handshake that would have succeeded in
- * twelve seconds — an ordinary outcome on a slow link to a distant STUN server
- * — was torn down at nine, restarted, and torn down again, forever.
- *
- * The fix for that overshot. Widening it to 20 seconds with two extensions
- * meant a caller stuck in `checking` — which is exactly what "no TURN server"
- * looks like, and does not resolve itself no matter how long it is given —
- * could take a full 60 seconds before its first retry. The caller trying
- * again does not fix a pair that structurally cannot connect, so there is
- * nothing to buy by waiting that long; what matters is finding out fast and
- * telling the relay to carry the match, which DROPPED_MS in MatchView.tsx
- * does on its own timer. That timer was 8 seconds — shorter than even the
- * first window here — so on every connection that failed rather than merely
- * being slow, a real player's seat was handed to a bot before this file ever
- * got a chance to retry or report why. The two numbers have to be read
- * together; see the note by DROPPED_MS.
+ * This used to also be the *ceiling* — a fixed budget of one or two windows,
+ * after which a caller still in `checking` was killed and restarted from a
+ * fresh RTCPeerConnection regardless of whether it was making progress. It
+ * was not: `checking` means the ICE agent is actively working through a
+ * matrix of candidate pairs, which a route across real distance can
+ * legitimately take longer than a couple of windows to finish, especially
+ * gathering from three STUN servers. Killing it there never let one attempt
+ * run long enough to find out, and every restart threw away the gathering
+ * already done. See the watchdog itself, below, for why it now re-arms for
+ * as long as there is real activity instead of capping it.
  */
 const OPEN_DEADLINE = 6000;
-
-/** How many extra windows an attempt that is still making progress may have. */
-const MAX_EXTENSIONS = 1;
 
 interface Attempt {
   pc: RTCPeerConnection;
@@ -107,8 +97,6 @@ interface Attempt {
   dead: boolean;
   /** Fires if the channel never opens. Cleared the moment it does. */
   deadline: number | null;
-  /** Windows already granted to an attempt that was still making progress. */
-  extensions: number;
 }
 
 interface Peer {
@@ -388,39 +376,26 @@ export class Mesh {
       gathered: new Set(),
       dead: false,
       deadline: null,
-      extensions: 0,
     };
     peer.attempt = a;
 
     /**
-     * The backstop.
+     * Explains a negotiation that did not work out, once, and hands back to
+     * the caller so it can decide what to do next.
      *
-     * Only the caller runs one. The answerer cannot start a new negotiation of
-     * its own — `retry` returns immediately for it — so all a timeout there
-     * achieves is destroying a half-built connection the caller may still be
-     * completing, and then waiting for an offer anyway. Both sides running this
-     * is what turned one slow handshake into a permanent restart loop.
+     * Shared between two genuinely different triggers. `onconnectionstatechange`
+     * calls this the moment the browser's own ICE agent reaches `failed` —
+     * which is the real "exhausted every candidate pair, no route exists"
+     * signal, and the one that matters most. The watchdog below calls it too,
+     * but only for a connection stuck at `new`: gathering never produced
+     * anything to try at all, which is a different and rarer problem (usually
+     * signalling, not routing) but still worth a word.
      */
-    const watchdog = () => {
-      a.deadline = null;
-      if (a.dead || dc.readyState === 'open') return;
-
-      const ice = pc.iceConnectionState;
-      // `checking` means candidate pairs are actively being tested, and
-      // `connected`/`completed` means only the data channel is late. Both are
-      // progress, and tearing either down loses a connection that was on its
-      // way. Real failure arrives as `failed` and is handled the moment it does.
-      const working = ice === 'checking' || ice === 'connected' || ice === 'completed';
-      if (working && a.extensions < MAX_EXTENSIONS) {
-        a.extensions++;
-        a.deadline = window.setTimeout(watchdog, OPEN_DEADLINE);
-        return;
-      }
-
+    const reportTrouble = (ice: RTCIceConnectionState) => {
       const blocked = !a.gathered.has('srflx');
       const verdict = blocked ? 'STUN blocked on this network' : 'this pair needs a TURN server';
       console.warn(
-        `[mesh] no channel to ${peerId} after ${OPEN_DEADLINE * (a.extensions + 1)}ms —` +
+        `[mesh] no channel to ${peerId} —` +
           ` ice: ${ice}, gathering: ${pc.iceGatheringState},` +
           ` ours: [${[...a.gathered].join(', ') || 'nothing'}],` +
           ` theirs: [${[...typesOf(a.seen)].join(', ') || 'nothing'}]`,
@@ -432,6 +407,44 @@ export class Mesh {
         peer.told = true;
         this.onTrouble?.(peerId, verdict);
       }
+    };
+
+    /**
+     * The backstop, for a connection that never even started checking.
+     *
+     * Only the caller runs one. The answerer cannot start a new negotiation of
+     * its own — `retry` returns immediately for it.
+     *
+     * This used to also be where a stalled *`checking`* connection was killed
+     * and restarted from a fresh RTCPeerConnection after a fixed budget. That
+     * was wrong: `checking` means the ICE agent is actively working through a
+     * matrix of candidate pairs, which a route across real distance can
+     * genuinely take longer than a couple of windows to finish, especially
+     * gathering from three STUN servers. Killing it there never let one
+     * attempt run long enough to find out, and every restart threw away the
+     * gathering already done — a loop that could not succeed even on a pair
+     * that would have connected fine given the time its own ICE agent wanted
+     * to spend on it. Comparing against this game's Fireboy & Watergirl
+     * confirms it: that connection has no watchdog at all and simply waits,
+     * and it connects across real distance without a TURN server. The real
+     * "no route exists" signal is `failed`, and that is now handled directly
+     * by `onconnectionstatechange` instead of guessed at here.
+     *
+     * Waiting indefinitely for `new` to resolve is *not* safe the same way —
+     * unlike `checking`, nothing is actively happening while gathering has
+     * produced nothing at all, and that usually means signalling itself is
+     * stuck. So this still fires once, reports it, and retries — same as
+     * before, just now only for that case rather than for `checking` too.
+     */
+    const watchdog = () => {
+      a.deadline = null;
+      if (a.dead || dc.readyState === 'open') return;
+      const ice = pc.iceConnectionState;
+      if (ice === 'checking' || ice === 'connected' || ice === 'completed') {
+        a.deadline = window.setTimeout(watchdog, OPEN_DEADLINE);
+        return;
+      }
+      reportTrouble(ice);
       this.retry(peerId, peer, iCall);
     };
     if (iCall) a.deadline = window.setTimeout(watchdog, OPEN_DEADLINE);
@@ -481,6 +494,10 @@ export class Mesh {
       if (a.dead) return;
       const state = pc.connectionState;
       if (state === 'failed') {
+        // The browser's own ICE agent has exhausted every candidate pair it
+        // gathered and found no route — the real version of the thing the
+        // watchdog above used to guess at from a timeout.
+        reportTrouble(pc.iceConnectionState);
         this.retry(peerId, peer, iCall);
       } else if (state === 'disconnected') {
         // Usually a blip. Give it a moment to come back on its own before
