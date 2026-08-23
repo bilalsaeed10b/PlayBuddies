@@ -10,6 +10,7 @@ import { db } from "@/lib/firebase";
 import { useFriends } from "@/hooks/useFriends";
 import { useLobbyPresence, useFriendsOnline } from "@/hooks/usePresence";
 import { normalizeRoomCode, isValidRoomCode, LOBBY_TTL_MS, inviteTimestamps } from "@/lib/rooms";
+import { FRIEND_CODE_LENGTH, findByFriendCode, sendFriendRequest } from "@/lib/friends";
 import { rememberLobby, forgetLobby } from "@/lib/lastLobby";
 import { cleanWallet, EMPTY_WALLET, readWallet, recordMatch, writeWallet, type Wallet } from "@/lib/wallet";
 import type { Lobby, LobbyMessage, LobbyPlayer } from "@/types/game";
@@ -40,6 +41,9 @@ import {
   Maximize2,
   Send,
   X,
+  MoreVertical,
+  UserPlus,
+  Search,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -80,6 +84,24 @@ function LobbyContent() {
   const [isPseudoFull, setIsPseudoFull] = useState(false);
   const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
   const [inviteSent, setInviteSent] = useState<string | null>(null);
+  /** "Add a friend by code" inside the invite modal — separate from the invite list below it. */
+  const [addCode, setAddCode] = useState("");
+  const [addBusy, setAddBusy] = useState(false);
+  const [addNotice, setAddNotice] = useState("");
+  /** Crew and chat share the sidebar as tabs rather than a fixed vertical split. */
+  const [sidebarTab, setSidebarTab] = useState<"crew" | "chat">("crew");
+  /** Which crew member's "…" menu is open, if any. One at a time. */
+  const [crewMenuFor, setCrewMenuFor] = useState<string | null>(null);
+  const [crewNotice, setCrewNotice] = useState("");
+  /**
+   * How many chat messages have actually been seen.
+   *
+   * Crew and chat used to both be on screen at once, so a new message was
+   * always visible. Now that chat is a tab, a message arriving while Crew is
+   * open would otherwise go completely unnoticed — this is what the dot on
+   * the Chat tab is tracking against.
+   */
+  const seenChatCount = useRef(0);
   const gameFrameRef = useRef<HTMLIFrameElement>(null);
   /** The wrapper that goes fullscreen — the frame plus its floating controls. */
   const gameShellRef = useRef<HTMLDivElement>(null);
@@ -96,9 +118,13 @@ function LobbyContent() {
   const walletLoaded = useRef(false);
 
   const presentUids = useLobbyPresence(roomId);
-  const { friends } = useFriends(isInviteModalOpen);
-  // Only while the picker is open — a presence listener per friend is cheap,
-  // but there is no reason to hold them open for a closed modal.
+  // Always on, not just while the invite modal is open — the crew list also
+  // needs to know who is already a friend, to offer "Add Friend" only where
+  // it means something.
+  const { friends } = useFriends(true);
+  const friendUidSet = useMemo(() => new Set(friends.map((f) => f.uid)), [friends]);
+  // Per-friend presence listeners are the more expensive part, though, so
+  // those stay scoped to the picker being open.
   const friendUids = useMemo(
     () => (isInviteModalOpen ? friends.map((f) => f.uid) : []),
     [friends, isInviteModalOpen],
@@ -273,6 +299,12 @@ function LobbyContent() {
 
     return () => clearTimeout(timer);
   }, [lobby, presentUids, user, roomId]);
+
+  // Marks messages as seen for as long as the chat tab is the one showing.
+  useEffect(() => {
+    if (sidebarTab === "chat") seenChatCount.current = messages.length;
+  }, [sidebarTab, messages.length]);
+  const hasUnreadChat = sidebarTab !== "chat" && messages.length > seenChatCount.current;
 
   useEffect(() => {
     const onFsChange = () => {
@@ -472,6 +504,63 @@ function LobbyContent() {
   };
 
   /**
+   * "Add a friend by code", inline in the invite modal.
+   *
+   * Sends a friend request rather than an invite — friendship is required
+   * before an invite can even be sent (the platform's own rule, so a stranger
+   * can't be spammed into a room), so this is the step that has to happen
+   * first for someone who isn't a friend yet.
+   */
+  const submitAddByCode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const code = addCode.trim().toUpperCase();
+    if (code.length !== FRIEND_CODE_LENGTH || !user || addBusy) return;
+
+    setAddBusy(true);
+    setAddNotice("");
+    try {
+      const matches = await findByFriendCode(code, user.uid);
+      if (matches.length === 0) {
+        setAddNotice("No player found with that code.");
+        return;
+      }
+      const outcome = await sendFriendRequest(user.uid, matches[0].uid);
+      if (outcome === "sent") {
+        setAddNotice(`Friend request sent to ${matches[0].displayName}.`);
+        setAddCode("");
+      } else if (outcome === "already-friends") {
+        setAddNotice("You're already friends.");
+      } else if (outcome === "already-pending") {
+        setAddNotice("Request already pending.");
+      } else {
+        setAddNotice("Couldn't send that request.");
+      }
+    } catch (e) {
+      console.error("Add by code failed:", e);
+      setAddNotice("Couldn't send that request.");
+    } finally {
+      setAddBusy(false);
+    }
+  };
+
+  /** "Add Friend" from a crew member's own "…" menu. */
+  const addCrewFriend = async (targetUid: string) => {
+    if (!user) return;
+    setCrewMenuFor(null);
+    const outcome = await sendFriendRequest(user.uid, targetUid);
+    setCrewNotice(
+      outcome === "sent"
+        ? "Friend request sent."
+        : outcome === "already-friends"
+          ? "Already friends."
+          : outcome === "already-pending"
+            ? "Request already pending."
+            : "Couldn't send that request.",
+    );
+    setTimeout(() => setCrewNotice(""), 2500);
+  };
+
+  /**
    * Both routes, every time.
    *
    * The pseudo-fullscreen (the frame goes `fixed inset-0`) is the one that
@@ -631,6 +720,45 @@ function LobbyContent() {
                 </button>
               </div>
 
+              {/*
+                Not everyone worth inviting is a friend yet. Sending a friend
+                request here — rather than only from the separate friends
+                panel — is what makes this modal a real substitute for it
+                mid-invite, instead of a dead end that sends the host looking
+                for a different button.
+              */}
+              <div className="px-6 pt-4">
+                <form onSubmit={submitAddByCode} className="flex gap-2">
+                  <div className="relative flex-1">
+                    <Search
+                      className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted"
+                      size={14}
+                    />
+                    <label htmlFor="add-by-code" className="sr-only">Friend code</label>
+                    <input
+                      id="add-by-code"
+                      type="text"
+                      placeholder="Add a friend by code"
+                      value={addCode}
+                      onChange={(e) => {
+                        setAddCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ""));
+                        setAddNotice("");
+                      }}
+                      maxLength={FRIEND_CODE_LENGTH}
+                      className="w-full uppercase font-mono tracking-widest bg-white/5 border border-white/10 rounded-xl py-2 pl-9 pr-3 text-xs text-white focus:outline-none focus:border-primary transition-colors"
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={addCode.length !== FRIEND_CODE_LENGTH || addBusy}
+                    className="shrink-0 px-4 py-2 bg-white/10 hover:bg-white/20 text-white text-xs font-bold rounded-xl transition-colors disabled:opacity-50"
+                  >
+                    {addBusy ? "…" : "Add"}
+                  </button>
+                </form>
+                {addNotice && <p className="mt-2 text-xs text-amber-300">{addNotice}</p>}
+              </div>
+
               <div className="p-4 max-h-[60vh] overflow-y-auto space-y-2">
                 {invitees.length === 0 ? (
                   <div className="text-center py-10 text-text-muted">
@@ -694,108 +822,181 @@ function LobbyContent() {
             showSidebar ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
           } fixed lg:relative inset-y-0 left-0 w-80 flex flex-col border-r border-white/5 bg-black/90 lg:bg-black/20 z-50 transition-transform duration-300 ease-in-out`}
         >
-          <div className="p-6 flex flex-col min-h-0 h-[45%] border-b border-white/5">
-            <h2 className="text-sm font-bold text-text-muted uppercase tracking-wider mb-4 flex items-center gap-2">
-              <Users size={16} /> Crew ({players.length}/{capacity})
-            </h2>
-
-            <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar">
-              <div className="space-y-3">
-                <AnimatePresence initial={false}>
-                  {players.map((player) => (
-                    <motion.div
-                      key={player.uid}
-                      layout
-                      initial={{ opacity: 0, x: -20 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      exit={{ opacity: 0, x: -20 }}
-                      className="flex items-center justify-between p-3 rounded-xl glass border border-white/5"
-                    >
-                      <div className="flex items-center gap-3 min-w-0">
-                        <Avatar uid={player.uid} src={player.photoURL} name={player.displayName} />
-                        <div className="min-w-0">
-                          <p className="text-sm font-bold text-white flex items-center gap-1 truncate">
-                            {player.displayName}
-                            {player.uid === lobby.hostId && (
-                              <Crown size={14} className="text-yellow-400 shrink-0" />
-                            )}
-                          </p>
-                          <p className="text-xs text-text-muted">
-                            {player.uid === user?.uid ? "You" : "In Lobby"}
-                          </p>
-                        </div>
-                      </div>
-                      {player.isReady && (
-                        <span className="shrink-0 text-success" title="Ready">
-                          <Check size={18} />
-                        </span>
-                      )}
-                    </motion.div>
-                  ))}
-                </AnimatePresence>
-              </div>
-            </div>
-
-            {lobby.status !== "playing" && me && (
-              <button
-                onClick={toggleReady}
-                className={`mt-4 w-full py-3 rounded-xl font-bold text-sm transition-colors ${
-                  me.isReady
-                    ? "bg-success/20 text-success border border-success/40"
-                    : "bg-white/10 text-white hover:bg-white/20"
-                }`}
-              >
-                {me.isReady ? "Ready ✓" : "Not ready. Click when set"}
-              </button>
-            )}
+          {/* ── crew / chat tabs ──
+              Each pane gets the sidebar's full height now, rather than a fixed
+              45/55 split — Crew stops truncating a full room, and Chat stops
+              being a cramped strip under it. */}
+          <div className="flex border-b border-white/5 shrink-0">
+            <button
+              onClick={() => setSidebarTab("crew")}
+              className={`flex-1 flex items-center justify-center gap-1.5 py-3 text-xs font-bold uppercase tracking-wider transition-colors border-b-2 ${
+                sidebarTab === "crew"
+                  ? "border-primary text-white bg-white/5"
+                  : "border-transparent text-text-muted hover:text-white hover:bg-white/5"
+              }`}
+            >
+              <Users size={14} /> Crew ({players.length}/{capacity})
+            </button>
+            <button
+              onClick={() => setSidebarTab("chat")}
+              className={`relative flex-1 flex items-center justify-center gap-1.5 py-3 text-xs font-bold uppercase tracking-wider transition-colors border-b-2 ${
+                sidebarTab === "chat"
+                  ? "border-primary text-white bg-white/5"
+                  : "border-transparent text-text-muted hover:text-white hover:bg-white/5"
+              }`}
+            >
+              <MessageSquare size={14} /> Chat
+              {hasUnreadChat && (
+                <span className="w-2 h-2 rounded-full bg-primary" aria-label="Unread messages" />
+              )}
+            </button>
           </div>
 
-          <div className="flex-1 flex flex-col min-h-0 p-4 bg-black/40">
-            <div className="flex-1 overflow-y-auto mb-4 p-2 space-y-4">
-              {messages.length === 0 ? (
-                <div className="text-center text-xs text-text-muted my-2">
-                  No messages yet. Start the trash talk!
+          {sidebarTab === "crew" ? (
+            <div className="flex-1 flex flex-col min-h-0 p-6">
+              {crewNotice && (
+                <p className="mb-3 text-xs text-center text-amber-300 bg-amber-500/10 border border-amber-500/20 rounded-lg py-2 px-3">
+                  {crewNotice}
+                </p>
+              )}
+              <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar">
+                <div className="space-y-3">
+                  <AnimatePresence initial={false}>
+                    {players.map((player) => {
+                      const isSelf = player.uid === user?.uid;
+                      const isFriend = friendUidSet.has(player.uid);
+                      return (
+                        <motion.div
+                          key={player.uid}
+                          layout
+                          initial={{ opacity: 0, x: -20 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          exit={{ opacity: 0, x: -20 }}
+                          className="relative flex items-center justify-between p-3 rounded-xl glass border border-white/5"
+                        >
+                          <div className="flex items-center gap-3 min-w-0">
+                            <Avatar uid={player.uid} src={player.photoURL} name={player.displayName} />
+                            <div className="min-w-0">
+                              <p className="text-sm font-bold text-white flex items-center gap-1 truncate">
+                                {player.displayName}
+                                {player.uid === lobby.hostId && (
+                                  <Crown size={14} className="text-yellow-400 shrink-0" />
+                                )}
+                              </p>
+                              <p className="text-xs text-text-muted">
+                                {isSelf ? "You" : "In Lobby"}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-1 shrink-0">
+                            {player.isReady && (
+                              <span className="text-success" title="Ready">
+                                <Check size={18} />
+                              </span>
+                            )}
+                            {!isSelf && (
+                              <button
+                                onClick={() =>
+                                  setCrewMenuFor((cur) => (cur === player.uid ? null : player.uid))
+                                }
+                                aria-label={`Options for ${player.displayName}`}
+                                className="p-1.5 rounded-lg text-text-muted hover:text-white hover:bg-white/10 transition-colors"
+                              >
+                                <MoreVertical size={16} />
+                              </button>
+                            )}
+                          </div>
+
+                          {crewMenuFor === player.uid && (
+                            <>
+                              {/* Closes the menu on an outside click, without
+                                  intercepting clicks meant for anything else. */}
+                              <div
+                                className="fixed inset-0 z-30"
+                                onClick={() => setCrewMenuFor(null)}
+                              />
+                              <div className="absolute right-2 top-12 z-40 w-44 py-1 rounded-xl glass-solid border border-white/10 shadow-2xl">
+                                {isFriend ? (
+                                  <p className="px-3 py-2 text-xs text-text-muted">Already friends</p>
+                                ) : (
+                                  <button
+                                    onClick={() => addCrewFriend(player.uid)}
+                                    className="w-full flex items-center gap-2 px-3 py-2 text-xs font-bold text-white hover:bg-white/10 transition-colors"
+                                  >
+                                    <UserPlus size={14} /> Add Friend
+                                  </button>
+                                )}
+                              </div>
+                            </>
+                          )}
+                        </motion.div>
+                      );
+                    })}
+                  </AnimatePresence>
                 </div>
-              ) : (
-                messages.map((msg) => (
-                  <div
-                    key={msg.id}
-                    className={`flex flex-col ${msg.uid === user?.uid ? "items-end" : "items-start"}`}
-                  >
-                    <span className="text-[10px] text-text-muted mb-1 px-1">{msg.displayName}</span>
-                    <div
-                      className={`px-3 py-2 rounded-2xl text-sm max-w-[90%] break-words ${
-                        msg.uid === user?.uid
-                          ? "bg-primary text-white rounded-tr-none"
-                          : "bg-white/10 text-white rounded-tl-none"
-                      }`}
-                    >
-                      {msg.text}
-                    </div>
-                  </div>
-                ))
+              </div>
+
+              {lobby.status !== "playing" && me && (
+                <button
+                  onClick={toggleReady}
+                  className={`mt-4 w-full py-3 rounded-xl font-bold text-sm transition-colors ${
+                    me.isReady
+                      ? "bg-success/20 text-success border border-success/40"
+                      : "bg-white/10 text-white hover:bg-white/20"
+                  }`}
+                >
+                  {me.isReady ? "Ready ✓" : "Not ready. Click when set"}
+                </button>
               )}
             </div>
-            <form onSubmit={sendMessage} className="relative">
-              <label htmlFor="chat-input" className="sr-only">Message</label>
-              <input
-                id="chat-input"
-                type="text"
-                placeholder="Type a message..."
-                maxLength={MAX_MESSAGE_LENGTH}
-                className="w-full bg-white/5 border border-white/10 rounded-xl py-3 px-4 pr-12 text-sm text-white focus:outline-none focus:border-primary/50 transition-colors"
-                value={chatMessage}
-                onChange={(e) => setChatMessage(e.target.value)}
-              />
-              <button
-                type="submit"
-                aria-label="Send message"
-                className="absolute right-2 top-1/2 -translate-y-1/2 p-2 hover:bg-white/10 rounded-lg text-text-muted hover:text-white transition-colors"
-              >
-                <Send size={16} />
-              </button>
-            </form>
-          </div>
+          ) : (
+            <div className="flex-1 flex flex-col min-h-0 p-4 bg-black/40">
+              <div className="flex-1 overflow-y-auto mb-4 p-2 space-y-4">
+                {messages.length === 0 ? (
+                  <div className="text-center text-xs text-text-muted my-2">
+                    No messages yet. Start the trash talk!
+                  </div>
+                ) : (
+                  messages.map((msg) => (
+                    <div
+                      key={msg.id}
+                      className={`flex flex-col ${msg.uid === user?.uid ? "items-end" : "items-start"}`}
+                    >
+                      <span className="text-[10px] text-text-muted mb-1 px-1">{msg.displayName}</span>
+                      <div
+                        className={`px-3 py-2 rounded-2xl text-sm max-w-[90%] break-words ${
+                          msg.uid === user?.uid
+                            ? "bg-primary text-white rounded-tr-none"
+                            : "bg-white/10 text-white rounded-tl-none"
+                        }`}
+                      >
+                        {msg.text}
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+              <form onSubmit={sendMessage} className="relative">
+                <label htmlFor="chat-input" className="sr-only">Message</label>
+                <input
+                  id="chat-input"
+                  type="text"
+                  placeholder="Type a message..."
+                  maxLength={MAX_MESSAGE_LENGTH}
+                  className="w-full bg-white/5 border border-white/10 rounded-xl py-3 px-4 pr-12 text-sm text-white focus:outline-none focus:border-primary/50 transition-colors"
+                  value={chatMessage}
+                  onChange={(e) => setChatMessage(e.target.value)}
+                />
+                <button
+                  type="submit"
+                  aria-label="Send message"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 p-2 hover:bg-white/10 rounded-lg text-text-muted hover:text-white transition-colors"
+                >
+                  <Send size={16} />
+                </button>
+              </form>
+            </div>
+          )}
         </div>
 
         <div

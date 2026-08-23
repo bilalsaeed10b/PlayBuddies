@@ -2,27 +2,21 @@
 
 import { useEffect, useMemo, useState } from "react";
 import {
-  collection,
-  query,
-  where,
-  limit,
-  getDocs,
-  getDoc,
-  setDoc,
   doc,
+  getDoc,
   deleteDoc,
-  serverTimestamp,
+  setDoc,
   addDoc,
+  collection,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useAuthStore } from "@/store/useAuthStore";
 import { useFriends, type FriendProfile } from "@/hooks/useFriends";
 import { useFriendsOnline } from "@/hooks/usePresence";
 import { normalizeRoomCode, inviteTimestamps } from "@/lib/rooms";
+import { FRIEND_CODE_LENGTH, findByFriendCode, sendFriendRequest } from "@/lib/friends";
 import { Users, X, UserPlus, Check, MessageCircle, Search } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-
-const FRIEND_CODE_LENGTH = 8;
 
 export default function FriendsSidebar() {
   const user = useAuthStore((s) => s.user);
@@ -58,25 +52,8 @@ export default function FriendsSidebar() {
 
     setSearchState("searching");
     try {
-      // Searches the public profile collection — which by design holds no email
-      // or stats — and states a limit, because the rules reject profile queries
-      // that don't bound themselves.
-      const snap = await getDocs(
-        query(collection(db, "profiles"), where("friendCode", "==", code), limit(5)),
-      );
-      const results = snap.docs
-        .map((d) => {
-          const data = d.data();
-          return {
-            uid: d.id,
-            displayName: data.displayName || "Player",
-            photoURL: data.photoURL || "",
-            friendCode: data.friendCode,
-            connId: "",
-          } as FriendProfile;
-        })
-        .filter((d) => d.uid !== user.uid);
-
+      const matches = await findByFriendCode(code, user.uid);
+      const results: FriendProfile[] = matches.map((m) => ({ ...m, connId: "" }));
       setSearchResults(results);
       setSearchState(results.length === 0 ? "empty" : "idle");
     } catch (e) {
@@ -87,33 +64,20 @@ export default function FriendsSidebar() {
 
   const sendRequest = async (targetUid: string) => {
     if (!user) return;
-    const connId = [user.uid, targetUid].sort().join("_");
-    const ref = doc(db, "connections", connId);
-
-    try {
-      // Guard against clobbering an existing link. A plain setDoc would reset an
-      // already-accepted friendship back to "pending".
-      const existing = await getDoc(ref);
-      if (existing.exists()) {
-        const status = existing.data().status;
-        setNotice(status === "accepted" ? "You're already friends." : "Request already pending.");
-        setTimeout(() => setNotice(""), 2500);
-        return;
-      }
-
-      await setDoc(ref, {
-        participants: [user.uid, targetUid].sort(),
-        status: "pending",
-        senderId: user.uid,
-        createdAt: serverTimestamp(),
-      });
+    const outcome = await sendFriendRequest(user.uid, targetUid);
+    if (outcome === "sent") {
       setSentTo(targetUid);
       setTimeout(() => setSentTo(null), 2500);
-    } catch (e) {
-      console.error("Could not send request", e);
-      setNotice("Couldn't send that request.");
-      setTimeout(() => setNotice(""), 2500);
+      return;
     }
+    setNotice(
+      outcome === "already-friends"
+        ? "You're already friends."
+        : outcome === "already-pending"
+          ? "Request already pending."
+          : "Couldn't send that request.",
+    );
+    setTimeout(() => setNotice(""), 2500);
   };
 
   const acceptRequest = async (connId: string) => {
