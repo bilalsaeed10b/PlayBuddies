@@ -5,15 +5,24 @@
  * is not is *reliable to establish*. PlayBuddies ships no TURN server, so two
  * players behind unhelpful NATs — a phone on mobile data and a laptop on office
  * wifi is the usual pair — can hold a perfectly good signalling conversation
- * and still never open a data channel. There was nothing behind that, so the
- * match simply never started: no ball, no serve, no score, and no message on
- * screen explaining why.
+ * and still never open a data channel.
  *
- * So there is a second path. Every peer the mesh has not reached is relayed
- * through the one Firestore document each player is already allowed to write —
- * `lobbies/{room}/updates/{uid}`, the same slot Fish Eat Fish uses. It is
- * slower and it costs a write, so it runs at a lower rate, carries only the
- * newest state, and switches itself off the moment the data channel opens.
+ * So there is a second path, over the one Firestore document each player is
+ * already allowed to write — `lobbies/{room}/updates/{uid}`, the same slot
+ * Fish Eat Fish and Fireboy & Watergirl use. That second game is the reason
+ * this file looks the way it does: this used to be a three-tier chain — a
+ * dedicated Realtime Database relay node, then a piggyback on the signalling
+ * schema, then Firestore — opened only *after* the mesh's own startup write
+ * had settled, and only once each earlier tier had been probed and found
+ * wanting. Every one of those steps was a promise that could, on a network
+ * where Realtime Database is not reachable at all, simply never settle —
+ * and the SDK does not time those out on its own. One flaky signal and the
+ * entire chain hung forever, including the Firestore leg that was supposed
+ * to be the one path that always works. Fireboy & Watergirl never had that
+ * problem, because it never had that chain: it writes to Firestore
+ * unconditionally, from the first frame, in parallel with the mesh, and
+ * simply paces the writes slower once the mesh is confirmed carrying
+ * traffic. Copied here for the same reason — it works.
  *
  * Everything above this file talks to `Link` and never learns which path a
  * packet took.
@@ -23,76 +32,25 @@ import { NetMessage } from '../types/game';
 import { Mesh } from './mesh';
 
 /**
- * Relay writes per second, per player.
- *
- * Two rates, because the two paths cost completely different things. A
- * Firestore write is billed per document write, so that path is paced
- * conservatively. A Realtime Database write is a message on a socket that is
- * already open and is billed by bandwidth, so it can run fast enough that the
- * pacing itself stops being a source of delay.
- *
- * That pacing is not free latency-wise: at 8Hz a snapshot waits up to 125ms
- * just for the next write, and the reply to a round-trip probe waits again on
- * the other side. Two of those are most of the difference between a relayed
- * match that is slow and one that is unplayable.
+ * How often the Firestore relay writes while any peer is not yet reachable
+ * directly. Every write here is billed, so this is not the send rate the game
+ * would pick if the wire were free — it is the rate that keeps a relayed
+ * match playable without keeping a room's write bill unbounded.
  */
-const RELAY_HZ = 8;
-const FAST_RELAY_HZ = 20;
+const FS_ACTIVE_MS = 100;
 
 /**
- * The key a player's relay slot lives under, inside their own signalling node.
+ * How often it writes once every peer is reachable directly.
  *
- * A tilde cannot appear in a Firebase uid, so this can never collide with a
- * real peer.
+ * Not zero: a heartbeat this slow costs almost nothing, and it is what lets
+ * the relay take over instantly if the mesh drops mid-match — a fresh
+ * connection with no warm-up, rather than a cold start that has to open a
+ * Firestore listener and wait for it to catch up before the first packet.
  */
-const RELAY_SLOT = '~relay';
+const FS_IDLE_MS = 1000;
 
-/** What the signalling schema allows in that slot: 20000 characters, less headroom. */
-const SLOT_LIMIT = 19000;
 /** Events (a `bye`, say) queued for the next relay write, at most. */
 const MAX_EVENTS = 8;
-
-/**
- * How long each Realtime Database relay probe gets before it is treated as
- * unusable and the next fallback is tried instead.
- *
- * The RTDB SDK has no timeout of its own: a `set()` issued while the socket
- * cannot connect at all queues forever rather than rejecting, because from the
- * SDK's point of view the write is merely waiting for connectivity that may
- * yet arrive. On a network that blocks Realtime Database outright — this
- * happens on some carriers and corporate networks — that means `await`ing the
- * probe never returns, and the Firestore relay behind it, which is supposed
- * to be the one path that always works, is never even attempted. Racing the
- * probe against this instead turns "hangs forever" into "fails over in three
- * seconds", which is what a fallback chain is for.
- */
-const RTDB_PROBE_TIMEOUT = 3000;
-
-/** Settles with `true` on success, `false` on rejection or on timing out. */
-function probeOk(p: Promise<unknown>): Promise<boolean> {
-  return new Promise((resolve) => {
-    let settled = false;
-    const timer = window.setTimeout(() => {
-      if (settled) return;
-      settled = true;
-      resolve(false);
-    }, RTDB_PROBE_TIMEOUT);
-    p.then(
-      () => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        resolve(true);
-      },
-      () => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        resolve(false);
-      },
-    );
-  });
-}
 
 export interface LinkStatus {
   /** Peers on an open data channel. */
@@ -108,26 +66,22 @@ export interface LinkStatus {
 }
 
 type Handler = (from: string, msg: NetMessage) => void;
-
-interface RelayApi {
-  write: (batch: NetMessage[], seq: number) => Promise<void>;
-  stop: () => void;
-}
+type FirestoreWrite = (batch: NetMessage[], seq: number) => Promise<void>;
 
 export class Link {
   private mesh: Mesh;
   private peers: string[] = [];
   private rtts = new Map<string, number>();
-  private relay: RelayApi | null = null;
-  private relayTimer: number | null = null;
+  private fsWrite: FirestoreWrite | null = null;
+  private stopFirestore: (() => void) | null = null;
+  private fsTimer: number | null = null;
+  private lastFsWrite = 0;
   private pingTimer: number | null = null;
   private relaySeq = 0;
   private seen = new Map<string, number>();
   private pendingState: NetMessage | null = null;
   private pendingEvents: NetMessage[] = [];
   private reason: string | null = null;
-  /** Set by the signalling relay, so its per-peer listeners follow the roster. */
-  private watchRelayPeers: ((uids: string[]) => void) | null = null;
   private closed = false;
 
   constructor(
@@ -148,28 +102,18 @@ export class Link {
     );
 
     this.pingTimer = window.setInterval(() => this.ping(), 1000 / BALANCE.PING_HZ);
-    const openedAt = Date.now();
-    // The signalling-relay fallback writes into the same node Mesh's own
-    // constructor just told Firebase to wipe — see Mesh.ready. Waiting for that
-    // wipe to be acknowledged first is cheap here: it is normally settled long
-    // before the mesh even finishes gathering its first candidate.
-    void this.mesh.ready
-      .then(() => this.openRelay())
-      .then((path) => {
-        if (this.closed) return;
-        // Which of the three fallbacks actually engaged, and how long the whole
-        // chain took from construction. The dominant cost here in practice is
-        // downloading this game's own Firebase chunk for the first time in the
-        // session, not the round trips inside openRelay itself — this is what
-        // tells us, from a real session, whether that guess is right.
-        console.log(`[link] relay armed (${path}) after ${Date.now() - openedAt}ms`);
-      });
+
+    // Opened immediately, not after the mesh's own signalling has settled —
+    // there is nothing left to wait for. The old chain waited on that because
+    // an earlier relay design shared the mesh's own signalling node and could
+    // collide with its startup wipe; this one writes to a completely
+    // different document and has no such race.
+    void this.openFirestore();
   }
 
   setPeers(uids: string[]) {
     this.peers = uids.filter((u) => u && u !== this.selfId);
     this.mesh.setPeers(this.peers);
-    this.watchRelayPeers?.(this.peers);
     this.publishStatus();
   }
 
@@ -178,11 +122,11 @@ export class Link {
    *
    * `live` marks a packet whose only value is being the newest one — a snapshot
    * or a body update. The relay keeps just the last of those; anything else is
-   * queued and delivered.
+   * queued and delivered. Always captured for Firestore too, regardless of
+   * whether the mesh currently needs the help — see FS_IDLE_MS.
    */
   send(msg: NetMessage, live = false) {
     this.mesh.broadcast(msg);
-    if (!this.needsRelay()) return;
     if (live) this.pendingState = msg;
     else if (this.pendingEvents.length < MAX_EVENTS) this.pendingEvents.push(msg);
   }
@@ -216,8 +160,8 @@ export class Link {
   close() {
     this.closed = true;
     if (this.pingTimer !== null) clearInterval(this.pingTimer);
-    if (this.relayTimer !== null) clearInterval(this.relayTimer);
-    this.relay?.stop();
+    if (this.fsTimer !== null) clearInterval(this.fsTimer);
+    this.stopFirestore?.();
     this.mesh.close();
   }
 
@@ -300,36 +244,16 @@ export class Link {
   }
 
   /**
-   * Opens the fallback, and reports which of the three paths took.
-   *
-   * Firebase itself is not lazily loaded here — `Mesh` already imports it
-   * statically for the signalling it needs regardless of whether a relay ever
-   * runs, so the whole SDK is already a forced dependency of an online match
-   * before this file runs at all. What genuinely happens here in the
-   * background, while the mesh negotiates in parallel, is the handful of
-   * round trips each fallback needs to find out whether it is even usable.
+   * Arms the Firestore relay. Unconditional and immediate — see the note at
+   * the top of this file for why that matters more than which path is fastest.
    */
-  private async openRelay(): Promise<'rtdb' | 'signalling-relay' | 'firestore' | 'unavailable'> {
-    // Realtime Database first. It is the same websocket the signalling already
-    // holds open, so a message costs one push over a live socket rather than a
-    // Firestore document write and a listener fan-out — the difference between
-    // a fallback that plays and one that merely functions. Measured on a real
-    // match, the Firestore path alone was a 669ms round trip.
-    if (await this.openFastRelay()) {
-      this.relayTimer = window.setInterval(() => void this.flushRelay(), 1000 / FAST_RELAY_HZ);
-      return 'rtdb';
-    }
-    if (await this.openSignallingRelay()) {
-      this.relayTimer = window.setInterval(() => void this.flushRelay(), 1000 / FAST_RELAY_HZ);
-      return 'signalling-relay';
-    }
+  private async openFirestore() {
     try {
       const { db, doc, setDoc, collection, onSnapshot } = await import('../firebase');
-      if (this.closed) return 'unavailable';
-      console.warn('[link] falling back to the Firestore relay — deploy database.rules.json for the faster one');
+      if (this.closed) return;
 
       const mine = doc(db, 'lobbies', this.roomId, 'updates', this.selfId);
-      const stop = onSnapshot(
+      this.stopFirestore = onSnapshot(
         collection(db, 'lobbies', this.roomId, 'updates'),
         (snap) => {
           for (const change of snap.docChanges()) {
@@ -354,168 +278,19 @@ export class Link {
             for (const msg of batch) this.receive(from, msg);
           }
         },
-        (err) => console.error('[link] relay unavailable:', err),
+        (err) => console.error('[link] Firestore relay unavailable:', err),
       );
 
-      this.relay = {
-        write: async (batch, seq) => {
-          await setDoc(mine, { m: JSON.stringify(batch), n: seq, at: Date.now() });
-        },
-        stop,
+      this.fsWrite = async (batch, seq) => {
+        await setDoc(mine, { m: JSON.stringify(batch), n: seq, at: Date.now() });
       };
 
-      this.relayTimer = window.setInterval(() => void this.flushRelay(), 1000 / RELAY_HZ);
-      return 'firestore';
+      // Ticks far more often than either send rate actually needs, because
+      // each tick decides for itself — via needsRelay() — whether enough time
+      // has passed to be worth a write yet. See FS_ACTIVE_MS / FS_IDLE_MS.
+      this.fsTimer = window.setInterval(() => void this.flushFirestore(), FS_ACTIVE_MS);
     } catch (err) {
-      console.error('[link] could not arm the relay:', err);
-      return 'unavailable';
-    }
-  }
-
-  /**
-   * The fast fallback, over Realtime Database.
-   *
-   * Returns false if the rules for it are not deployed, in which case the
-   * caller uses the Firestore relay instead. That is deliberate: this path
-   * needs a `relay` node in database.rules.json, and a game that broke for
-   * everyone until someone remembered to publish rules would be a worse bug
-   * than the one being fixed.
-   */
-  private async openFastRelay(): Promise<boolean> {
-    try {
-      const { rtdb, dbRef, dbSet, dbOnValue, dbOnDisconnect, dbRemove } = await import('../firebase');
-      if (this.closed) return false;
-
-      const mine = dbRef(rtdb, `relay/${this.roomId}/${this.selfId}`);
-      // One probe write, to find out whether the rules for this path exist
-      // before committing the match to it — and, via probeOk, whether
-      // Realtime Database is reachable at all.
-      if (!(await probeOk(dbSet(mine, { m: '[]', n: 0 })))) return false;
-      if (this.closed) return false;
-      dbOnDisconnect(mine).remove().catch(() => {});
-
-      const stop = dbOnValue(
-        dbRef(rtdb, `relay/${this.roomId}`),
-        (snap) => {
-          const all = snap.val() as Record<string, { m?: string; n?: number }> | null;
-          if (!all) return;
-          for (const [from, entry] of Object.entries(all)) {
-            if (from === this.selfId) continue;
-            if (typeof entry?.m !== 'string' || typeof entry.n !== 'number') continue;
-            if (this.isReplay(from, entry.n)) continue;
-            this.markSeen(from, entry.n);
-            let batch: NetMessage[];
-            try {
-              batch = JSON.parse(entry.m) as NetMessage[];
-            } catch {
-              continue;
-            }
-            for (const msg of batch) this.receive(from, msg);
-          }
-        },
-        (err: unknown) => console.error('[link] fast relay dropped:', err),
-      );
-
-      this.relay = {
-        write: async (batch, seq) => {
-          await dbSet(mine, { m: JSON.stringify(batch), n: seq });
-        },
-        stop: () => {
-          stop();
-          dbRemove(mine).catch(() => {});
-        },
-      };
-      return true;
-    } catch (err) {
-      // Almost always PERMISSION_DENIED, meaning the rules are not deployed.
-      console.warn('[link] fast relay unavailable:', err);
-      return false;
-    }
-  }
-
-  /**
-   * The fast fallback again, over a path that is already permitted.
-   *
-   * The clean `relay/{room}/{uid}` node above needs rules published before it
-   * works. This one needs nothing: the deployed signalling rules already let a
-   * player write `signaling/{room}/{self}/{anything}/desc` as a `{type, sdp}`
-   * pair of strings, and let anyone in the room read it. A reserved key that no
-   * uid can collide with gives every player one writable slot on the same
-   * websocket, which is all a relay is.
-   *
-   * It is someone else's schema and it is used deliberately, because the
-   * alternative is a player being told to go and publish database rules before
-   * their game stops feeling broken. When the proper node does exist, the
-   * method above wins and this is never reached.
-   */
-  private async openSignallingRelay(): Promise<boolean> {
-    try {
-      const { rtdb, dbRef, dbSet, dbOnValue, dbRemove } = await import('../firebase');
-      if (this.closed) return false;
-
-      const slot = (uid: string) => `signaling/${this.roomId}/${uid}/${RELAY_SLOT}/desc`;
-      const mine = dbRef(rtdb, slot(this.selfId));
-      if (!(await probeOk(dbSet(mine, { type: 'r', sdp: '[]' })))) return false;
-      if (this.closed) return false;
-
-      // One listener per peer rather than one on the room: the room node also
-      // carries every ICE candidate anyone pushes, and watching all of it would
-      // re-deliver the whole handshake on every one of them.
-      const stops: (() => void)[] = [];
-      const listen = (uid: string) =>
-        dbOnValue(
-          dbRef(rtdb, slot(uid)),
-          (snap) => {
-            const entry = snap.val() as { sdp?: string } | null;
-            if (typeof entry?.sdp !== 'string') return;
-            let batch: NetMessage[];
-            try {
-              batch = JSON.parse(entry.sdp) as NetMessage[];
-            } catch {
-              return;
-            }
-            // The sequence number rides inside the payload here, as the slot
-            // itself only has room for the two fields the schema allows.
-            const first = batch[0] as { rn?: number } | undefined;
-            if (typeof first?.rn === 'number') {
-              if (this.isReplay(uid, first.rn)) return;
-              this.markSeen(uid, first.rn);
-            }
-            for (const msg of batch) if ((msg as { rn?: number }).rn === undefined) this.receive(uid, msg);
-          },
-          (err: unknown) => console.error('[link] signalling relay dropped:', err),
-        );
-
-      this.watchRelayPeers = (uids) => {
-        while (stops.length) stops.pop()?.();
-        for (const uid of uids) if (uid !== this.selfId) stops.push(listen(uid));
-      };
-      this.watchRelayPeers(this.peers);
-
-      this.relay = {
-        write: async (batch, seq) => {
-          // `[{rn}, …messages]` — the marker carries the sequence, because the
-          // slot itself has room only for the two fields the schema allows.
-          let body = JSON.stringify([{ rn: seq }, ...batch]);
-          if (body.length > SLOT_LIMIT) {
-            // Only the newest state is worth keeping if it will not all fit,
-            // and silently sending nothing would be worse than sending less.
-            console.warn('[link] relay payload over the slot limit; sending state only');
-            body = JSON.stringify([{ rn: seq }, ...batch.slice(0, 1)]);
-          }
-          await dbSet(mine, { type: 'r', sdp: body });
-        },
-        stop: () => {
-          while (stops.length) stops.pop()?.();
-          this.watchRelayPeers = null;
-          dbRemove(mine).catch(() => {});
-        },
-      };
-      console.warn('[link] relaying over the signalling channel — publish database.rules.json for the dedicated one');
-      return true;
-    } catch (err) {
-      console.warn('[link] signalling relay unavailable:', err);
-      return false;
+      console.error('[link] could not open the Firestore relay:', err);
     }
   }
 
@@ -534,10 +309,6 @@ export class Link {
   /**
    * Records that a peer has been heard from over the relay, and — the first
    * time, for this peer — tells the badge immediately.
-   *
-   * Without the "first time" guard this would fire on every packet, which the
-   * fast relay delivers up to 20 times a second; the badge only needs to know
-   * once that the peer has gone from silent to reachable.
    */
   private markSeen(id: string, n: number) {
     const first = !this.seen.has(id);
@@ -545,15 +316,15 @@ export class Link {
     if (first) this.publishStatus();
   }
 
-  private async flushRelay() {
-    if (this.closed || !this.relay) return;
-    if (!this.needsRelay()) {
-      // Nothing to carry: drop whatever queued up while the mesh was coming up
-      // rather than sending it late.
-      this.pendingState = null;
-      this.pendingEvents.length = 0;
-      return;
-    }
+  private async flushFirestore() {
+    if (this.closed || !this.fsWrite) return;
+    // Fast while somebody still needs the help; a slow heartbeat once nobody
+    // does, so the relay stays warm without costing much. Never off outright —
+    // that is exactly the gap the old gated version fell into.
+    const interval = this.needsRelay() ? FS_ACTIVE_MS : FS_IDLE_MS;
+    const now = Date.now();
+    if (now - this.lastFsWrite < interval) return;
+
     const batch: NetMessage[] = [];
     if (this.pendingState) batch.push(this.pendingState);
     batch.push(...this.pendingEvents);
@@ -561,10 +332,11 @@ export class Link {
     this.pendingEvents.length = 0;
     if (batch.length === 0) return;
 
+    this.lastFsWrite = now;
     try {
-      await this.relay.write(batch, ++this.relaySeq);
+      await this.fsWrite(batch, ++this.relaySeq);
     } catch (err) {
-      console.error('[link] relay write failed:', err);
+      console.error('[link] Firestore relay write failed:', err);
     }
   }
 }
