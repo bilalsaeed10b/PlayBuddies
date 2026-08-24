@@ -21,18 +21,20 @@
 import { fxSprites, bakeSea, drawFallbackSea, drawRock, drawWaves, rockRadius } from '../game/sea';
 import { SHIPS, drawShip } from '../game/ships';
 import {
-  ARENA,
   BALANCE,
   CARDS,
   CardId,
   TEAM_COLORS,
   angleOf,
+  arenaFor,
   clamp,
   dealHand,
   elevOf,
   elevRange,
+  fleetSizeFor,
   mulberry32,
 } from '../game/rules';
+import type { Arena } from '../game/rules';
 import type { Quality } from '../game/quality';
 import type {
   Control,
@@ -59,8 +61,10 @@ export interface Seat {
 export type Sfx = 'fire' | 'hull' | 'splash' | 'rock' | 'deal' | 'burn' | 'sink';
 
 export interface EngineConfig {
-  seats: [Seat, Seat];
+  /** Two, four or six hulls, evenly split. Order fixes the anchors and the turn order. */
+  seats: Seat[];
   seed: number;
+  /** Which side opens. The hull that actually fires is that side's front rank. */
   first: Team;
   /**
    * The host's rules, identical on both clients.
@@ -71,8 +75,9 @@ export interface EngineConfig {
    */
   rules: MatchRules;
   onPhase?: (phase: Phase) => void;
-  onTurn?: (team: Team, hand: CardId[]) => void;
-  onHp?: (hp: [number, number]) => void;
+  /** `ship` is an index into `seats`, not a side. */
+  onTurn?: (ship: number, hand: CardId[]) => void;
+  onHp?: (hp: number[]) => void;
   /**
    * A packet this device is responsible for, ready to send: the instant
    * preview when a shot is fired, and again with the outcome once it lands.
@@ -125,11 +130,21 @@ interface Box {
 }
 
 export class BattleEngine {
-  readonly ships: [Ship, Ship];
+  /**
+   * Every hull on the water, in a fixed order both clients agree on.
+   *
+   * Indexed by ship, not by team: a battle can be six ships across two sides,
+   * so `ships[1]` is the second hull in the order, not "the right-hand side".
+   * Whose side it is on is `ships[i].team`.
+   */
+  readonly ships: Ship[];
+  /** The water this battle is fought on, sized to the fleet. */
+  readonly arena: Arena;
   rocks: Rock[] = [];
 
   phase: Phase = 'deal';
-  turn: Team;
+  /** Index into `ships` of whoever has the helm. */
+  turn: number;
   turnNo = 0;
   winner: Team | null = null;
   wind = 0;
@@ -156,7 +171,7 @@ export class BattleEngine {
    * hit therefore measured as a near miss, and the bots tightened their aim
    * forever instead of settling.
    */
-  lastShotHit: [boolean | null, boolean | null] = [null, null];
+  lastShotHit: (boolean | null)[] = [];
 
   private cfg: EngineConfig;
   private projectiles: Projectile[] = [];
@@ -173,7 +188,9 @@ export class BattleEngine {
   private budget = 1;
 
   /** Burn stacks as they stood before the current shot, so a firebomb cannot tick on itself. */
-  private burnBefore: [number, number] = [0, 0];
+  private burnBefore: number[] = [];
+  /** The last hull on each side to take a shot, so the helm goes round a fleet rather than sticking. */
+  private lastFired: Record<Team, number> = { 0: -1, 1: -1 };
   /** The preview of the other side's shot: what was fired, before its outcome is known. */
   private pendingFire: FirePacket | null = null;
   /** The other side's shot, fully resolved -- HP, wind, drift, next turn. */
@@ -224,36 +241,80 @@ export class BattleEngine {
 
   constructor(cfg: EngineConfig) {
     this.cfg = cfg;
-    this.turn = cfg.first;
 
-    this.ships = [this.makeShip(cfg.seats[0], 0), this.makeShip(cfg.seats[1], 2.1)];
+    // Slots run back from the front rank in the order the seats were handed
+    // over, so both clients put the same captain on the same anchor.
+    const filled: Record<Team, number> = { 0: 0, 1: 0 };
+    this.arena = arenaFor(fleetSizeFor(cfg.seats.length));
+    this.ships = cfg.seats.map((seat, i) => this.makeShip(seat, filled[seat.team]++, i * 2.1));
+    this.lastShotHit = this.ships.map(() => null);
+    this.burnBefore = this.ships.map(() => 0);
+
+    // `first` names the side that opens; the hull that actually fires is that
+    // side's front rank.
+    this.turn = Math.max(0, this.ships.findIndex((s) => s.team === cfg.first));
 
     const rnd = this.rngFor(0);
     this.wind = (rnd() * 2 - 1) * 0.7;
-    this.ships[0].x = this.ships[0].anchorX + (rnd() * 2 - 1) * BALANCE.DRIFT_STEP;
-    this.ships[1].x = this.ships[1].anchorX + (rnd() * 2 - 1) * BALANCE.DRIFT_STEP;
+    for (const ship of this.ships) {
+      ship.x = ship.anchorX + (rnd() * 2 - 1) * this.arena.driftStep;
+    }
     if (cfg.rules.mountain !== 'off') this.spawnRocks(rnd);
 
     this.beginTurn();
   }
 
-  private makeShip(seat: Seat, bobPhase: number): Ship {
+  private makeShip(seat: Seat, slot: number, bobPhase: number): Ship {
+    const anchorX = this.arena.anchor[seat.team][slot] ?? this.arena.anchor[seat.team][0];
     return {
       team: seat.team,
+      slot,
       id: seat.id,
       name: seat.name,
       control: seat.control,
       aiLevel: seat.aiLevel,
       skin: clamp(seat.skin, 0, SHIPS.length - 1),
       hp: BALANCE.MAX_HP,
-      anchorX: ARENA.anchor[seat.team],
-      x: ARENA.anchor[seat.team],
+      anchorX,
+      x: anchorX,
       burn: 0,
       bobPhase,
       flash: 0,
       lean: 0,
       lastAim: { angle: seat.team === 0 ? -0.72 : -Math.PI + 0.72, power: 0.65 },
     };
+  }
+
+  /** Living hulls still flying a side's colours. */
+  private afloat(team: Team): number[] {
+    const out: number[] = [];
+    for (let i = 0; i < this.ships.length; i++) {
+      if (this.ships[i].team === team && this.ships[i].hp > 0) out.push(i);
+    }
+    return out;
+  }
+
+  /**
+   * Who fires after this hull.
+   *
+   * The helm alternates sides every single turn, however lopsided the battle
+   * has become: a fleet down to its last ship still gets every other shot
+   * rather than being pounded three times between replies. Within a side it
+   * goes round the survivors in order, so the same captain does not fire twice
+   * while a crewmate waits.
+   */
+  private nextTurn(from: number): number {
+    const other = (1 - this.ships[from].team) as Team;
+    const theirs = this.afloat(other);
+    if (theirs.length > 0) {
+      // Whoever on that side has waited longest — the first one past the last
+      // of theirs to fire, wrapping around.
+      const after = theirs.find((i) => i > (this.lastFired[other] ?? -1));
+      return after ?? theirs[0];
+    }
+    // Nobody left to answer; the same side keeps firing until finish() notices.
+    const mine = this.afloat(this.ships[from].team);
+    return mine.find((i) => i > from) ?? mine[0] ?? from;
   }
 
   /**
@@ -282,14 +343,17 @@ export class BattleEngine {
    * anchor would just hand that side a free flat lane down the far side.
    */
   private spawnRocks(rnd: () => number) {
-    const lo = ARENA.anchor[0] + BALANCE.ROCK_MARGIN;
-    const hi = ARENA.anchor[1] - BALANCE.ROCK_MARGIN;
+    // Measured from the innermost hull of each fleet, so the mountain always
+    // sits in the open water between the two front ranks rather than drifting
+    // out among the rear ships as the battle gets bigger.
+    const lo = this.arena.anchor[0][0] + BALANCE.ROCK_MARGIN;
+    const hi = this.arena.anchor[1][0] - BALANCE.ROCK_MARGIN;
     const mid = (lo + hi) / 2;
     const wander = (hi - lo) * 0.22;
     const r = BALANCE.ROCK_R_MIN + rnd() * (BALANCE.ROCK_R_MAX - BALANCE.ROCK_R_MIN);
     this.rocks.push({
       x: clamp(mid + (rnd() * 2 - 1) * wander, lo, hi),
-      y: ARENA.seaY - 6 - rnd() * 26,
+      y: this.arena.seaY - 6 - rnd() * 26,
       r,
       hp: BALANCE.ROCK_HP,
       seed: (rnd() * 0xffffff) | 0,
@@ -297,42 +361,47 @@ export class BattleEngine {
   }
 
   // -- geometry ---------------------------------------------------------------
+  //
+  // Every one of these takes a ship index, not a team. In a duel the two were
+  // the same number and the distinction did not exist; with six hulls it is
+  // the difference between aiming at a ship and aiming at a side.
 
   /** Waterline the hull is riding on this instant. The bob is real, not paint. */
-  shipY(team: Team): number {
-    const ship = this.ships[team];
-    return ARENA.seaY + Math.sin(this.clock * BALANCE.BOB_SPEED + ship.bobPhase) * BALANCE.BOB_AMP;
+  shipY(i: number): number {
+    const ship = this.ships[i];
+    return this.arena.seaY + Math.sin(this.clock * BALANCE.BOB_SPEED + ship.bobPhase) * BALANCE.BOB_AMP;
   }
 
-  facing(team: Team): 1 | -1 {
-    return team === 0 ? 1 : -1;
+  /** Which way this hull points, which is always across the water at the enemy. */
+  facing(i: number): 1 | -1 {
+    return this.ships[i].team === 0 ? 1 : -1;
   }
 
   /** The pivot the barrel turns about. */
-  private trunnion(team: Team): { x: number; y: number } {
+  private trunnion(i: number): { x: number; y: number } {
     return {
-      x: this.ships[team].x + this.facing(team) * BALANCE.MUZZLE_X,
-      y: this.shipY(team) + BALANCE.MUZZLE_Y,
+      x: this.ships[i].x + this.facing(i) * BALANCE.MUZZLE_X,
+      y: this.shipY(i) + BALANCE.MUZZLE_Y,
     };
   }
 
   /** The mouth of the barrel at a given elevation, where a ball actually appears. */
-  muzzle(team: Team, angle: number): { x: number; y: number } {
-    const t = this.trunnion(team);
+  muzzle(i: number, angle: number): { x: number; y: number } {
+    const t = this.trunnion(i);
     return { x: t.x + Math.cos(angle) * BARREL, y: t.y + Math.sin(angle) * BARREL };
   }
 
-  private hullBox(team: Team): Box {
-    const x = this.ships[team].x;
-    const y = this.shipY(team);
+  private hullBox(i: number): Box {
+    const x = this.ships[i].x;
+    const y = this.shipY(i);
     return { x0: x - BALANCE.HULL_W / 2, y0: y - 62, x1: x + BALANCE.HULL_W / 2, y1: y + 22 };
   }
 
   /** Mast and canvas. Worth hitting, worth less than the hull. */
-  private rigBox(team: Team): Box {
-    const x = this.ships[team].x;
-    const y = this.shipY(team);
-    const f = this.facing(team);
+  private rigBox(i: number): Box {
+    const x = this.ships[i].x;
+    const y = this.shipY(i);
+    const f = this.facing(i);
     const a = x + f * -92;
     const b = x + f * 104;
     return { x0: Math.min(a, b), y0: y - 242, x1: Math.max(a, b), y1: y - 62 };
@@ -372,8 +441,8 @@ export class BattleEngine {
     );
   }
 
-  get hp(): [number, number] {
-    return [Math.max(0, Math.round(this.ships[0].hp)), Math.max(0, Math.round(this.ships[1].hp))];
+  get hp(): number[] {
+    return this.ships.map((s) => Math.max(0, Math.round(s.hp)));
   }
 
   select(card: CardId) {
@@ -393,23 +462,24 @@ export class BattleEngine {
    */
   fire(shot: Shot) {
     if (this.phase !== 'aim' && this.phase !== 'deal') return;
-    const team = this.turn;
-    const ship = this.ships[team];
+    const shooter = this.turn;
+    const ship = this.ships[shooter];
     const card = CARDS[shot.card] ?? CARDS.round;
     // The aim pad, the keyboard and the bot's solver all already respect a
     // card's elevation band, but this is the one place every source of a shot
     // -- including whatever a peer's client claims it fired -- actually has to
     // pass through, so it is the one place the mortar's lock is guaranteed
     // rather than merely usually true.
-    const facing = this.facing(team);
+    const facing = this.facing(shooter);
     const [loElev, hiElev] = elevRange(card.id);
     const angle = angleOf(clamp(elevOf(shot.angle, facing), loElev, hiElev), facing);
     const power = clamp(shot.power, 0.05, 1);
 
     ship.lastAim = { angle, power };
     this.lastShot = { angle, power, card: card.id };
-    this.lastShotHit[team] = false;
-    this.burnBefore = [this.ships[0].burn, this.ships[1].burn];
+    this.lastShotHit[shooter] = false;
+    this.lastFired[ship.team] = shooter;
+    this.burnBefore = this.ships.map((s) => s.burn);
 
     // Sent before a single physics step has run. Only for a shot this device
     // actually owns -- not a replay of what the wire just handed us, and not
@@ -432,8 +502,8 @@ export class BattleEngine {
       this.cfg.onHp?.(this.hp);
     }
 
-    const speed = (BALANCE.MIN_SPEED + (BALANCE.MAX_SPEED - BALANCE.MIN_SPEED) * power) * card.speed;
-    const mouth = this.muzzle(team, angle);
+    const speed = (BALANCE.MIN_SPEED + (this.arena.maxSpeed - BALANCE.MIN_SPEED) * power) * card.speed;
+    const mouth = this.muzzle(shooter, angle);
 
     for (let i = 0; i < card.shots; i++) {
       // Fanned symmetrically about the aim, so a single-shot card is dead on
@@ -446,7 +516,8 @@ export class BattleEngine {
         vx: Math.cos(a) * speed,
         vy: Math.sin(a) * speed,
         r: BALANCE.BALL_R * (card.shots > 2 ? 0.62 : 1),
-        team,
+        team: ship.team,
+        from: shooter,
         damage: BALANCE.DIRECT * card.damage,
         blast: BALANCE.BLAST_R * card.blast,
         gravity: BALANCE.GRAVITY * card.gravity,
@@ -461,7 +532,7 @@ export class BattleEngine {
     }
 
     // The hull kicks away from the shot and rights itself.
-    ship.lean += this.facing(team) * -0.09;
+    ship.lean += facing * -0.09;
     this.muzzleFlash(mouth.x, mouth.y, angle);
     this.shake = Math.max(this.shake, 6 + power * 8);
     this.phase = 'flight';
@@ -503,8 +574,8 @@ export class BattleEngine {
   }
 
   /** A player who left hands their wheel to a bot rather than stranding the match. */
-  handOverToAI(team: Team, level = 1) {
-    const ship = this.ships[team];
+  handOverToAI(i: number, level = 1) {
+    const ship = this.ships[i];
     if (ship.control !== 'remote') return;
     ship.control = 'ai';
     ship.aiLevel = level;
@@ -512,12 +583,12 @@ export class BattleEngine {
     this.pendingFire = null;
     this.pendingRemote = null;
     this.awaitingOutcome = false;
-    if (this.phase === 'aim' && this.turn === team) this.botTimer = BALANCE.BOT_THINK;
+    if (this.phase === 'aim' && this.turn === i) this.botTimer = BALANCE.BOT_THINK;
   }
 
   // -- simulation -------------------------------------------------------------
 
-  update(dt: number, decide?: (team: Team) => Shot) {
+  update(dt: number, decide?: (ship: number) => Shot) {
     this.clock += dt;
     this.acc += Math.min(dt, 0.25);
 
@@ -627,7 +698,7 @@ export class BattleEngine {
       // Off the sides is a miss, not an explosion. Above is fine: gravity
       // brings a lofted mortar back, and despawning at y < 0 is precisely the
       // bug that eats every high shot.
-      if (p.x < -260 || p.x > ARENA.w + 260 || p.age > BALANCE.MAX_FLIGHT) p.alive = false;
+      if (p.x < -260 || p.x > this.arena.w + 260 || p.age > BALANCE.MAX_FLIGHT) p.alive = false;
     }
 
     if (this.phase === 'flight' && !this.projectiles.some((p) => p.alive)) {
@@ -641,7 +712,7 @@ export class BattleEngine {
   }
 
   private insideOwn(p: Projectile, x: number, y: number): boolean {
-    return inBox(x, y, this.hullBox(p.team), p.r) || inBox(x, y, this.rigBox(p.team), p.r);
+    return inBox(x, y, this.hullBox(p.from), p.r) || inBox(x, y, this.rigBox(p.from), p.r);
   }
 
   /**
@@ -655,24 +726,27 @@ export class BattleEngine {
   private sweep(p: Projectile, nx: number, ny: number) {
     let best = 2;
     let kind: 'hull' | 'rig' | 'rock' | 'water' | null = null;
-    let team: Team = 0;
+    let struckShip = 0;
     let struck: Rock | null = null;
 
-    for (const side of [0, 1] as Team[]) {
-      if (side === p.team && !p.armed) continue;
-      if (this.ships[side].hp <= 0) continue;
+    for (let i = 0; i < this.ships.length; i++) {
+      // Only the hull it was fired from is transparent before arming — a
+      // crewmate parked in the way is a real obstacle, and clipping a
+      // friend's rigging on the way out is a thing that should hurt.
+      if (i === p.from && !p.armed) continue;
+      if (this.ships[i].hp <= 0) continue;
 
-      const th = segmentBox(p.x, p.y, nx, ny, this.hullBox(side), p.r);
+      const th = segmentBox(p.x, p.y, nx, ny, this.hullBox(i), p.r);
       if (th !== null && th < best) {
         best = th;
         kind = 'hull';
-        team = side;
+        struckShip = i;
       }
-      const tr = segmentBox(p.x, p.y, nx, ny, this.rigBox(side), p.r);
+      const tr = segmentBox(p.x, p.y, nx, ny, this.rigBox(i), p.r);
       if (tr !== null && tr < best) {
         best = tr;
         kind = 'rig';
-        team = side;
+        struckShip = i;
       }
     }
 
@@ -688,9 +762,9 @@ export class BattleEngine {
       }
     }
 
-    if (p.vy > 0 && ny + p.r >= ARENA.seaY) {
+    if (p.vy > 0 && ny + p.r >= this.arena.seaY) {
       const denom = ny - p.y;
-      const t = clamp(Math.abs(denom) < 1e-6 ? 0 : (ARENA.seaY - (p.y + p.r)) / denom, 0, 1);
+      const t = clamp(Math.abs(denom) < 1e-6 ? 0 : (this.arena.seaY - (p.y + p.r)) / denom, 0, 1);
       if (t < best) {
         best = t;
         kind = 'water';
@@ -705,12 +779,23 @@ export class BattleEngine {
 
     if (kind === 'hull' || kind === 'rig') {
       const mult = kind === 'rig' ? RIG_MULT : 1;
-      const own = team === p.team;
-      if (!own) this.lastShotHit[p.team] = true;
-      this.damage(team, p.damage * mult * (own ? BALANCE.SELF_MULT : 1), ix);
-      if (p.burn > 0 && !own) this.ships[team].burn = p.burn + 1;
+      // Friendly counts as "own" for damage purposes: shelling your own fleet
+      // should cost you, but it should not cost you as much as taking one
+      // from the enemy, and it must never be scored as a hit landed.
+      const friendly = this.ships[struckShip].team === p.team;
+      if (!friendly) this.lastShotHit[p.from] = true;
+      this.damage(struckShip, p.damage * mult * (friendly ? BALANCE.SELF_MULT : 1), ix);
+      if (p.burn > 0 && !friendly) this.ships[struckShip].burn = p.burn + 1;
       this.explode(ix, iy, p, 'hull');
-      this.shout(own ? 'your own hull!' : kind === 'rig' ? 'rigging hit' : 'direct hit!');
+      this.shout(
+        struckShip === p.from
+          ? 'your own hull!'
+          : friendly
+            ? 'that was one of ours!'
+            : kind === 'rig'
+              ? 'rigging hit'
+              : 'direct hit!',
+      );
       return;
     }
 
@@ -723,33 +808,33 @@ export class BattleEngine {
       return;
     }
 
-    this.explode(ix, ARENA.seaY, p, 'water');
-    this.splashDamage(ix, ARENA.seaY, p);
+    this.explode(ix, this.arena.seaY, p, 'water');
+    this.splashDamage(ix, this.arena.seaY, p);
   }
 
   /** Blast falls off to nothing at the edge, so a near miss still counts for something. */
   private splashDamage(x: number, y: number, p: Projectile) {
     let closest = Infinity;
-    for (const side of [0, 1] as Team[]) {
-      if (this.ships[side].hp <= 0) continue;
-      const box = this.hullBox(side);
+    for (let i = 0; i < this.ships.length; i++) {
+      if (this.ships[i].hp <= 0) continue;
+      const box = this.hullBox(i);
       const dx = Math.max(box.x0 - x, 0, x - box.x1);
       const dy = Math.max(box.y0 - y, 0, y - box.y1);
       const dist = Math.hypot(dx, dy);
-      if (side !== p.team) closest = Math.min(closest, dist);
+      const friendly = this.ships[i].team === p.team;
+      if (!friendly) closest = Math.min(closest, dist);
       if (dist >= p.blast) continue;
 
       const falloff = 1 - dist / p.blast;
-      const own = side === p.team;
       const dealt =
-        BALANCE.BLAST * falloff * falloff * (own ? BALANCE.SELF_MULT : 1) * (p.damage / BALANCE.DIRECT);
-      if (dealt > 0.7) this.damage(side, dealt, x);
+        BALANCE.BLAST * falloff * falloff * (friendly ? BALANCE.SELF_MULT : 1) * (p.damage / BALANCE.DIRECT);
+      if (dealt > 0.7) this.damage(i, dealt, x);
     }
     if (closest < p.blast) this.shout('close!');
   }
 
-  private damage(team: Team, amount: number, fromX: number) {
-    const ship = this.ships[team];
+  private damage(i: number, amount: number, fromX: number) {
+    const ship = this.ships[i];
     if (ship.hp <= 0 || amount <= 0) return;
     ship.hp = Math.max(0, ship.hp - amount);
     ship.flash = Math.min(1, ship.flash + amount / 30);
@@ -772,12 +857,12 @@ export class BattleEngine {
     this.awaitingOutcome = false;
     this.outcomeWait = 0;
 
-    for (const side of [0, 1] as Team[]) {
-      const ship = this.ships[side];
-      if (this.burnBefore[side] > 0 && ship.hp > 0) {
+    for (let i = 0; i < this.ships.length; i++) {
+      const ship = this.ships[i];
+      if ((this.burnBefore[i] ?? 0) > 0 && ship.hp > 0) {
         ship.hp = Math.max(0, ship.hp - BALANCE.BURN_PER_TURN);
         ship.burn = Math.max(0, ship.burn - 1);
-        this.burnAt(side);
+        this.burnAt(i);
         this.cfg.onSfx?.('burn');
       }
     }
@@ -789,15 +874,18 @@ export class BattleEngine {
       // and a static site has no server to be the authority. But a single turn
       // still cannot take more than a turn's worth of hull off, so a tampered
       // client cannot end a match in one write.
-      this.ships[0].hp = clampClaim(this.ships[0].hp, packet.hp0);
-      this.ships[1].hp = clampClaim(this.ships[1].hp, packet.hp1);
-      this.ships[0].burn = clamp(Math.round(packet.f0), 0, 4);
-      this.ships[1].burn = clamp(Math.round(packet.f1), 0, 4);
+      for (let i = 0; i < this.ships.length; i++) {
+        // A packet from a client that somehow has a different idea of the
+        // fleet size leaves the missing hulls exactly as they were, rather
+        // than reading `undefined` into the simulation.
+        if (packet.hp[i] !== undefined) this.ships[i].hp = clampClaim(this.ships[i].hp, packet.hp[i]);
+        if (packet.f[i] !== undefined) this.ships[i].burn = clamp(Math.round(packet.f[i]), 0, 4);
+        if (packet.d[i] !== undefined) this.ships[i].x = this.clampDrift(i, packet.d[i]);
+      }
       this.wind = clamp(packet.w, -BALANCE.WIND_MAX, BALANCE.WIND_MAX);
-      this.ships[0].x = this.clampDrift(0, packet.d0);
-      this.ships[1].x = this.clampDrift(1, packet.d1);
       this.turnNo = next;
-      this.turn = packet.o === 1 ? 1 : 0;
+      this.turn = clamp(Math.round(packet.o), 0, this.ships.length - 1);
+      this.lastFired[this.ships[this.turn].team] = this.turn;
     } else {
       const rnd = this.rngFor(next + 977);
       this.wind = clamp(
@@ -805,11 +893,10 @@ export class BattleEngine {
         -BALANCE.WIND_MAX,
         BALANCE.WIND_MAX,
       );
-      this.ships[0].x = this.drift(0, rnd);
-      this.ships[1].x = this.drift(1, rnd);
+      for (let i = 0; i < this.ships.length; i++) this.ships[i].x = this.drift(i, rnd);
       const shooter = this.turn;
       this.turnNo = next;
-      this.turn = (1 - shooter) as Team;
+      this.turn = this.nextTurn(shooter);
 
       // Only a seat this device is responsible for produces a packet. A bot
       // standing in for someone who left is one of those; an offline match has
@@ -826,13 +913,10 @@ export class BattleEngine {
           a: round3(this.lastShot.angle),
           p: round3(this.lastShot.power),
           c: this.lastShot.card,
-          hp0: Math.round(this.ships[0].hp),
-          hp1: Math.round(this.ships[1].hp),
-          f0: this.ships[0].burn,
-          f1: this.ships[1].burn,
+          hp: this.ships.map((s) => Math.round(s.hp)),
+          f: this.ships.map((s) => s.burn),
+          d: this.ships.map((s) => Math.round(s.x)),
           w: round3(this.wind),
-          d0: Math.round(this.ships[0].x),
-          d1: Math.round(this.ships[1].x),
           o: this.turn,
         });
       }
@@ -840,32 +924,37 @@ export class BattleEngine {
 
     this.cfg.onHp?.(this.hp);
 
-    if (this.ships[0].hp <= 0 || this.ships[1].hp <= 0) {
+    // A side is beaten when every one of its hulls is under, not when any one
+    // of them is — which is the whole difference between a duel and a fleet.
+    if (this.afloat(0).length === 0 || this.afloat(1).length === 0) {
       this.finish();
       return;
     }
     this.beginTurn();
   }
 
-  private clampDrift(team: Team, x: number): number {
-    const anchor = ARENA.anchor[team];
-    return clamp(x, anchor - BALANCE.DRIFT_MAX, anchor + BALANCE.DRIFT_MAX);
+  private clampDrift(i: number, x: number): number {
+    const anchor = this.ships[i].anchorX;
+    return clamp(x, anchor - this.arena.driftMax, anchor + this.arena.driftMax);
   }
 
-  private drift(team: Team, rnd: () => number): number {
-    return this.clampDrift(team, this.ships[team].x + (rnd() * 2 - 1) * BALANCE.DRIFT_STEP);
+  private drift(i: number, rnd: () => number): number {
+    return this.clampDrift(i, this.ships[i].x + (rnd() * 2 - 1) * this.arena.driftStep);
   }
 
   private finish() {
-    const [a, b] = [this.ships[0].hp, this.ships[1].hp];
-    // Both hulls gone is a real outcome: a mortar into your own rigging can do
-    // it. Whoever is still floating on more timber takes it; dead level, the
-    // one that did not fire survives.
-    this.winner = a > b ? 0 : b > a ? 1 : ((1 - this.turn) as Team);
+    const timber = (team: Team) =>
+      this.ships.reduce((sum, s) => (s.team === team ? sum + Math.max(0, s.hp) : sum), 0);
+    const a = timber(0);
+    const b = timber(1);
+    // Both fleets gone is a real outcome: a mortar into your own rigging can
+    // do it. Whichever side is still floating on more timber takes it; dead
+    // level, the side that did not fire survives.
+    this.winner = a > b ? 0 : b > a ? 1 : ((1 - this.ships[this.turn].team) as Team);
     this.phase = 'over';
     this.sinkT = 0;
     const loser = (1 - this.winner) as Team;
-    this.wreck(loser);
+    for (let i = 0; i < this.ships.length; i++) if (this.ships[i].team === loser) this.wreck(i);
     this.shout('she goes down!');
     this.cfg.onSfx?.('sink');
     this.cfg.onPhase?.(this.phase);
@@ -953,7 +1042,7 @@ export class BattleEngine {
     });
 
     if (surface === 'water') {
-      this.burst(15 * power, 3, x, ARENA.seaY, (q) => {
+      this.burst(15 * power, 3, x, this.arena.seaY, (q) => {
         q.vx = (Math.random() - 0.5) * 340;
         q.vy = -180 - Math.random() * 460 * power;
         q.max = 0.7 + Math.random() * 0.55;
@@ -961,7 +1050,7 @@ export class BattleEngine {
         q.size = 16 + Math.random() * 30;
         q.grow = 1.5;
       });
-      this.pushRing({ x, y: ARENA.seaY, r: 10, max: 120 * scale, life: 1, width: 5 });
+      this.pushRing({ x, y: this.arena.seaY, r: 10, max: 120 * scale, life: 1, width: 5 });
       this.cfg.onSfx?.('splash');
     } else if (surface === 'rock') {
       this.debris(x, y, power, '#5b6675');
@@ -1014,9 +1103,9 @@ export class BattleEngine {
     });
   }
 
-  private burnAt(team: Team) {
-    const x = this.ships[team].x + (Math.random() - 0.5) * BALANCE.HULL_W * 0.7;
-    const y = this.shipY(team) - 58;
+  private burnAt(i: number) {
+    const x = this.ships[i].x + (Math.random() - 0.5) * BALANCE.HULL_W * 0.7;
+    const y = this.shipY(i) - 58;
     this.burst(7, 0, x, y, (q) => {
       q.vx = (Math.random() - 0.5) * 60;
       q.vy = -70 - Math.random() * 120;
@@ -1027,9 +1116,9 @@ export class BattleEngine {
     });
   }
 
-  private wreck(team: Team) {
-    const ship = this.ships[team];
-    this.burst(20, 1, ship.x, this.shipY(team) - 70, (q) => {
+  private wreck(i: number) {
+    const ship = this.ships[i];
+    this.burst(20, 1, ship.x, this.shipY(i) - 70, (q) => {
       q.vx = (Math.random() - 0.5) * 180;
       q.vy = -40 - Math.random() * 150;
       q.max = 1.8 + Math.random() * 1.4;
@@ -1037,7 +1126,7 @@ export class BattleEngine {
       q.size = 50 + Math.random() * 70;
       q.grow = 2.6;
     });
-    this.debris(ship.x, this.shipY(team) - 40, 1.6, '#6b4423');
+    this.debris(ship.x, this.shipY(i) - 40, 1.6, '#6b4423');
   }
 
   private shout(text: string) {
@@ -1071,7 +1160,7 @@ export class BattleEngine {
         p.vy += 900 * dt;
         p.vx *= 0.995;
         // Sparks, spray and splinters all drown when they reach the water.
-        if (p.y > ARENA.seaY + 6) {
+        if (p.y > this.arena.seaY + 6) {
           this.particles.splice(i, 1);
           this.pool.push(p);
         }
@@ -1110,7 +1199,7 @@ export class BattleEngine {
   previewArc(dots: number): { x: number; y: number }[] {
     const card = CARDS[this.selected] ?? CARDS.round;
     const power = clamp(this.aimPower, 0, 1);
-    const speed = (BALANCE.MIN_SPEED + (BALANCE.MAX_SPEED - BALANCE.MIN_SPEED) * power) * card.speed;
+    const speed = (BALANCE.MIN_SPEED + (this.arena.maxSpeed - BALANCE.MIN_SPEED) * power) * card.speed;
     const start = this.muzzle(this.turn, this.aimAngle);
     let vx = Math.cos(this.aimAngle) * speed;
     let vy = Math.sin(this.aimAngle) * speed;
@@ -1125,7 +1214,7 @@ export class BattleEngine {
       x += vx * dt;
       y += vy * dt;
       if (i % perDot === perDot - 1) out.push({ x, y });
-      if (y > ARENA.seaY) break;
+      if (y > this.arena.seaY) break;
     }
     return out;
   }
@@ -1149,11 +1238,11 @@ export class BattleEngine {
     // Letterbox. Both ships and the whole arc between them stay on screen at
     // every aspect ratio, because an artillery duel you have to scroll is a
     // guessing game.
-    this.scale = Math.min(cssW / ARENA.w, cssH / ARENA.h) * this.dpr;
-    this.offX = (canvas.width - ARENA.w * this.scale) / 2;
-    this.offY = (canvas.height - ARENA.h * this.scale) / 2;
+    this.scale = Math.min(cssW / this.arena.w, cssH / this.arena.h) * this.dpr;
+    this.offX = (canvas.width - this.arena.w * this.scale) / 2;
+    this.offY = (canvas.height - this.arena.h * this.scale) / 2;
 
-    if (!this.backdrop) this.backdrop = bakeSea(ARENA, q.fancy);
+    if (!this.backdrop) this.backdrop = bakeSea(this.arena, q.fancy);
   }
 
   /** Screen point to world point, so a drag can be measured in world units. */
@@ -1174,11 +1263,11 @@ export class BattleEngine {
     ctx.setTransform(this.scale, 0, 0, this.scale, this.offX + sx * this.scale, this.offY + sy * this.scale);
 
     if (this.backdrop) ctx.drawImage(this.backdrop, 0, 0);
-    else drawFallbackSea(ctx, ARENA);
+    else drawFallbackSea(ctx, this.arena);
 
-    drawWaves(ctx, ARENA, this.clock, q.waves);
+    drawWaves(ctx, this.arena, this.clock, q.waves);
 
-    for (const rock of this.rocks) if (rock.hp > 0) drawRock(ctx, rock, ARENA.seaY);
+    for (const rock of this.rocks) if (rock.hp > 0) drawRock(ctx, rock, this.arena.seaY);
     for (const side of [0, 1] as Team[]) this.drawOneShip(ctx, side, q);
 
     this.drawProjectiles(ctx, q);
@@ -1192,8 +1281,8 @@ export class BattleEngine {
     this.drawCall(ctx);
   }
 
-  private drawOneShip(ctx: CanvasRenderingContext2D, team: Team, q: Quality) {
-    const ship = this.ships[team];
+  private drawOneShip(ctx: CanvasRenderingContext2D, i: number, q: Quality) {
+    const ship = this.ships[i];
     const sunk = ship.hp <= 0;
     // A sunk hull slides under rather than blinking out, which is the part of
     // the ending anybody actually remembers.
@@ -1201,22 +1290,22 @@ export class BattleEngine {
 
     // The barrel tracks whoever is shooting; an idle ship rests its gun at the
     // elevation it last used, so it never looks unmanned.
-    const live = this.turn === team && (this.phase === 'aim' || this.phase === 'deal');
+    const live = this.turn === i && (this.phase === 'aim' || this.phase === 'deal');
 
     drawShip(ctx, {
       skin: ship.skin,
       x: ship.x,
-      y: this.shipY(team) + settle,
-      facing: this.facing(team),
-      accent: TEAM_COLORS[team].main,
+      y: this.shipY(i) + settle,
+      facing: this.facing(i),
+      accent: TEAM_COLORS[ship.team].main,
       aim: live ? this.aimAngle : ship.lastAim.angle,
       lean: ship.lean,
       flash: ship.flash,
       clock: this.clock,
     });
 
-    if (ship.burn > 0 && q.fancy && Math.random() < 0.35) this.burnAt(team);
-    if (!sunk) this.drawHealthBar(ctx, team);
+    if (ship.burn > 0 && q.fancy && Math.random() < 0.35) this.burnAt(i);
+    if (!sunk) this.drawHealthBar(ctx, i);
   }
 
   /**
@@ -1226,12 +1315,12 @@ export class BattleEngine {
    * on the water, not on a corner of the screen, and a number that changes
    * where you are not looking may as well not have changed.
    */
-  private drawHealthBar(ctx: CanvasRenderingContext2D, team: Team) {
-    const ship = this.ships[team];
+  private drawHealthBar(ctx: CanvasRenderingContext2D, i: number) {
+    const ship = this.ships[i];
     const w = 190;
     const h = 17;
     const x = ship.x - w / 2;
-    const y = this.shipY(team) - 300;
+    const y = this.shipY(i) - 300;
     const frac = clamp(ship.hp / BALANCE.MAX_HP, 0, 1);
 
     ctx.save();
@@ -1255,7 +1344,7 @@ export class BattleEngine {
     ctx.fillText(`${Math.ceil(ship.hp)}`, ship.x, y + h / 2 + 1);
 
     ctx.font = '700 15px system-ui, sans-serif';
-    ctx.fillStyle = TEAM_COLORS[team].light;
+    ctx.fillStyle = TEAM_COLORS[ship.team].light;
     ctx.fillText(ship.name.length > 16 ? `${ship.name.slice(0, 15)}.` : ship.name, ship.x, y - 15);
 
     if (ship.burn > 0) {
@@ -1341,7 +1430,7 @@ export class BattleEngine {
 
   private drawGuide(ctx: CanvasRenderingContext2D, q: Quality) {
     const arc = this.previewArc(q.aimDots);
-    const color = TEAM_COLORS[this.turn].light;
+    const color = TEAM_COLORS[this.ships[this.turn].team].light;
     ctx.save();
     for (let i = 0; i < arc.length; i++) {
       ctx.globalAlpha = 0.85 - (i / arc.length) * 0.6;
@@ -1357,7 +1446,7 @@ export class BattleEngine {
   private drawOffscreenMarkers(ctx: CanvasRenderingContext2D) {
     for (const p of this.projectiles) {
       if (!p.alive || p.y > 26) continue;
-      const x = clamp(p.x, 30, ARENA.w - 30);
+      const x = clamp(p.x, 30, this.arena.w - 30);
       ctx.fillStyle = 'rgba(255, 244, 214, 0.9)';
       ctx.beginPath();
       ctx.moveTo(x, 12);
@@ -1381,8 +1470,8 @@ export class BattleEngine {
     ctx.strokeStyle = 'rgba(4, 16, 28, 0.75)';
     ctx.fillStyle = '#fff7e0';
     const y = 150 - (1 - t) * 26;
-    ctx.strokeText(this.call.toUpperCase(), ARENA.w / 2, y);
-    ctx.fillText(this.call.toUpperCase(), ARENA.w / 2, y);
+    ctx.strokeText(this.call.toUpperCase(), this.arena.w / 2, y);
+    ctx.fillText(this.call.toUpperCase(), this.arena.w / 2, y);
     ctx.restore();
   }
 }

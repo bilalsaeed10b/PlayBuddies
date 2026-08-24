@@ -27,12 +27,13 @@ export interface MatchConfig {
   /** null for offline play. */
   roomId: string | null;
   uid: string | null;
-  /** The other human, online only. */
-  peerUid: string | null;
+  /** Everyone else in the battle, online only. Empty offline. */
+  peerUids: string[];
   isHost: boolean;
-  seats: [Seat, Seat];
-  /** Teams driven from this device: one online or solo, both on a couch. */
-  localTeams: Team[];
+  /** Two, four or six hulls. Index into this is a ship, everywhere. */
+  seats: Seat[];
+  /** Hulls driven from this device: one online, one or two on a couch. */
+  localShips: number[];
   /** Difficulty for bots, including one that takes over from a dropout. */
   aiLevel: number;
   /** Chosen by the host online, locally otherwise. */
@@ -74,7 +75,7 @@ export default function BattleView({
   const engineRef = useRef<BattleEngine | null>(null);
   const linkRef = useRef<TurnLink | null>(null);
 
-  const online = Boolean(config.roomId && config.uid && config.peerUid);
+  const online = Boolean(config.roomId && config.uid && config.peerUids.length > 0);
   /**
    * The rules as one number, so the wire effect below can depend on them.
    *
@@ -97,8 +98,9 @@ export default function BattleView({
   const [session, setSession] = useState<Session | null>(
     online && !config.isHost ? null : { seed: config.seed, first: config.first, rules: config.rules },
   );
-  const [hp, setHp] = useState<[number, number]>([BALANCE.MAX_HP, BALANCE.MAX_HP]);
-  const [turn, setTurn] = useState<Team>(config.first);
+  const [hp, setHp] = useState<number[]>(() => config.seats.map(() => BALANCE.MAX_HP));
+  /** Index into  of whoever has the helm, not a side. */
+  const [turn, setTurn] = useState<number>(0);
   const [phase, setPhase] = useState<Phase>('deal');
   const [hand, setHand] = useState<CardId[]>([]);
   const [selected, setSelected] = useState<CardId>('round');
@@ -138,7 +140,8 @@ export default function BattleView({
   settingsRef.current = settings;
   const held = useRef<Record<string, boolean>>({});
   const draggingRef = useRef(false);
-  const brains = useRef<[Brain, Brain]>([newBrain(), newBrain()]);
+  /** One per hull, since every seat can end up driven by a bot. */
+  const brains = useRef<Brain[]>([]);
   /** Shots that arrived before the engine existed. */
   const queued = useRef<NetPacket[]>([]);
 
@@ -154,11 +157,21 @@ export default function BattleView({
    * abandoned ship and handed the wheel to a bot -- over and over, for as long
    * as the lobby kept ticking.
    */
-  const localTeamsKey = config.localTeams.join(',');
-  const remoteTeam = (1 - (config.localTeams[0] ?? 0)) as Team;
+  const localShipsKey = config.localShips.join(',');
+  const peerKey = config.peerUids.join(',');
   const { aiLevel } = config;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const localTeams = useMemo(() => new Set(config.localTeams), [localTeamsKey]);
+  const localShips = useMemo(() => new Set(config.localShips), [localShipsKey]);
+  /**
+   * Which hull each remote player is sailing, so a `bye` can be pinned on the
+   * ship its sender was actually driving rather than on "the other one".
+   */
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const shipOfUid = useMemo(() => {
+    const map = new Map<string, number>();
+    config.seats.forEach((seat, i) => map.set(seat.id, i));
+    return map;
+  }, [config.seats.map((s) => s.id).join(',')]);
   /** Read once a frame from a ref, so a media-query change cannot rebuild the loop. */
   const coarseRef = useRef(false);
   coarseRef.current = coarse;
@@ -217,7 +230,7 @@ export default function BattleView({
   // -- the wire ---------------------------------------------------------------
 
   const handlePacket = useCallback(
-    (packet: NetPacket) => {
+    (packet: NetPacket, from: string) => {
       if (packet.t === 'start') {
         setSession((current) =>
           current && current.seed === packet.seed
@@ -227,8 +240,10 @@ export default function BattleView({
         return;
       }
       if (packet.t === 'bye') {
-        engineRef.current?.handOverToAI(remoteTeam, aiLevel);
-        setNotice('They abandoned ship. A bot has the wheel.');
+        const ship = shipOfUid.get(from);
+        if (ship === undefined) return;
+        engineRef.current?.handOverToAI(ship, aiLevel);
+        setNotice(`${config.seats[ship]?.name ?? 'A captain'} abandoned ship. A bot has the wheel.`);
         return;
       }
       if (packet.t !== 'fire' && packet.t !== 'shot') return;
@@ -251,11 +266,12 @@ export default function BattleView({
       if (packet.t === 'fire') engine.applyFire(packet);
       else engine.applyShot(packet);
     },
-    [remoteTeam, aiLevel],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [shipOfUid, aiLevel],
   );
 
   useEffect(() => {
-    if (!online || !config.roomId || !config.uid || !config.peerUid) return;
+    if (!online || !config.roomId || !config.uid || config.peerUids.length === 0) return;
 
     let disposed = false;
     let link: TurnLink | null = null;
@@ -269,7 +285,7 @@ export default function BattleView({
         link = new Link(
           config.roomId as string,
           config.uid as string,
-          config.peerUid as string,
+          config.peerUids,
           handlePacket,
           (message) => {
             setNotice(message);
@@ -312,7 +328,8 @@ export default function BattleView({
       retryingRef.current = false;
       linkRef.current = null;
     };
-  }, [online, config.roomId, config.uid, config.peerUid, config.isHost, config.seed, config.first, rulesBits, handlePacket, wireGeneration]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [online, config.roomId, config.uid, peerKey, config.isHost, config.seed, config.first, rulesBits, handlePacket, wireGeneration]);
 
   // -- the engine and the loop -----------------------------------------------
 
@@ -324,7 +341,6 @@ export default function BattleView({
     if (!ctx) return;
 
     const governor = new QualityGovernor(settingsRef.current.lowPower);
-    brains.current = [newBrain(), newBrain()];
 
     const engine = new BattleEngine({
       seats: config.seats,
@@ -343,8 +359,11 @@ export default function BattleView({
       onLocalShot: online ? (packet) => linkRef.current?.send(packet) : undefined,
       onOver: (winner) => {
         setOver({ winner });
-        const won = localTeams.has(winner);
-        onResult(won, Math.round(engine.ships[winner].hp));
+        // With a fleet, "did I win" is about the side I am sailing on, and the
+        // hull the prize is counted from is my own — not some crewmate's.
+        const won = config.localShips.some((i) => engine.ships[i].team === winner);
+        const mine = config.localShips[0] ?? 0;
+        onResult(won, Math.round(Math.max(0, engine.ships[mine].hp)));
         audioService.playEnd(won);
       },
     });
@@ -355,15 +374,16 @@ export default function BattleView({
     }
     queued.current = [];
 
-    const decide = (team: Team) =>
-      chooseShot(engine, team, engine.ships[team].aiLevel, brains.current[team]);
+    brains.current = engine.ships.map(() => newBrain());
+    const decide = (ship: number) =>
+      chooseShot(engine, ship, engine.ships[ship].aiLevel, brains.current[ship]);
 
     // Dev-only handles. "Who is on the water, whose turn does the engine think
     // it is, and what would a bot do from here" are the first three questions
     // worth asking when a turn appears stuck, and none of them can be answered
     // from the console without these.
     if (import.meta.env.DEV) {
-      const dev = window as unknown as { __battle?: BattleEngine; __decide?: (team: Team) => unknown };
+      const dev = window as unknown as { __battle?: BattleEngine; __decide?: (ship: number) => unknown };
       dev.__battle = engine;
       dev.__decide = decide;
     }
@@ -546,9 +566,12 @@ export default function BattleView({
 
   // -- render -----------------------------------------------------------------
 
-  const myTurn = localTeams.has(turn) && (phase === 'aim' || phase === 'deal');
+  const myTurn = localShips.has(turn) && (phase === 'aim' || phase === 'deal');
   const canAim = phase === 'aim' && myTurn && !over;
-  const facing: 1 | -1 = turn === 0 ? 1 : -1;
+  /** My side, for colouring the HUD — the first hull this device sails. */
+  const myTeam: Team = config.seats[config.localShips[0] ?? 0]?.team ?? 0;
+  const turnTeam: Team = config.seats[turn]?.team ?? 0;
+  const facing: 1 | -1 = turnTeam === 0 ? 1 : -1;
   const handHeight = compact ? HAND_HEIGHT_COMPACT : HAND_HEIGHT;
   // With cards off there is only ever the plain round shot, so a one-card hand
   // is a strip of screen showing the player a choice they do not have. The pad
@@ -557,14 +580,24 @@ export default function BattleView({
 
   // A seat handed to a bot keeps its owner's name, so this line has to read
   // properly for "Alice (adrift)" and for the solo seat, which is called "You".
-  const shooter = config.seats[turn].name;
+  const shooter = config.seats[turn]?.name ?? 'Someone';
   const turnLabel = over
     ? ''
     : myTurn || shooter.toLowerCase() === 'you'
-      ? config.localTeams.length > 1
+      ? config.localShips.length > 1
         ? `${shooter} to fire`
         : 'Your shot'
       : `${shooter} is aiming`;
+
+  // How the winning side finished: total timber left, and how many hulls are
+  // still carrying it.
+  const iWon = over ? myTeam === over.winner : false;
+  const winnerTimber = over
+    ? config.seats.reduce((sum, seat, i) => (seat.team === over.winner ? sum + (hp[i] ?? 0) : sum), 0)
+    : 0;
+  const winnerAfloat = over
+    ? config.seats.filter((seat, i) => seat.team === over.winner && (hp[i] ?? 0) > 0).length
+    : 0;
 
   if (!session) {
     return (
@@ -595,19 +628,25 @@ export default function BattleView({
     <div ref={shellRef} className="relative h-[100dvh] w-full overflow-hidden bg-[#04121f] text-white">
       <canvas ref={canvasRef} className="absolute inset-0 h-full w-full touch-none" />
 
-      {/* -- the two hulls, at a glance -- */}
+      {/* -- every hull, at a glance, grouped by side -- */}
       <div className="pointer-events-none absolute inset-x-0 top-2 z-20 flex justify-center px-2">
-        <div className="flex w-full max-w-[560px] items-stretch gap-1.5 rounded-2xl border border-white/15 bg-slate-950/55 p-1.5 backdrop-blur-md">
+        <div className="flex w-full max-w-[720px] items-stretch gap-1.5 rounded-2xl border border-white/15 bg-slate-950/55 p-1.5 backdrop-blur-md">
           {([0, 1] as Team[]).map((team) => (
-            <HullMeter
-              key={team}
-              name={config.seats[team].name}
-              skin={config.seats[team].skin}
-              hp={hp[team]}
-              team={team}
-              mine={localTeams.has(team)}
-              active={turn === team && !over}
-            />
+            <div key={team} className="flex min-w-0 flex-1 items-stretch gap-1">
+              {config.seats.map((seat, i) =>
+                seat.team !== team ? null : (
+                  <HullMeter
+                    key={i}
+                    name={seat.name}
+                    skin={seat.skin}
+                    hp={hp[i] ?? 0}
+                    team={team}
+                    mine={localShips.has(i)}
+                    active={turn === i && !over}
+                  />
+                ),
+              )}
+            </div>
           ))}
         </div>
       </div>
@@ -618,7 +657,7 @@ export default function BattleView({
         {turnLabel && (
           <div
             className="rounded-full border border-white/15 bg-slate-950/60 px-3 py-1 text-[11px] font-black uppercase tracking-[0.16em] backdrop-blur-md"
-            style={{ color: TEAM_COLORS[turn].light }}
+            style={{ color: TEAM_COLORS[turnTeam].light }}
           >
             {turnLabel}
             {canAim && session?.rules.turnTimer && clock <= 10 ? ` - ${clock}s` : ''}
@@ -707,23 +746,23 @@ export default function BattleView({
           <div className="w-full max-w-sm space-y-5 rounded-[2rem] border border-white/20 bg-slate-900/90 p-7 text-center">
             <ShipIcon
               className="mx-auto h-14 w-14"
-              style={{ color: localTeams.has(over.winner) ? '#fbbf24' : '#64748b' }}
+              style={{ color: iWon ? '#fbbf24' : '#64748b' }}
             />
             {/* On a couch both seats are local, so "you win" is true of
-                whoever is reading it and useless. Name the winner instead. */}
+                whoever is reading it and useless. Name the side instead. */}
             <h2 className="text-3xl font-black">
-              {config.localTeams.length > 1
-                ? `${config.seats[over.winner].name} takes it!`
-                : localTeams.has(over.winner)
+              {config.localShips.length > 1
+                ? `${TEAM_COLORS[over.winner].name} takes it!`
+                : iWon
                   ? 'Prize taken!'
                   : 'You are sunk'}
             </h2>
             <p className="text-sm text-white/60">
-              {/* The solo seat is literally called "You", so the verb has to
-                  agree with it or the line reads "You wins". */}
-              {config.seats[over.winner].name}{' '}
-              {config.seats[over.winner].name.toLowerCase() === 'you' ? 'win' : 'wins'} with{' '}
-              {hp[over.winner]} hull left.
+              {/* Named by side rather than by captain: with three hulls a side
+                  there is no single winner to point at, and with one the side
+                  and the captain are the same thing anyway. */}
+              {TEAM_COLORS[over.winner].name} wins with {winnerTimber} hull left across{' '}
+              {winnerAfloat === 1 ? 'her last ship' : `${winnerAfloat} ships`}.
             </p>
             {!online && (
               <button

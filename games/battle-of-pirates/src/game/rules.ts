@@ -6,26 +6,108 @@
  * quotes a figure, it is this figure.
  */
 
+/** Ships a side brings. One each is the duel; two or three is a fleet action. */
+export type FleetSize = 1 | 2 | 3;
+
+/** Hulls on the water to ships per side, clamped to what an arena exists for. */
+export function fleetSizeFor(totalShips: number): FleetSize {
+  return clamp(Math.round(totalShips / 2), 1, 3) as FleetSize;
+}
+
 export interface Arena {
   w: number;
   h: number;
   /** Waterline. Hulls sit on it; anything below is sea. */
   seaY: number;
-  /** Where each ship would sit with no drift. */
-  anchor: [number, number];
+  /**
+   * Where each ship would sit with no drift, as `anchor[team][slot]`.
+   *
+   * Slot 0 is the one nearest the enemy, so the fleet builds backwards from
+   * the front rank and the innermost pair are always CENTRE_GAP apart however
+   * many ships turn up. That is what keeps the opening exchange of a 3v3
+   * feeling like the duel this was balanced as.
+   */
+  anchor: [number[], number[]];
+  /**
+   * Muzzle speed at full power, which is a property of the water rather than
+   * of the cannon.
+   *
+   * A bigger fleet means a wider sea, and the rearmost ship still has to be
+   * able to reach the enemy's rearmost ship. Range goes as the square of
+   * muzzle velocity, so the speed scales with the square root of the longest
+   * shot on the board — which leaves the *relative* reach of the power dial
+   * exactly where it was tuned: the bottom third still falls short and the
+   * top still clears a drifted target, whatever the size of the battle.
+   */
+  maxSpeed: number;
+  /** How far a hull may wander, and how far per turn. Tighter when it has neighbours. */
+  driftMax: number;
+  driftStep: number;
+}
+
+/** Between the two innermost hulls. The number the whole game was balanced around. */
+const CENTRE_GAP = 1850;
+/**
+ * Between one ship and the next on its own side.
+ *
+ * A hull's hitbox is HULL_W across, but the sprite carries a bowsprit and
+ * rigging past that, so the gap is set against the drawing rather than the
+ * box: 360 apart with 60 of drift each way leaves 40px of daylight at the
+ * worst possible moment, which is enough that two hulls never read as one.
+ */
+const SLOT_GAP = 360;
+/** Water beyond the rearmost hull, so a drifting ship never touches the frame. */
+const EDGE = 300;
+
+/**
+ * The water for a battle of this size.
+ *
+ * A one-a-side call reproduces the hand-tuned arena this game shipped with,
+ * down to the pixel — 2450 by 900, anchors at 300 and 2150, 1760 muzzle speed
+ * — so growing the fleet is strictly an addition and the duel is untouched.
+ */
+export function arenaFor(perSide: FleetSize): Arena {
+  const back = (perSide - 1) * SLOT_GAP;
+  const w = EDGE * 2 + back * 2 + CENTRE_GAP;
+  // The frame keeps its shape as it widens, so a lofted shot has the same
+  // headroom over the water it always had rather than leaving the top of a
+  // squashed letterbox.
+  const h = (w * 900) / 2450;
+  const front = [EDGE + back, EDGE + back + CENTRE_GAP];
+
+  const anchor: [number[], number[]] = [
+    Array.from({ length: perSide }, (_, slot) => front[0] - slot * SLOT_GAP),
+    Array.from({ length: perSide }, (_, slot) => front[1] + slot * SLOT_GAP),
+  ];
+
+  // The longest shot anyone can be asked to make: rearmost hull to rearmost hull.
+  const longest = CENTRE_GAP + back * 2;
+
+  return {
+    w,
+    h,
+    seaY: (h * 690) / 900,
+    anchor,
+    maxSpeed: BASE_MAX_SPEED * Math.sqrt(longest / CENTRE_GAP),
+    // A lone ship has the whole side to itself and keeps the roomy original
+    // drift. Give it neighbours and that same drift would sail two hulls
+    // straight through each other, so it tightens to something that cannot.
+    driftMax: perSide === 1 ? 135 : 60,
+    driftStep: perSide === 1 ? 62 : 28,
+  };
 }
 
 /**
- * One arena, always fully visible.
+ * Every arena is fully visible, whatever its size.
  *
- * There is no camera. Both ships and the whole arc between them are on screen
+ * There is no camera. Every ship and the whole arc between them are on screen
  * at all times, because an artillery game where you cannot see the target is
  * a guessing game, and a scrolling view on a phone is unreadable anyway.
  * The generous headroom is deliberate: a lofted mortar leaves the top of the
  * frame, and an off-screen ball needs somewhere to be.
  *
- * The water is wide on purpose, and wider again than the first two passes at
- * this. A thousand pixels between anchors let two thirds of the power dial
+ * CENTRE_GAP above is wide on purpose, and wider than the first two passes at
+ * it. A thousand pixels between anchors let two thirds of the power dial
  * reach the enemy outright; 1260 fixed that but a good aim from the deck
  * could still all but guarantee a hit once elevation was solved once; 1600
  * made range a real problem to solve on every shot, not just once a match.
@@ -35,12 +117,15 @@ export interface Arena {
  * the extra room to do it in. The anchors stay clear of the frame's edge at
  * full drift either way.
  */
-export const ARENA: Arena = {
-  w: 2450,
-  h: 900,
-  seaY: 690,
-  anchor: [300, 2150],
-};
+
+/**
+ * Muzzle speed at full power for the one-a-side arena, in world px/s.
+ *
+ * Not read directly by anything that fires: `arenaFor` scales it to the water
+ * it is building and hands the result out as `arena.maxSpeed`. This is the
+ * number that scaling is anchored on.
+ */
+const BASE_MAX_SPEED = 1760;
 
 export const BALANCE = {
   /**
@@ -49,14 +134,11 @@ export const BALANCE = {
    * The power dial is only a decision while both ends of it mean something.
    * Retuned so the bottom third of the dial still falls short of a
    * stationary enemy and the top comfortably clears one who has drifted
-   * away, at the new sixteen-hundred-pixel gap between anchors. It also
-   * buys the thing a wide sea wants: a longer, higher arc, more time to
-   * read the wind before it lands, and more room for a mortar's much
-   * steeper drop to actually mean something.
+   * away. It also buys the thing a wide sea wants: a longer, higher arc,
+   * more time to read the wind before it lands, and more room for a mortar's
+   * much steeper drop to actually mean something.
    */
   GRAVITY: 1050,
-  /** Speed at full power, in world px/s. */
-  MAX_SPEED: 1760,
   /** Minimum, so a fumbled tap still leaves the barrel. */
   MIN_SPEED: 300,
   /** Sideways acceleration per unit of wind (wind runs -1 to 1). */
@@ -84,9 +166,6 @@ export const BALANCE = {
   /** Muzzle offset from the hull centre, toward the enemy. Scaled with HULL_W. */
   MUZZLE_X: 66,
   MUZZLE_Y: -46,
-  /** How far a ship may wander from its anchor, and how far per turn. */
-  DRIFT_MAX: 135,
-  DRIFT_STEP: 62,
   /** Real on the hitbox, not just paint. See REQUIREMENTS section 4. */
   BOB_AMP: 10,
   BOB_SPEED: 1.35,

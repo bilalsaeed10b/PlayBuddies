@@ -21,7 +21,7 @@ import type { NetPacket } from '../types/game';
 type Unsubscribe = () => void;
 
 export class TurnLink {
-  private unsubscribe: Unsubscribe | null = null;
+  private unsubscribes: Unsubscribe[] = [];
   private closed = false;
   private ready: Promise<void>;
   private write: ((packet: NetPacket) => Promise<void>) | null = null;
@@ -31,8 +31,16 @@ export class TurnLink {
   constructor(
     private room: string,
     private selfUid: string,
-    private peerUid: string,
-    private onPacket: (packet: NetPacket) => void,
+    /**
+     * Everyone else in the battle.
+     *
+     * One document each, one listener each. A duel has a single entry here; a
+     * three-a-side has five, which is still five listeners on five small
+     * documents that change once a turn — nothing like the mesh a real-time
+     * game would need, and no peer connection anywhere.
+     */
+    private peerUids: string[],
+    private onPacket: (packet: NetPacket, from: string) => void,
     private onError?: (message: string) => void,
     /**
      * Fields merged into every packet this side writes.
@@ -53,7 +61,6 @@ export class TurnLink {
       if (this.closed) return;
 
       const mine = doc(db, 'lobbies', this.room, 'updates', this.selfUid);
-      const theirs = doc(db, 'lobbies', this.room, 'updates', this.peerUid);
 
       this.write = async (packet: NetPacket) => {
         // setDoc, not update: the document may not exist yet, and each turn
@@ -66,17 +73,24 @@ export class TurnLink {
       await setDoc(mine, { t: 'idle', n: 0 });
       if (this.closed) return;
 
-      this.unsubscribe = onSnapshot(
-        theirs,
-        (snap) => {
-          const data = snap.data() as NetPacket | undefined;
-          if (data && data.t !== 'idle') this.onPacket(data);
-        },
-        (err) => {
-          console.error('[turnLink] lost the wire:', err);
-          this.onError?.('Lost contact with the other ship.');
-        },
-      );
+      for (const peer of this.peerUids) {
+        this.unsubscribes.push(
+          onSnapshot(
+            doc(db, 'lobbies', this.room, 'updates', peer),
+            (snap) => {
+              const data = snap.data() as NetPacket | undefined;
+              // Who sent it matters once there are more than two of us: a
+              // `bye` has to name the hull it is abandoning, and it cannot be
+              // inferred from "the other one" any more.
+              if (data && data.t !== 'idle') this.onPacket(data, peer);
+            },
+            (err) => {
+              console.error('[turnLink] lost the wire to', peer, err);
+              this.onError?.('Lost contact with one of the other ships.');
+            },
+          ),
+        );
+      }
 
       if (this.queued) {
         const pending = this.queued;
@@ -120,8 +134,8 @@ export class TurnLink {
   close(announce = true) {
     if (this.closed) return;
     this.closed = true;
-    this.unsubscribe?.();
-    this.unsubscribe = null;
+    for (const stop of this.unsubscribes) stop();
+    this.unsubscribes = [];
     if (announce) this.write?.({ t: 'bye', n: Date.now() }).catch(() => {});
   }
 }

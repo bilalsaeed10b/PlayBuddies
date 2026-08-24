@@ -23,7 +23,7 @@ import { GameWallet, reportResult } from './platform/wallet';
 import BattleView, { MatchConfig } from './screens/BattleView';
 import type { Seat } from './engine/BattleEngine';
 import { DEFAULT_RULES } from './types/game';
-import type { GameSettings, MatchRules, MountainRule, Team } from './types/game';
+import type { GameSettings, MatchRules, MountainRule, PlayerCount, Team } from './types/game';
 
 /**
  * The platform owns the lobby.
@@ -232,21 +232,33 @@ export default function App() {
    * sides from arrival order would give two players different ideas about who
    * is on the left.
    */
+  /**
+   * Who is sailing, which side they are on, and in what order.
+   *
+   * Sorted by uid so every client computes the identical answer from data it
+   * already has -- arrival order would give two players different ideas about
+   * who is on the left. Sides alternate down that sorted list, which splits
+   * any even count evenly and puts the same captain on the same anchor
+   * everywhere.
+   *
+   * Anyone past the host's chosen player count is in the room but not in the
+   * battle. That is deliberate: the two fleets have to match, so a fifth
+   * person in a four-player battle watches rather than making it 3v2.
+   */
   const people = useMemo(() => {
     return Object.values(lobby?.players ?? {})
       .sort((a, b) => a.uid.localeCompare(b.uid))
-      .slice(0, 2)
+      .slice(0, rules.players)
       .map((p, i) => ({
         uid: p.uid,
         displayName: p.displayName || 'Player',
         skin: p.fishIndex,
-        team: i as Team,
+        team: (i % 2) as Team,
       }));
-  }, [lobby]);
+  }, [lobby, rules.players]);
 
   const mySkin = uid ? lobby?.players?.[uid]?.fishIndex : undefined;
   const isHost = Boolean(uid && lobby && lobby.hostId === uid);
-  const myTeam = people.find((p) => p.uid === uid)?.team ?? 0;
 
   useEffect(() => {
     // An offline battle is the player's own; the room does not get to start or
@@ -373,21 +385,59 @@ export default function App() {
    */
   function onlineConfig(): MatchConfig {
     // `mode=single` is the platform saying this player pressed its own Solo
-    // button. It should mean a bot even in the moment before the roster
+    // button. It should mean bots even in the moment before the roster
     // settles, rather than a battle that depends on how fast a snapshot
     // arrived.
-    const opponent = handoff.solo ? undefined : people.find((p) => p.uid !== uid);
-    const seats: [Seat, Seat] = [
-      seatFor(0, opponent, myTeam),
-      seatFor(1, opponent, myTeam),
-    ];
+    const crew = handoff.solo ? people.filter((p) => p.uid === uid) : people;
+    const seats: Seat[] = [];
+    const localShips: number[] = [];
+
+    // Every berth the rules call for gets filled, in the fixed side-alternating
+    // order every client derives the same way. A berth with nobody in it gets a
+    // bot, so a half-empty room is still an even fight rather than a walkover.
+    for (let i = 0; i < rules.players; i++) {
+      const team = (i % 2) as Team;
+      const person = crew[i];
+      if (person && person.uid === uid) {
+        localShips.push(i);
+        seats.push({
+          team,
+          id: uid ?? 'me',
+          name: handoff.displayName || 'You',
+          control: 'local',
+          aiLevel,
+          skin: mySkin ?? FREE_SHIPS[0],
+        });
+      } else if (person) {
+        seats.push({
+          team,
+          id: person.uid,
+          name: person.displayName,
+          control: 'remote',
+          aiLevel,
+          skin: person.skin ?? pickOtherShip(mySkin ?? FREE_SHIPS[0]),
+        });
+      } else {
+        seats.push({
+          team,
+          id: `bot-${i}`,
+          name: `${TIERS[aiLevel].label} Bot`,
+          control: 'ai',
+          aiLevel,
+          skin: pickOtherShip(mySkin ?? FREE_SHIPS[0]),
+        });
+      }
+    }
+
     return {
       roomId: handoff.room,
       uid,
-      peerUid: opponent?.uid ?? null,
+      peerUids: crew.filter((p) => p.uid !== uid).map((p) => p.uid),
       isHost,
       seats,
-      localTeams: [myTeam],
+      // A player who arrived after the berths filled up has no hull; the
+      // battle still renders, they just have nothing to fire.
+      localShips,
       aiLevel,
       seed: session.seed,
       first: session.first,
@@ -395,52 +445,48 @@ export default function App() {
     };
   }
 
-  function seatFor(team: Team, opponent: { uid: string; displayName: string; skin?: number | null } | undefined, mine: Team): Seat {
-    if (team === mine) {
-      return {
-        team,
-        id: uid ?? 'me',
-        name: handoff.displayName || 'You',
-        control: 'local',
-        aiLevel,
-        skin: mySkin ?? FREE_SHIPS[0],
-      };
-    }
-    if (opponent) {
-      return {
-        team,
-        id: opponent.uid,
-        name: opponent.displayName,
-        control: 'remote',
-        aiLevel,
-        skin: opponent.skin ?? pickOtherShip(mySkin ?? FREE_SHIPS[0]),
-      };
-    }
-    return {
-      team,
-      id: 'bot',
-      name: `${TIERS[aiLevel].label} Bot`,
-      control: 'ai',
-      aiLevel,
-      skin: pickOtherShip(mySkin ?? FREE_SHIPS[0]),
-    };
-  }
-
   function offlineConfig(): MatchConfig {
     const p1 = seatSkin[0] ?? FREE_SHIPS[0];
-    const seats: [Seat, Seat] = [
-      { team: 0, id: 'seat-0', name: seatCount > 1 ? 'Player 1' : 'You', control: 'local', aiLevel, skin: p1 },
-      seatCount > 1
-        ? { team: 1, id: 'seat-1', name: 'Player 2', control: 'local', aiLevel, skin: seatSkin[1] ?? pickOtherShip(p1) }
-        : { team: 1, id: 'bot', name: `${TIERS[aiLevel].label} Bot`, control: 'ai', aiLevel, skin: pickOtherShip(p1) },
-    ];
+    const seats: Seat[] = [];
+    const localShips: number[] = [];
+
+    // The fleet-size rule applies offline too, so a solo player can take a
+    // wing of bots against a fleet of them. Sides alternate down the list, so
+    // the first two berths are opposite each other — which is what makes a
+    // couch battle two people facing off rather than sharing a side.
+    for (let i = 0; i < rules.players; i++) {
+      const team = (i % 2) as Team;
+      if (i < seatCount) {
+        localShips.push(i);
+        seats.push({
+          team,
+          id: `seat-${i}`,
+          name: seatCount > 1 ? `Player ${i + 1}` : 'You',
+          control: 'local',
+          aiLevel,
+          skin: seatSkin[i] ?? (i === 0 ? p1 : pickOtherShip(p1)),
+        });
+      } else {
+        seats.push({
+          team,
+          id: `bot-${i}`,
+          // Numbered only when there is more than one, so a duel still reads
+          // "Gunner Bot" rather than "Gunner Bot 2".
+          name: rules.players > 2 ? `${TIERS[aiLevel].label} ${i}` : `${TIERS[aiLevel].label} Bot`,
+          control: 'ai',
+          aiLevel,
+          skin: pickOtherShip(p1),
+        });
+      }
+    }
+
     return {
       roomId: null,
       uid: null,
-      peerUid: null,
+      peerUids: [],
       isHost: true,
       seats,
-      localTeams: seatCount > 1 ? [0, 1] : [0],
+      localShips,
       aiLevel,
       seed: session.seed,
       first: session.first,
@@ -535,9 +581,15 @@ const MOUNTAIN_LABEL: Record<MountainRule, string> = {
   solid: 'Solid mountain',
 };
 
+/** How a player count reads as a fight. */
+function formatSides(players: PlayerCount): string {
+  return `${players / 2}v${players / 2}`;
+}
+
 /** The rules in one line, for anyone who wants to know what they are sailing into. */
 function rulesSummary(rules: MatchRules): string {
   return [
+    `${formatSides(rules.players)} · ${rules.players} ships`,
     MOUNTAIN_LABEL[rules.mountain],
     rules.cards ? 'cards on' : 'round shot only',
     rules.turnTimer ? '30s turns' : 'no clock',
@@ -886,7 +938,8 @@ function RoomScreen({
   }
 
   const iAmReady = mine !== undefined && mine !== null;
-  const soloRoom = people.length < 2;
+  /** Berths the rules call for that nobody has walked into; bots take these. */
+  const emptyBerths = Math.max(0, rules.players - people.length);
   /**
    * Nobody sails until everybody has chosen.
    *
@@ -905,7 +958,8 @@ function RoomScreen({
         <div className="min-w-0">
           <h2 className="truncate text-lg font-black tracking-tight sm:text-2xl">Pick your ship</h2>
           <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-amber-300/80">
-            {soloRoom ? 'A bot will take the other helm' : '1v1 across open water'}
+            {formatSides(rules.players)} across open water
+            {emptyBerths > 0 && ` · ${emptyBerths} ${emptyBerths === 1 ? 'helm' : 'helms'} to bots`}
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
@@ -1023,9 +1077,9 @@ function RoomScreen({
                     ? 'Pick your own ship first.'
                     : !everyonePicked
                       ? `Waiting on ${waitingFor} more to pick a ship.`
-                      : soloRoom
-                        ? 'A bot will sail the other hull.'
-                        : 'Who fires first is drawn at the start.'}
+                      : emptyBerths > 0
+                        ? `Bots will sail ${emptyBerths} of the ${rules.players} hulls.`
+                        : 'Which side fires first is drawn at the start.'}
                 </p>
               </>
             ) : (
@@ -1187,6 +1241,38 @@ function RulesPanel({
           <button onClick={onClose} aria-label="Close" className="rounded-xl p-2 hover:bg-white/10">
             <ArrowLeft className="h-5 w-5" />
           </button>
+        </div>
+
+        <div className="space-y-2">
+          <p className="text-sm font-bold">
+            Ships on the water
+            <span className="block text-[11px] font-normal text-white/50">
+              Split evenly into two fleets. Anyone in the room beyond this watches — the two sides have to
+              match. Empty berths are sailed by bots.
+            </span>
+          </p>
+          <div className="grid grid-cols-3 gap-2">
+            {([2, 4, 6] as PlayerCount[]).map((option) => (
+              <button
+                key={option}
+                disabled={!editable}
+                onClick={() => onChange({ ...rules, players: option })}
+                className={`rounded-xl border px-2 py-2.5 text-xs font-black transition-colors disabled:opacity-50 ${
+                  rules.players === option
+                    ? 'border-amber-400 bg-amber-400/20 text-amber-200'
+                    : 'border-white/15 bg-white/5 text-white/60 hover:bg-white/10'
+                }`}
+              >
+                {formatSides(option)}
+                <span className="block text-[10px] font-bold text-white/40">{option} ships</span>
+              </button>
+            ))}
+          </div>
+          <p className="text-[11px] text-white/40">
+            {rules.players === 2
+              ? 'The duel. One hull each, the whole sea between you.'
+              : `The water widens to fit ${rules.players} hulls, and the guns reach further for it. The helm alternates sides every turn.`}
+          </p>
         </div>
 
         <div className="space-y-2">

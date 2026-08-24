@@ -31,6 +31,14 @@ export interface Shot {
 
 export interface Ship {
   team: Team;
+  /**
+   * This hull's rank in its own fleet, 0 being the one nearest the enemy.
+   *
+   * Together with `team` this picks the anchor out of `Arena.anchor`. A duel
+   * only ever has slot 0 on each side; a 3v3 has slots 0, 1 and 2 strung back
+   * from the front rank.
+   */
+  slot: number;
   id: string;
   name: string;
   control: Control;
@@ -60,8 +68,16 @@ export interface Projectile {
   vx: number;
   vy: number;
   r: number;
-  /** Team that fired it, so a hull can tell friendly fire from incoming. */
+  /** Side that fired it, so a hull can tell friendly fire from incoming. */
   team: Team;
+  /**
+   * The ship that fired it.
+   *
+   * Distinct from `team` once a side has more than one hull: "don't detonate
+   * on the deck you left" is about this ship, while "that one hurts less" is
+   * about the side. In a duel the two questions had the same answer.
+   */
+  from: number;
   damage: number;
   blast: number;
   gravity: number;
@@ -113,6 +129,14 @@ export interface GameSettings {
 export type MountainRule = 'off' | 'breakable' | 'solid';
 
 /**
+ * How many hulls take to the water, split evenly into two fleets.
+ *
+ * Always even, because the two sides have to match: 2 is the duel, 4 is two
+ * a side, 6 is three. Anyone in the room beyond this count watches.
+ */
+export type PlayerCount = 2 | 4 | 6;
+
+/**
  * How this battle is played, set by the host and obeyed by everyone.
  *
  * These reach the guest over the wire before its engine is built (see
@@ -134,6 +158,7 @@ export interface MatchRules {
   mountain: MountainRule;
   /** Cards. Off means every shot is a plain round shot and the hand is hidden. */
   cards: boolean;
+  players: PlayerCount;
 }
 
 export const DEFAULT_RULES: MatchRules = {
@@ -141,9 +166,11 @@ export const DEFAULT_RULES: MatchRules = {
   turnTimer: true,
   mountain: 'breakable',
   cards: true,
+  players: 2,
 };
 
 const MOUNTAIN_CODES: MountainRule[] = ['off', 'breakable', 'solid'];
+const PLAYER_CODES: PlayerCount[] = [2, 4, 6];
 
 /**
  * The rules as one integer.
@@ -158,7 +185,8 @@ export function packRules(rules: MatchRules): number {
     (rules.aimArc ? 1 : 0) |
     (rules.turnTimer ? 2 : 0) |
     (Math.max(0, MOUNTAIN_CODES.indexOf(rules.mountain)) << 2) |
-    (rules.cards ? 16 : 0)
+    (rules.cards ? 16 : 0) |
+    (Math.max(0, PLAYER_CODES.indexOf(rules.players)) << 5)
   );
 }
 
@@ -169,6 +197,7 @@ export function unpackRules(bits: number | undefined): MatchRules {
     turnTimer: (bits & 2) !== 0,
     mountain: MOUNTAIN_CODES[(bits >> 2) & 3] ?? DEFAULT_RULES.mountain,
     cards: (bits & 16) !== 0,
+    players: PLAYER_CODES[(bits >> 5) & 3] ?? DEFAULT_RULES.players,
   };
 }
 
@@ -253,18 +282,20 @@ export interface ShotPacket {
   a: number;
   p: number;
   c: CardId;
-  /** HP of each ship once the shot resolved. */
-  hp0: number;
-  hp1: number;
-  /** Burning turns left on each ship. */
-  f0: number;
-  f1: number;
-  /** Wind for the next turn, and where the hulls drift to. */
+  /**
+   * The fleet as the shot left it, one entry per ship in engine order: hull,
+   * burning turns left, and where it drifted to.
+   *
+   * These were `hp0`/`hp1`, `f0`/`f1`, `d0`/`d1` back when a battle was always
+   * two ships. Arrays now, because it can be six.
+   */
+  hp: number[];
+  f: number[];
+  d: number[];
+  /** Wind for the next turn. */
   w: number;
-  d0: number;
-  d1: number;
-  /** Whose turn it is next. Stated, never inferred. */
-  o: Team;
+  /** Which ship fires next, by index. Stated, never inferred. */
+  o: number;
   /**
    * Who fired first in this match, stamped by the host onto every turn it
    * sends.

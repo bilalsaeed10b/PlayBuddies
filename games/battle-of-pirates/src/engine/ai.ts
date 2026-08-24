@@ -22,9 +22,9 @@
  * without ever moving the point of aim off the target.
  */
 import type { BattleEngine } from './BattleEngine';
-import { ARENA, BALANCE, CARDS, CardId, CardMeta, clamp, elevOf, elevRange } from '../game/rules';
+import { BALANCE, CARDS, CardId, CardMeta, clamp, elevOf, elevRange } from '../game/rules';
 import { rockRadius } from '../game/sea';
-import type { Shot, Team } from '../types/game';
+import type { Shot } from '../types/game';
 
 export interface Tier {
   label: string;
@@ -67,26 +67,60 @@ export function newBrain(): Brain {
 /** Powers it is willing to use. Nothing at the very edges: those look robotic. */
 const POWERS = [0.55, 0.62, 0.7, 0.78, 0.86, 0.93];
 
-export function chooseShot(engine: BattleEngine, team: Team, level: number, brain: Brain): Shot {
+/**
+ * Which enemy hull to shoot at.
+ *
+ * The nearest one it can plausibly reach, and among equals the one closest to
+ * sinking. Nearest matters more than it sounds: a rear ship is a longer shot
+ * over the same mountain, and a bot that always picks the wounded one across
+ * the whole sea spends the battle lobbing at maximum range and missing. This
+ * keeps it engaging the ship in front of it and finishing what it started.
+ */
+function pickTarget(engine: BattleEngine, me: number): number {
+  const mine = engine.ships[me];
+  let best = -1;
+  let bestScore = Infinity;
+  for (let i = 0; i < engine.ships.length; i++) {
+    const foe = engine.ships[i];
+    if (foe.team === mine.team || foe.hp <= 0) continue;
+    // Distance dominates; a hull already down to its last planks is worth a
+    // few hundred pixels of extra reach, no more.
+    const score = Math.abs(foe.x - mine.x) + foe.hp * 4;
+    if (score < bestScore) {
+      bestScore = score;
+      best = i;
+    }
+  }
+  return best;
+}
+
+export function chooseShot(engine: BattleEngine, me: number, level: number, brain: Brain): Shot {
   const tier = TIERS[clamp(level, 0, TIERS.length - 1)];
-  const foe = (1 - team) as Team;
+  const foe = pickTarget(engine, me);
+  const facing = engine.facing(me);
+  // Every enemy is under; nothing sensible to aim at, and resolve() is about
+  // to end the battle anyway.
+  if (foe < 0) {
+    return { angle: facing > 0 ? -0.72 : -Math.PI + 0.72, power: 0.6, card: engine.hand[0] ?? 'round' };
+  }
   const enemy = engine.ships[foe];
 
   // Range in on the last shot before aiming the next one. A miss narrows the
   // group; landing one puts it straight back to the tier's honest accuracy, so
   // a bot oscillates around its rank rather than converging on perfect and
   // staying there.
-  const hit = engine.lastShotHit[team];
-  if (hit !== null) brain.focus = hit ? 1 : Math.max(tier.floor, brain.focus * tier.learn);
+  const hit = engine.lastShotHit[me];
+  if (hit !== null && hit !== undefined) {
+    brain.focus = hit ? 1 : Math.max(tier.floor, brain.focus * tier.learn);
+  }
 
-  const card = pickCard(engine, team, tier);
+  const card = pickCard(engine, me, foe, tier);
   engine.select(card);
   const meta = CARDS[card];
 
   const targetY = engine.shipY(foe) - 24;
   const aimX = enemy.x + (Math.random() * 2 - 1) * tier.spread * brain.focus;
 
-  const facing = engine.facing(team);
   const options: Shot[] = [];
 
   // Lofting over the mountain is worth doing on purpose, so both arcs are
@@ -95,7 +129,7 @@ export function chooseShot(engine: BattleEngine, team: Team, level: number, brai
   const [loElev, hiElev] = elevRange(card);
   for (const high of [false, true]) {
     for (const power of POWERS) {
-      const angle = solve(engine, team, aimX, targetY, power, meta.gravity, meta.speed, Boolean(meta.windproof), high);
+      const angle = solve(engine, me, aimX, targetY, power, meta.gravity, meta.speed, Boolean(meta.windproof), high);
       if (angle === null) continue;
       // Mortar cannot leave the barrel below 45 degrees, same as a human's
       // aim pad -- without this the solver's flat root would have the bot
@@ -103,7 +137,7 @@ export function chooseShot(engine: BattleEngine, team: Team, level: number, brai
       // the target it was aimed at.
       const elev = elevOf(angle, facing);
       if (elev < loElev || elev > hiElev) continue;
-      if (!meta.pierce && blocked(engine, team, angle, power, meta.gravity, meta.speed, Boolean(meta.windproof))) continue;
+      if (!meta.pierce && blocked(engine, me, angle, power, meta.gravity, meta.speed, Boolean(meta.windproof))) continue;
       options.push({ angle, power, card });
     }
   }
@@ -143,18 +177,18 @@ export function chooseShot(engine: BattleEngine, team: Team, level: number, brai
  * fifteen ship-lengths short of anything, which reads as broken rather than
  * as the card doing what it says on the tin.
  */
-function maxReach(card: CardMeta, dropHeight: number): number {
+function maxReach(card: CardMeta, maxSpeed: number, dropHeight: number): number {
   const g = BALANCE.GRAVITY * card.gravity;
-  const v = BALANCE.MAX_SPEED * card.speed;
+  const v = maxSpeed * card.speed;
   return (v / g) * Math.sqrt(v * v + Math.max(0, 2 * g * dropHeight));
 }
 
-function pickCard(engine: BattleEngine, team: Team, tier: Tier): CardId {
+function pickCard(engine: BattleEngine, self: number, target: number, tier: Tier): CardId {
   const hand = engine.hand;
   if (!tier.reads) return hand[Math.floor(Math.random() * hand.length)] ?? 'round';
 
-  const me = engine.ships[team];
-  const foe = engine.ships[(1 - team) as Team];
+  const me = engine.ships[self];
+  const foe = engine.ships[target];
   if (me.hp <= 38 && hand.includes('patch')) return 'patch';
 
   const mountainInTheWay = engine.rocks.some((r) => {
@@ -175,7 +209,7 @@ function pickCard(engine: BattleEngine, team: Team, tier: Tier): CardId {
   // one card-length of slack for the height difference the bob and the drift
   // put between the two decks.
   const distance = Math.abs(foe.x - me.x);
-  const inReach = hand.filter((id) => maxReach(CARDS[id], 60) >= distance);
+  const inReach = hand.filter((id) => maxReach(CARDS[id], engine.arena.maxSpeed, 60) >= distance);
   const pool = inReach.length > 0 ? inReach : hand;
 
   // The biggest stick that can actually land, counting a fan as its total
@@ -195,7 +229,7 @@ function pickCard(engine: BattleEngine, team: Team, tier: Tier): CardId {
  */
 function solve(
   engine: BattleEngine,
-  team: Team,
+  self: number,
   targetX: number,
   targetY: number,
   power: number,
@@ -205,8 +239,8 @@ function solve(
   high: boolean,
 ): number | null {
   const g = BALANCE.GRAVITY * gravityMult;
-  const v = (BALANCE.MIN_SPEED + (BALANCE.MAX_SPEED - BALANCE.MIN_SPEED) * power) * speedMult;
-  const facing = engine.facing(team);
+  const v = (BALANCE.MIN_SPEED + (engine.arena.maxSpeed - BALANCE.MIN_SPEED) * power) * speedMult;
+  const facing = engine.facing(self);
   const wind = windproof ? 0 : engine.wind * BALANCE.WIND_ACCEL;
 
   // Everything is solved as if firing rightward, then mirrored back. Halves
@@ -217,7 +251,7 @@ function solve(
   let flight = 0.8;
 
   for (let pass = 0; pass < 3; pass++) {
-    const start = engine.muzzle(team, angle ?? (facing > 0 ? -0.7 : -Math.PI + 0.7));
+    const start = engine.muzzle(self, angle ?? (facing > 0 ? -0.7 : -Math.PI + 0.7));
     const dx = (targetX - start.x) * mirror;
     const dy = targetY - start.y;
     if (dx <= 40) return null;
@@ -257,7 +291,7 @@ function arc(dx: number, dy: number, v: number, g: number, high: boolean): numbe
 /** Walk the arc forward and see whether a rock eats it first. */
 function blocked(
   engine: BattleEngine,
-  team: Team,
+  self: number,
   angle: number,
   power: number,
   gravityMult: number,
@@ -266,10 +300,10 @@ function blocked(
 ): boolean {
   if (engine.rocks.length === 0) return false;
   const g = BALANCE.GRAVITY * gravityMult;
-  const v = (BALANCE.MIN_SPEED + (BALANCE.MAX_SPEED - BALANCE.MIN_SPEED) * power) * speedMult;
+  const v = (BALANCE.MIN_SPEED + (engine.arena.maxSpeed - BALANCE.MIN_SPEED) * power) * speedMult;
   const wind = windproof ? 0 : engine.wind * BALANCE.WIND_ACCEL;
 
-  const start = engine.muzzle(team, angle);
+  const start = engine.muzzle(self, angle);
   let x = start.x;
   let y = start.y;
   let vx = Math.cos(angle) * v;
@@ -281,7 +315,7 @@ function blocked(
     vy += g * dt;
     x += vx * dt;
     y += vy * dt;
-    if (y > ARENA.seaY || x < -200 || x > ARENA.w + 200) return false;
+    if (y > engine.arena.seaY || x < -200 || x > engine.arena.w + 200) return false;
     for (const rock of engine.rocks) {
       if (rock.hp <= 0) continue;
       // Same worn radius the ballistics use, so the bot does not refuse an arc
