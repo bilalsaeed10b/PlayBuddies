@@ -15,7 +15,7 @@ playbuddies/
 │  └─ types/                # shared types
 │
 ├─ games/                   # ONE folder per game — the source of truth
-│  └─ fireboy-watergirl/
+│  └─ volley-clash/
 │     ├─ game.json          # metadata: name, players, category, thumbnail
 │     ├─ thumb.webp         # card art
 │     ├─ src/               # the game itself (Vite + React)
@@ -92,22 +92,14 @@ npm run lint
 Build a single game while iterating:
 
 ```bash
-node scripts/build-games.mjs fireboy-watergirl
+node scripts/build-games.mjs volley-clash
 ```
 
 Work on a game standalone (with hot reload):
 
 ```bash
-cd games/fireboy-watergirl && npm run dev
+cd games/volley-clash && npm run dev
 ```
-
-## Levels
-
-`games/fireboy-watergirl/src/game/levels.ts` holds `DEFAULT_LEVELS`. The
-in-game editor saves overrides to localStorage, namespaced by `LEVELS_VERSION`.
-
-**Bump `LEVELS_VERSION` whenever you change the default levels** — that is what
-stops a player's saved overrides from shadowing the levels you just shipped.
 
 ## Deployment
 

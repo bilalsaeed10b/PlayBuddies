@@ -24,7 +24,12 @@ export interface LobbyPlayer {
   displayName: string;
   photoURL: string;
   isReady: boolean;
-  /** Written by the game, not the platform: Neon Elements uses `role`, Fish Eat Fish uses `fishIndex`. */
+  /**
+   * Written by the game, not the platform: Fish Eat Fish uses `fishIndex`.
+   * `role` was Neon Elements' fire/water pick — that game is gone, but the
+   * field is left here since firestore.rules still allows writing it and
+   * nothing depends on it being absent.
+   */
   role?: "fire" | "water" | null;
   fishIndex?: number;
   joinedAt?: number;

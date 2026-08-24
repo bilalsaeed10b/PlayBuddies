@@ -52,21 +52,6 @@
       "port": 5197
     },
     {
-      "name": "neon-elements",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": [
-        "run",
-        "dev",
-        "--prefix",
-        "games/fireboy-watergirl",
-        "--",
-        "--port",
-        "5198",
-        "--strictPort"
-      ],
-      "port": 5198
-    },
-    {
       "name": "battle-of-pirates",
       "runtimeExecutable": "npm",
       "runtimeArgs": [
