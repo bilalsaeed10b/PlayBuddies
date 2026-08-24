@@ -186,7 +186,7 @@ function Navbar() {
           : "bg-transparent"
           }`}
       >
-        <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+        <div className="relative max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
           {/* Logo */}
           <motion.div
             className="flex items-center gap-3 cursor-pointer"
@@ -212,7 +212,7 @@ function Navbar() {
           </motion.div>
 
           {/* Desktop Nav Links */}
-          <div className="hidden md:flex items-center gap-8">
+          <div className="hidden md:flex items-center gap-8 absolute left-1/2 -translate-x-1/2">
             {["Games", "Features", "About"].map((item) => (
               <motion.a
                 key={item}
