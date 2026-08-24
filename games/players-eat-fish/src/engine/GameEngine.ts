@@ -34,6 +34,19 @@ export const BALANCE = {
   VIEW_AREA: 1200 * 900,
   /** Clamps daft aspect ratios (a 21:9 ultrawide) from seeing halfway across the map. */
   VIEW_MAX_EDGE: 2000,
+  /**
+   * How far the camera pulls back as the local fish grows, at most.
+   *
+   * The view used to be a fixed size no matter how big you got, so a bigger
+   * fish simply filled more and more of a screen that never widened to match
+   * -- the run felt like it was zooming in on you rather than you growing
+   * into a bigger ocean. `zoomFor` below eases the view outward at roughly
+   * the same rate the sprite itself grows, so a fish covers about the same
+   * share of the screen at size 6 as it does at size 200. Capped well short
+   * of "the whole map is always visible", which would make the reef feel
+   * small rather than the fish feel big.
+   */
+  ZOOM_MAX: 2.4,
 
   // Player
   PLAYER_ACCEL: 1400,
@@ -43,13 +56,25 @@ export const BALANCE = {
   PLAYER_VERTICAL_DAMPEN: 0.85,
   PLAYER_FRICTION: 0.9,
   START_SIZE: 6,
-  MAX_SIZE: 200,
+  /**
+   * A safety ceiling, not a target anyone is meant to reach. It used to sit at
+   * 200 -- close enough that a serious run stalled out well before the enemy
+   * population's own top end (see spawnEnemy), so a maxed-out fish became
+   * uneatable by anything but the scripted boss and the run turned into
+   * dodging a timer instead of playing the game. Lifted far out of reach so
+   * growth never visibly stops.
+   */
+  MAX_SIZE: 900,
   /**
    * Growth is by area, not by radius: size² accumulates. Eating your first few
    * fish is dramatic and eating your hundredth barely moves the needle, which
    * is what keeps a long run from ending with one fish filling the screen.
+   * Lowered from 0.55 so that curve stretches out much further -- size climbs
+   * noticeably slower across a whole run, not just at the high end.
    */
-  GROWTH: 0.55,
+  GROWTH: 0.24,
+  /** Score climbs a little slower than size does -- its own dial, not tied to GROWTH. */
+  SCORE_RATE: 0.8,
   SPAWN_PROTECTION: 2.5,
 
   // AI population
@@ -103,11 +128,21 @@ export const BALANCE = {
   BUBBLES: 60,
   VISUAL_SCALE: 1.3,
   /**
-   * Steepest a fish ever tilts, in radians (~35°). Fish mirror horizontally to
-   * change direction and only ever pitch within this, so none is drawn upside
-   * down no matter which way it swims.
+   * Steepest a fish ever tilts, in radians (~85°) -- most of the way to
+   * straight up or down, so swimming vertically actually reads as vertically.
+   *
+   * This used to sit at 0.62 (~35°), which kept a fish nearly level even
+   * when its heading was dead vertical: pushing straight up never made it
+   * look up. That cap existed for a *different* bug -- the old renderer
+   * rotated by the full heading and mirrored *vertically* past ±90°, which
+   * is what actually went upside down, and it happened however small this
+   * number was. The fix for that was switching to a horizontal-only mirror
+   * (see drawFish): pitch is now rotation on top of that mirror, not a
+   * substitute for it, so it stays right-side up at any pitch up to a true
+   * ±90° -- this is stopped just short of that, purely so the sprite never
+   * looks perfectly nose-on.
    */
-  MAX_PITCH: 0.62,
+  MAX_PITCH: 1.48,
 } as const;
 
 const CONTROL_SCHEMES = [
@@ -195,8 +230,14 @@ export class GameEngine {
   /** Enemies eaten since the last time the host published a removal batch. */
   private pendingKills: number[] = [];
 
+  /** Base view size for the current screen aspect, at zoom 1. Set by resize() only. */
   private viewW = 1200;
   private viewH = 900;
+  /** Eased zoom-out multiplier, from `zoomFor`. 1 = base view, grows as the local fish does. */
+  private zoom = 1;
+  /** `viewW`/`viewH` times the current `zoom` -- what the camera and spawner actually use. */
+  private effViewW = 1200;
+  private effViewH = 900;
   private cameraX = BALANCE.WORLD_W / 2;
   private cameraY = BALANCE.WORLD_H / 2;
 
@@ -492,10 +533,33 @@ export class GameEngine {
     const aspect = this.ctx.canvas.width / this.ctx.canvas.height || 1;
     this.viewW = Math.min(BALANCE.VIEW_MAX_EDGE, Math.sqrt(BALANCE.VIEW_AREA * aspect));
     this.viewH = Math.min(BALANCE.VIEW_MAX_EDGE, Math.sqrt(BALANCE.VIEW_AREA / aspect));
+    this.effViewW = this.viewW * this.zoom;
+    this.effViewH = this.viewH * this.zoom;
+  }
+
+  /**
+   * Eases `zoom` toward `zoomFor` of the local fleet's average size, and
+   * refreshes `effViewW`/`effViewH` from it.
+   *
+   * Runs once per frame, before anything that reads the view size -- spawning,
+   * culling and drawing all have to agree on the same view this frame, not a
+   * mix of this frame's camera and last frame's spawn ring.
+   */
+  private updateZoom(dt: number) {
+    let target = 1;
+    const alive = [...this.locals.values()].filter((f) => !f.dead);
+    if (alive.length) {
+      const avgSize = alive.reduce((s, f) => s + f.size, 0) / alive.length;
+      target = zoomFor(avgSize);
+    }
+    const k = 1 - Math.pow(0.05, dt);
+    this.zoom += (target - this.zoom) * k;
+    this.effViewW = this.viewW * this.zoom;
+    this.effViewH = this.viewH * this.zoom;
   }
 
   private viewRadius() {
-    return Math.hypot(this.viewW, this.viewH) / 2;
+    return Math.hypot(this.effViewW, this.effViewH) / 2;
   }
 
   // ── main loop ────────────────────────────────────────────────────────────
@@ -525,6 +589,7 @@ export class GameEngine {
   };
 
   private update(dt: number) {
+    this.updateZoom(dt);
     this.updateLocals(dt);
     if (this.simulateAI) {
       this.simulateEnemies(dt);
@@ -661,18 +726,31 @@ export class GameEngine {
     const ref = this.referenceSize();
     const roll = Math.random();
 
+    // How far into a run the local fleet already is: 0 at a fresh spawn, 1
+    // once comfortably grown. Predators lean in as this climbs, so a brand
+    // new fish gets a gentler reef and pressure ramps up to match a player
+    // who has already grown, instead of a fixed 30% predator chance from the
+    // first second of the run.
+    const grown = clamp((ref - BALANCE.START_SIZE) / 250, 0, 1);
+    const preyCut = 0.5 - grown * 0.15;
+    const peerCut = preyCut + 0.3;
+
     let size: number;
-    if (roll < 0.45) {
+    if (roll < preyCut) {
       // Prey: always something to eat, so a run never stalls.
       size = ref * (0.25 + Math.random() * 0.6);
-    } else if (roll < 0.7) {
+    } else if (roll < peerCut) {
       // Peers: can't eat you, you can't eat them. They make the water feel busy.
       size = ref * (0.85 + Math.random() * 0.3);
     } else {
       // Predators: the reason you keep moving.
       size = ref * (1.2 + Math.random() * 1.0);
     }
-    size = Math.max(4, Math.min(BALANCE.MAX_SIZE * 0.9, size));
+    // Bounded by what a player can actually grow to (MAX_SIZE), not by a
+    // fixed fraction of it -- the old 0.9 multiplier put a hard ceiling at
+    // 180 that never moved, so a fish that grew past it became uneatable by
+    // anything except the scripted boss.
+    size = Math.max(4, Math.min(BALANCE.MAX_SIZE * 1.1, size));
 
     const id = this.nextEnemyId++;
     const fish = this.makeFish(String(id), 'enemy', size, assetForSize(size));
@@ -1043,7 +1121,7 @@ export class GameEngine {
   }
 
   private grow(fish: Fish, eatenSize: number) {
-    fish.score += Math.round(eatenSize);
+    fish.score += Math.round(eatenSize * BALANCE.SCORE_RATE);
     fish.size = Math.min(
       BALANCE.MAX_SIZE,
       Math.sqrt(fish.size * fish.size + eatenSize * eatenSize * BALANCE.GROWTH),
@@ -1193,7 +1271,7 @@ export class GameEngine {
     ctx.fillRect(0, 0, cw, ch);
 
     ctx.save();
-    ctx.scale(cw / this.viewW, ch / this.viewH);
+    ctx.scale(cw / this.effViewW, ch / this.effViewH);
 
     // Camera follows the centroid of whoever is alive locally, and is clamped
     // so the view never slides off the world into empty space.
@@ -1204,15 +1282,15 @@ export class GameEngine {
       tx = alive.reduce((s, f) => s + f.x, 0) / alive.length;
       ty = alive.reduce((s, f) => s + f.y, 0) / alive.length;
     }
-    tx = clampView(tx, this.viewW, BALANCE.WORLD_W);
-    ty = clampView(ty, this.viewH, BALANCE.WORLD_H);
+    tx = clampView(tx, this.effViewW, BALANCE.WORLD_W);
+    ty = clampView(ty, this.effViewH, BALANCE.WORLD_H);
     // Same easing per unit of time regardless of frame rate: at 144Hz the
     // camera must not converge nearly three times faster than at 60Hz.
     const k = 1 - Math.pow(0.05, this.lastDt);
     this.cameraX += (tx - this.cameraX) * k;
     this.cameraY += (ty - this.cameraY) * k;
 
-    ctx.translate(this.viewW / 2 - this.cameraX, this.viewH / 2 - this.cameraY);
+    ctx.translate(this.effViewW / 2 - this.cameraX, this.effViewH / 2 - this.cameraY);
 
     if (this.backdrop) {
       ctx.drawImage(this.backdrop, 0, 0, BALANCE.WORLD_W, BALANCE.WORLD_H);
@@ -1248,10 +1326,10 @@ export class GameEngine {
     // money on a mobile GPU; skipping the ones the player can't see is what
     // keeps a crowded reef from stuttering on a phone.
     const margin = 300;
-    const left = this.cameraX - this.viewW / 2 - margin;
-    const right = this.cameraX + this.viewW / 2 + margin;
-    const top = this.cameraY - this.viewH / 2 - margin;
-    const bottom = this.cameraY + this.viewH / 2 + margin;
+    const left = this.cameraX - this.effViewW / 2 - margin;
+    const right = this.cameraX + this.effViewW / 2 + margin;
+    const top = this.cameraY - this.effViewH / 2 - margin;
+    const bottom = this.cameraY + this.effViewH / 2 + margin;
     const onScreen = (f: Fish) => f.x > left && f.x < right && f.y > top && f.y < bottom;
 
     this.enemies.forEach((f) => onScreen(f) && this.drawFish(f, false));
@@ -1392,6 +1470,20 @@ function clamp(v: number, lo: number, hi: number) {
  */
 export function bodyRadius(size: number): number {
   return 10 + Math.pow(size, 0.75) * BALANCE.VISUAL_SCALE;
+}
+
+/**
+ * How far out the camera should sit for a fish this size, as a multiple of
+ * the base view.
+ *
+ * Tracks `bodyRadius` against the size a run starts at, so the view widens at
+ * roughly the rate the sprite itself does and a fish keeps covering about the
+ * same share of the screen throughout a run, capped at `ZOOM_MAX` so the reef
+ * never shrinks to a speck once someone is huge.
+ */
+export function zoomFor(size: number): number {
+  const ref = bodyRadius(BALANCE.START_SIZE);
+  return clamp(bodyRadius(size) / ref, 1, BALANCE.ZOOM_MAX);
 }
 
 /** Half-width and half-height of the drawn sprite, at `bodyRadius` scale. */
