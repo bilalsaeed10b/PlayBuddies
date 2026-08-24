@@ -424,35 +424,41 @@ export default function GameView({
           </div>
         )}
 
-        <ControlsTray
-          shellRef={rootRef}
-          online={online}
-          isHost={isHost}
-          onSettings={onOpenSettings}
-          onExit={onExit}
-          theme="light"
-          onFullscreenChange={() => engineRef.current?.resize()}
-          before={
-            online && (
-              <div
-                className="rounded-xl border border-black/10 bg-white/80 p-2 text-slate-700"
-                title={
-                  link === 'alone'
-                    ? 'Nobody else in the room yet'
-                    : link === 'direct'
-                      ? `Direct connection to ${peerCount} player(s)`
-                      : 'Direct connection failed. Using the slower fallback'
-                }
-              >
-                {link === 'relayed' ? (
-                  <WifiOff size={18} className="text-amber-600" />
-                ) : (
-                  <Wifi size={18} className={link === 'direct' ? 'text-emerald-600' : 'text-slate-400'} />
-                )}
-              </div>
-            )
-          }
-        />
+        {/* The row above is pointer-events-none so taps fall through to the
+            canvas/joystick underneath; the tray itself has to opt back in or
+            none of its buttons -- fullscreen, settings, leave, end game --
+            are reachable once a match is actually running. */}
+        <div className="pointer-events-auto">
+          <ControlsTray
+            shellRef={rootRef}
+            online={online}
+            isHost={isHost}
+            onSettings={onOpenSettings}
+            onExit={onExit}
+            theme="light"
+            onFullscreenChange={() => engineRef.current?.resize()}
+            before={
+              online && (
+                <div
+                  className="rounded-xl border border-black/10 bg-white/80 p-2 text-slate-700"
+                  title={
+                    link === 'alone'
+                      ? 'Nobody else in the room yet'
+                      : link === 'direct'
+                        ? `Direct connection to ${peerCount} player(s)`
+                        : 'Direct connection failed. Using the slower fallback'
+                  }
+                >
+                  {link === 'relayed' ? (
+                    <WifiOff size={18} className="text-amber-600" />
+                  ) : (
+                    <Wifi size={18} className={link === 'direct' ? 'text-emerald-600' : 'text-slate-400'} />
+                  )}
+                </div>
+              )
+            }
+          />
+        </div>
       </div>
 
       {!ready && (

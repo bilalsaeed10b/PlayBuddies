@@ -552,6 +552,13 @@ export class GameEngine {
       const avgSize = alive.reduce((s, f) => s + f.size, 0) / alive.length;
       target = zoomFor(avgSize);
     }
+    // Never zoom out further than the 3000x2200 world can actually fill.
+    // ZOOM_MAX alone doesn't know the screen's aspect ratio, so on a wide
+    // enough monitor it could ask for a view wider than the map -- the
+    // background ran out and the sides of the screen showed bare colour
+    // past the world's edge instead of more ocean.
+    const worldCap = Math.min(BALANCE.WORLD_W / this.viewW, BALANCE.WORLD_H / this.viewH);
+    target = Math.min(target, worldCap);
     const k = 1 - Math.pow(0.05, dt);
     this.zoom += (target - this.zoom) * k;
     this.effViewW = this.viewW * this.zoom;
