@@ -144,6 +144,15 @@ export default function MatchView({
   const online = Boolean(config.roomId && config.uid);
   const isHost = !online || config.uid === config.hostId;
 
+  // The authoritative signal that the browser actually finished entering or
+  // leaving real fullscreen, so the icon matches reality when it's exited via
+  // Esc rather than the button itself (or denied/dropped by the browser).
+  useEffect(() => {
+    const onChange = () => setIsFull(Boolean(document.fullscreenElement));
+    document.addEventListener('fullscreenchange', onChange);
+    return () => document.removeEventListener('fullscreenchange', onChange);
+  }, []);
+
   // ── seats ────────────────────────────────────────────────────────────────
   //
   // Built once. Re-deriving them mid-match would rebuild the engine and reset
@@ -708,7 +717,7 @@ export default function MatchView({
             {wire.stalled && <span className="text-amber-300">· reconnecting</span>}
           </div>
         )}
-          {online && isHost && (
+          {(!online || isHost) && (
             <button
               onClick={askHostToEndGame}
               className="flex items-center gap-1.5 rounded-2xl border border-white/20 bg-black/45 px-3 py-2.5 text-xs font-bold text-white backdrop-blur-md"

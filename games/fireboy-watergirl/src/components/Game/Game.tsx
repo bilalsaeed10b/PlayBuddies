@@ -9,7 +9,7 @@ import { GameEngine } from '../../game/engine';
 import { Level } from '../../types';
 import { getLevels } from '../../game/levels';
 import { RemoteSmoother, snapshotOf, worthSending, RemoteSnapshot } from '../../game/netSync';
-import { IN_IFRAME, askHostToEndGame, toggleFullscreen, isTouchDevice } from '../../game/fullscreen';
+import { askHostToEndGame, toggleFullscreen, isTouchDevice } from '../../game/fullscreen';
 import { QualityGovernor } from '../../game/quality';
 import TouchControls from './TouchControls';
 import { MessageSquare, RefreshCw, Smartphone, Monitor, Gem, ArrowLeft, LogOut, Settings, Users, Maximize2, Minimize2 } from 'lucide-react';
@@ -2014,14 +2014,21 @@ export default function Game({
                   <button onClick={() => onBack?.()} className="flex-1 py-4 bg-zinc-900 border border-white/5 rounded-xl text-xs font-bold text-zinc-500 hover:text-white transition-colors">BACK TO MENU</button>
                 </div>
 
-                {/* Standalone only — embedded, the host's bar owns full screen. */}
-                {!IN_IFRAME && (
+                <button
+                  onClick={() => requestFullscreen(!isFull)}
+                  className="w-full py-3 bg-zinc-900 border border-white/5 rounded-xl text-xs font-bold text-zinc-400 hover:text-white transition-colors flex items-center justify-center gap-2"
+                >
+                  {isFull ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+                  {isFull ? 'EXIT FULL SCREEN' : 'FULL SCREEN'}
+                </button>
+
+                {isHost && (
                   <button
-                    onClick={() => requestFullscreen(!isFull)}
+                    onClick={askHostToEndGame}
                     className="w-full py-3 bg-zinc-900 border border-white/5 rounded-xl text-xs font-bold text-zinc-400 hover:text-white transition-colors flex items-center justify-center gap-2"
                   >
-                    {isFull ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
-                    {isFull ? 'EXIT FULL SCREEN' : 'FULL SCREEN'}
+                    <LogOut size={14} />
+                    END GAME
                   </button>
                 )}
 
@@ -2137,7 +2144,7 @@ export default function Game({
               >
                 {isFull ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
               </button>
-              {isHost && gameMode === 'multi' && (
+              {(gameMode !== 'multi' || isHost) && (
                 <button
                   onClick={askHostToEndGame}
                   className="px-3 py-2 bg-black/50 border border-white/10 rounded-lg hover:bg-white/10 transition-colors text-xs font-bold flex items-center gap-1.5"

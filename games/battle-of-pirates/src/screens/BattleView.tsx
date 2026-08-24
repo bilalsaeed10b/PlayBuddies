@@ -64,6 +64,15 @@ export default function BattleView({
   const online = Boolean(config.roomId && config.uid && config.peerUid);
   const [isFull, setIsFull] = useState(false);
 
+  // The authoritative signal that the browser actually finished entering or
+  // leaving real fullscreen, so the icon matches reality when it's exited via
+  // Esc rather than the button itself (or denied/dropped by the browser).
+  useEffect(() => {
+    const onChange = () => setIsFull(Boolean(document.fullscreenElement));
+    document.addEventListener('fullscreenchange', onChange);
+    return () => document.removeEventListener('fullscreenchange', onChange);
+  }, []);
+
   /**
    * The whole negotiation.
    *
@@ -587,7 +596,7 @@ export default function BattleView({
       </div>
 
       <div className="absolute right-2 top-2 z-30 flex gap-2">
-        {online && config.isHost && (
+        {(!online || config.isHost) && (
           <button
             onClick={askHostToEndGame}
             aria-label="End the battle for everyone"

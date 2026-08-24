@@ -6,13 +6,14 @@ import {
   Crown,
   Loader2,
   Lock,
+  LogOut,
   Maximize2,
   Play,
   Settings as SettingsIcon,
   Users,
   Volleyball,
 } from 'lucide-react';
-import { IN_IFRAME, toggleFullscreen } from './fullscreen';
+import { askHostToEndGame, toggleFullscreen } from './fullscreen';
 import { CHARACTERS, Character, FREE_CHARACTERS, drawCharacter } from './game/characters';
 import { BALANCE, TEAM_COLORS } from './game/rules';
 import { TIERS } from './engine/ai';
@@ -690,10 +691,7 @@ function Shell({
 }) {
   return (
     <div className="mx-auto flex h-full w-full max-w-6xl flex-col gap-3 p-3 sm:gap-4 sm:p-6">
-      {/* Reachable while embedded via "Play Offline / Couch", so the whole row
-          clears the host's floating bar rather than just the coin badge — the
-          three sit on one baseline and staggering them reads as broken. */}
-      <div className={`flex shrink-0 items-center justify-between gap-2 ${IN_IFRAME ? 'mt-14' : ''}`}>
+      <div className="flex shrink-0 items-center justify-between gap-2">
         <button onClick={onBack} className="panel shrink-0 rounded-2xl p-3">
           <ArrowLeft className="h-5 w-5" />
         </button>
@@ -820,25 +818,21 @@ function RoomScreen({
           <h2 className="truncate text-lg font-black tracking-tight sm:text-2xl">Pick your character</h2>
           <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-amber-300/80">{format}</p>
         </div>
-        {/*
-          Embedded, PlayBuddies floats its own Invite / Full screen / End Game
-          bar over this same corner at a z-index we cannot reach from inside the
-          frame, so this row has to start below it. Full screen is not repeated
-          here for the same reason it was dropped from the match HUD: the host
-          already provides one, and two in one corner is the overlap.
-        */}
-        <div className={`flex shrink-0 items-center gap-2 ${IN_IFRAME ? 'mt-14' : ''}`}>
+        <div className="flex shrink-0 items-center gap-2">
           <div className="panel flex items-center gap-2 rounded-2xl px-3 py-2 font-bold text-amber-300">
             <Coins className="h-4 w-4" /> {coins}
           </div>
-          {!IN_IFRAME && (
-            <button onClick={onFullscreen} className="panel rounded-2xl p-2.5" title="Full screen">
-              <Maximize2 className="h-5 w-5" />
-            </button>
-          )}
+          <button onClick={onFullscreen} className="panel rounded-2xl p-2.5" title="Full screen">
+            <Maximize2 className="h-5 w-5" />
+          </button>
           <button onClick={onSettings} className="panel rounded-2xl p-2.5">
             <SettingsIcon className="h-5 w-5" />
           </button>
+          {isHost && (
+            <button onClick={askHostToEndGame} className="panel rounded-2xl p-2.5" title="End the match for everyone">
+              <LogOut className="h-5 w-5" />
+            </button>
+          )}
         </div>
       </div>
 

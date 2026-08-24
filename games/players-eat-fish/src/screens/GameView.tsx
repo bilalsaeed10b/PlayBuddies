@@ -419,8 +419,11 @@ export default function GameView({
         />
       )}
 
-      {/* HUD */}
-      <div className="pointer-events-none absolute inset-x-0 top-0 z-20 flex items-start justify-between p-3 gap-3">
+      {/* HUD. z-40 rather than the usual z-20 for a HUD row: the tray living in
+          here (fullscreen, settings, leave, end game) has to stay reachable
+          through the z-30 loading and defeat overlays below, not just once a
+          run is actually underway. */}
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-40 flex items-start justify-between p-3 gap-3">
         <div className="rounded-2xl border border-black/10 bg-white/80 px-4 py-2 shadow-sm">
           <p className="text-[10px] font-bold uppercase tracking-widest text-slate-600">Size</p>
           <p className="text-2xl font-black leading-none text-emerald-700">{Math.floor(me?.size ?? 0)}</p>
@@ -482,7 +485,7 @@ export default function GameView({
           >
             <ArrowLeft size={18} />
           </button>
-          {online && isHost && (
+          {(!online || isHost) && (
             <button
               onClick={askHostToEndGame}
               className="flex items-center gap-1.5 rounded-xl border border-black/10 bg-white/80 px-3 py-2 text-sm font-bold text-slate-800 transition-colors hover:bg-white"

@@ -7,12 +7,13 @@ import {
   Fish as FishIcon,
   Loader2,
   Lock,
+  LogOut,
   Maximize2,
   Play,
   Settings as SettingsIcon,
   Users,
 } from 'lucide-react';
-import { IN_IFRAME, toggleFullscreen } from './fullscreen';
+import { askHostToEndGame, toggleFullscreen } from './fullscreen';
 import {
   FISH_ASSETS,
   FISH_CATEGORIES,
@@ -440,9 +441,7 @@ function Shell({
 }) {
   return (
     <div className="mx-auto flex h-full w-full max-w-6xl flex-col gap-3 p-3 sm:gap-4 sm:p-6">
-      {/* The shop is reachable from the embedded room screen, so this row has
-          to clear the host's floating bar the same way that one does. */}
-      <div className={`flex shrink-0 items-center justify-between gap-2 ${IN_IFRAME ? 'mt-14' : ''}`}>
+      <div className="flex shrink-0 items-center justify-between gap-2">
         <button onClick={onBack} className="glass-dark shrink-0 rounded-2xl p-3">
           <ArrowLeft className="h-5 w-5" />
         </button>
@@ -665,24 +664,21 @@ function RoomScreen({
             </span>
           )}
         </div>
-        {/*
-          Embedded, PlayBuddies floats its own Invite / Full screen / End Game
-          bar over this corner above anything this frame can reach, so the row
-          starts below it. Full screen is dropped there too — the host already
-          has one, and two in the same corner is the overlap itself.
-        */}
-        <div className={`flex shrink-0 items-center gap-1.5 sm:gap-2 ${IN_IFRAME ? 'mt-14' : ''}`}>
+        <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
           <button onClick={onShop} className="glass-dark flex items-center gap-1.5 rounded-xl px-2.5 py-1.5 text-xs sm:text-sm font-bold text-amber-600">
             <Coins className="h-4 w-4" /> {coins}
           </button>
-          {!IN_IFRAME && (
-            <button onClick={onFullscreen} className="glass-dark rounded-xl p-2" title="Full screen">
-              <Maximize2 className="h-4 w-4 sm:h-5 sm:w-5" />
-            </button>
-          )}
+          <button onClick={onFullscreen} className="glass-dark rounded-xl p-2" title="Full screen">
+            <Maximize2 className="h-4 w-4 sm:h-5 sm:w-5" />
+          </button>
           <button onClick={onSettings} className="glass-dark rounded-xl p-2">
             <SettingsIcon className="h-4 w-4 sm:h-5 sm:w-5" />
           </button>
+          {isHost && (
+            <button onClick={askHostToEndGame} className="glass-dark rounded-xl p-2" title="End the match for everyone">
+              <LogOut className="h-4 w-4 sm:h-5 sm:w-5" />
+            </button>
+          )}
         </div>
       </div>
 
