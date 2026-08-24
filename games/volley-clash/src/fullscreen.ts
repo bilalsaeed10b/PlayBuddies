@@ -59,13 +59,25 @@ export function toggleFullscreen(el: HTMLElement, on: boolean) {
   lockPageScroll(on);
 
   if (!on) {
+    if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
     el.style.cssText = el.style.cssText.replace(IMMERSIVE, '');
     unlockOrientation();
     return;
   }
 
-  applyImmersive(el);
-  lockLandscape();
+  // Real fullscreen first. It's the only path most mobile browsers will
+  // actually honour an orientation lock on — lockLandscape's own comment
+  // notes that — and it resizes the visual viewport itself instead of us
+  // guessing at CSS percentages while the address bar is mid-animation.
+  // CSS immersive mode is the fallback: iOS has no Element.requestFullscreen
+  // at all, and a permissions policy can deny the request outright.
+  if (typeof el.requestFullscreen === 'function') {
+    el.requestFullscreen()
+      .then(lockLandscape)
+      .catch(() => applyImmersive(el));
+  } else {
+    applyImmersive(el);
+  }
 }
 
 function applyImmersive(el: HTMLElement) {
