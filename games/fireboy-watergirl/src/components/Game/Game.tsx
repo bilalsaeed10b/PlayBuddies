@@ -9,10 +9,10 @@ import { GameEngine } from '../../game/engine';
 import { Level } from '../../types';
 import { getLevels } from '../../game/levels';
 import { RemoteSmoother, snapshotOf, worthSending, RemoteSnapshot } from '../../game/netSync';
-import { IN_IFRAME, toggleFullscreen, isTouchDevice } from '../../game/fullscreen';
+import { IN_IFRAME, askHostToEndGame, toggleFullscreen, isTouchDevice } from '../../game/fullscreen';
 import { QualityGovernor } from '../../game/quality';
 import TouchControls from './TouchControls';
-import { MessageSquare, RefreshCw, Smartphone, Monitor, Gem, ArrowLeft, Settings, Users, Maximize2, Minimize2 } from 'lucide-react';
+import { MessageSquare, RefreshCw, Smartphone, Monitor, Gem, ArrowLeft, LogOut, Settings, Users, Maximize2, Minimize2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import confetti from 'canvas-confetti';
 import { playJumpSound, playCollectSound, playDeathSound, playWinSound } from '../../game/sounds';
@@ -2114,14 +2114,7 @@ export default function Game({
               />
             </div>
 
-            {/*
-              Embedded, PlayBuddies floats its own Invite / Full screen / End
-              Game bar over this corner at a z-index nothing inside the frame
-              can beat, so this row starts below it. Full screen is not repeated
-              there either: the host already provides one, and two buttons in a
-              single corner is the overlap.
-            */}
-            <div className={`flex gap-2 pointer-events-auto ${IN_IFRAME ? 'mt-14' : ''}`}>
+            <div className="flex gap-2 pointer-events-auto">
               {onBack && (
                 <button
                   onClick={onBack}
@@ -2137,13 +2130,20 @@ export default function Game({
               >
                 INVITE
               </button>
-              {!IN_IFRAME && (
+              <button
+                onClick={() => requestFullscreen(!isFull)}
+                className="p-2 bg-black/50 border border-white/10 rounded-lg hover:bg-white/10 transition-colors"
+                title={isFull ? 'Exit Full Screen' : 'Full Screen'}
+              >
+                {isFull ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
+              </button>
+              {isHost && gameMode === 'multi' && (
                 <button
-                  onClick={() => requestFullscreen(!isFull)}
-                  className="p-2 bg-black/50 border border-white/10 rounded-lg hover:bg-white/10 transition-colors"
-                  title={isFull ? 'Exit Full Screen' : 'Full Screen'}
+                  onClick={askHostToEndGame}
+                  className="px-3 py-2 bg-black/50 border border-white/10 rounded-lg hover:bg-white/10 transition-colors text-xs font-bold flex items-center gap-1.5"
+                  title="End the match for everyone"
                 >
-                  {isFull ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
+                  <LogOut size={16} /> END GAME
                 </button>
               )}
               {isTouch && (

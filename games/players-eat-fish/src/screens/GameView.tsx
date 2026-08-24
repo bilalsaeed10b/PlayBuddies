@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowLeft, Maximize2, Minimize2, Settings, Wifi, WifiOff } from 'lucide-react';
+import { ArrowLeft, LogOut, Maximize2, Minimize2, Settings, Wifi, WifiOff } from 'lucide-react';
 import { GameEngine } from '../engine/GameEngine';
 import Joystick from '../components/Joystick';
 import { GameSettings, NetMessage, PlayerPacket } from '../types/game';
@@ -7,7 +7,7 @@ import { GameSettings, NetMessage, PlayerPacket } from '../types/game';
 // neither the mesh nor the Firebase SDK it depends on lands in the main bundle.
 import type { Mesh } from '../net/mesh';
 import { audioService } from '../services/audio';
-import { IN_IFRAME, toggleFullscreen } from '../fullscreen';
+import { askHostToEndGame, toggleFullscreen } from '../fullscreen';
 
 /**
  * How often each client publishes itself, and how often the host publishes the
@@ -442,14 +442,7 @@ export default function GameView({
           </div>
         )}
 
-        {/*
-          PlayBuddies paints its own Invite / Full screen / End Game controls
-          over the top-right of this iframe at a higher z-index than anything
-          in here can reach, so our own buttons sat underneath them and could
-          not be tapped. Dropping below that bar is the only fix available from
-          inside the frame — the host's chrome is not ours to move.
-        */}
-        <div className={`pointer-events-auto flex items-center gap-2 ${IN_IFRAME ? 'mt-14' : ''}`}>
+        <div className="pointer-events-auto flex items-center gap-2">
           {online && (
             <div
               className="rounded-xl border border-black/10 bg-white/80 p-2 text-slate-700"
@@ -489,6 +482,15 @@ export default function GameView({
           >
             <ArrowLeft size={18} />
           </button>
+          {online && isHost && (
+            <button
+              onClick={askHostToEndGame}
+              className="flex items-center gap-1.5 rounded-xl border border-black/10 bg-white/80 px-3 py-2 text-sm font-bold text-slate-800 transition-colors hover:bg-white"
+              title="End the match for everyone"
+            >
+              <LogOut size={16} /> End Game
+            </button>
+          )}
         </div>
       </div>
 

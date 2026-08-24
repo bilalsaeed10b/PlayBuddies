@@ -38,7 +38,6 @@ import {
   Play,
   Crown,
   Loader2,
-  Maximize2,
   Send,
   X,
   MoreVertical,
@@ -105,6 +104,8 @@ function LobbyContent() {
   const gameFrameRef = useRef<HTMLIFrameElement>(null);
   /** The wrapper that goes fullscreen — the frame plus its floating controls. */
   const gameShellRef = useRef<HTMLDivElement>(null);
+  /** Always the latest `endGame`, for the message handler below to call without needing it as a dependency. */
+  const endGameRef = useRef<() => Promise<void>>(async () => {});
 
   /**
    * The player's purse, held here rather than in the game.
@@ -361,6 +362,13 @@ function LobbyContent() {
    *                 Element.requestFullscreen, and even where the API exists it
    *                 only blows up the iframe's own document while this page's
    *                 chrome stays wrapped around it.
+   *   end-game      The host pressed the game's own "End Game" button. Every
+   *                 game now carries this in its own control bar rather than
+   *                 this page floating a duplicate one over the iframe, so
+   *                 this is the only way it hears about it. `endGame` itself
+   *                 still checks host-ness — a non-host game sending this is
+   *                 either a bug or someone poking postMessage by hand, and
+   *                 either way it should not end anyone's match.
    *   wallet-request  I have booted, what does this player own?
    *   wallet-save   Their balance changed, please keep it.
    *   result        A match finished, and whether this player won it.
@@ -373,6 +381,11 @@ function LobbyContent() {
 
       if (data.type === "fullscreen") {
         setIsPseudoFull(Boolean(data.value));
+        return;
+      }
+
+      if (data.type === "end-game") {
+        void endGameRef.current();
         return;
       }
 
@@ -400,6 +413,10 @@ function LobbyContent() {
     };
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
+    // endGame is read through endGameRef (assigned below, after it's defined)
+    // rather than listed here — it isn't memoized, and this listener has no
+    // reason to be torn down and rebuilt on every render just because that
+    // function identity changed.
   }, [user, sendWallet, clearStats]);
 
   const copyLink = () => {
@@ -458,6 +475,7 @@ function LobbyContent() {
       console.error("Error ending game:", e);
     }
   };
+  endGameRef.current = endGame;
 
   const lastMessageTimeRef = useRef<number>(0);
   const sendMessage = async (e: React.FormEvent) => {
@@ -558,20 +576,6 @@ function LobbyContent() {
             : "Couldn't send that request.",
     );
     setTimeout(() => setCrewNotice(""), 2500);
-  };
-
-  /**
-   * Both routes, every time.
-   *
-   * The pseudo-fullscreen (the frame goes `fixed inset-0`) is the one that
-   * always works — including on iOS, where the Fullscreen API does not exist
-   * for anything but video. The native request is attempted on top of it
-   * because where it *is* granted it also hides the browser chrome and unlocks
-   * orientation locking. Branching on "is this a phone" was the mistake: it
-   * left phones with a slightly bigger box and no way to fill the screen.
-   */
-  const toggleFullScreen = () => {
-    setIsPseudoFull((prev) => !prev);
   };
 
   /**
@@ -1027,37 +1031,6 @@ function LobbyContent() {
                 title={selectedGame?.name || "Game Window"}
                 allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
               />
-
-              <div className="absolute top-4 right-4 z-[110] flex gap-2">
-                {/* Reachable mid-match too — the nav bar is covered in full screen. */}
-                <button
-                  onClick={() => setIsInviteModalOpen(true)}
-                  className="p-2 rounded-xl border border-white/20 shadow-2xl backdrop-blur-md bg-black/60 hover:bg-black text-white transition-colors"
-                  title="Invite friends"
-                >
-                  <Users size={18} />
-                </button>
-                <button
-                  onClick={toggleFullScreen}
-                  className={`p-2 rounded-xl border border-white/20 shadow-2xl backdrop-blur-md transition-colors ${
-                    isPseudoFull
-                      ? "bg-primary text-white border-primary/50"
-                      : "bg-black/60 hover:bg-black text-white"
-                  }`}
-                  title={isPseudoFull ? "Close Full Screen" : "Full Screen"}
-                >
-                  <Maximize2 size={18} />
-                </button>
-
-                {isHost && (
-                  <button
-                    onClick={endGame}
-                    className="glass px-4 py-2 bg-black/80 hover:bg-black text-white font-bold rounded-xl border border-white/20 text-sm shadow-2xl backdrop-blur-md"
-                  >
-                    End Game
-                  </button>
-                )}
-              </div>
             </div>
           ) : (
             <div className="space-y-8 relative">

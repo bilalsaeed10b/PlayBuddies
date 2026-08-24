@@ -6,9 +6,9 @@
  * which is what keeps the simulation testable and the netcode swappable.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, Settings as SettingsIcon, Trophy, Wifi, WifiOff } from 'lucide-react';
+import { ArrowLeft, LogOut, Maximize2, Minimize2, Settings as SettingsIcon, Trophy, Wifi, WifiOff } from 'lucide-react';
 import TouchPad, { PadState } from '../components/TouchPad';
-import { IN_IFRAME, toggleFullscreen } from '../fullscreen';
+import { IN_IFRAME, askHostToEndGame, toggleFullscreen } from '../fullscreen';
 import { CHARACTERS } from '../game/characters';
 import { BALANCE, POWER_META, TEAM_COLORS, arenaFor } from '../game/rules';
 import { MatchEngine, Seat } from '../engine/MatchEngine';
@@ -139,6 +139,7 @@ export default function MatchView({
   const wireRef = useRef(wire);
   wireRef.current = wire;
   const [touch, setTouch] = useState(false);
+  const [isFull, setIsFull] = useState(false);
 
   const online = Boolean(config.roomId && config.uid);
   const isHost = !online || config.uid === config.hostId;
@@ -678,17 +679,8 @@ export default function MatchView({
         </div>
       )}
 
-      {/*
-        ── top-right controls ──
-        PlayBuddies paints its own Invite / Full screen / End Game bar over this
-        corner at a z-index above the iframe, so ours has to sit below it or it
-        cannot be tapped at all. Full screen is deliberately not repeated here:
-        the platform already offers it, and two buttons fighting over the same
-        corner is what caused the overlap.
-      */}
-      <div
-        className={`absolute right-3 z-20 flex flex-col items-end gap-2 ${IN_IFRAME ? 'top-20' : 'top-3'}`}
-      >
+      {/* ── top-right controls ── */}
+      <div className="absolute right-3 top-3 z-20 flex flex-col items-end gap-2">
         <div className="flex gap-2">
           {online && (
           <div
@@ -716,6 +708,26 @@ export default function MatchView({
             {wire.stalled && <span className="text-amber-300">· reconnecting</span>}
           </div>
         )}
+          {online && isHost && (
+            <button
+              onClick={askHostToEndGame}
+              className="flex items-center gap-1.5 rounded-2xl border border-white/20 bg-black/45 px-3 py-2.5 text-xs font-bold text-white backdrop-blur-md"
+              title="End the match for everyone"
+            >
+              <LogOut className="h-4 w-4" /> End Game
+            </button>
+          )}
+          <button
+            onClick={() => {
+              const next = !isFull;
+              toggleFullscreen(shellRef.current ?? document.documentElement, next);
+              setIsFull(next);
+            }}
+            className="rounded-2xl border border-white/20 bg-black/45 p-2.5 text-white backdrop-blur-md"
+            title={isFull ? 'Exit full screen' : 'Full screen'}
+          >
+            {isFull ? <Minimize2 className="h-5 w-5" /> : <Maximize2 className="h-5 w-5" />}
+          </button>
           <button
             onClick={onOpenSettings}
             className="rounded-2xl border border-white/20 bg-black/45 p-2.5 text-white backdrop-blur-md"

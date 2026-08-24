@@ -39,6 +39,19 @@ export function isNativeFullscreen(): boolean {
   return Boolean(document.fullscreenElement);
 }
 
+/**
+ * Asks the host page to end the match for the whole room.
+ *
+ * A game can leave its own player's seat on its own — that is just this
+ * device navigating away — but ending the match is a room-wide state change
+ * that lives on the lobby document the platform owns, not this game. The host
+ * page re-checks that the caller is actually the host before acting on it.
+ */
+export function askHostToEndGame() {
+  if (!IN_IFRAME) return;
+  window.parent.postMessage({ source: 'playbuddies-game', type: 'end-game' }, '*');
+}
+
 const IMMERSIVE = 'position:fixed;inset:0;width:100%;height:100%;z-index:2147483647;';
 
 export function toggleFullscreen(el: HTMLElement, on: boolean) {
