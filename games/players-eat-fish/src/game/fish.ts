@@ -79,7 +79,7 @@ export function assetForSize(size: number): number {
  * Biggest fish that will ever travel in a group. Above this they swim alone —
  * a shark drifting in the middle of a school of neon tetras looked ridiculous.
  */
-export const SHOAL_MAX_SIZE = 34;
+export const SHOAL_MAX_SIZE = 40;
 
 export function isShoalingSize(size: number): boolean {
   return size <= SHOAL_MAX_SIZE;

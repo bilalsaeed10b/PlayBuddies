@@ -80,9 +80,30 @@ export const BALANCE = {
   // AI population
   ENEMY_BASE: 26,
   ENEMY_PER_PLAYER: 6,
-  ENEMY_MAX: 70,
+  /**
+   * How many more fish join the reef as the local fleet grows, on top of
+   * ENEMY_BASE -- ramped by the same `grown` curve as the predator mix (see
+   * PREDATOR_RAMP_SIZE), so the water fills up over a run instead of holding
+   * at one fixed headcount from the first second to the last.
+   */
+  ENEMY_GROWTH_BONUS: 34,
+  ENEMY_MAX: 100,
   ENEMY_MIN_SPEED: 55,
   ENEMY_MAX_SPEED: 135,
+  /**
+   * How much the local fleet has to grow, in size, before the reef reaches
+   * its full predator pressure and population -- `grown` in spawnEnemy and
+   * enemyTarget both ramp from 0 to 1 across this many size points above
+   * START_SIZE.
+   *
+   * Used to sit at 250, which meant the reef finished escalating by the time
+   * a player was barely a third of the way to MAX_SIZE -- sharks showed up
+   * "quickly" relative to a whole run, and everything past that point felt
+   * flat rather than still climbing. Stretched out to match the much longer
+   * runs GROWTH's slower curve now produces, so the big predators are a late-
+   * game event, not a mid-game one.
+   */
+  PREDATOR_RAMP_SIZE: 500,
   /** Spawn ring, as a multiple of the view's half-diagonal — just out of sight. */
   SPAWN_RING: 1.15,
   /** Beyond this (same units) a fish nobody can see is recycled. */
@@ -712,7 +733,12 @@ export class GameEngine {
 
   private enemyTarget() {
     const players = this.locals.size + this.remotes.size;
-    return Math.min(BALANCE.ENEMY_MAX, BALANCE.ENEMY_BASE + players * BALANCE.ENEMY_PER_PLAYER);
+    const base = BALANCE.ENEMY_BASE + players * BALANCE.ENEMY_PER_PLAYER;
+    // The reef fills in as the run goes on, not just with more players --
+    // otherwise a solo run sits at the same 32-ish fish from minute one to
+    // minute thirty, thinning out rather than building toward anything.
+    const bonus = this.grownFor(this.referenceSize()) * BALANCE.ENEMY_GROWTH_BONUS;
+    return Math.min(BALANCE.ENEMY_MAX, Math.round(base + bonus));
   }
 
   /** Average size of everyone alive — the yardstick the spawner balances against. */
@@ -729,35 +755,52 @@ export class GameEngine {
     return count ? total / count : BALANCE.START_SIZE;
   }
 
+  /**
+   * How far into a run the local fleet already is, 0 at a fresh spawn to 1
+   * once grown past PREDATOR_RAMP_SIZE -- the single curve both the predator
+   * mix (spawnEnemy) and the population size (enemyTarget) ramp against, so
+   * the reef fills up and gets dangerous on the same schedule.
+   */
+  private grownFor(ref: number): number {
+    return clamp((ref - BALANCE.START_SIZE) / BALANCE.PREDATOR_RAMP_SIZE, 0, 1);
+  }
+
   private spawnEnemy(): Fish {
     const ref = this.referenceSize();
     const roll = Math.random();
 
-    // How far into a run the local fleet already is: 0 at a fresh spawn, 1
-    // once comfortably grown. Predators lean in as this climbs, so a brand
-    // new fish gets a gentler reef and pressure ramps up to match a player
-    // who has already grown, instead of a fixed 30% predator chance from the
-    // first second of the run.
-    const grown = clamp((ref - BALANCE.START_SIZE) / 250, 0, 1);
-    const preyCut = 0.5 - grown * 0.15;
+    // Predators lean in as the fleet grows, so a brand new fish gets a
+    // gentler reef and pressure ramps up to match a player who has already
+    // grown, instead of a fixed 30% predator chance from the first second.
+    const grown = this.grownFor(ref);
+    const preyCut = 0.55 - grown * 0.2;
     const peerCut = preyCut + 0.3;
 
     let size: number;
     if (roll < preyCut) {
-      // Prey: always something to eat, so a run never stalls.
-      size = ref * (0.25 + Math.random() * 0.6);
+      // Prey: always something to eat, so a run never stalls. A little
+      // bigger than a bare snack so a young fish still feels like it's
+      // eating something, not just noise.
+      size = ref * (0.3 + Math.random() * 0.65);
     } else if (roll < peerCut) {
       // Peers: can't eat you, you can't eat them. They make the water feel busy.
       size = ref * (0.85 + Math.random() * 0.3);
+    } else if (Math.random() < 0.5) {
+      // Small predator: bigger than you, but only just -- a threat you can
+      // actually out-turn or out-grow, not a wall.
+      size = ref * (1.15 + Math.random() * 0.45);
     } else {
-      // Predators: the reason you keep moving.
-      size = ref * (1.2 + Math.random() * 1.0);
+      // Shark: unmistakably, seriously bigger. Split 50/50 with the small
+      // predator above rather than one smooth 1.2x-2.2x range, so "predator"
+      // means either "watch it" or "run", not an even gradient between the
+      // two that always reads as roughly the same fish.
+      size = ref * (2.0 + Math.random() * 1.2);
     }
-    // Bounded by what a player can actually grow to (MAX_SIZE), not by a
-    // fixed fraction of it -- the old 0.9 multiplier put a hard ceiling at
-    // 180 that never moved, so a fish that grew past it became uneatable by
-    // anything except the scripted boss.
-    size = Math.max(4, Math.min(BALANCE.MAX_SIZE * 1.1, size));
+    // A safety ceiling, not a real limit -- big enough that a predator's own
+    // ref-relative formula above decides its size long before this ever
+    // binds, so there is always something bigger out there no matter how big
+    // a player actually gets.
+    size = Math.max(4, Math.min(2600, size));
 
     const id = this.nextEnemyId++;
     const fish = this.makeFish(String(id), 'enemy', size, assetForSize(size));
@@ -934,7 +977,7 @@ export class GameEngine {
   private spawnShoal() {
     const ref = this.referenceSize();
     // Always food, and always small — the whole appeal is a cloud of minnows.
-    const size = Math.max(4, Math.min(SHOAL_MAX_SIZE, ref * (0.28 + Math.random() * 0.45)));
+    const size = Math.max(4, Math.min(SHOAL_MAX_SIZE, ref * (0.32 + Math.random() * 0.5)));
     const asset = assetForSize(size);
     const count = BALANCE.SHOAL_MIN + Math.floor(Math.random() * (BALANCE.SHOAL_MAX - BALANCE.SHOAL_MIN + 1));
 
