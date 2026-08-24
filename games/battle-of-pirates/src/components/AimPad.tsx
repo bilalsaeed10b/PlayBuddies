@@ -46,10 +46,26 @@ interface Drag {
  * and says nothing at all about where the ball comes down. Reading the wind
  * and the range is the player's job again.
  *
- * It grows out of the far side of the knob, opposite the pull, because that is
- * the direction the shot actually goes; a slingshot pulled left fires right.
+ * A free-floating flag rather than a shaft with a head on it: it sits just
+ * past the guide circle's edge, pointing the way the shot leaves, and does
+ * not stretch back to the knob. That keeps it reading as a heading, not as
+ * a second rubber band next to the one the pull line already draws.
  */
-function Arrow({ ox, oy, x, y, power }: { ox: number; oy: number; x: number; y: number; power: number }) {
+function Arrow({
+  ox,
+  oy,
+  x,
+  y,
+  power,
+  reach,
+}: {
+  ox: number;
+  oy: number;
+  x: number;
+  y: number;
+  power: number;
+  reach: number;
+}) {
   const dx = ox - x;
   const dy = oy - y;
   const len = Math.hypot(dx, dy);
@@ -59,36 +75,27 @@ function Arrow({ ox, oy, x, y, power }: { ox: number; oy: number; x: number; y: 
 
   const ux = dx / len;
   const uy = dy / len;
-  // Anchored past the knob's own radius so the two do not overlap, and grown
-  // with power so the arrow is a strength readout as well as a heading.
-  const base = 34;
-  const shaft = base + 26 + power * 74;
-  const head = 20;
-
-  const tipX = x + ux * shaft;
-  const tipY = y + uy * shaft;
-  // Perpendicular, for the two back corners of the head.
+  // A fixed gap past the ring, not past the knob: the arrow marks a heading on
+  // the ring itself, so it holds still while only the knob behind it moves.
+  const gap = 20;
+  const size = 22 + power * 24;
+  const cx = ox + ux * (reach + gap);
+  const cy = oy + uy * (reach + gap);
+  // Perpendicular, for the two back corners.
   const px = -uy;
   const py = ux;
-  const backX = tipX - ux * head;
-  const backY = tipY - uy * head;
+
+  const tipX = cx + ux * size;
+  const tipY = cy + uy * size;
+  const backX = cx - ux * size * 0.55;
+  const backY = cy - uy * size * 0.55;
+  const wing = size * 0.8;
 
   return (
-    <g>
-      <line
-        x1={x + ux * base}
-        y1={y + uy * base}
-        x2={backX}
-        y2={backY}
-        stroke="rgba(255, 232, 170, 0.95)"
-        strokeWidth={7}
-        strokeLinecap="round"
-      />
-      <polygon
-        points={`${tipX},${tipY} ${backX + px * head * 0.62},${backY + py * head * 0.62} ${backX - px * head * 0.62},${backY - py * head * 0.62}`}
-        fill="rgba(255, 232, 170, 0.95)"
-      />
-    </g>
+    <polygon
+      points={`${tipX},${tipY} ${backX + px * wing},${backY + py * wing} ${backX - px * wing},${backY - py * wing}`}
+      fill="rgba(255, 232, 170, 0.95)"
+    />
   );
 }
 
@@ -122,12 +129,20 @@ export default function AimPad({
   const frame = useRef(0);
   const touched = useRef(false);
 
-  /** Full deflection, in CSS pixels. Scaled so a phone is not asking for a longer pull than it has. */
-  const reach = useRef(180);
+  /**
+   * Full deflection, in CSS pixels. Scaled so a phone is not asking for a
+   * longer pull than it has.
+   *
+   * This is also the guide circle's radius, not a separate visual choice — the
+   * ring is a promise about how far a full pull is, and drawing it any other
+   * size than the number `measure` actually fires on would make it a promise
+   * the pad doesn't keep.
+   */
+  const reach = useRef(130);
   useEffect(() => {
     const measure = () => {
       const small = Math.min(window.innerWidth, window.innerHeight);
-      reach.current = Math.max(96, Math.min(210, small * 0.34));
+      reach.current = Math.max(70, Math.min(150, small * 0.24));
     };
     measure();
     window.addEventListener('resize', measure);
@@ -274,7 +289,7 @@ export default function AimPad({
               strokeWidth={4}
               strokeLinecap="round"
             />
-            <Arrow ox={drag.ox} oy={drag.oy} x={drag.x} y={drag.y} power={drag.power} />
+            <Arrow ox={drag.ox} oy={drag.oy} x={drag.x} y={drag.y} power={drag.power} reach={reach.current} />
             <circle cx={drag.ox} cy={drag.oy} r={9} fill="rgba(255, 232, 170, 0.9)" />
             <circle
               cx={drag.x}
