@@ -848,14 +848,14 @@ function RoomScreen({
         {isHost ? (
           <button
             onClick={onStart}
-            disabled={!iAmReady}
+            disabled={!iAmReady || !everyone}
             className="flex w-full items-center justify-center gap-2 rounded-xl bg-amber-400 py-3 text-base font-black text-slate-900 disabled:opacity-40"
           >
             <Play className="h-5 w-5 fill-current" /> START MATCH
           </button>
         ) : (
           <p className="text-center text-sm font-bold text-white/60">
-            {iAmReady ? 'Waiting for the host…' : 'Pick a character to be ready.'}
+            {!iAmReady ? 'Pick a character to be ready.' : !everyone ? 'Waiting for everyone to pick…' : 'Waiting for the host…'}
           </p>
         )}
         <button
@@ -916,7 +916,7 @@ function RoomScreen({
               <>
                 <button
                   onClick={onStart}
-                  disabled={!iAmReady}
+                  disabled={!iAmReady || !everyone}
                   className="flex w-full items-center justify-center gap-2 rounded-2xl bg-amber-400 py-4 text-lg font-black text-slate-900 disabled:opacity-40"
                 >
                   <Play className="h-5 w-5 fill-current" /> START MATCH
@@ -931,7 +931,7 @@ function RoomScreen({
               </>
             ) : (
               <p className="text-center text-sm font-bold text-white/60">
-                {!iAmReady ? 'Pick a character to be ready.' : 'Waiting for the host…'}
+                {!iAmReady ? 'Pick a character to be ready.' : !everyone ? 'Waiting for everyone to pick…' : 'Waiting for the host…'}
               </p>
             )}
             <button
