@@ -539,7 +539,6 @@ export class BattleEngine {
         windproof: Boolean(card.windproof),
         burn: card.burn ?? 0,
         alive: true,
-        armed: false,
         age: 0,
         trail: [],
       });
@@ -697,10 +696,6 @@ export class BattleEngine {
       const nx = p.x + p.vx * dt;
       const ny = p.y + p.vy * dt;
 
-      // Arms once clear of the ship that fired it. Until then its own hull and
-      // rigging are ignored, because the muzzle sits inside both.
-      if (!p.armed && !this.insideOwn(p, p.x, p.y)) p.armed = true;
-
       this.sweep(p, nx, ny);
 
       if (!p.alive) continue;
@@ -725,10 +720,6 @@ export class BattleEngine {
     this.stepParticles(dt);
   }
 
-  private insideOwn(p: Projectile, x: number, y: number): boolean {
-    return inBox(x, y, this.hullBox(p.from), p.r) || inBox(x, y, this.rigBox(p.from), p.r);
-  }
-
   /**
    * Swept collision for one projectile step.
    *
@@ -744,10 +735,10 @@ export class BattleEngine {
     let struck: Rock | null = null;
 
     for (let i = 0; i < this.ships.length; i++) {
-      // Only the hull it was fired from is transparent before arming — a
-      // crewmate parked in the way is a real obstacle, and clipping a
-      // friend's rigging on the way out is a thing that should hurt.
-      if (i === p.from && !p.armed) continue;
+      // Friendly fire is off: a shot passes straight through every hull and
+      // yard of rigging flying its own colours, own ship included, so a
+      // crewmate parked in the flight path is never an obstacle.
+      if (this.ships[i].team === p.team) continue;
       if (this.ships[i].hp <= 0) continue;
 
       const th = segmentBox(p.x, p.y, nx, ny, this.hullBox(i), p.r);
@@ -795,24 +786,15 @@ export class BattleEngine {
     p.alive = false;
 
     if (kind === 'hull' || kind === 'rig') {
+      // Struck ships are always the enemy now -- friendly hulls and rigging
+      // are skipped entirely above, before a segment test is even run against
+      // them.
       const mult = kind === 'rig' ? RIG_MULT : 1;
-      // Friendly counts as "own" for damage purposes: shelling your own fleet
-      // should cost you, but it should not cost you as much as taking one
-      // from the enemy, and it must never be scored as a hit landed.
-      const friendly = this.ships[struckShip].team === p.team;
-      if (!friendly) this.lastShotHit[p.from] = true;
-      this.damage(struckShip, p.damage * mult * (friendly ? BALANCE.SELF_MULT : 1), ix);
-      if (p.burn > 0 && !friendly) this.ships[struckShip].burn = p.burn + 1;
+      this.lastShotHit[p.from] = true;
+      this.damage(struckShip, p.damage * mult, ix);
+      if (p.burn > 0) this.ships[struckShip].burn = p.burn + 1;
       this.explode(ix, iy, p, 'hull', this.waterLevelFor(struckShip));
-      this.shout(
-        struckShip === p.from
-          ? 'your own hull!'
-          : friendly
-            ? 'that was one of ours!'
-            : kind === 'rig'
-              ? 'rigging hit'
-              : 'direct hit!',
-      );
+      this.shout(kind === 'rig' ? 'rigging hit' : 'direct hit!');
       return;
     }
 
@@ -835,17 +817,18 @@ export class BattleEngine {
     let closest = Infinity;
     for (let i = 0; i < this.ships.length; i++) {
       if (this.ships[i].hp <= 0) continue;
+      // Friendly fire is off: a blast reaching a hull flying its own colours
+      // never damages it, same as a direct hit above.
+      if (this.ships[i].team === p.team) continue;
       const box = this.hullBox(i);
       const dx = Math.max(box.x0 - x, 0, x - box.x1);
       const dy = Math.max(box.y0 - y, 0, y - box.y1);
       const dist = Math.hypot(dx, dy);
-      const friendly = this.ships[i].team === p.team;
-      if (!friendly) closest = Math.min(closest, dist);
+      closest = Math.min(closest, dist);
       if (dist >= p.blast) continue;
 
       const falloff = 1 - dist / p.blast;
-      const dealt =
-        BALANCE.BLAST * falloff * falloff * (friendly ? BALANCE.SELF_MULT : 1) * (p.damage / BALANCE.DIRECT);
+      const dealt = BALANCE.BLAST * falloff * falloff * (p.damage / BALANCE.DIRECT);
       if (dealt > 0.7) this.damage(i, dealt, x);
     }
     if (closest < p.blast) this.shout('close!');
@@ -1546,10 +1529,6 @@ function clampClaim(current: number, claimed: number): number {
   const floor = Math.max(0, current - BALANCE.MAX_TURN_DAMAGE);
   const ceiling = Math.min(BALANCE.MAX_HP, current + 20);
   return clamp(claimed, floor, ceiling);
-}
-
-function inBox(x: number, y: number, box: Box, r: number): boolean {
-  return x >= box.x0 - r && x <= box.x1 + r && y >= box.y0 - r && y <= box.y1 + r;
 }
 
 function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {

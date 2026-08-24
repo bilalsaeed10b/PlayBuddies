@@ -77,26 +77,28 @@ const CENTRE_GAP = 1850;
 /**
  * Horizontal fan between a side's own ships.
  *
- * Small on purpose: rows do almost all of the separating now (see ROW_DEPTH),
- * so this only has to keep a side's hulls from reading as a single blob when
- * they're viewed at the same depth, not carry the whole burden of it.
+ * Rows do most of the separating (see ROW_DEPTH), but this still has to keep
+ * a side's hulls from reading as a single crowded raft when they're viewed at
+ * the same depth -- wide enough that neighbouring hulls read as clearly
+ * separate ships even at a glance.
  */
-const SLOT_GAP = 140;
+const SLOT_GAP = 220;
 /**
  * How much further into the water each additional row sits.
  *
  * A hull's hitbox is 84px tall (62 above its anchor, 22 below) and bobs ±10
  * on top of that, so two rows need at least 104px between them to never
- * touch regardless of where either one has drifted in x. 150 leaves real
- * daylight, and — because it protects the ships on pure depth — the
- * horizontal drift between rows doesn't have to be constrained at all to
- * keep them apart, unlike a same-row, same-height arrangement.
+ * touch regardless of where either one has drifted in x. 210 leaves generous
+ * daylight -- ships read as separate vessels at a distance, not a raft --
+ * and because it protects the ships on pure depth, the horizontal drift
+ * between rows doesn't have to be constrained at all to keep them apart,
+ * unlike a same-row, same-height arrangement.
  */
-const ROW_DEPTH = 150;
+const ROW_DEPTH = 210;
 /** Water beyond the rearmost hull, so a drifting ship never touches the frame. */
 const EDGE = 300;
-/** A fanned fleet needs a little more clearance than a single ship in a straight line does. */
-const EDGE_FLEET = 360;
+/** A fanned fleet needs more clearance than a single ship in a straight line does. */
+const EDGE_FLEET = 420;
 
 /**
  * Where a ship sits within its own side: how far in from the front rank's own
@@ -222,8 +224,6 @@ export const BALANCE = {
   BLAST_R: 140,
   /** Splash damage at zero distance, falling linearly to nothing at BLAST_R. */
   BLAST: 15,
-  /** Your own hull counts. It hurts half as much, which is mercy enough. */
-  SELF_MULT: 0.5,
   /** Ceiling on any single resolution, used to clamp what a peer claims. */
   MAX_TURN_DAMAGE: 62,
   BURN_PER_TURN: 7,

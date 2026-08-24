@@ -86,15 +86,6 @@ export interface Projectile {
   burn: number;
   alive: boolean;
   age: number;
-  /**
-   * False until the ball has cleared its own ship.
-   *
-   * The muzzle sits inside the hull's own hitbox, so without this every shot
-   * detonated on the deck it was fired from. It flips the moment the ball is
-   * outside both of its owner's boxes, which is also exactly when hitting
-   * your own rigging on the way up should start counting.
-   */
-  armed: boolean;
   /** Ring buffer of past positions for the smoke trail. */
   trail: number[];
 }
