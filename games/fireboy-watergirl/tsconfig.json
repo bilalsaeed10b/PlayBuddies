@@ -18,6 +18,9 @@
     "paths": {
       "@/*": [
         "./*"
+      ],
+      "@shared/*": [
+        "../_shared/*"
       ]
     },
     "allowImportingTsExtensions": true,

@@ -6,7 +6,7 @@
  * keeps the simulation testable and the transport swappable.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, LogOut, Loader2, Maximize2, Minimize2, Settings as SettingsIcon, Ship as ShipIcon, Wind } from 'lucide-react';
+import { Loader2, Ship as ShipIcon, Wind } from 'lucide-react';
 import AimPad, { Aim } from '../components/AimPad';
 import CardHand, { HAND_HEIGHT, HAND_HEIGHT_COMPACT } from '../components/CardHand';
 import { BattleEngine, Seat } from '../engine/BattleEngine';
@@ -14,7 +14,8 @@ import { Brain, chooseShot, newBrain } from '../engine/ai';
 import { BALANCE, CardId, TEAM_COLORS, angleOf, clamp, elevOf, elevRange } from '../game/rules';
 import { QualityGovernor } from '../game/quality';
 import { SHIPS } from '../game/ships';
-import { IN_IFRAME, askHostToEndGame, toggleFullscreen } from '../fullscreen';
+import { IN_IFRAME, toggleFullscreen } from '../fullscreen';
+import ControlsTray from '@shared/controls/ControlsTray';
 import { audioService } from '../services/audio';
 import type { GameSettings, NetPacket, Phase, Team } from '../types/game';
 // Type only: the runtime value arrives through the dynamic import below, which
@@ -62,16 +63,6 @@ export default function BattleView({
   const linkRef = useRef<TurnLink | null>(null);
 
   const online = Boolean(config.roomId && config.uid && config.peerUid);
-  const [isFull, setIsFull] = useState(false);
-
-  // The authoritative signal that the browser actually finished entering or
-  // leaving real fullscreen, so the icon matches reality when it's exited via
-  // Esc rather than the button itself (or denied/dropped by the browser).
-  useEffect(() => {
-    const onChange = () => setIsFull(Boolean(document.fullscreenElement));
-    document.addEventListener('fullscreenchange', onChange);
-    return () => document.removeEventListener('fullscreenchange', onChange);
-  }, []);
 
   /**
    * The whole negotiation.
@@ -596,40 +587,14 @@ export default function BattleView({
       </div>
 
       <div className="absolute right-2 top-2 z-30 flex gap-2">
-        {(!online || config.isHost) && (
-          <button
-            onClick={askHostToEndGame}
-            aria-label="End the battle for everyone"
-            className="flex items-center gap-1.5 rounded-2xl border border-white/20 bg-slate-950/60 px-3 py-3 text-xs font-bold backdrop-blur-md"
-          >
-            <LogOut className="h-4 w-4" /> End Game
-          </button>
-        )}
-        <button
-          onClick={() => {
-            const next = !isFull;
-            if (shellRef.current) toggleFullscreen(shellRef.current, next);
-            setIsFull(next);
-          }}
-          aria-label={isFull ? 'Exit full screen' : 'Full screen'}
-          className="rounded-2xl border border-white/20 bg-slate-950/60 p-3 backdrop-blur-md"
-        >
-          {isFull ? <Minimize2 className="h-5 w-5" /> : <Maximize2 className="h-5 w-5" />}
-        </button>
-        <button
-          onClick={onOpenSettings}
-          aria-label="Settings"
-          className="rounded-2xl border border-white/20 bg-slate-950/60 p-3 backdrop-blur-md"
-        >
-          <SettingsIcon className="h-5 w-5" />
-        </button>
-        <button
-          onClick={onExit}
-          aria-label="Leave the battle"
-          className="rounded-2xl border border-white/20 bg-slate-950/60 p-3 backdrop-blur-md"
-        >
-          <ArrowLeft className="h-5 w-5" />
-        </button>
+        <ControlsTray
+          shellRef={shellRef}
+          online={online}
+          isHost={config.isHost}
+          onSettings={onOpenSettings}
+          onExit={onExit}
+          theme="dark"
+        />
       </div>
 
       {portrait && rotateHint && !over && (

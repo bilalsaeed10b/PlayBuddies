@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowLeft, LogOut, Maximize2, Minimize2, Settings, Wifi, WifiOff } from 'lucide-react';
+import { Wifi, WifiOff } from 'lucide-react';
 import { GameEngine } from '../engine/GameEngine';
 import Joystick from '../components/Joystick';
 import { GameSettings, NetMessage, PlayerPacket } from '../types/game';
@@ -7,7 +7,7 @@ import { GameSettings, NetMessage, PlayerPacket } from '../types/game';
 // neither the mesh nor the Firebase SDK it depends on lands in the main bundle.
 import type { Mesh } from '../net/mesh';
 import { audioService } from '../services/audio';
-import { askHostToEndGame, toggleFullscreen } from '../fullscreen';
+import ControlsTray from '@shared/controls/ControlsTray';
 
 /**
  * How often each client publishes itself, and how often the host publishes the
@@ -87,7 +87,6 @@ export default function GameView({
 
   const [progress, setProgress] = useState(0);
   const [ready, setReady] = useState(false);
-  const [isFull, setIsFull] = useState(false);
   const [peerCount, setPeerCount] = useState(0);
   const [link, setLink] = useState<'direct' | 'relayed' | 'alone'>('alone');
   const [scoreboard, setScoreboard] = useState<{ id: string; name: string; size: number; score: number; local: boolean }[]>([]);
@@ -375,26 +374,6 @@ export default function GameView({
     else audioService.stopBackgroundMusic();
   }, [ready, settings.bgmVolume]);
 
-  useEffect(() => {
-    // The authoritative signal that the browser actually finished entering or
-    // leaving real fullscreen — unlike our own 200ms guess below, this fires
-    // exactly when the viewport has settled, orientation lock included.
-    const onChange = () => {
-      setIsFull(Boolean(document.fullscreenElement));
-      engineRef.current?.resize();
-    };
-    document.addEventListener('fullscreenchange', onChange);
-    return () => document.removeEventListener('fullscreenchange', onChange);
-  }, []);
-
-  const fullscreen = (on: boolean) => {
-    if (rootRef.current) toggleFullscreen(rootRef.current, on);
-    setIsFull(on);
-    // Covers the CSS-only fallback path (iOS, or a denied fullscreen request),
-    // where 'fullscreenchange' above never fires at all.
-    setTimeout(() => engineRef.current?.resize(), 200);
-  };
-
   const respawn = () => {
     setDefeat(null);
     localIds.forEach((id) => engineRef.current?.respawn(id));
@@ -445,56 +424,35 @@ export default function GameView({
           </div>
         )}
 
-        <div className="pointer-events-auto flex items-center gap-2">
-          {online && (
-            <div
-              className="rounded-xl border border-black/10 bg-white/80 p-2 text-slate-700"
-              title={
-                link === 'alone'
-                  ? 'Nobody else in the room yet'
-                  : link === 'direct'
-                    ? `Direct connection to ${peerCount} player(s)`
-                    : 'Direct connection failed. Using the slower fallback'
-              }
-            >
-              {link === 'relayed' ? (
-                <WifiOff size={18} className="text-amber-600" />
-              ) : (
-                <Wifi size={18} className={link === 'direct' ? 'text-emerald-600' : 'text-slate-400'} />
-              )}
-            </div>
-          )}
-          <button
-            onClick={onOpenSettings}
-            className="rounded-xl border border-black/10 bg-white/80 p-2 text-slate-800 transition-colors hover:bg-white"
-            title="Settings"
-          >
-            <Settings size={18} />
-          </button>
-          <button
-            onClick={() => fullscreen(!isFull)}
-            className="rounded-xl border border-black/10 bg-white/80 p-2 text-slate-800 transition-colors hover:bg-white"
-            title={isFull ? 'Exit full screen' : 'Full screen'}
-          >
-            {isFull ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
-          </button>
-          <button
-            onClick={onExit}
-            className="rounded-xl border border-black/10 bg-white/80 p-2 text-slate-800 transition-colors hover:bg-white"
-            title="Leave"
-          >
-            <ArrowLeft size={18} />
-          </button>
-          {(!online || isHost) && (
-            <button
-              onClick={askHostToEndGame}
-              className="flex items-center gap-1.5 rounded-xl border border-black/10 bg-white/80 px-3 py-2 text-sm font-bold text-slate-800 transition-colors hover:bg-white"
-              title="End the match for everyone"
-            >
-              <LogOut size={16} /> End Game
-            </button>
-          )}
-        </div>
+        <ControlsTray
+          shellRef={rootRef}
+          online={online}
+          isHost={isHost}
+          onSettings={onOpenSettings}
+          onExit={onExit}
+          theme="light"
+          onFullscreenChange={() => engineRef.current?.resize()}
+          before={
+            online && (
+              <div
+                className="rounded-xl border border-black/10 bg-white/80 p-2 text-slate-700"
+                title={
+                  link === 'alone'
+                    ? 'Nobody else in the room yet'
+                    : link === 'direct'
+                      ? `Direct connection to ${peerCount} player(s)`
+                      : 'Direct connection failed. Using the slower fallback'
+                }
+              >
+                {link === 'relayed' ? (
+                  <WifiOff size={18} className="text-amber-600" />
+                ) : (
+                  <Wifi size={18} className={link === 'direct' ? 'text-emerald-600' : 'text-slate-400'} />
+                )}
+              </div>
+            )
+          }
+        />
       </div>
 
       {!ready && (

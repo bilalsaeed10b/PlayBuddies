@@ -6,9 +6,10 @@
  * which is what keeps the simulation testable and the netcode swappable.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, LogOut, Maximize2, Minimize2, Settings as SettingsIcon, Trophy, Wifi, WifiOff } from 'lucide-react';
+import { Trophy, Wifi, WifiOff } from 'lucide-react';
 import TouchPad, { PadState } from '../components/TouchPad';
-import { IN_IFRAME, askHostToEndGame, toggleFullscreen } from '../fullscreen';
+import { IN_IFRAME, toggleFullscreen } from '../fullscreen';
+import ControlsTray from '@shared/controls/ControlsTray';
 import { CHARACTERS } from '../game/characters';
 import { BALANCE, POWER_META, TEAM_COLORS, arenaFor } from '../game/rules';
 import { MatchEngine, Seat } from '../engine/MatchEngine';
@@ -139,19 +140,9 @@ export default function MatchView({
   const wireRef = useRef(wire);
   wireRef.current = wire;
   const [touch, setTouch] = useState(false);
-  const [isFull, setIsFull] = useState(false);
 
   const online = Boolean(config.roomId && config.uid);
   const isHost = !online || config.uid === config.hostId;
-
-  // The authoritative signal that the browser actually finished entering or
-  // leaving real fullscreen, so the icon matches reality when it's exited via
-  // Esc rather than the button itself (or denied/dropped by the browser).
-  useEffect(() => {
-    const onChange = () => setIsFull(Boolean(document.fullscreenElement));
-    document.addEventListener('fullscreenchange', onChange);
-    return () => document.removeEventListener('fullscreenchange', onChange);
-  }, []);
 
   // ── seats ────────────────────────────────────────────────────────────────
   //
@@ -690,66 +681,42 @@ export default function MatchView({
 
       {/* ── top-right controls ── */}
       <div className="absolute right-3 top-3 z-20 flex flex-col items-end gap-2">
-        <div className="flex gap-2">
-          {online && (
-          <div
-            className="flex items-center gap-1.5 rounded-2xl border border-white/20 bg-black/45 px-3 py-2 text-xs font-bold text-white backdrop-blur-md"
-            title={
-              wire.peers + wire.relayed === 0
-                ? 'Connecting to the other players…'
-                : `${wire.peers} direct, ${wire.relayed} relayed · ${wire.rtt}ms round trip`
-            }
-          >
-            {wire.peers + wire.relayed > 0 ? (
-              <Wifi className={`h-4 w-4 ${wire.relayed > 0 ? 'text-amber-300' : 'text-emerald-400'}`} />
-            ) : (
-              <WifiOff className="h-4 w-4 text-rose-400" />
-            )}
-            {/* The number players actually want during a competitive match is
-                the round trip, not a peer count. It appears as soon as there is
-                one to show. */}
-            {wire.rtt > 0 ? `${wire.rtt}ms` : isHost ? 'host' : 'guest'}
-            {/* Named, not just coloured. "Amber means relayed" is knowledge
-                nobody has at the moment they need it, and the difference
-                between the two paths is the difference between a game that
-                feels instant and one that does not. */}
-            {wire.relayed > 0 && <span className="text-amber-300">· relay</span>}
-            {wire.stalled && <span className="text-amber-300">· reconnecting</span>}
-          </div>
-        )}
-          {(!online || isHost) && (
-            <button
-              onClick={askHostToEndGame}
-              className="flex items-center gap-1.5 rounded-2xl border border-white/20 bg-black/45 px-3 py-2.5 text-xs font-bold text-white backdrop-blur-md"
-              title="End the match for everyone"
-            >
-              <LogOut className="h-4 w-4" /> End Game
-            </button>
-          )}
-          <button
-            onClick={() => {
-              const next = !isFull;
-              toggleFullscreen(shellRef.current ?? document.documentElement, next);
-              setIsFull(next);
-            }}
-            className="rounded-2xl border border-white/20 bg-black/45 p-2.5 text-white backdrop-blur-md"
-            title={isFull ? 'Exit full screen' : 'Full screen'}
-          >
-            {isFull ? <Minimize2 className="h-5 w-5" /> : <Maximize2 className="h-5 w-5" />}
-          </button>
-          <button
-            onClick={onOpenSettings}
-            className="rounded-2xl border border-white/20 bg-black/45 p-2.5 text-white backdrop-blur-md"
-          >
-            <SettingsIcon className="h-5 w-5" />
-          </button>
-          <button
-            onClick={onExit}
-            className="rounded-2xl border border-white/20 bg-black/45 p-2.5 text-white backdrop-blur-md"
-          >
-            <ArrowLeft className="h-5 w-5" />
-          </button>
-        </div>
+        <ControlsTray
+          shellRef={shellRef}
+          online={online}
+          isHost={isHost}
+          onSettings={onOpenSettings}
+          onExit={onExit}
+          theme="dark"
+          before={
+            online && (
+              <div
+                className="flex items-center gap-1.5 rounded-2xl border border-white/20 bg-black/45 px-3 py-2 text-xs font-bold text-white backdrop-blur-md"
+                title={
+                  wire.peers + wire.relayed === 0
+                    ? 'Connecting to the other players…'
+                    : `${wire.peers} direct, ${wire.relayed} relayed · ${wire.rtt}ms round trip`
+                }
+              >
+                {wire.peers + wire.relayed > 0 ? (
+                  <Wifi className={`h-4 w-4 ${wire.relayed > 0 ? 'text-amber-300' : 'text-emerald-400'}`} />
+                ) : (
+                  <WifiOff className="h-4 w-4 text-rose-400" />
+                )}
+                {/* The number players actually want during a competitive match is
+                    the round trip, not a peer count. It appears as soon as there is
+                    one to show. */}
+                {wire.rtt > 0 ? `${wire.rtt}ms` : isHost ? 'host' : 'guest'}
+                {/* Named, not just coloured. "Amber means relayed" is knowledge
+                    nobody has at the moment they need it, and the difference
+                    between the two paths is the difference between a game that
+                    feels instant and one that does not. */}
+                {wire.relayed > 0 && <span className="text-amber-300">· relay</span>}
+                {wire.stalled && <span className="text-amber-300">· reconnecting</span>}
+              </div>
+            )
+          }
+        />
         {online && wire.reason && (
           // The verdict, on screen, because the person wondering why the game
           // says relay is not the person with DevTools open.
