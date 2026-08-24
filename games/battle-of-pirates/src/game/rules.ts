@@ -91,8 +91,17 @@ export const BALANCE = {
   BOB_AMP: 10,
   BOB_SPEED: 1.35,
 
-  /** Hits the mountain takes before it crumbles. It visibly wears down with each. */
-  ROCK_HP: 3,
+  /**
+   * Hits the mountain takes before it crumbles. It visibly wears down with each.
+   *
+   * Three was far too few. The mountain is the one thing making elevation a
+   * real decision, and it was gone inside the opening exchange — two stray
+   * shots and a bore, and the rest of the battle was the flat duel this arena
+   * was widened specifically to prevent. Ten means it erodes across a battle
+   * rather than in the first minute of one, and the host can put it beyond
+   * breaking entirely with the 'solid' rule.
+   */
+  ROCK_HP: 10,
   /**
    * The mountain's size, in world pixels of radius -- the hitbox is a true
    * circle, so this is both how wide it reads on screen and, what actually

@@ -10,6 +10,7 @@ import {
   LogOut,
   Maximize2,
   Play,
+  ScrollText,
   Settings as SettingsIcon,
   Users,
 } from 'lucide-react';
@@ -21,7 +22,8 @@ import { audioService } from './services/audio';
 import { GameWallet, reportResult } from './platform/wallet';
 import BattleView, { MatchConfig } from './screens/BattleView';
 import type { Seat } from './engine/BattleEngine';
-import type { GameSettings, Team } from './types/game';
+import { DEFAULT_RULES } from './types/game';
+import type { GameSettings, MatchRules, MountainRule, Team } from './types/game';
 
 /**
  * The platform owns the lobby.
@@ -52,9 +54,6 @@ function readHandoff(): Handoff {
 const DEFAULT_SETTINGS: GameSettings = {
   bgmVolume: 0.3,
   sfxVolume: 0.75,
-  aimGuide: true,
-  turnTimer: true,
-  obstacles: true,
   lowPower: false,
 };
 
@@ -133,6 +132,23 @@ export default function App() {
     const saved = localStorage.getItem('pirates_settings');
     return saved ? { ...DEFAULT_SETTINGS, ...JSON.parse(saved) } : DEFAULT_SETTINGS;
   });
+
+  /**
+   * How the next battle is played. The host's copy is the one that counts.
+   *
+   * Remembered between battles so a host who prefers a solid mountain does not
+   * re-set it every round, but never merged with anything a guest has stored:
+   * a guest's copy of this is only ever a placeholder until the host's rules
+   * arrive on the wire.
+   */
+  const [rules, setRules] = useState<MatchRules>(() => {
+    const saved = localStorage.getItem('pirates_rules');
+    return saved ? { ...DEFAULT_RULES, ...JSON.parse(saved) } : DEFAULT_RULES;
+  });
+  const [showRules, setShowRules] = useState(false);
+  useEffect(() => {
+    localStorage.setItem('pirates_rules', JSON.stringify(rules));
+  }, [rules]);
 
   // The coin balance is shared with the rest of PlayBuddies on purpose. Coins
   // earned in one game are worth something in the next, which is the only
@@ -375,6 +391,7 @@ export default function App() {
       aiLevel,
       seed: session.seed,
       first: session.first,
+      rules,
     };
   }
 
@@ -427,6 +444,7 @@ export default function App() {
       aiLevel,
       seed: session.seed,
       first: session.first,
+      rules,
     };
   }
 
@@ -451,6 +469,8 @@ export default function App() {
           onSolo={() => openOffline(1)}
           onCouch={() => openOffline(2)}
           onSettings={() => setShowSettings(true)}
+          onRules={() => setShowRules(true)}
+          rules={rules}
           onBack={view === 'offline_menu' ? () => setView('room') : undefined}
         />
       )}
@@ -483,6 +503,8 @@ export default function App() {
           onPick={pickOnline}
           onStart={startMatch}
           onSettings={() => setShowSettings(true)}
+          onRules={() => setShowRules(true)}
+          rules={rules}
           onFullscreen={() => toggleFullscreen(document.documentElement, !document.fullscreenElement)}
           onPlayOffline={() => {
             audioService.unlock();
@@ -494,8 +516,33 @@ export default function App() {
       {showSettings && (
         <SettingsPanel settings={settings} onChange={setSettings} onClose={() => setShowSettings(false)} />
       )}
+
+      {showRules && (
+        <RulesPanel
+          rules={rules}
+          editable={!online || isHost}
+          onChange={setRules}
+          onClose={() => setShowRules(false)}
+        />
+      )}
     </div>
   );
+}
+
+const MOUNTAIN_LABEL: Record<MountainRule, string> = {
+  off: 'No mountain',
+  breakable: 'Breakable mountain',
+  solid: 'Solid mountain',
+};
+
+/** The rules in one line, for anyone who wants to know what they are sailing into. */
+function rulesSummary(rules: MatchRules): string {
+  return [
+    MOUNTAIN_LABEL[rules.mountain],
+    rules.cards ? 'cards on' : 'round shot only',
+    rules.turnTimer ? '30s turns' : 'no clock',
+    rules.aimArc ? 'aim arc on' : 'no aim arc',
+  ].join(' · ');
 }
 
 /** The bot sails something other than what the player picked. */
@@ -513,6 +560,8 @@ function Menu({
   onSolo,
   onCouch,
   onSettings,
+  onRules,
+  rules,
   onBack,
 }: {
   coins: number;
@@ -521,6 +570,8 @@ function Menu({
   onSolo: () => void;
   onCouch: () => void;
   onSettings: () => void;
+  onRules: () => void;
+  rules: MatchRules;
   onBack?: () => void;
 }) {
   return (
@@ -592,10 +643,14 @@ function Menu({
         <div className="panel flex items-center gap-2 rounded-2xl px-4 py-3 font-bold text-amber-300">
           <Coins className="h-5 w-5" /> {coins}
         </div>
+        <button onClick={onRules} className="panel flex items-center gap-2 rounded-2xl px-4 py-3 font-bold text-white/70">
+          <ScrollText className="h-5 w-5" /> Rules
+        </button>
         <button onClick={onSettings} aria-label="Settings" className="panel rounded-2xl p-3">
           <SettingsIcon className="h-5 w-5" />
         </button>
       </div>
+      <p className="-mt-3 text-center text-[11px] font-semibold text-white/35">{rulesSummary(rules)}</p>
     </div>
   );
 }
@@ -782,6 +837,8 @@ function RoomScreen({
   onPick,
   onStart,
   onSettings,
+  onRules,
+  rules,
   onFullscreen,
   onPlayOffline,
 }: {
@@ -797,6 +854,8 @@ function RoomScreen({
   onPick: (index: number) => void;
   onStart: () => void;
   onSettings: () => void;
+  onRules: () => void;
+  rules: MatchRules;
   onFullscreen: () => void;
   onPlayOffline: () => void;
 }) {
@@ -828,6 +887,17 @@ function RoomScreen({
 
   const iAmReady = mine !== undefined && mine !== null;
   const soloRoom = people.length < 2;
+  /**
+   * Nobody sails until everybody has chosen.
+   *
+   * The host used to be able to weigh anchor the moment its *own* ship was
+   * picked, which left anyone still choosing to be dropped into a battle
+   * sailing a hull the lobby had never recorded — their opponent saw a ship
+   * they had not chosen, and the shop screen was still open over the top of it.
+   */
+  const everyonePicked = people.every((p) => p.skin !== undefined && p.skin !== null);
+  const canStart = iAmReady && everyonePicked;
+  const waitingFor = people.filter((p) => p.skin === undefined || p.skin === null).length;
 
   return (
     <div className="mx-auto flex h-full w-full max-w-6xl flex-col gap-3 p-3 sm:gap-4 sm:p-6">
@@ -862,16 +932,29 @@ function RoomScreen({
         {isHost ? (
           <button
             onClick={onStart}
-            disabled={!iAmReady}
+            disabled={!canStart}
             className="flex w-full items-center justify-center gap-2 rounded-xl bg-amber-400 py-3 text-base font-black text-slate-900 disabled:opacity-40"
           >
             <Play className="h-5 w-5 fill-current" /> WEIGH ANCHOR
           </button>
         ) : (
           <p className="text-center text-sm font-bold text-white/60">
-            {iAmReady ? 'Waiting for the host...' : 'Pick a ship to be ready.'}
+            {!iAmReady
+              ? 'Pick a ship to be ready.'
+              : !everyonePicked
+                ? 'Waiting for everyone to pick...'
+                : 'Waiting for the host...'}
           </p>
         )}
+        <button
+          onClick={onRules}
+          className="mt-2 flex w-full flex-col items-center gap-0.5 rounded-xl border border-white/20 bg-white/5 py-2 text-sm font-black text-white/70 transition-colors hover:bg-white/15"
+        >
+          <span className="flex items-center gap-2">
+            <ScrollText className="h-4 w-4" /> {isHost ? 'Battle rules' : 'Battle rules (host sets these)'}
+          </span>
+          <span className="px-2 text-[10px] font-semibold leading-tight text-white/45">{rulesSummary(rules)}</span>
+        </button>
         <button
           onClick={onPlayOffline}
           className="mt-2 w-full rounded-xl border border-white/20 bg-white/5 py-2.5 text-sm font-black text-white/70 transition-colors hover:bg-white/15"
@@ -930,7 +1013,7 @@ function RoomScreen({
               <>
                 <button
                   onClick={onStart}
-                  disabled={!iAmReady}
+                  disabled={!canStart}
                   className="flex w-full items-center justify-center gap-2 rounded-2xl bg-amber-400 py-4 text-lg font-black text-slate-900 disabled:opacity-40"
                 >
                   <Play className="h-5 w-5 fill-current" /> WEIGH ANCHOR
@@ -938,16 +1021,31 @@ function RoomScreen({
                 <p className="mt-2 text-center text-[11px] text-white/50">
                   {!iAmReady
                     ? 'Pick your own ship first.'
-                    : soloRoom
-                      ? 'A bot will sail the other hull.'
-                      : 'Who fires first is drawn at the start.'}
+                    : !everyonePicked
+                      ? `Waiting on ${waitingFor} more to pick a ship.`
+                      : soloRoom
+                        ? 'A bot will sail the other hull.'
+                        : 'Who fires first is drawn at the start.'}
                 </p>
               </>
             ) : (
               <p className="text-center text-sm font-bold text-white/60">
-                {!iAmReady ? 'Pick a ship to be ready.' : 'Waiting for the host...'}
+                {!iAmReady
+                  ? 'Pick a ship to be ready.'
+                  : !everyonePicked
+                    ? 'Waiting for everyone to pick...'
+                    : 'Waiting for the host...'}
               </p>
             )}
+            <button
+              onClick={onRules}
+              className="mt-3 flex w-full flex-col items-center gap-1 rounded-2xl border border-white/20 bg-white/5 py-3 font-black text-white/60 transition-colors hover:bg-white/15"
+            >
+              <span className="flex items-center gap-2">
+                <ScrollText className="h-4 w-4" /> {isHost ? 'Battle rules' : 'Battle rules (host sets these)'}
+              </span>
+              <span className="px-3 text-[10px] font-semibold leading-tight text-white/45">{rulesSummary(rules)}</span>
+            </button>
             <button
               onClick={onPlayOffline}
               className="mt-3 w-full rounded-2xl border border-white/20 bg-white/5 py-3 font-black text-white/60 transition-colors hover:bg-white/15"
@@ -970,10 +1068,16 @@ function SettingsPanel({
   onChange: (s: GameSettings) => void;
   onClose: () => void;
 }) {
+  /**
+   * This device only.
+   *
+   * The aim guide, the turn clock and the mountain used to live here and no
+   * longer do: they change how the battle plays, so both sides have to agree
+   * on them. They are Battle Rules now, set by the host in the room. What is
+   * left is genuinely local — how loud it is, and how hard this particular
+   * machine is willing to work.
+   */
   const toggles: { key: keyof GameSettings; label: string; hint: string }[] = [
-    { key: 'aimGuide', label: 'Aim guide', hint: 'Shows the first stretch of the arc. Off is the harder game.' },
-    { key: 'turnTimer', label: 'Turn clock', hint: 'Fires on its own after 30 seconds. Takes effect next battle.' },
-    { key: 'obstacles', label: 'Rocks', hint: 'Stone in the water between the ships. Takes effect next battle.' },
     {
       key: 'lowPower',
       label: 'Low power mode',
@@ -1020,6 +1124,116 @@ function SettingsPanel({
               checked={Boolean(settings[key])}
               onChange={(e) => onChange({ ...settings, [key]: e.target.checked })}
               className="h-6 w-6 shrink-0 accent-amber-400"
+            />
+          </label>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The rules of the battle, set once by the host and obeyed by everyone.
+ *
+ * Separate from Settings on purpose. Settings are this device's business —
+ * volume, render cost — and nobody else is affected by them. These change what
+ * the battle *is*, so both fleets have to be playing the same one: they travel
+ * to the guest over the wire (see `packRules`) and its engine is built from
+ * whatever arrives, not from anything stored locally.
+ *
+ * A guest can open this panel and read it, but every control is dead. Letting
+ * them change a copy that gets overwritten the moment the host presses start
+ * would be a lie about who is in charge.
+ */
+function RulesPanel({
+  rules,
+  editable,
+  onChange,
+  onClose,
+}: {
+  rules: MatchRules;
+  editable: boolean;
+  onChange: (r: MatchRules) => void;
+  onClose: () => void;
+}) {
+  const toggles: { key: 'cards' | 'turnTimer' | 'aimArc'; label: string; hint: string }[] = [
+    {
+      key: 'cards',
+      label: 'Cards',
+      hint: 'Three dealt a turn: chain, grape, mortar, firebomb, bore, patch. Off means round shot every time, and the battle is pure gunnery.',
+    },
+    {
+      key: 'turnTimer',
+      label: 'Turn clock',
+      hint: 'The shot goes off on its own after 30 seconds. Off lets a turn take as long as it takes.',
+    },
+    {
+      key: 'aimArc',
+      label: 'Aim arc',
+      hint: 'Draws the opening stretch of the shot while aiming. It makes the game a great deal easier — line the dots up and let go. The aim arrow on the pad stays either way.',
+    },
+  ];
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm">
+      <div className="panel max-h-[88dvh] w-full max-w-md space-y-6 overflow-y-auto overscroll-contain rounded-[2rem] p-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-xl font-black">Battle rules</h3>
+            <p className="text-[11px] font-semibold text-white/45">
+              {editable ? 'Applies to both fleets. Takes effect next battle.' : 'Set by the host.'}
+            </p>
+          </div>
+          <button onClick={onClose} aria-label="Close" className="rounded-xl p-2 hover:bg-white/10">
+            <ArrowLeft className="h-5 w-5" />
+          </button>
+        </div>
+
+        <div className="space-y-2">
+          <p className="text-sm font-bold">
+            The mountain
+            <span className="block text-[11px] font-normal text-white/50">
+              Stone amidships, tall enough that no working elevation skims it. Going over it costs real powder;
+              the only way through is a bore shot.
+            </span>
+          </p>
+          <div className="grid grid-cols-3 gap-2">
+            {(['off', 'breakable', 'solid'] as MountainRule[]).map((option) => (
+              <button
+                key={option}
+                disabled={!editable}
+                onClick={() => onChange({ ...rules, mountain: option })}
+                className={`rounded-xl border px-2 py-2.5 text-xs font-black capitalize transition-colors disabled:opacity-50 ${
+                  rules.mountain === option
+                    ? 'border-amber-400 bg-amber-400/20 text-amber-200'
+                    : 'border-white/15 bg-white/5 text-white/60 hover:bg-white/10'
+                }`}
+              >
+                {option}
+              </button>
+            ))}
+          </div>
+          <p className="text-[11px] text-white/40">
+            {rules.mountain === 'off'
+              ? 'Open water. Every shot is a flat duel.'
+              : rules.mountain === 'breakable'
+                ? 'Crumbles after ten hits, so the lane opens up late in a long battle.'
+                : 'Never crumbles. The lane over the top is the only lane there is.'}
+          </p>
+        </div>
+
+        {toggles.map(({ key, label, hint }) => (
+          <label key={key} className="flex items-center justify-between gap-3">
+            <span className="text-sm font-bold">
+              {label}
+              <span className="block text-[11px] font-normal text-white/50">{hint}</span>
+            </span>
+            <input
+              type="checkbox"
+              disabled={!editable}
+              checked={rules[key]}
+              onChange={(e) => onChange({ ...rules, [key]: e.target.checked })}
+              className="h-6 w-6 shrink-0 accent-amber-400 disabled:opacity-50"
             />
           </label>
         ))}

@@ -36,6 +36,62 @@ interface Drag {
   elev: number;
 }
 
+/**
+ * Which way the shot leaves the barrel, drawn out of the pull.
+ *
+ * This is what replaced the trajectory arc on the water. That arc drew the
+ * opening stretch of the ball's actual path, and it turned out to be the whole
+ * game: you dragged until the dots lined up with the enemy and let go. An
+ * arrow says direction and strength — the two things the gesture is setting —
+ * and says nothing at all about where the ball comes down. Reading the wind
+ * and the range is the player's job again.
+ *
+ * It grows out of the far side of the knob, opposite the pull, because that is
+ * the direction the shot actually goes; a slingshot pulled left fires right.
+ */
+function Arrow({ ox, oy, x, y, power }: { ox: number; oy: number; x: number; y: number; power: number }) {
+  const dx = ox - x;
+  const dy = oy - y;
+  const len = Math.hypot(dx, dy);
+  // Below this the direction is noise — the finger has barely moved, and an
+  // arrow spinning wildly under a stationary thumb reads as a glitch.
+  if (len < 12) return null;
+
+  const ux = dx / len;
+  const uy = dy / len;
+  // Anchored past the knob's own radius so the two do not overlap, and grown
+  // with power so the arrow is a strength readout as well as a heading.
+  const base = 34;
+  const shaft = base + 26 + power * 74;
+  const head = 20;
+
+  const tipX = x + ux * shaft;
+  const tipY = y + uy * shaft;
+  // Perpendicular, for the two back corners of the head.
+  const px = -uy;
+  const py = ux;
+  const backX = tipX - ux * head;
+  const backY = tipY - uy * head;
+
+  return (
+    <g>
+      <line
+        x1={x + ux * base}
+        y1={y + uy * base}
+        x2={backX}
+        y2={backY}
+        stroke="rgba(255, 232, 170, 0.95)"
+        strokeWidth={7}
+        strokeLinecap="round"
+      />
+      <polygon
+        points={`${tipX},${tipY} ${backX + px * head * 0.62},${backY + py * head * 0.62} ${backX - px * head * 0.62},${backY - py * head * 0.62}`}
+        fill="rgba(255, 232, 170, 0.95)"
+      />
+    </g>
+  );
+}
+
 export default function AimPad({
   enabled,
   facing,
@@ -198,7 +254,7 @@ export default function AimPad({
     >
       {drag && (
         <>
-          {/* The band. One SVG, two shapes, redrawn once a frame. */}
+          {/* The band. One SVG, redrawn once a frame. */}
           <svg className="pointer-events-none fixed inset-0 h-full w-full" aria-hidden>
             <circle
               cx={drag.ox}
@@ -218,6 +274,7 @@ export default function AimPad({
               strokeWidth={4}
               strokeLinecap="round"
             />
+            <Arrow ox={drag.ox} oy={drag.oy} x={drag.x} y={drag.y} power={drag.power} />
             <circle cx={drag.ox} cy={drag.oy} r={9} fill="rgba(255, 232, 170, 0.9)" />
             <circle
               cx={drag.x}

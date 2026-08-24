@@ -17,7 +17,8 @@ import { SHIPS } from '../game/ships';
 import { IN_IFRAME, toggleFullscreen } from '../fullscreen';
 import ControlsTray from '@shared/controls/ControlsTray';
 import { audioService } from '../services/audio';
-import type { GameSettings, NetPacket, Phase, Team } from '../types/game';
+import { packRules, unpackRules } from '../types/game';
+import type { GameSettings, MatchRules, NetPacket, Phase, Team } from '../types/game';
 // Type only: the runtime value arrives through the dynamic import below, which
 // is what keeps the Firebase SDK out of an offline player's bundle.
 import type { TurnLink } from '../net/turnLink';
@@ -37,11 +38,22 @@ export interface MatchConfig {
   /** Chosen by the host online, locally otherwise. */
   seed: number;
   first: Team;
+  /** The host's rules. A guest's copy is overwritten by whatever arrives on the wire. */
+  rules: MatchRules;
 }
 
+/**
+ * Everything the engine needs that the host decides.
+ *
+ * The rules join the seed and the coin toss here rather than being read from
+ * local settings, because all three have to be identical on both clients: a
+ * guest that built its engine from its own idea of the rules would spawn a
+ * different mountain and deal itself different cards.
+ */
 interface Session {
   seed: number;
   first: Team;
+  rules: MatchRules;
 }
 
 export default function BattleView({
@@ -63,6 +75,16 @@ export default function BattleView({
   const linkRef = useRef<TurnLink | null>(null);
 
   const online = Boolean(config.roomId && config.uid && config.peerUid);
+  /**
+   * The rules as one number, so the wire effect below can depend on them.
+   *
+   * `config.rules` is a fresh object on every render — App rebuilds the whole
+   * config from scratch each lobby snapshot — and listing it in a dependency
+   * array would tear the link down and reopen it several times a second,
+   * writing a `bye` each time. See the note on `localTeamsKey`: this is the
+   * same hazard, and the same fix.
+   */
+  const rulesBits = packRules(config.rules);
 
   /**
    * The whole negotiation.
@@ -73,7 +95,7 @@ export default function BattleView({
    * fall out of the seed.
    */
   const [session, setSession] = useState<Session | null>(
-    online && !config.isHost ? null : { seed: config.seed, first: config.first },
+    online && !config.isHost ? null : { seed: config.seed, first: config.first, rules: config.rules },
   );
   const [hp, setHp] = useState<[number, number]>([BALANCE.MAX_HP, BALANCE.MAX_HP]);
   const [turn, setTurn] = useState<Team>(config.first);
@@ -198,7 +220,9 @@ export default function BattleView({
     (packet: NetPacket) => {
       if (packet.t === 'start') {
         setSession((current) =>
-          current && current.seed === packet.seed ? current : { seed: packet.seed, first: packet.first },
+          current && current.seed === packet.seed
+            ? current
+            : { seed: packet.seed, first: packet.first, rules: unpackRules(packet.r) },
         );
         return;
       }
@@ -214,7 +238,7 @@ export default function BattleView({
       // on it, which is everything a match is built from. Carried on the
       // preview too, since that is now usually the first thing to arrive.
       if (packet.first !== undefined) {
-        const opening = { seed: packet.s, first: packet.first };
+        const opening = { seed: packet.s, first: packet.first, rules: unpackRules(packet.r) };
         setSession((current) => current ?? opening);
       }
       const engine = engineRef.current;
@@ -256,13 +280,20 @@ export default function BattleView({
           },
           // The host's terms ride along on every turn it writes, not only on
           // the start packet that the next write replaces.
-          config.isHost ? { first: config.first } : undefined,
+          config.isHost ? { first: config.first, r: rulesBits } : undefined,
         );
         linkRef.current = link;
 
-        // Two numbers, sent once. Everything else about the match is derived.
+        // The whole negotiation, sent once: a seed, a coin toss and the rules.
+        // Everything else about the match is derived from those.
         if (config.isHost) {
-          link.send({ t: 'start', n: Date.now(), seed: config.seed, first: config.first });
+          link.send({
+            t: 'start',
+            n: Date.now(),
+            seed: config.seed,
+            first: config.first,
+            r: rulesBits,
+          });
         }
 
         leave = () => link?.close();
@@ -281,7 +312,7 @@ export default function BattleView({
       retryingRef.current = false;
       linkRef.current = null;
     };
-  }, [online, config.roomId, config.uid, config.peerUid, config.isHost, config.seed, config.first, handlePacket, wireGeneration]);
+  }, [online, config.roomId, config.uid, config.peerUid, config.isHost, config.seed, config.first, rulesBits, handlePacket, wireGeneration]);
 
   // -- the engine and the loop -----------------------------------------------
 
@@ -299,8 +330,7 @@ export default function BattleView({
       seats: config.seats,
       seed: session.seed,
       first: session.first,
-      obstacles: settingsRef.current.obstacles,
-      turnTimer: settingsRef.current.turnTimer,
+      rules: session.rules,
       onSfx: (kind, power) => {
         if (kind === 'fire') audioService.playFire(power ?? 0.6);
         else if (kind === 'hull') audioService.playHull(power ?? 0.6);
@@ -379,8 +409,9 @@ export default function BattleView({
       }
 
       readKeyboard(engine, dt);
-      engine.aiming =
-        settingsRef.current.aimGuide && engine.awaitingLocal && (draggingRef.current || !coarseRef.current);
+      // Only "is a drag live"; whether that shows the trajectory arc at all is
+      // the host's rule, checked inside the engine's own render.
+      engine.aiming = engine.awaitingLocal && (draggingRef.current || !coarseRef.current);
       engine.setBudget(q.particles);
       engine.update(dt, decide);
 
@@ -503,7 +534,13 @@ export default function BattleView({
   const playAgain = useCallback(() => {
     setOver(null);
     setNotice(null);
-    setSession({ seed: (Math.random() * 0x7fffffff) | 0, first: Math.random() < 0.5 ? 0 : 1 });
+    // A rematch is a fresh seed and a fresh toss, played under the rules the
+    // battle that just finished was played under.
+    setSession((current) => ({
+      seed: (Math.random() * 0x7fffffff) | 0,
+      first: Math.random() < 0.5 ? 0 : 1,
+      rules: current?.rules ?? config.rules,
+    }));
     setRematch((n) => n + 1);
   }, []);
 
@@ -513,7 +550,10 @@ export default function BattleView({
   const canAim = phase === 'aim' && myTurn && !over;
   const facing: 1 | -1 = turn === 0 ? 1 : -1;
   const handHeight = compact ? HAND_HEIGHT_COMPACT : HAND_HEIGHT;
-  const showHand = myTurn && !over;
+  // With cards off there is only ever the plain round shot, so a one-card hand
+  // is a strip of screen showing the player a choice they do not have. The pad
+  // takes the space back instead.
+  const showHand = myTurn && !over && (session?.rules.cards ?? true);
 
   // A seat handed to a bot keeps its owner's name, so this line has to read
   // properly for "Alice (adrift)" and for the solo seat, which is called "You".
@@ -581,7 +621,7 @@ export default function BattleView({
             style={{ color: TEAM_COLORS[turn].light }}
           >
             {turnLabel}
-            {canAim && settings.turnTimer && clock <= 10 ? ` - ${clock}s` : ''}
+            {canAim && session?.rules.turnTimer && clock <= 10 ? ` - ${clock}s` : ''}
           </div>
         )}
       </div>

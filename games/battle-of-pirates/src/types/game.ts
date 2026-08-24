@@ -92,17 +92,84 @@ export interface Rock {
   seed: number;
 }
 
+/**
+ * Preferences that belong to this device and nobody else.
+ *
+ * Anything that changes how the battle actually plays out lives in MatchRules
+ * below instead. The split matters: both clients simulate the same shot from
+ * the same seed, so a rule one of them disagreed about is a desync, not a
+ * preference — which is exactly what `obstacles` used to be when it lived
+ * here. A host with rocks on and a guest with rocks off built two different
+ * seas and every shot after the first landed somewhere else on each screen.
+ */
 export interface GameSettings {
   bgmVolume: number;
   sfxVolume: number;
-  /** Draw the first stretch of the arc while aiming. Off is the harder game. */
-  aimGuide: boolean;
-  /** Fire automatically when the turn clock runs out. */
-  turnTimer: boolean;
-  /** Rocks in the water between the ships. */
-  obstacles: boolean;
   /** Force the cheap render path regardless of what the device claims. */
   lowPower: boolean;
+}
+
+/** Off entirely, crumbles after enough hits, or stands there all battle. */
+export type MountainRule = 'off' | 'breakable' | 'solid';
+
+/**
+ * How this battle is played, set by the host and obeyed by everyone.
+ *
+ * These reach the guest over the wire before its engine is built (see
+ * `packRules`), so both sides deal the same hands, spawn the same mountain and
+ * agree on whether a shot fires itself when the clock runs out.
+ */
+export interface MatchRules {
+  /**
+   * The dotted trajectory arc while aiming.
+   *
+   * Off by default now. With it on the shot solves itself — you drag until the
+   * dots point at the enemy and let go — which is the whole game handed over.
+   * The aim arrow on the pad is always there regardless; that shows direction
+   * and power, not where the ball lands.
+   */
+  aimArc: boolean;
+  /** Fire automatically when the turn clock runs out. */
+  turnTimer: boolean;
+  mountain: MountainRule;
+  /** Cards. Off means every shot is a plain round shot and the hand is hidden. */
+  cards: boolean;
+}
+
+export const DEFAULT_RULES: MatchRules = {
+  aimArc: false,
+  turnTimer: true,
+  mountain: 'breakable',
+  cards: true,
+};
+
+const MOUNTAIN_CODES: MountainRule[] = ['off', 'breakable', 'solid'];
+
+/**
+ * The rules as one integer.
+ *
+ * TurnLink stamps a flat `Record<string, number>` onto every packet the host
+ * writes, so that a guest arriving after the opening shot still learns the
+ * match's terms from whatever turn happens to be in the document. Packing the
+ * rules into a single number is what lets them ride along in that same slot.
+ */
+export function packRules(rules: MatchRules): number {
+  return (
+    (rules.aimArc ? 1 : 0) |
+    (rules.turnTimer ? 2 : 0) |
+    (Math.max(0, MOUNTAIN_CODES.indexOf(rules.mountain)) << 2) |
+    (rules.cards ? 16 : 0)
+  );
+}
+
+export function unpackRules(bits: number | undefined): MatchRules {
+  if (typeof bits !== 'number' || !Number.isFinite(bits)) return DEFAULT_RULES;
+  return {
+    aimArc: (bits & 1) !== 0,
+    turnTimer: (bits & 2) !== 0,
+    mountain: MOUNTAIN_CODES[(bits >> 2) & 3] ?? DEFAULT_RULES.mountain,
+    cards: (bits & 16) !== 0,
+  };
 }
 
 /**
@@ -127,6 +194,8 @@ export interface StartPacket {
   seed: number;
   /** Who fires first. Drawn at random by the host. */
   first: Team;
+  /** The host's rules, packed by `packRules`. See ShotPacket.first for why it rides on every packet. */
+  r?: number;
 }
 
 /**
@@ -157,6 +226,8 @@ export interface FirePacket {
   c: CardId;
   /** See ShotPacket.first -- carried here too so the earliest possible message can seed a late guest's session. */
   first?: Team;
+  /** The host's rules, packed by `packRules`. Travels with `first`, for the same reason. */
+  r?: number;
 }
 
 /**
@@ -208,6 +279,8 @@ export interface ShotPacket {
    * Absent on the guest's own turns, which nobody needs it from.
    */
   first?: Team;
+  /** The host's rules, packed by `packRules`. Travels with `first`, for the same reason. */
+  r?: number;
 }
 
 /** Sent on the way out so the opponent's ship is taken over rather than abandoned. */

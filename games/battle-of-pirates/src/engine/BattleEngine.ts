@@ -36,6 +36,7 @@ import {
 import type { Quality } from '../game/quality';
 import type {
   Control,
+  MatchRules,
   Phase,
   Projectile,
   FirePacket,
@@ -61,8 +62,14 @@ export interface EngineConfig {
   seats: [Seat, Seat];
   seed: number;
   first: Team;
-  obstacles: boolean;
-  turnTimer: boolean;
+  /**
+   * The host's rules, identical on both clients.
+   *
+   * These are simulation inputs, not preferences: the mountain they spawn and
+   * the hands they deal have to match on both sides or the two engines are
+   * running different battles.
+   */
+  rules: MatchRules;
   onPhase?: (phase: Phase) => void;
   onTurn?: (team: Team, hand: CardId[]) => void;
   onHp?: (hp: [number, number]) => void;
@@ -137,7 +144,7 @@ export class BattleEngine {
   /** Aim the local player is holding, in world radians and 0..1. */
   aimAngle = -0.7;
   aimPower = 0.65;
-  /** True while a finger or the mouse is down, so the guide only shows then. */
+  /** True while a finger or the mouse is down, so the arc only shows then. */
   aiming = false;
   /**
    * Did this team's last shot actually strike the enemy? null before its first.
@@ -225,7 +232,7 @@ export class BattleEngine {
     this.wind = (rnd() * 2 - 1) * 0.7;
     this.ships[0].x = this.ships[0].anchorX + (rnd() * 2 - 1) * BALANCE.DRIFT_STEP;
     this.ships[1].x = this.ships[1].anchorX + (rnd() * 2 - 1) * BALANCE.DRIFT_STEP;
-    if (cfg.obstacles) this.spawnRocks(rnd);
+    if (cfg.rules.mountain !== 'off') this.spawnRocks(rnd);
 
     this.beginTurn();
   }
@@ -335,7 +342,12 @@ export class BattleEngine {
 
   private beginTurn() {
     const rnd = this.rngFor(this.turnNo + 1);
-    this.hand = dealHand(rnd);
+    // Cards off is a real mode, not a hidden hand: everyone fires the plain
+    // round shot every turn, so the battle is aim and wind and nothing else.
+    // Skipping the deal leaves this turn's generator untouched, which costs
+    // nothing — wind and drift roll from their own stream (see resolve), and
+    // both clients are on the same rule either way.
+    this.hand = this.cfg.rules.cards ? dealHand(rnd) : ['round'];
     this.selected = this.hand[0];
     this.phase = 'deal';
     this.phaseTimer = 0.5;
@@ -559,7 +571,7 @@ export class BattleEngine {
         return;
       }
 
-      if (this.cfg.turnTimer) {
+      if (this.cfg.rules.turnTimer) {
         this.turnClock -= dt;
         if (this.turnClock <= 0) {
           this.shout('out of time');
@@ -703,7 +715,9 @@ export class BattleEngine {
     }
 
     if (kind === 'rock' && struck) {
-      struck.hp -= 1;
+      // A solid mountain still takes the shot and still stops the ball — it
+      // just never wears through, so `drawRock` keeps drawing it whole.
+      if (this.cfg.rules.mountain !== 'solid') struck.hp -= 1;
       this.explode(ix, iy, p, 'rock');
       this.splashDamage(ix, iy, p);
       return;
@@ -1170,7 +1184,10 @@ export class BattleEngine {
     this.drawProjectiles(ctx, q);
     this.drawParticles(ctx);
     this.drawRings(ctx);
-    if (this.aiming && this.awaitingLocal) this.drawGuide(ctx, q);
+    // The arc is a rule now, and off by default. `aiming` only says a drag is
+    // live; whether that drag is allowed to show where the ball lands is the
+    // host's call, and it applies to both fleets or neither.
+    if (this.cfg.rules.aimArc && this.aiming && this.awaitingLocal) this.drawGuide(ctx, q);
     this.drawOffscreenMarkers(ctx);
     this.drawCall(ctx);
   }
