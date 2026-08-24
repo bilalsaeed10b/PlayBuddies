@@ -22,7 +22,7 @@
  * without ever moving the point of aim off the target.
  */
 import type { BattleEngine } from './BattleEngine';
-import { BALANCE, CARDS, CardId, CardMeta, clamp, elevOf, elevRange } from '../game/rules';
+import { BALANCE, CARDS, CardId, CardMeta, angleOf, clamp, elevOf, elevRange } from '../game/rules';
 import { rockRadius } from '../game/sea';
 import type { Shot } from '../types/game';
 
@@ -114,41 +114,62 @@ export function chooseShot(engine: BattleEngine, me: number, level: number, brai
     brain.focus = hit ? 1 : Math.max(tier.floor, brain.focus * tier.learn);
   }
 
-  const card = pickCard(engine, me, foe, tier);
-  engine.select(card);
-  const meta = CARDS[card];
-
+  const blockedByMountain = mountainBetween(engine, engine.ships[me].x, enemy.x);
   const targetY = engine.shipY(foe) - 24;
   const aimX = enemy.x + (Math.random() * 2 - 1) * tier.spread * brain.focus;
-
-  const options: Shot[] = [];
 
   // Lofting over the mountain is worth doing on purpose, so both arcs are
   // tried and the one with a clear line wins. A bot that fires flat into the
   // same mountain three turns running is the fastest way to look broken.
-  const [loElev, hiElev] = elevRange(card);
-  for (const high of [false, true]) {
-    for (const power of POWERS) {
-      const angle = solve(engine, me, aimX, targetY, power, meta.gravity, meta.speed, Boolean(meta.windproof), high);
-      if (angle === null) continue;
-      // Mortar cannot leave the barrel below 45 degrees, same as a human's
-      // aim pad -- without this the solver's flat root would have the bot
-      // firing mortars the engine's own fire() would just clamp away from
-      // the target it was aimed at.
-      const elev = elevOf(angle, facing);
-      if (elev < loElev || elev > hiElev) continue;
-      if (!meta.pierce && blocked(engine, me, angle, power, meta.gravity, meta.speed, Boolean(meta.windproof))) continue;
-      options.push({ angle, power, card });
+  const solveFor = (id: CardId): Shot[] => {
+    const meta = CARDS[id];
+    const [loElev, hiElev] = elevRange(id);
+    const found: Shot[] = [];
+    for (const high of [false, true]) {
+      for (const power of POWERS) {
+        const angle = solve(engine, me, aimX, targetY, power, meta.gravity, meta.speed, Boolean(meta.windproof), high);
+        if (angle === null) continue;
+        // Mortar cannot leave the barrel below 45 degrees, same as a human's
+        // aim pad -- without this the solver's flat root would have the bot
+        // firing mortars the engine's own fire() would just clamp away from
+        // the target it was aimed at.
+        const elev = elevOf(angle, facing);
+        if (elev < loElev || elev > hiElev) continue;
+        if (!meta.pierce && blocked(engine, me, angle, power, meta.gravity, meta.speed, Boolean(meta.windproof))) continue;
+        found.push({ angle, power, card: id });
+      }
+    }
+    return found;
+  };
+
+  let card = pickCard(engine, me, foe, tier, blockedByMountain);
+  let options = solveFor(card);
+
+  // The picked card couldn't thread the mountain -- a solid one never wears
+  // down, so this is not a one-off. Rather than repeat the exact shot that
+  // just found the rock, see if anything else in the hand actually clears it
+  // before falling back to a guess.
+  if (options.length === 0) {
+    for (const alt of engine.hand) {
+      if (alt === card) continue;
+      const altOptions = solveFor(alt);
+      if (altOptions.length > 0) {
+        card = alt;
+        options = altOptions;
+        break;
+      }
     }
   }
+  engine.select(card);
 
   if (options.length === 0) {
-    // Nothing solved: throw something plausible downrange rather than freeze.
-    return {
-      angle: facing > 0 ? -0.72 : -Math.PI + 0.72,
-      power: 0.6 + Math.random() * 0.3,
-      card,
-    };
+    // Nothing in hand solves it. A blocked mountain is why that happens most
+    // often, so guess steep and hard rather than repeating the same flat shot
+    // that keeps finding the rock -- a real chance of clearing it beats a
+    // certainty of not.
+    const [, hiElev] = elevRange(card);
+    const elev = blockedByMountain ? hiElev * 0.92 : 0.72;
+    return { angle: angleOf(elev, facing), power: 0.85 + Math.random() * 0.1, card };
   }
 
   // Prefer a middling power: it keeps the flight watchable and leaves the bot
@@ -183,7 +204,14 @@ function maxReach(card: CardMeta, maxSpeed: number, dropHeight: number): number 
   return (v / g) * Math.sqrt(v * v + Math.max(0, 2 * g * dropHeight));
 }
 
-function pickCard(engine: BattleEngine, self: number, target: number, tier: Tier): CardId {
+/** Is a live rock sitting anywhere on the straight line between two x positions. */
+function mountainBetween(engine: BattleEngine, ax: number, bx: number): boolean {
+  const lo = Math.min(ax, bx);
+  const hi = Math.max(ax, bx);
+  return engine.rocks.some((r) => r.hp > 0 && r.x > lo && r.x < hi);
+}
+
+function pickCard(engine: BattleEngine, self: number, target: number, tier: Tier, mountainInTheWay: boolean): CardId {
   const hand = engine.hand;
   if (!tier.reads) return hand[Math.floor(Math.random() * hand.length)] ?? 'round';
 
@@ -191,17 +219,14 @@ function pickCard(engine: BattleEngine, self: number, target: number, tier: Tier
   const foe = engine.ships[target];
   if (me.hp <= 38 && hand.includes('patch')) return 'patch';
 
-  const mountainInTheWay = engine.rocks.some((r) => {
-    if (r.hp <= 0) return false;
-    const lo = Math.min(me.x, foe.x);
-    const hi = Math.max(me.x, foe.x);
-    return r.x > lo && r.x < hi;
-  });
-  // Bore is the only card built to ignore the mountain outright, whatever the
-  // angle. Mortar could clear it too, but only from within its own locked
-  // band -- see elevRange -- which the options loop above already tries and
-  // discards on its own merits, so this only needs the one sure thing.
+  // Bore ignores the mountain outright, whatever the angle. Mortar clears it
+  // too, from within its own locked band -- see elevRange. Either is a sure
+  // thing where the damage-sorted pick below is not: a hand holding neither
+  // used to fall through to a card that could only find the mountain, turn
+  // after turn, since a solid one never wears down for the options loop to
+  // eventually clear on its own.
   if (mountainInTheWay && hand.includes('bore')) return 'bore';
+  if (mountainInTheWay && hand.includes('mortar')) return 'mortar';
 
   if (me.hp <= 55 && hand.includes('patch')) return 'patch';
 

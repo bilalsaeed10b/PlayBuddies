@@ -592,8 +592,9 @@ function rulesSummary(rules: MatchRules): string {
     `${formatSides(rules.players)} · ${rules.players} ships`,
     MOUNTAIN_LABEL[rules.mountain],
     rules.cards ? 'cards on' : 'round shot only',
-    rules.turnTimer ? '30s turns' : 'no clock',
+    rules.turnTimer ? '15s turns' : 'no clock',
     rules.aimArc ? 'aim arc on' : 'no aim arc',
+    rules.wind ? 'wind on' : 'no wind',
   ].join(' · ');
 }
 
@@ -1214,7 +1215,7 @@ function RulesPanel({
   onChange: (r: MatchRules) => void;
   onClose: () => void;
 }) {
-  const toggles: { key: 'cards' | 'turnTimer' | 'aimArc'; label: string; hint: string }[] = [
+  const toggles: { key: 'cards' | 'turnTimer' | 'aimArc' | 'wind'; label: string; hint: string }[] = [
     {
       key: 'cards',
       label: 'Cards',
@@ -1223,12 +1224,17 @@ function RulesPanel({
     {
       key: 'turnTimer',
       label: 'Turn clock',
-      hint: 'The shot goes off on its own after 30 seconds. Off lets a turn take as long as it takes.',
+      hint: 'The shot goes off on its own after 15 seconds. Off lets a turn take as long as it takes.',
     },
     {
       key: 'aimArc',
       label: 'Aim arc',
       hint: 'Draws the opening stretch of the shot while aiming. It makes the game a great deal easier — line the dots up and let go. The aim arrow on the pad stays either way.',
+    },
+    {
+      key: 'wind',
+      label: 'Wind',
+      hint: 'Pushes every shot sideways, stronger by the turn. Off keeps every ball flying dead straight and the gauge reads calm all match.',
     },
   ];
 

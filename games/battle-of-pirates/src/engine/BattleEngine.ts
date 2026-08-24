@@ -264,7 +264,7 @@ export class BattleEngine {
     this.turn = Math.max(0, this.ships.findIndex((s) => s.team === cfg.first));
 
     const rnd = this.rngFor(0);
-    this.wind = (rnd() * 2 - 1) * 0.7;
+    this.wind = cfg.rules.wind ? (rnd() * 2 - 1) * 0.7 : 0;
     for (const ship of this.ships) {
       ship.x = ship.anchorX + (rnd() * 2 - 1) * this.arena.driftStep;
     }
@@ -889,11 +889,9 @@ export class BattleEngine {
       this.lastFired[this.ships[this.turn].team] = this.turn;
     } else {
       const rnd = this.rngFor(next + 977);
-      this.wind = clamp(
-        this.wind + (rnd() * 2 - 1) * BALANCE.WIND_STEP,
-        -BALANCE.WIND_MAX,
-        BALANCE.WIND_MAX,
-      );
+      this.wind = this.cfg.rules.wind
+        ? clamp(this.wind + (rnd() * 2 - 1) * BALANCE.WIND_STEP, -BALANCE.WIND_MAX, BALANCE.WIND_MAX)
+        : 0;
       for (let i = 0; i < this.ships.length; i++) this.ships[i].x = this.drift(i, rnd);
       const shooter = this.turn;
       this.turnNo = next;
@@ -1287,7 +1285,18 @@ export class BattleEngine {
   render(ctx: CanvasRenderingContext2D, q: Quality) {
     const { canvas } = ctx;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.fillStyle = '#04121f';
+
+    // Letterbox bars, painted as sky above the horizon and sea below it
+    // rather than a flat colour, so a wide desktop window reads as more sky
+    // and more water instead of a stripe of a third colour top and bottom.
+    const horizon = clamp((this.offY + this.arena.seaY * this.scale) / canvas.height, 0.04, 0.96);
+    const bg = ctx.createLinearGradient(0, 0, 0, canvas.height);
+    bg.addColorStop(0, '#071b33');
+    bg.addColorStop(Math.max(0, horizon - 0.08), '#14507f');
+    bg.addColorStop(horizon, '#2f8fb8');
+    bg.addColorStop(Math.min(1, horizon + 0.001), '#1a6a96');
+    bg.addColorStop(1, '#062744');
+    ctx.fillStyle = bg;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     const sx = this.shake ? (Math.random() - 0.5) * this.shake : 0;
@@ -1299,7 +1308,7 @@ export class BattleEngine {
 
     drawWaves(ctx, this.arena, this.clock, q.waves);
 
-    for (const rock of this.rocks) if (rock.hp > 0) drawRock(ctx, rock, this.arena.seaY);
+    for (const rock of this.rocks) if (rock.hp > 0) drawRock(ctx, rock);
     // Every hull, not a fixed pair -- `[0,1] as Team[]` only ever drew ships 0
     // and 1, which was invisible in a duel (there were only ever two) and
     // silently dropped every third-and-up hull once a side could have more.

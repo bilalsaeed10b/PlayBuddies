@@ -149,7 +149,7 @@ export default function AimPad({
   useEffect(() => {
     const measure = () => {
       const small = Math.min(window.innerWidth, window.innerHeight);
-      reach.current = Math.max(56, Math.min(104, small * 0.16));
+      reach.current = Math.max(42, Math.min(78, small * 0.12));
     };
     measure();
     window.addEventListener('resize', measure);
@@ -263,8 +263,6 @@ export default function AimPad({
 
   if (!enabled) return null;
 
-  const degrees = drag ? Math.round((drag.elev * 180) / Math.PI) : 0;
-
   return (
     <div
       className="absolute left-0 right-0 z-10 touch-none select-none"
@@ -307,19 +305,6 @@ export default function AimPad({
               strokeWidth={3}
             />
           </svg>
-
-          {/* Readout, pinned above the thumb so a hand does not cover it. */}
-          <div
-            className="pointer-events-none fixed z-20 -translate-x-1/2 rounded-xl border border-white/20 bg-slate-950/80 px-3 py-1.5 text-center backdrop-blur-sm"
-            style={{ left: drag.x, top: Math.max(8, drag.y - 84) }}
-          >
-            <div className="text-lg font-black leading-none tabular-nums text-amber-200">
-              {Math.round(drag.power * 100)}%
-            </div>
-            <div className="mt-0.5 text-[10px] font-bold uppercase tracking-[0.18em] text-white/60">
-              {degrees} deg
-            </div>
-          </div>
         </>
       )}
     </div>

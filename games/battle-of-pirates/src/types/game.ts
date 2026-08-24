@@ -138,10 +138,10 @@ export interface MatchRules {
   /**
    * The dotted trajectory arc while aiming.
    *
-   * Off by default now. With it on the shot solves itself — you drag until the
-   * dots point at the enemy and let go — which is the whole game handed over.
-   * The aim arrow on the pad is always there regardless; that shows direction
-   * and power, not where the ball lands.
+   * On by default. With it on the shot solves itself — you drag until the
+   * dots point at the enemy and let go. The aim arrow on the pad is always
+   * there regardless; that shows direction and power, not where the ball
+   * lands.
    */
   aimArc: boolean;
   /** Fire automatically when the turn clock runs out. */
@@ -150,14 +150,17 @@ export interface MatchRules {
   /** Cards. Off means every shot is a plain round shot and the hand is hidden. */
   cards: boolean;
   players: PlayerCount;
+  /** Sideways push on every shot. Off means round shot and true wind read exactly true. */
+  wind: boolean;
 }
 
 export const DEFAULT_RULES: MatchRules = {
-  aimArc: false,
+  aimArc: true,
   turnTimer: true,
   mountain: 'breakable',
   cards: true,
   players: 2,
+  wind: true,
 };
 
 const MOUNTAIN_CODES: MountainRule[] = ['off', 'breakable', 'solid'];
@@ -177,7 +180,8 @@ export function packRules(rules: MatchRules): number {
     (rules.turnTimer ? 2 : 0) |
     (Math.max(0, MOUNTAIN_CODES.indexOf(rules.mountain)) << 2) |
     (rules.cards ? 16 : 0) |
-    (Math.max(0, PLAYER_CODES.indexOf(rules.players)) << 5)
+    (Math.max(0, PLAYER_CODES.indexOf(rules.players)) << 5) |
+    (rules.wind ? 128 : 0)
   );
 }
 
@@ -189,6 +193,7 @@ export function unpackRules(bits: number | undefined): MatchRules {
     mountain: MOUNTAIN_CODES[(bits >> 2) & 3] ?? DEFAULT_RULES.mountain,
     cards: (bits & 16) !== 0,
     players: PLAYER_CODES[(bits >> 5) & 3] ?? DEFAULT_RULES.players,
+    wind: (bits & 128) !== 0,
   };
 }
 

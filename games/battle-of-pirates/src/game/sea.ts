@@ -269,7 +269,7 @@ export function rockRadius(rock: Rock): number {
  * The silhouette comes from the rock's own seed, so it is the same mountain
  * on both screens.
  */
-export function drawRock(ctx: CanvasRenderingContext2D, rock: Rock, waterY: number) {
+export function drawRock(ctx: CanvasRenderingContext2D, rock: Rock) {
   const rnd = mulberry32(rock.seed);
   const r = rockRadius(rock);
 
@@ -281,17 +281,41 @@ export function drawRock(ctx: CanvasRenderingContext2D, rock: Rock, waterY: numb
   const summitX = (rnd() - 0.5) * r * 0.28;
   const summitY = -r * 0.98;
 
-  ctx.fillStyle = '#38422f';
+  // Soft shadow spilling past the footprint, so the waterline reads as
+  // something the rock sits IN rather than a flat cutout stamped on top of
+  // the sea. Drawn before the rock itself, so the fill below covers the
+  // part of it that overlaps stone.
+  const wet = ctx.createRadialGradient(0, baseY, 0, 0, baseY, halfBase * 1.2);
+  wet.addColorStop(0, 'rgba(6, 24, 34, 0.5)');
+  wet.addColorStop(0.65, 'rgba(6, 30, 42, 0.22)');
+  wet.addColorStop(1, 'rgba(6, 30, 42, 0)');
+  ctx.fillStyle = wet;
   ctx.beginPath();
-  ctx.moveTo(-halfBase, baseY);
-  ctx.lineTo(-halfBase * 0.62 - rnd() * r * 0.08, -r * 0.4 - rnd() * r * 0.1);
-  ctx.lineTo(-halfBase * 0.2 - rnd() * r * 0.06, -r * 0.68 - rnd() * r * 0.08);
-  ctx.lineTo(summitX, summitY);
-  ctx.lineTo(halfBase * 0.3 + rnd() * r * 0.06, -r * 0.6 - rnd() * r * 0.08);
-  ctx.lineTo(halfBase * 0.68 + rnd() * r * 0.08, -r * 0.28 - rnd() * r * 0.1);
-  ctx.lineTo(halfBase, baseY);
-  ctx.closePath();
+  ctx.ellipse(0, baseY + 3, halfBase * 1.2, r * 0.2, 0, 0, Math.PI * 2);
   ctx.fill();
+
+  const body = new Path2D();
+  body.moveTo(-halfBase, baseY);
+  body.lineTo(-halfBase * 0.62 - rnd() * r * 0.08, -r * 0.4 - rnd() * r * 0.1);
+  body.lineTo(-halfBase * 0.2 - rnd() * r * 0.06, -r * 0.68 - rnd() * r * 0.08);
+  body.lineTo(summitX, summitY);
+  body.lineTo(halfBase * 0.3 + rnd() * r * 0.06, -r * 0.6 - rnd() * r * 0.08);
+  body.lineTo(halfBase * 0.68 + rnd() * r * 0.08, -r * 0.28 - rnd() * r * 0.1);
+  body.lineTo(halfBase, baseY);
+  body.closePath();
+  ctx.fillStyle = '#38422f';
+  ctx.fill(body);
+
+  // Fade the stone into the water instead of ending on a hard flat line --
+  // a waterline is a gradient, not an edge.
+  ctx.save();
+  ctx.clip(body);
+  const soak = ctx.createLinearGradient(0, baseY - r * 0.18, 0, baseY);
+  soak.addColorStop(0, 'rgba(14, 70, 112, 0)');
+  soak.addColorStop(1, 'rgba(14, 70, 112, 0.6)');
+  ctx.fillStyle = soak;
+  ctx.fillRect(-halfBase, baseY - r * 0.18, halfBase * 2, r * 0.18);
+  ctx.restore();
 
   // Lit face, catching the light from the same side the sun sits on.
   ctx.fillStyle = '#54654a';
@@ -310,18 +334,6 @@ export function drawRock(ctx: CanvasRenderingContext2D, rock: Rock, waterY: numb
   ctx.lineTo(summitX - r * 0.13, summitY + r * 0.22);
   ctx.closePath();
   ctx.fill();
-
-  // Foam collar, drawn where the waterline actually crosses the mountain
-  // rather than at a fixed fraction of its radius. On the old small rocks
-  // those were the same place; on something tall enough to stop a shot, the
-  // fixed offset put the foam a hull's height under the surface.
-  const collar = Math.max(-r * 0.82, Math.min(r * 0.82, waterY - rock.y));
-  const collarW = Math.sqrt(Math.max(0, r * r - collar * collar)) * 1.06;
-  ctx.strokeStyle = 'rgba(232, 250, 255, 0.55)';
-  ctx.lineWidth = 5;
-  ctx.beginPath();
-  ctx.ellipse(0, collar, collarW, Math.max(7, collarW * 0.14), 0, 0, Math.PI * 2);
-  ctx.stroke();
   ctx.restore();
 }
 

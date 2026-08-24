@@ -660,9 +660,9 @@ export default function BattleView({
             style={{ color: TEAM_COLORS[turnTeam].light }}
           >
             {turnLabel}
-            {canAim && session?.rules.turnTimer && clock <= 10 ? ` - ${clock}s` : ''}
           </div>
         )}
+        {canAim && session?.rules.turnTimer && <TurnTimerBar clock={clock} />}
       </div>
 
       <div className="absolute right-2 top-2 z-30 flex gap-2">
@@ -731,9 +731,16 @@ export default function BattleView({
         />
       )}
 
-      {/* -- how to play, on a device with keys -- */}
+      {/* -- how to play, on a device with keys --
+          Pinned above the card hand rather than at a fixed bottom-1, which used
+          to sit directly behind it: the hand is z-20 and this was z-10 at the
+          very same edge, so the hint was never actually visible whenever a hand
+          was showing. */}
       {!coarse && canAim && !dragging && (
-        <div className="pointer-events-none absolute inset-x-0 bottom-1 z-10 flex justify-center">
+        <div
+          className="pointer-events-none absolute inset-x-0 z-10 flex justify-center"
+          style={{ bottom: showHand ? handHeight + 8 : 4 }}
+        >
           <div className="rounded-xl border border-white/10 bg-slate-950/50 px-3 py-1 text-[10px] font-semibold text-white/55 backdrop-blur-md">
             drag back and release to fire &middot; arrows adjust &middot; space fires &middot; 1-3 pick a card
           </div>
@@ -828,6 +835,22 @@ function HullMeter({
       <div className="mt-0.5 truncate text-[9px] font-bold uppercase tracking-wider text-white/35">
         {SHIPS[clamp(skin, 0, SHIPS.length - 1)].name}
       </div>
+    </div>
+  );
+}
+
+/** How much of the turn clock is left, as a shrinking bar rather than a number to read. */
+function TurnTimerBar({ clock }: { clock: number }) {
+  const frac = clamp(clock / BALANCE.TURN_TIME, 0, 1);
+  return (
+    <div className="h-1.5 w-40 overflow-hidden rounded-full border border-white/10 bg-slate-950/60">
+      <div
+        className="h-full rounded-full transition-[width] duration-200 ease-linear"
+        style={{
+          width: `${frac * 100}%`,
+          background: clock <= 5 ? '#f87171' : clock <= 10 ? '#fbbf24' : '#4ade80',
+        }}
+      />
     </div>
   );
 }

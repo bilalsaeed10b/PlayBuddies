@@ -212,7 +212,7 @@ export const BALANCE = {
   /** Minimum, so a fumbled tap still leaves the barrel. */
   MIN_SPEED: 300,
   /** Sideways acceleration per unit of wind (wind runs -1 to 1). */
-  WIND_ACCEL: 160,
+  WIND_ACCEL: 184,
   BALL_R: 15,
   /** Nothing may fly forever. A shot that has not landed by now is a miss. */
   MAX_FLIGHT: 14,
@@ -274,7 +274,7 @@ export const BALANCE = {
   ROCK_MARGIN: 780,
 
   /** Seconds a player gets to aim before the shot goes off on its own. */
-  TURN_TIME: 30,
+  TURN_TIME: 15,
   /** Beat between the explosion settling and the next player getting the helm. */
   IMPACT_HOLD: 1.35,
   /**
@@ -341,16 +341,25 @@ export interface CardMeta {
  * mortar below from round shot -- three different fights at three different
  * ranges, not one card with a bigger number on it.
  */
+/**
+ * Every cannonball hits equally hard -- `damage` is the same number on all
+ * seven cards. What tells them apart is everything else here: how many balls
+ * leave the barrel, how far they reach, and what they do besides bruise a
+ * hull. A five-pellet grapeshot volley is not weaker per pellet than a solid
+ * round shot, it is just five separate decisions instead of one.
+ */
+const POWER = 1.1;
+
 export const CARDS: Record<CardId, CardMeta> = {
   round: {
     id: 'round', name: 'Round Shot', glyph: 'O', weight: 30,
     blurb: 'The honest one. Full powder, full range.',
-    shots: 1, spread: 0, damage: 1.1, blast: 1, gravity: 1, speed: 1,
+    shots: 1, spread: 0, damage: POWER, blast: 1, gravity: 1, speed: 1,
   },
   chain: {
     id: 'chain', name: 'Chain Shot', glyph: 'oo', weight: 16,
     blurb: 'Two balls on a chain, same range as round shot. Both can bite.',
-    shots: 2, spread: 0.05, damage: 0.62, blast: 0.85, gravity: 1, speed: 1,
+    shots: 2, spread: 0.05, damage: POWER, blast: 0.85, gravity: 1, speed: 1,
   },
   /**
    * A close-range shotgun, not a weaker round shot. At 0.78x speed -- nudged
@@ -364,7 +373,7 @@ export const CARDS: Record<CardId, CardMeta> = {
   grape: {
     id: 'grape', name: 'Grapeshot', glyph: '::', weight: 15,
     blurb: 'A close-range fan of five. Needs the enemy properly near.',
-    shots: 5, spread: 0.15, damage: 0.32, blast: 0.55, gravity: 1, speed: 0.78,
+    shots: 5, spread: 0.15, damage: POWER, blast: 0.55, gravity: 1, speed: 0.78,
   },
   /**
    * The finisher, and the only card the mountain cannot make flinch. `elevRange`
@@ -376,18 +385,18 @@ export const CARDS: Record<CardId, CardMeta> = {
    * carry: at 1.1x speed its 45-degree ceiling clears the water with room to
    * spare, and it still has real reach most of the way to 90, where it becomes a
    * near-vertical drop for whatever has drifted in close. `gravity` stays high,
-   * so the drop itself is still the steepest in the deck, and the payoff for
-   * threading it is unchanged: hardest hitting card here by a wide margin.
+   * so the drop itself is still the steepest in the deck; the payoff for
+   * threading the angle is a wider blast, not a bigger hit -- see `POWER`.
    */
   mortar: {
     id: 'mortar', name: 'Mortar', glyph: 'V', weight: 13,
-    blurb: 'Steep shots only, forty-five degrees or more. Hits hardest, carries far for it.',
-    shots: 1, spread: 0, damage: 1.75, blast: 1.5, gravity: 1.4, speed: 1.1,
+    blurb: 'Steep shots only, forty-five degrees or more. Clears the mountain outright.',
+    shots: 1, spread: 0, damage: POWER, blast: 1.5, gravity: 1.4, speed: 1.1,
   },
   firebomb: {
     id: 'firebomb', name: 'Firebomb', glyph: '*', weight: 11,
     blurb: 'Lights the deck at full range. Burns for three of their turns.',
-    shots: 1, spread: 0, damage: 0.8, blast: 1.15, gravity: 1, speed: 1, burn: 3,
+    shots: 1, spread: 0, damage: POWER, blast: 1.15, gravity: 1, speed: 1, burn: 3,
   },
   /**
    * The reef's answer. Every other card either goes over a rock or stops at
@@ -399,13 +408,13 @@ export const CARDS: Record<CardId, CardMeta> = {
   bore: {
     id: 'bore', name: 'Bore Shot', glyph: '>', weight: 9,
     blurb: 'Fast, flat, and straight through rock. Ignores the wind.',
-    shots: 1, spread: 0, damage: 1.2, blast: 0.9, gravity: 0.85, speed: 1.3,
+    shots: 1, spread: 0, damage: POWER, blast: 0.9, gravity: 0.85, speed: 1.3,
     pierce: true, windproof: true,
   },
   patch: {
     id: 'patch', name: 'Patch Kit', glyph: '+', weight: 10,
     blurb: 'Plug the holes, then fire anyway. Heals 14.',
-    shots: 1, spread: 0, damage: 0.85, blast: 0.9, gravity: 1, speed: 1, heal: 14,
+    shots: 1, spread: 0, damage: POWER, blast: 0.9, gravity: 1, speed: 1, heal: 14,
   },
 };
 

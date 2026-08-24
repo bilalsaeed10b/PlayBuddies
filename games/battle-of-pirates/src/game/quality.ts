@@ -33,9 +33,9 @@ export interface Quality {
 }
 
 const TIERS: Record<Tier, Quality> = {
-  0: { tier: 0, maxDpr: 1, particles: 0.35, trails: false, waves: 2, aimDots: 4, fancy: false, idleHalfRate: true },
-  1: { tier: 1, maxDpr: 1.5, particles: 0.7, trails: true, waves: 4, aimDots: 6, fancy: true, idleHalfRate: true },
-  2: { tier: 2, maxDpr: 2, particles: 1, trails: true, waves: 6, aimDots: 8, fancy: true, idleHalfRate: false },
+  0: { tier: 0, maxDpr: 1, particles: 0.35, trails: false, waves: 2, aimDots: 2, fancy: false, idleHalfRate: true },
+  1: { tier: 1, maxDpr: 1.5, particles: 0.7, trails: true, waves: 4, aimDots: 3, fancy: true, idleHalfRate: true },
+  2: { tier: 2, maxDpr: 2, particles: 1, trails: true, waves: 6, aimDots: 4, fancy: true, idleHalfRate: false },
 };
 
 interface DeviceHints {
