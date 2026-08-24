@@ -17,7 +17,11 @@ export function fleetSizeFor(totalShips: number): FleetSize {
 export interface Arena {
   w: number;
   h: number;
-  /** Waterline. Hulls sit on it; anything below is sea. */
+  /**
+   * Where the ocean visually begins -- the front rank's waterline, always,
+   * whatever the fleet size. A back rank sits *below* this, further into the
+   * same drawn ocean, rather than the frame widening to fit it.
+   */
   seaY: number;
   /**
    * Where each ship would sit with no drift, as `anchor[team][slot]`.
@@ -29,15 +33,38 @@ export interface Arena {
    */
   anchor: [number[], number[]];
   /**
+   * How much further into the water each slot sits, indexed by slot, added
+   * to `seaY` to get that row's actual waterline.
+   *
+   * Slot 0 is 0 -- exactly `seaY`, so the front rank of any fleet size sits
+   * exactly where the duel's one ship always has. A one-a-side arena has a
+   * single entry, always 0.
+   */
+  rowDepth: number[];
+  /**
+   * The water-collision plane ballistics actually use: `seaY` plus the
+   * deepest occupied row.
+   *
+   * `seaY` alone would make a back-rank ship unreachable -- any falling ball
+   * would be ruled a splash the instant it crossed the *front* rank's
+   * waterline, before it could ever fall far enough to reach a hull sitting
+   * lower than that. A ball only counts as a genuine miss once it has fallen
+   * past every row that exists in this battle.
+   */
+  deepSeaY: number;
+  /**
    * Muzzle speed at full power, which is a property of the water rather than
    * of the cannon.
    *
-   * A bigger fleet means a wider sea, and the rearmost ship still has to be
-   * able to reach the enemy's rearmost ship. Range goes as the square of
-   * muzzle velocity, so the speed scales with the square root of the longest
-   * shot on the board — which leaves the *relative* reach of the power dial
-   * exactly where it was tuned: the bottom third still falls short and the
-   * top still clears a drifted target, whatever the size of the battle.
+   * A bigger fleet means the rearmost ship on one side has to be able to
+   * reach the rearmost ship on the other. Range goes as the square of muzzle
+   * velocity, so the speed scales with the square root of the longest
+   * straight-line shot on the board — which leaves the *relative* reach of
+   * the power dial exactly where it was tuned: the bottom third still falls
+   * short and the top still clears a drifted target, whatever the size of
+   * the battle. Deeper rows are if anything easier to reach at a given
+   * speed, not harder, so scaling against the flat horizontal distance
+   * alone is generous rather than short.
    */
   maxSpeed: number;
   /** How far a hull may wander, and how far per turn. Tighter when it has neighbours. */
@@ -48,16 +75,44 @@ export interface Arena {
 /** Between the two innermost hulls. The number the whole game was balanced around. */
 const CENTRE_GAP = 1850;
 /**
- * Between one ship and the next on its own side.
+ * Horizontal fan between a side's own ships.
  *
- * A hull's hitbox is HULL_W across, but the sprite carries a bowsprit and
- * rigging past that, so the gap is set against the drawing rather than the
- * box: 360 apart with 60 of drift each way leaves 40px of daylight at the
- * worst possible moment, which is enough that two hulls never read as one.
+ * Small on purpose: rows do almost all of the separating now (see ROW_DEPTH),
+ * so this only has to keep a side's hulls from reading as a single blob when
+ * they're viewed at the same depth, not carry the whole burden of it.
  */
-const SLOT_GAP = 360;
+const SLOT_GAP = 140;
+/**
+ * How much further into the water each additional row sits.
+ *
+ * A hull's hitbox is 84px tall (62 above its anchor, 22 below) and bobs ±10
+ * on top of that, so two rows need at least 104px between them to never
+ * touch regardless of where either one has drifted in x. 150 leaves real
+ * daylight, and — because it protects the ships on pure depth — the
+ * horizontal drift between rows doesn't have to be constrained at all to
+ * keep them apart, unlike a same-row, same-height arrangement.
+ */
+const ROW_DEPTH = 150;
 /** Water beyond the rearmost hull, so a drifting ship never touches the frame. */
 const EDGE = 300;
+/** A fanned fleet needs a little more clearance than a single ship in a straight line does. */
+const EDGE_FLEET = 360;
+
+/**
+ * Where a ship sits within its own side: how far in from the front rank's own
+ * x, and how many rows deep.
+ *
+ * Alternates which way it leans -- slot 1 tucks in toward the middle of the
+ * fleet, slot 2 swings back out -- so three ships read as a loose wedge
+ * sailing into the water rather than a queue standing in a line. Slot 0 is
+ * always `{ dx: 0, row: 0 }`, which is what keeps the front rank identical to
+ * the duel's one ship.
+ */
+function slotOffset(slot: number): { dx: number; row: number } {
+  if (slot === 0) return { dx: 0, row: 0 };
+  const dx = slot % 2 === 1 ? SLOT_GAP * 0.6 : -SLOT_GAP;
+  return { dx, row: slot * ROW_DEPTH };
+}
 
 /**
  * The water for a battle of this size.
@@ -65,35 +120,48 @@ const EDGE = 300;
  * A one-a-side call reproduces the hand-tuned arena this game shipped with,
  * down to the pixel — 2450 by 900, anchors at 300 and 2150, 1760 muzzle speed
  * — so growing the fleet is strictly an addition and the duel is untouched.
+ * A bigger fleet grows the frame *downward*, into the ocean already drawn
+ * below the front rank, rather than widening it: the water fills with ships
+ * instead of the ships spreading thin across more of it.
  */
 export function arenaFor(perSide: FleetSize): Arena {
-  const back = (perSide - 1) * SLOT_GAP;
-  const w = EDGE * 2 + back * 2 + CENTRE_GAP;
-  // The frame keeps its shape as it widens, so a lofted shot has the same
-  // headroom over the water it always had rather than leaving the top of a
-  // squashed letterbox.
-  const h = (w * 900) / 2450;
-  const front = [EDGE + back, EDGE + back + CENTRE_GAP];
+  const edge = perSide === 1 ? EDGE : EDGE_FLEET;
+  const w = edge * 2 + CENTRE_GAP;
+  const base: [number, number] = [edge, edge + CENTRE_GAP];
 
-  const anchor: [number[], number[]] = [
-    Array.from({ length: perSide }, (_, slot) => front[0] - slot * SLOT_GAP),
-    Array.from({ length: perSide }, (_, slot) => front[1] + slot * SLOT_GAP),
-  ];
+  const anchor: [number[], number[]] = [[], []];
+  const rowDepth: number[] = [];
+  for (let slot = 0; slot < perSide; slot++) {
+    const { dx, row } = slotOffset(slot);
+    anchor[0].push(base[0] + dx);
+    anchor[1].push(base[1] - dx);
+    rowDepth.push(row);
+  }
 
-  // The longest shot anyone can be asked to make: rearmost hull to rearmost hull.
-  const longest = CENTRE_GAP + back * 2;
+  const deepestRow = rowDepth[rowDepth.length - 1] ?? 0;
+  // Only grows past the duel's 900 once there is a second row to fit --
+  // seaY and the front rank's height are otherwise untouched.
+  const h = 900 + (deepestRow > 0 ? deepestRow + 60 : 0);
+  const seaY = 690;
+
+  // The longest shot anyone can be asked to make: the two most-fanned-out
+  // rearmost hulls, straight line, ignoring the depth they've gained (that
+  // only helps their reach, never hurts it -- see maxSpeed's own comment).
+  const longest = Math.max(CENTRE_GAP, Math.max(...anchor[1]) - Math.min(...anchor[0]));
 
   return {
     w,
     h,
-    seaY: (h * 690) / 900,
+    seaY,
     anchor,
+    rowDepth,
+    deepSeaY: seaY + deepestRow,
     maxSpeed: BASE_MAX_SPEED * Math.sqrt(longest / CENTRE_GAP),
     // A lone ship has the whole side to itself and keeps the roomy original
-    // drift. Give it neighbours and that same drift would sail two hulls
-    // straight through each other, so it tightens to something that cannot.
-    driftMax: perSide === 1 ? 135 : 60,
-    driftStep: perSide === 1 ? 62 : 28,
+    // drift. With neighbours, depth alone keeps the rows apart (see
+    // ROW_DEPTH), so this is tuned for feel now rather than for safety.
+    driftMax: perSide === 1 ? 135 : 100,
+    driftStep: perSide === 1 ? 62 : 45,
   };
 }
 

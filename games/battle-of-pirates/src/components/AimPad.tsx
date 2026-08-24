@@ -50,6 +50,12 @@ interface Drag {
  * past the guide circle's edge, pointing the way the shot leaves, and does
  * not stretch back to the knob. That keeps it reading as a heading, not as
  * a second rubber band next to the one the pull line already draws.
+ *
+ * Width is fixed. Only its reach -- the tip's distance from its base --
+ * grows with power, so pulling harder makes the flag point further out
+ * rather than swelling the whole shape. A triangle that gets both longer
+ * and wider at once reads as "bigger", not as "more power in this specific
+ * direction", which is the one thing this pad is actually trying to say.
  */
 function Arrow({
   ox,
@@ -77,19 +83,20 @@ function Arrow({
   const uy = dy / len;
   // A fixed gap past the ring, not past the knob: the arrow marks a heading on
   // the ring itself, so it holds still while only the knob behind it moves.
-  const gap = 20;
-  const size = 22 + power * 24;
-  const cx = ox + ux * (reach + gap);
-  const cy = oy + uy * (reach + gap);
+  const gap = 12;
+  const wing = 8;
+  const backLen = 10;
+  const tipLen = 22 + power * 40;
+  const baseX = ox + ux * (reach + gap);
+  const baseY = oy + uy * (reach + gap);
   // Perpendicular, for the two back corners.
   const px = -uy;
   const py = ux;
 
-  const tipX = cx + ux * size;
-  const tipY = cy + uy * size;
-  const backX = cx - ux * size * 0.55;
-  const backY = cy - uy * size * 0.55;
-  const wing = size * 0.8;
+  const tipX = baseX + ux * tipLen;
+  const tipY = baseY + uy * tipLen;
+  const backX = tipX - ux * backLen;
+  const backY = tipY - uy * backLen;
 
   return (
     <polygon
@@ -138,11 +145,11 @@ export default function AimPad({
    * size than the number `measure` actually fires on would make it a promise
    * the pad doesn't keep.
    */
-  const reach = useRef(130);
+  const reach = useRef(90);
   useEffect(() => {
     const measure = () => {
       const small = Math.min(window.innerWidth, window.innerHeight);
-      reach.current = Math.max(70, Math.min(150, small * 0.24));
+      reach.current = Math.max(56, Math.min(104, small * 0.16));
     };
     measure();
     window.addEventListener('resize', measure);

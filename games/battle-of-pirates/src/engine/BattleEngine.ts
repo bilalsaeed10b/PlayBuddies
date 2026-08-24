@@ -103,6 +103,15 @@ interface Particle {
   rot: number;
   spin: number;
   color: string;
+  /**
+   * The water level a spark or splinter drowns at, in world y.
+   *
+   * Every hull used to sit on the one shared waterline, so a single constant
+   * worked for all of them. A back-row ship now sits well below that line,
+   * so debris flung from its explosion has to drown at *its* row's depth --
+   * fixed to where the burst actually happened, not the front row's.
+   */
+  sink: number;
 }
 
 interface Ring {
@@ -369,7 +378,12 @@ export class BattleEngine {
   /** Waterline the hull is riding on this instant. The bob is real, not paint. */
   shipY(i: number): number {
     const ship = this.ships[i];
-    return this.arena.seaY + Math.sin(this.clock * BALANCE.BOB_SPEED + ship.bobPhase) * BALANCE.BOB_AMP;
+    return this.waterLevelFor(i) + Math.sin(this.clock * BALANCE.BOB_SPEED + ship.bobPhase) * BALANCE.BOB_AMP;
+  }
+
+  /** The still-water level (no bob) a given hull's own row sits at. */
+  private waterLevelFor(i: number): number {
+    return this.arena.seaY + (this.arena.rowDepth[this.ships[i].slot] ?? 0);
   }
 
   /** Which way this hull points, which is always across the water at the enemy. */
@@ -762,9 +776,12 @@ export class BattleEngine {
       }
     }
 
-    if (p.vy > 0 && ny + p.r >= this.arena.seaY) {
+    // The deep plane, not the front rank's own waterline -- see Arena.deepSeaY.
+    // A ball is only a genuine miss once it has fallen past every row that
+    // exists in this battle, not the instant it reaches the shallowest one.
+    if (p.vy > 0 && ny + p.r >= this.arena.deepSeaY) {
       const denom = ny - p.y;
-      const t = clamp(Math.abs(denom) < 1e-6 ? 0 : (this.arena.seaY - (p.y + p.r)) / denom, 0, 1);
+      const t = clamp(Math.abs(denom) < 1e-6 ? 0 : (this.arena.deepSeaY - (p.y + p.r)) / denom, 0, 1);
       if (t < best) {
         best = t;
         kind = 'water';
@@ -786,7 +803,7 @@ export class BattleEngine {
       if (!friendly) this.lastShotHit[p.from] = true;
       this.damage(struckShip, p.damage * mult * (friendly ? BALANCE.SELF_MULT : 1), ix);
       if (p.burn > 0 && !friendly) this.ships[struckShip].burn = p.burn + 1;
-      this.explode(ix, iy, p, 'hull');
+      this.explode(ix, iy, p, 'hull', this.waterLevelFor(struckShip));
       this.shout(
         struckShip === p.from
           ? 'your own hull!'
@@ -803,13 +820,14 @@ export class BattleEngine {
       // A solid mountain still takes the shot and still stops the ball — it
       // just never wears through, so `drawRock` keeps drawing it whole.
       if (this.cfg.rules.mountain !== 'solid') struck.hp -= 1;
-      this.explode(ix, iy, p, 'rock');
+      // The mountain sits at row 0 always, whichever ship fired at it.
+      this.explode(ix, iy, p, 'rock', this.arena.seaY);
       this.splashDamage(ix, iy, p);
       return;
     }
 
-    this.explode(ix, this.arena.seaY, p, 'water');
-    this.splashDamage(ix, this.arena.seaY, p);
+    this.explode(ix, this.arena.deepSeaY, p, 'water', this.arena.deepSeaY);
+    this.splashDamage(ix, this.arena.deepSeaY, p);
   }
 
   /** Blast falls off to nothing at the edge, so a near miss still counts for something. */
@@ -985,7 +1003,14 @@ export class BattleEngine {
   }
 
   /** Counts are multiplied by the quality budget, so one tier drop thins every burst. */
-  private burst(count: number, kind: ParticleKind, x: number, y: number, make: (p: Particle, t: number) => void) {
+  private burst(
+    count: number,
+    kind: ParticleKind,
+    x: number,
+    y: number,
+    sinkY: number,
+    make: (p: Particle, t: number) => void,
+  ) {
     const n = Math.max(1, Math.round(count * this.budget));
     for (let i = 0; i < n; i++) {
       const p = this.take();
@@ -996,11 +1021,20 @@ export class BattleEngine {
       p.spin = 0;
       p.grow = 1;
       p.color = '#fff';
+      // Set on every particle, spark or not: a pooled one that used to be a
+      // spark can come back as anything, and a stale value from its last
+      // life would drown it at the wrong depth.
+      p.sink = sinkY;
       make(p, n === 1 ? 0 : i / (n - 1));
     }
   }
 
-  private explode(x: number, y: number, p: Projectile, surface: 'hull' | 'water' | 'rock') {
+  /**
+   * @param sinkY The water level, in world y, that debris from this blast
+   * drowns at -- the struck ship's own row for a hull hit, `seaY` for the
+   * mountain (always row 0), or the impact point itself for a water splash.
+   */
+  private explode(x: number, y: number, p: Projectile, surface: 'hull' | 'water' | 'rock', sinkY: number) {
     const power = clamp(p.damage / BALANCE.DIRECT, 0.35, 1.7);
     const scale = p.blast / BALANCE.BLAST_R;
 
@@ -1008,7 +1042,7 @@ export class BattleEngine {
     this.shake = Math.min(34, this.shake + 9 * power);
 
     // Fireball.
-    this.burst(11 * power, 0, x, y, (q, t) => {
+    this.burst(11 * power, 0, x, y, sinkY, (q, t) => {
       const a = Math.random() * Math.PI * 2;
       const speed = 60 + Math.random() * 210 * power;
       q.vx = Math.cos(a) * speed;
@@ -1020,7 +1054,7 @@ export class BattleEngine {
     });
 
     // Sparks.
-    this.burst(14 * power, 2, x, y, (q) => {
+    this.burst(14 * power, 2, x, y, sinkY, (q) => {
       const a = Math.random() * Math.PI * 2;
       const speed = 180 + Math.random() * 520 * power;
       q.vx = Math.cos(a) * speed;
@@ -1032,7 +1066,7 @@ export class BattleEngine {
     });
 
     // Smoke, which is what is still there a second later.
-    this.burst(7 * power, 1, x, y, (q) => {
+    this.burst(7 * power, 1, x, y, sinkY, (q) => {
       q.vx = (Math.random() - 0.5) * 130;
       q.vy = -30 - Math.random() * 110;
       q.max = 1.1 + Math.random() * 1.1;
@@ -1042,7 +1076,11 @@ export class BattleEngine {
     });
 
     if (surface === 'water') {
-      this.burst(15 * power, 3, x, this.arena.seaY, (q) => {
+      // The passed-in y, not the shallow front-row waterline: a miss past a
+      // back-row fleet lands deep in the frame, and a splash drawn at the
+      // shallow line while the ring and shake happened down at the real
+      // impact point would read as two different events.
+      this.burst(15 * power, 3, x, y, sinkY, (q) => {
         q.vx = (Math.random() - 0.5) * 340;
         q.vy = -180 - Math.random() * 460 * power;
         q.max = 0.7 + Math.random() * 0.55;
@@ -1050,13 +1088,13 @@ export class BattleEngine {
         q.size = 16 + Math.random() * 30;
         q.grow = 1.5;
       });
-      this.pushRing({ x, y: this.arena.seaY, r: 10, max: 120 * scale, life: 1, width: 5 });
+      this.pushRing({ x, y, r: 10, max: 120 * scale, life: 1, width: 5 });
       this.cfg.onSfx?.('splash');
     } else if (surface === 'rock') {
-      this.debris(x, y, power, '#5b6675');
+      this.debris(x, y, power, '#5b6675', sinkY);
       this.cfg.onSfx?.('rock');
     } else {
-      this.debris(x, y, power, '#8b5a2b');
+      this.debris(x, y, power, '#8b5a2b', sinkY);
     }
   }
 
@@ -1065,8 +1103,8 @@ export class BattleEngine {
     this.rings.push(ring);
   }
 
-  private debris(x: number, y: number, power: number, color: string) {
-    this.burst(9 * power, 4, x, y, (q) => {
+  private debris(x: number, y: number, power: number, color: string, sinkY: number) {
+    this.burst(9 * power, 4, x, y, sinkY, (q) => {
       const a = -Math.PI / 2 + (Math.random() - 0.5) * 2.6;
       const speed = 190 + Math.random() * 430 * power;
       q.vx = Math.cos(a) * speed;
@@ -1081,7 +1119,10 @@ export class BattleEngine {
   }
 
   private muzzleFlash(x: number, y: number, angle: number) {
-    this.burst(9, 0, x, y, (q) => {
+    // Neither burst below is a spark, splash or splinter, so sinkY is never
+    // read for these -- passed as y itself only because burst() takes it
+    // unconditionally.
+    this.burst(9, 0, x, y, y, (q) => {
       const a = angle + (Math.random() - 0.5) * 0.7;
       const speed = 200 + Math.random() * 400;
       q.vx = Math.cos(a) * speed;
@@ -1091,7 +1132,7 @@ export class BattleEngine {
       q.size = 26 + Math.random() * 26;
       q.grow = 1.7;
     });
-    this.burst(6, 1, x, y, (q) => {
+    this.burst(6, 1, x, y, y, (q) => {
       const a = angle + (Math.random() - 0.5) * 1.1;
       const speed = 90 + Math.random() * 160;
       q.vx = Math.cos(a) * speed;
@@ -1106,7 +1147,8 @@ export class BattleEngine {
   private burnAt(i: number) {
     const x = this.ships[i].x + (Math.random() - 0.5) * BALANCE.HULL_W * 0.7;
     const y = this.shipY(i) - 58;
-    this.burst(7, 0, x, y, (q) => {
+    // Fire, kind 0 -- never drowns, so sinkY is unused here.
+    this.burst(7, 0, x, y, y, (q) => {
       q.vx = (Math.random() - 0.5) * 60;
       q.vy = -70 - Math.random() * 120;
       q.max = 0.5 + Math.random() * 0.4;
@@ -1118,7 +1160,8 @@ export class BattleEngine {
 
   private wreck(i: number) {
     const ship = this.ships[i];
-    this.burst(20, 1, ship.x, this.shipY(i) - 70, (q) => {
+    // Smoke, kind 1 -- never drowns, so sinkY is unused here.
+    this.burst(20, 1, ship.x, this.shipY(i) - 70, this.shipY(i), (q) => {
       q.vx = (Math.random() - 0.5) * 180;
       q.vy = -40 - Math.random() * 150;
       q.max = 1.8 + Math.random() * 1.4;
@@ -1126,7 +1169,7 @@ export class BattleEngine {
       q.size = 50 + Math.random() * 70;
       q.grow = 2.6;
     });
-    this.debris(ship.x, this.shipY(i) - 40, 1.6, '#6b4423');
+    this.debris(ship.x, this.shipY(i) - 40, 1.6, '#6b4423', this.waterLevelFor(i));
   }
 
   private shout(text: string) {
@@ -1159,8 +1202,10 @@ export class BattleEngine {
       } else {
         p.vy += 900 * dt;
         p.vx *= 0.995;
-        // Sparks, spray and splinters all drown when they reach the water.
-        if (p.y > this.arena.seaY + 6) {
+        // Sparks, spray and splinters all drown when they reach the water --
+        // their own row's water, set once at the burst that spawned them
+        // (see burst()'s sinkY), not the arena's single shallow line.
+        if (p.y > p.sink + 6) {
           this.particles.splice(i, 1);
           this.pool.push(p);
         }
@@ -1208,13 +1253,17 @@ export class BattleEngine {
     const out: { x: number; y: number }[] = [];
     const dt = 1 / 60;
     const perDot = 3;
+    // The shooter's own row, not the shallow front-rank line -- a back-row
+    // ship's muzzle already starts below that line, and cutting the preview
+    // off at it would draw nothing at all.
+    const localSeaY = this.waterLevelFor(this.turn);
     for (let i = 0; i < dots * perDot; i++) {
       if (!card.windproof) vx += this.wind * BALANCE.WIND_ACCEL * dt;
       vy += BALANCE.GRAVITY * card.gravity * dt;
       x += vx * dt;
       y += vy * dt;
       if (i % perDot === perDot - 1) out.push({ x, y });
-      if (y > this.arena.seaY) break;
+      if (y > localSeaY) break;
     }
     return out;
   }
@@ -1268,7 +1317,13 @@ export class BattleEngine {
     drawWaves(ctx, this.arena, this.clock, q.waves);
 
     for (const rock of this.rocks) if (rock.hp > 0) drawRock(ctx, rock, this.arena.seaY);
-    for (const side of [0, 1] as Team[]) this.drawOneShip(ctx, side, q);
+    // Every hull, not a fixed pair -- `[0,1] as Team[]` only ever drew ships 0
+    // and 1, which was invisible in a duel (there were only ever two) and
+    // silently dropped every third-and-up hull once a side could have more.
+    // Sorted by depth so a back-row ship, correctly, draws in front of
+    // whatever's shallower where the two overlap on screen.
+    const order = this.ships.map((_, i) => i).sort((a, b) => this.shipY(a) - this.shipY(b));
+    for (const i of order) this.drawOneShip(ctx, i, q);
 
     this.drawProjectiles(ctx, q);
     this.drawParticles(ctx);

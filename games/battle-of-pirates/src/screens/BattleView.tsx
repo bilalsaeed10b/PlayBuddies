@@ -400,8 +400,7 @@ export default function BattleView({
     // Mirrors of what the HUD is already showing, so a frame that changed
     // nothing costs no React work at all.
     const shown = {
-      hp0: -1,
-      hp1: -1,
+      hp: '' as string,
       turn: -1 as number,
       phase: '' as string,
       selected: '' as string,
@@ -445,14 +444,15 @@ export default function BattleView({
       // -- HUD, only when something a human can read has changed --
       const nextClock = Math.max(0, Math.ceil(engine.turnClock));
       const handKey = engine.hand.join(',');
-      const hp0 = engine.hp[0];
-      const hp1 = engine.hp[1];
+      // One hp per hull now rather than a fixed pair, so this has to be a
+      // string join like the others rather than two named locals -- there is
+      // no hp0/hp1 to compare once a side can have three ships on it.
+      const hpKey = engine.hp.join(',');
       const windRounded = Math.round(engine.wind * 20) / 20;
 
-      if (hp0 !== shown.hp0 || hp1 !== shown.hp1) {
-        shown.hp0 = hp0;
-        shown.hp1 = hp1;
-        setHp([hp0, hp1]);
+      if (hpKey !== shown.hp) {
+        shown.hp = hpKey;
+        setHp(engine.hp);
       }
       if (engine.turn !== shown.turn) {
         shown.turn = engine.turn;
