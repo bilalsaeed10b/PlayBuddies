@@ -22,7 +22,7 @@ import { audioService } from './services/audio';
 import { GameWallet, reportResult } from './platform/wallet';
 import BattleView, { MatchConfig } from './screens/BattleView';
 import type { Seat } from './engine/BattleEngine';
-import { DEFAULT_RULES } from './types/game';
+import { DEFAULT_RULES, packRules, unpackRules } from './types/game';
 import type { GameSettings, MatchRules, MountainRule, PlayerCount, Team } from './types/game';
 
 /**
@@ -85,6 +85,7 @@ export default function App() {
     hostId: string;
     players: Record<string, LobbyPerson>;
     matchStarted?: boolean;
+    matchRules?: number;
   } | null>(null);
   const [lobbyError, setLobbyError] = useState<string | null>(null);
 
@@ -208,6 +209,7 @@ export default function App() {
             hostId: string;
             players: Record<string, LobbyPerson>;
             matchStarted?: boolean;
+            matchRules?: number;
           };
           if (!data.players?.[uid]) {
             setLobbyError("You are not in this lobby.");
@@ -215,6 +217,19 @@ export default function App() {
           }
           setLobbyError(null);
           setLobby(data);
+          // The host's rules, arriving on the one channel every client is
+          // already subscribed to. Without this a guest's `rules.players` is
+          // whatever it last was on THIS device -- often the default of 2 --
+          // and `people`/`onlineConfig` below slice the roster by it, so a
+          // 3v3 with four humans rendered as a duel on every guest: two ships
+          // instead of six, and the two who got left out of the seats array
+          // could never be given a turn because their identity was never
+          // subscribed to on the wire. Compared directly against `data.hostId`
+          // rather than the `isHost` variable, which still reflects the
+          // *previous* lobby snapshot inside this same callback.
+          if (typeof data.matchRules === 'number' && data.hostId !== uid) {
+            setRules(unpackRules(data.matchRules));
+          }
         },
         () => setLobbyError('Lost contact with the lobby.'),
       );
@@ -321,11 +336,16 @@ export default function App() {
     if (!isHost) return;
     try {
       const { db, doc, updateDoc } = await import('./firebase');
-      await updateDoc(doc(db, 'lobbies', handoff.room), { matchStarted: true });
+      // `matchRules` rides along with the go-signal in the same write, so it
+      // lands in every guest's next snapshot at the same instant `matchStarted`
+      // does -- there is no room for a guest to flip to the game view on a
+      // `rules.players` that hasn't been corrected yet (see the lobby
+      // snapshot handler above).
+      await updateDoc(doc(db, 'lobbies', handoff.room), { matchStarted: true, matchRules: packRules(rules) });
     } catch (e) {
       console.error('Could not start the battle', e);
     }
-  }, [isHost, handoff.room]);
+  }, [isHost, handoff.room, rules]);
 
   const award = useCallback((won: boolean, hpLeft: number) => {
     // Something for turning up, more for winning, and a bonus for coming
