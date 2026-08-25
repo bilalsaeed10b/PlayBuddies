@@ -82,7 +82,6 @@ export interface Projectile {
   blast: number;
   gravity: number;
   pierce: boolean;
-  windproof: boolean;
   burn: number;
   alive: boolean;
   age: number;
@@ -150,17 +149,14 @@ export interface MatchRules {
   /** Cards. Off means every shot is a plain round shot and the hand is hidden. */
   cards: boolean;
   players: PlayerCount;
-  /** Sideways push on every shot. Off means round shot and true wind read exactly true. */
-  wind: boolean;
 }
 
 export const DEFAULT_RULES: MatchRules = {
   aimArc: true,
   turnTimer: true,
-  mountain: 'breakable',
+  mountain: 'solid',
   cards: true,
   players: 2,
-  wind: true,
 };
 
 const MOUNTAIN_CODES: MountainRule[] = ['off', 'breakable', 'solid'];
@@ -180,8 +176,7 @@ export function packRules(rules: MatchRules): number {
     (rules.turnTimer ? 2 : 0) |
     (Math.max(0, MOUNTAIN_CODES.indexOf(rules.mountain)) << 2) |
     (rules.cards ? 16 : 0) |
-    (Math.max(0, PLAYER_CODES.indexOf(rules.players)) << 5) |
-    (rules.wind ? 128 : 0)
+    (Math.max(0, PLAYER_CODES.indexOf(rules.players)) << 5)
   );
 }
 
@@ -193,7 +188,6 @@ export function unpackRules(bits: number | undefined): MatchRules {
     mountain: MOUNTAIN_CODES[(bits >> 2) & 3] ?? DEFAULT_RULES.mountain,
     cards: (bits & 16) !== 0,
     players: PLAYER_CODES[(bits >> 5) & 3] ?? DEFAULT_RULES.players,
-    wind: (bits & 128) !== 0,
   };
 }
 
@@ -210,11 +204,11 @@ export interface StartPacket {
   t: 'start';
   n: number;
   /**
-   * Seeds every deal, every wind shift and every drift for the whole match.
+   * Seeds every deal and every drift for the whole match.
    *
    * Nothing else about the opening needs sending: given the same seed, both
-   * clients compute the same wind and the same starting positions in the
-   * engine's constructor. This is the entire negotiation.
+   * clients compute the same starting positions in the engine's constructor.
+   * This is the entire negotiation.
    */
   seed: number;
   /** Who fires first. Drawn at random by the host. */
@@ -229,18 +223,18 @@ export interface StartPacket {
  *
  * A ShotPacket, below, used to be the only thing that ever went out, and it
  * is only written once a turn is fully resolved: the flight has landed, the
- * impact has settled, wind and drift have rolled for next turn. On a
- * screen-filling arena that whole sequence is two to four seconds, and the
- * far side never saw a single frame of it until all of that had already
- * happened *and* crossed the network -- their own replay of the shot then
- * started from scratch on top of that. A shot that took three seconds to
- * land took six to be seen fire at all, which is the "delay" in multiplayer.
+ * impact has settled, drift has rolled for next turn. On a screen-filling
+ * arena that whole sequence is two to four seconds, and the far side never
+ * saw a single frame of it until all of that had already happened *and*
+ * crossed the network -- their own replay of the shot then started from
+ * scratch on top of that. A shot that took three seconds to land took six to
+ * be seen fire at all, which is the "delay" in multiplayer.
  *
  * This carries only the input -- what was aimed, not what it did -- so the
  * far side can start animating in step with the shooter, off by network
  * latency alone. The ShotPacket still follows once the outcome is known and
- * is still what the receiver trusts for HP, wind and drift; this only lets
- * the picture start moving before that arrives.
+ * is still what the receiver trusts for HP, drift and the mountain; this
+ * only lets the picture start moving before that arrives.
  */
 export interface FirePacket {
   t: 'fire';
@@ -288,8 +282,20 @@ export interface ShotPacket {
   hp: number[];
   f: number[];
   d: number[];
-  /** Wind for the next turn. */
-  w: number;
+  /**
+   * The mountain's hull, one entry per rock (in practice always one).
+   *
+   * Never used to be sent at all -- rock damage was left for each client to
+   * work out on its own from replaying the same shot, which is exactly the
+   * one piece of "the picture" this packet's own doc comment says clients
+   * should never have to independently agree on. Two devices whose flight
+   * simulations disagreed by even a hair on whether a shot grazed the rock
+   * -- different hardware, different browser engine, a sub-pixel difference
+   * in a trig function -- would silently end up with two different mountains:
+   * intact on one screen, gone on the other, and every shot near it after
+   * that resolved differently depending which screen you were looking at.
+   */
+  rk: number[];
   /** Which ship fires next, by index. Stated, never inferred. */
   o: number;
   /**

@@ -204,15 +204,12 @@ export const BALANCE = {
    * The power dial is only a decision while both ends of it mean something.
    * Retuned so the bottom third of the dial still falls short of a
    * stationary enemy and the top comfortably clears one who has drifted
-   * away. It also buys the thing a wide sea wants: a longer, higher arc,
-   * more time to read the wind before it lands, and more room for a mortar's
-   * much steeper drop to actually mean something.
+   * away. It also buys the thing a wide sea wants: a longer, higher arc, and
+   * more room for a mortar's much steeper drop to actually mean something.
    */
   GRAVITY: 1050,
   /** Minimum, so a fumbled tap still leaves the barrel. */
   MIN_SPEED: 300,
-  /** Sideways acceleration per unit of wind (wind runs -1 to 1). */
-  WIND_ACCEL: 184,
   BALL_R: 15,
   /** Nothing may fly forever. A shot that has not landed by now is a miss. */
   MAX_FLIGHT: 14,
@@ -287,9 +284,6 @@ export const BALANCE = {
   OUTCOME_TIMEOUT: 6,
   /** How long the bot pretends to think, so a shot never appears from nowhere. */
   BOT_THINK: 1.1,
-  /** Wind can change by at most this much between turns. */
-  WIND_STEP: 0.55,
-  WIND_MAX: 1,
 } as const;
 
 export const TEAM_COLORS: Record<0 | 1, { name: string; main: string; light: string; dark: string }> = {
@@ -318,8 +312,6 @@ export interface CardMeta {
   speed: number;
   /** Flies straight through rocks. */
   pierce?: boolean;
-  /** Wind does not touch it. */
-  windproof?: boolean;
   /** Sets the target alight for this many of their turns. */
   burn?: number;
   /** Repairs your own hull the moment it is played. */
@@ -366,9 +358,8 @@ export const CARDS: Record<CardId, CardMeta> = {
    * up when the water itself widened to 1850, so a full-power shot can still
    * physically reach the far rail when the turn's drift has actually brought
    * the two hulls close, rather than falling short even then -- it is still
-   * comfortably shorter than the wind-eaten, half-power shots round shot
-   * manages. The five-pellet forgiveness only pays off once the range is
-   * genuinely closed.
+   * comfortably shorter than a half-power round shot manages. The
+   * five-pellet forgiveness only pays off once the range is genuinely closed.
    */
   grape: {
     id: 'grape', name: 'Grapeshot', glyph: '::', weight: 15,
@@ -401,15 +392,14 @@ export const CARDS: Record<CardId, CardMeta> = {
   /**
    * The reef's answer. Every other card either goes over a rock or stops at
    * it; this is the one that does not care it is there. The faster, flatter
-   * flight is deliberate too -- windproof already means the gauge stops
-   * mattering, and a shot that visibly refuses to bend for either the rock
-   * or the wind reads as a punch, not a lob.
+   * flight is deliberate too -- a shot that visibly refuses to bend for the
+   * rock reads as a punch, not a lob.
    */
   bore: {
     id: 'bore', name: 'Bore Shot', glyph: '>', weight: 9,
-    blurb: 'Fast, flat, and straight through rock. Ignores the wind.',
+    blurb: 'Fast, flat, and straight through rock.',
     shots: 1, spread: 0, damage: POWER, blast: 0.9, gravity: 0.85, speed: 1.3,
-    pierce: true, windproof: true,
+    pierce: true,
   },
   patch: {
     id: 'patch', name: 'Patch Kit', glyph: '+', weight: 10,
@@ -457,10 +447,10 @@ export function elevRange(card: CardId): [number, number] {
 /**
  * Deterministic PRNG.
  *
- * Both players must deal the same hand and blow the same wind without a round
- * trip to agree on it, so every random thing in a match is a pure function of
- * the match seed and the turn number. Math.random would desynchronise the two
- * clients within one turn.
+ * Both players must deal the same hand and drift the same amount without a
+ * round trip to agree on it, so every random thing in a match is a pure
+ * function of the match seed and the turn number. Math.random would
+ * desynchronise the two clients within one turn.
  */
 export function mulberry32(seed: number): () => number {
   let s = seed >>> 0;

@@ -639,7 +639,6 @@ function rulesSummary(rules: MatchRules): string {
     rules.cards ? 'cards on' : 'round shot only',
     rules.turnTimer ? '15s turns' : 'no clock',
     rules.aimArc ? 'aim arc on' : 'no aim arc',
-    rules.wind ? 'wind on' : 'no wind',
   ].join(' · ');
 }
 
@@ -730,7 +729,7 @@ function Menu({
         <div className="rounded-2xl bg-black/25 p-3 text-center text-xs leading-relaxed text-white/50">
           <p className="mb-1 font-black uppercase tracking-[0.15em] text-white/40">How it works</p>
           <p>Drag back from anywhere and let go. Further back is more powder; the angle is the angle.</p>
-          <p className="mt-1">Read the wind, pick a card, and put a hole in the other hull first.</p>
+          <p className="mt-1">Read the range, pick a card, and put a hole in the other hull first.</p>
           <p className="mt-2 text-white/40">
             Playing online? Start a lobby on PlayBuddies and pick this game. Two ships, one stretch of water.
           </p>
@@ -1260,7 +1259,7 @@ function RulesPanel({
   onChange: (r: MatchRules) => void;
   onClose: () => void;
 }) {
-  const toggles: { key: 'cards' | 'turnTimer' | 'aimArc' | 'wind'; label: string; hint: string }[] = [
+  const toggles: { key: 'cards' | 'turnTimer' | 'aimArc'; label: string; hint: string }[] = [
     {
       key: 'cards',
       label: 'Cards',
@@ -1275,11 +1274,6 @@ function RulesPanel({
       key: 'aimArc',
       label: 'Aim arc',
       hint: 'Draws the opening stretch of the shot while aiming. It makes the game a great deal easier — line the dots up and let go. The aim arrow on the pad stays either way.',
-    },
-    {
-      key: 'wind',
-      label: 'Wind',
-      hint: 'Pushes every shot sideways, stronger by the turn. Off keeps every ball flying dead straight and the gauge reads calm all match.',
     },
   ];
 

@@ -6,7 +6,7 @@
  * keeps the simulation testable and the transport swappable.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Loader2, Ship as ShipIcon, Wind } from 'lucide-react';
+import { Loader2, Ship as ShipIcon } from 'lucide-react';
 import AimPad, { Aim } from '../components/AimPad';
 import CardHand, { HAND_HEIGHT, HAND_HEIGHT_COMPACT } from '../components/CardHand';
 import { BattleEngine, Seat } from '../engine/BattleEngine';
@@ -92,9 +92,9 @@ export default function BattleView({
    * The whole negotiation.
    *
    * The host draws a seed and a first shooter and sends those two numbers. The
-   * guest waits for them and builds the identical match from nothing else: the
-   * wind, the drift, the rocks and every hand for the rest of the game all
-   * fall out of the seed.
+   * guest waits for them and builds the identical match from nothing else:
+   * the drift, the rocks and every hand for the rest of the game all fall
+   * out of the seed.
    */
   const [session, setSession] = useState<Session | null>(
     online && !config.isHost ? null : { seed: config.seed, first: config.first, rules: config.rules },
@@ -106,7 +106,6 @@ export default function BattleView({
   const [hand, setHand] = useState<CardId[]>([]);
   const [selected, setSelected] = useState<CardId>('round');
   const [clock, setClock] = useState<number>(BALANCE.TURN_TIME);
-  const [wind, setWind] = useState(0);
   const [over, setOver] = useState<{ winner: Team } | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   /**
@@ -428,7 +427,6 @@ export default function BattleView({
       phase: '' as string,
       selected: '' as string,
       clock: -1,
-      wind: 99,
       hand: '',
     };
 
@@ -471,7 +469,6 @@ export default function BattleView({
       // string join like the others rather than two named locals -- there is
       // no hp0/hp1 to compare once a side can have three ships on it.
       const hpKey = engine.hp.join(',');
-      const windRounded = Math.round(engine.wind * 20) / 20;
 
       if (hpKey !== shown.hp) {
         shown.hp = hpKey;
@@ -502,10 +499,6 @@ export default function BattleView({
       if (nextClock !== shown.clock) {
         shown.clock = nextClock;
         setClock(nextClock);
-      }
-      if (windRounded !== shown.wind) {
-        shown.wind = windRounded;
-        setWind(windRounded);
       }
     };
     raf = requestAnimationFrame(frame);
@@ -657,32 +650,35 @@ export default function BattleView({
     <div ref={shellRef} className="relative h-[100dvh] w-full overflow-hidden bg-[#04121f] text-white">
       <canvas ref={canvasRef} className="absolute inset-0 h-full w-full touch-none" />
 
-      {/* -- every hull, at a glance, grouped by side -- */}
-      <div className="pointer-events-none absolute inset-x-0 top-2 z-20 flex justify-center px-2">
-        <div className="flex w-full max-w-[720px] items-stretch gap-1.5 rounded-2xl border border-white/15 bg-slate-950/55 p-1.5 backdrop-blur-md">
-          {([0, 1] as Team[]).map((team) => (
-            <div key={team} className="flex min-w-0 flex-1 items-stretch gap-1">
-              {config.seats.map((seat, i) =>
-                seat.team !== team ? null : (
-                  <HullMeter
-                    key={i}
-                    name={seat.name}
-                    skin={seat.skin}
-                    hp={hp[i] ?? 0}
-                    team={team}
-                    mine={localShips.has(i)}
-                    active={turn === i && !over}
-                  />
-                ),
-              )}
-            </div>
-          ))}
+      {/* -- every hull, at a glance, pinned to the edge its own side sails on --
+          left is always team 0, right is always team 1, the same split the
+          arena itself draws them in, so a glance at either edge tells you
+          who's where without reading a name. */}
+      {([0, 1] as Team[]).map((team) => (
+        <div
+          key={team}
+          className={`pointer-events-none absolute top-16 z-20 w-32 sm:w-40 ${team === 0 ? 'left-2' : 'right-2'}`}
+        >
+          <div className="space-y-1 rounded-2xl border border-white/15 bg-slate-950/55 p-1.5 backdrop-blur-md">
+            {config.seats.map((seat, i) =>
+              seat.team !== team ? null : (
+                <HullMeter
+                  key={i}
+                  name={seat.name}
+                  skin={seat.skin}
+                  hp={hp[i] ?? 0}
+                  team={team}
+                  mine={localShips.has(i)}
+                  active={turn === i && !over}
+                />
+              ),
+            )}
+          </div>
         </div>
-      </div>
+      ))}
 
-      {/* -- wind, turn and clock -- */}
-      <div className="pointer-events-none absolute inset-x-0 top-[76px] z-20 flex flex-col items-center gap-1.5">
-        <WindGauge wind={wind} />
+      {/* -- turn and clock -- */}
+      <div className="pointer-events-none absolute inset-x-0 top-2 z-20 flex flex-col items-center gap-1.5">
         {turnLabel && (
           <div
             className="rounded-full border border-white/15 bg-slate-950/60 px-3 py-1 text-[11px] font-black uppercase tracking-[0.16em] backdrop-blur-md"
@@ -880,39 +876,6 @@ function TurnTimerBar({ clock }: { clock: number }) {
           background: clock <= 5 ? '#f87171' : clock <= 10 ? '#fbbf24' : '#4ade80',
         }}
       />
-    </div>
-  );
-}
-
-/**
- * The wind, as an arrow.
- *
- * It has to be readable in the half second between looking up and pulling
- * back, so it is a direction and a length rather than a number: a long arrow
- * pointing right means the ball goes right, and that is the whole of it.
- */
-function WindGauge({ wind }: { wind: number }) {
-  const strength = Math.min(1, Math.abs(wind));
-  const dead = strength < 0.05;
-  return (
-    <div className="flex items-center gap-2 rounded-full border border-white/15 bg-slate-950/60 px-3 py-1 backdrop-blur-md">
-      <Wind className="h-3.5 w-3.5 text-sky-200" />
-      <div className="relative h-3 w-24">
-        <div className="absolute left-1/2 top-1/2 h-3 w-px -translate-x-1/2 -translate-y-1/2 bg-white/25" />
-        {!dead && (
-          <div
-            className="absolute top-1/2 h-1 -translate-y-1/2 rounded-full bg-sky-300"
-            style={{
-              width: `${strength * 46}%`,
-              left: wind > 0 ? '50%' : undefined,
-              right: wind < 0 ? '50%' : undefined,
-            }}
-          />
-        )}
-      </div>
-      <span className="w-9 text-[10px] font-black uppercase tracking-wider text-white/55">
-        {dead ? 'calm' : wind > 0 ? 'east' : 'west'}
-      </span>
     </div>
   );
 }

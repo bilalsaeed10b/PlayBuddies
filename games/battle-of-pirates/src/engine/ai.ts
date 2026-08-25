@@ -2,9 +2,8 @@
  * The bot.
  *
  * It does not cheat and it does not read your aim. It solves the same
- * ballistics problem the player is eyeballing -- including the wind, which it
- * can see on the same gauge you can -- then deliberately gets it wrong by an
- * amount set by its rank, and tightens up as it ranges in.
+ * ballistics problem the player is eyeballing, then deliberately gets it
+ * wrong by an amount set by its rank, and tightens up as it ranges in.
  *
  * That last part matters more than the accuracy number. A bot with a fixed
  * random error is a slot machine: it never threatens you and it never
@@ -15,11 +14,11 @@
  * The obvious way to write "it ranges in" is to feed the last miss back in as
  * a correction, and that is what this did first. It is wrong here, and
  * measurably so: the solver has no systematic error to correct, so every miss
- * is either the deliberate spread or a wind that has since changed. Feeding
- * that back means aiming off by yesterday's noise, and it roughly doubled the
- * bot's average miss instead of shrinking it. What survives is the honest part
- * -- a miss narrows the spread, a hit resets it -- which tightens the group
- * without ever moving the point of aim off the target.
+ * is just the deliberate spread. Feeding that back means aiming off by
+ * yesterday's noise, and it roughly doubled the bot's average miss instead of
+ * shrinking it. What survives is the honest part -- a miss narrows the
+ * spread, a hit resets it -- which tightens the group without ever moving the
+ * point of aim off the target.
  */
 import type { BattleEngine } from './BattleEngine';
 import { BALANCE, CARDS, CardId, CardMeta, angleOf, clamp, elevOf, elevRange } from '../game/rules';
@@ -127,7 +126,7 @@ export function chooseShot(engine: BattleEngine, me: number, level: number, brai
     const found: Shot[] = [];
     for (const high of [false, true]) {
       for (const power of POWERS) {
-        const angle = solve(engine, me, aimX, targetY, power, meta.gravity, meta.speed, Boolean(meta.windproof), high);
+        const angle = solve(engine, me, aimX, targetY, power, meta.gravity, meta.speed, high);
         if (angle === null) continue;
         // Mortar cannot leave the barrel below 45 degrees, same as a human's
         // aim pad -- without this the solver's flat root would have the bot
@@ -135,7 +134,7 @@ export function chooseShot(engine: BattleEngine, me: number, level: number, brai
         // the target it was aimed at.
         const elev = elevOf(angle, facing);
         if (elev < loElev || elev > hiElev) continue;
-        if (!meta.pierce && blocked(engine, me, angle, power, meta.gravity, meta.speed, Boolean(meta.windproof))) continue;
+        if (!meta.pierce && blocked(engine, me, angle, power, meta.gravity, meta.speed)) continue;
         found.push({ angle, power, card: id });
       }
     }
@@ -254,9 +253,10 @@ function pickCard(
 /**
  * The elevation that puts a ball of this speed onto that point.
  *
- * Closed form, then three passes to fold the wind in: the crosswind
- * displacement depends on the flight time, and the flight time depends on the
- * angle, so the two are settled by iteration rather than by algebra. Three
+ * Closed form, then three passes to refine it: the muzzle's own position
+ * depends on the elevation (it sits at the end of the barrel), and the
+ * elevation the closed form solves for depends on where the muzzle actually
+ * is, so the two are settled by iteration rather than by algebra. Three
  * passes is comfortably enough at these speeds.
  */
 function solve(
@@ -267,20 +267,17 @@ function solve(
   power: number,
   gravityMult: number,
   speedMult: number,
-  windproof: boolean,
   high: boolean,
 ): number | null {
   const g = BALANCE.GRAVITY * gravityMult;
   const v = (BALANCE.MIN_SPEED + (engine.arena.maxSpeed - BALANCE.MIN_SPEED) * power) * speedMult;
   const facing = engine.facing(self);
-  const wind = windproof ? 0 : engine.wind * BALANCE.WIND_ACCEL;
 
   // Everything is solved as if firing rightward, then mirrored back. Halves
   // the sign handling and removes the whole class of bug that lives there.
   const mirror = facing < 0 ? -1 : 1;
 
   let angle: number | null = null;
-  let flight = 0.8;
 
   for (let pass = 0; pass < 3; pass++) {
     const start = engine.muzzle(self, angle ?? (facing > 0 ? -0.7 : -Math.PI + 0.7));
@@ -288,14 +285,9 @@ function solve(
     const dy = targetY - start.y;
     if (dx <= 40) return null;
 
-    // Aim upwind by however far the wind will have pushed the ball by then.
-    const dxEff = dx - 0.5 * wind * mirror * flight * flight;
-    if (dxEff <= 40) return null;
-
-    const local = arc(dxEff, dy, v, g, high);
+    const local = arc(dx, dy, v, g, high);
     if (local === null) return null;
 
-    flight = dxEff / Math.max(60, v * Math.cos(local));
     // Kept in the same range the aim pad produces, so a bot's parting shot is
     // a valid starting elevation for whoever takes the wheel after it.
     angle = mirror > 0 ? local : -local - Math.PI;
@@ -328,12 +320,10 @@ function blocked(
   power: number,
   gravityMult: number,
   speedMult: number,
-  windproof: boolean,
 ): boolean {
   if (engine.rocks.length === 0) return false;
   const g = BALANCE.GRAVITY * gravityMult;
   const v = (BALANCE.MIN_SPEED + (engine.arena.maxSpeed - BALANCE.MIN_SPEED) * power) * speedMult;
-  const wind = windproof ? 0 : engine.wind * BALANCE.WIND_ACCEL;
 
   const start = engine.muzzle(self, angle);
   let x = start.x;
@@ -343,7 +333,6 @@ function blocked(
   const dt = 1 / 60;
 
   for (let i = 0; i < 600; i++) {
-    vx += wind * dt;
     vy += g * dt;
     x += vx * dt;
     y += vy * dt;

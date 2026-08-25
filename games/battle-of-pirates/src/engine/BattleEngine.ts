@@ -13,10 +13,10 @@
  *    the shape, never a point-inside test, so nothing tunnels through a hull
  *    at close range, which is exactly where a hit matters most.
  *
- * 3. **Every random thing is seeded.** The hand you are dealt, the wind, the
- *    drift: all pure functions of (match seed, turn number). Two clients
- *    therefore deal themselves the same match with nothing to negotiate, and
- *    the wire carries turns rather than state.
+ * 3. **Every random thing is seeded.** The hand you are dealt, the drift:
+ *    all pure functions of (match seed, turn number). Two clients therefore
+ *    deal themselves the same match with nothing to negotiate, and the wire
+ *    carries turns rather than state.
  */
 import { fxSprites, bakeSea, drawFallbackSea, drawRock, drawWaves, rockRadius } from '../game/sea';
 import { SHIPS, drawShip } from '../game/ships';
@@ -156,7 +156,6 @@ export class BattleEngine {
   turn: number;
   turnNo = 0;
   winner: Team | null = null;
-  wind = 0;
   /** Seconds left to aim. Only counted down on the device whose turn it is. */
   turnClock = BALANCE.TURN_TIME;
   hand: CardId[] = [];
@@ -202,7 +201,7 @@ export class BattleEngine {
   private lastFired: Record<Team, number> = { 0: -1, 1: -1 };
   /** The preview of the other side's shot: what was fired, before its outcome is known. */
   private pendingFire: FirePacket | null = null;
-  /** The other side's shot, fully resolved -- HP, wind, drift, next turn. */
+  /** The other side's shot, fully resolved -- HP, drift, the mountain, next turn. */
   private pendingRemote: ShotPacket | null = null;
   /**
    * True from the moment a remote shot starts flying until its outcome is
@@ -264,7 +263,6 @@ export class BattleEngine {
     this.turn = Math.max(0, this.ships.findIndex((s) => s.team === cfg.first));
 
     const rnd = this.rngFor(0);
-    this.wind = cfg.rules.wind ? (rnd() * 2 - 1) * 0.7 : 0;
     for (const ship of this.ships) {
       ship.x = ship.anchorX + (rnd() * 2 - 1) * this.arena.driftStep;
     }
@@ -330,7 +328,7 @@ export class BattleEngine {
    * One generator per turn, derived from the match seed.
    *
    * Not one long stream: a client replaying a turn to animate it must draw the
-   * same hand and the same wind as the client that played it. Keying on the
+   * same hand and the same drift as the client that played it. Keying on the
    * turn number makes every draw reproducible from the two numbers both sides
    * already hold.
    */
@@ -450,10 +448,10 @@ export class BattleEngine {
   private beginTurn() {
     const rnd = this.rngFor(this.turnNo + 1);
     // Cards off is a real mode, not a hidden hand: everyone fires the plain
-    // round shot every turn, so the battle is aim and wind and nothing else.
+    // round shot every turn, so the battle is aim and range and nothing else.
     // Skipping the deal leaves this turn's generator untouched, which costs
-    // nothing — wind and drift roll from their own stream (see resolve), and
-    // both clients are on the same rule either way.
+    // nothing — drift rolls from its own stream (see resolve), and both
+    // clients are on the same rule either way.
     this.hand = this.cfg.rules.cards ? dealHand(rnd) : ['round'];
     this.selected = this.hand[0];
     this.phase = 'deal';
@@ -564,7 +562,6 @@ export class BattleEngine {
         blast: BALANCE.BLAST_R * card.blast,
         gravity: BALANCE.GRAVITY * card.gravity,
         pierce: Boolean(card.pierce),
-        windproof: Boolean(card.windproof),
         burn: card.burn ?? 0,
         alive: true,
         age: 0,
@@ -718,7 +715,6 @@ export class BattleEngine {
     for (const p of this.projectiles) {
       if (!p.alive) continue;
       p.age += dt;
-      if (!p.windproof) p.vx += this.wind * BALANCE.WIND_ACCEL * dt;
       p.vy += p.gravity * dt;
 
       const nx = p.x + p.vx * dt;
@@ -911,15 +907,19 @@ export class BattleEngine {
         if (packet.f[i] !== undefined) this.ships[i].burn = clamp(Math.round(packet.f[i]), 0, 4);
         if (packet.d[i] !== undefined) this.ships[i].x = this.clampDrift(i, packet.d[i]);
       }
-      this.wind = clamp(packet.w, -BALANCE.WIND_MAX, BALANCE.WIND_MAX);
+      // The mountain's hull is authoritative here too, the same reason ship hp
+      // is: two clients replaying the identical flight can still land on two
+      // different ideas of whether it grazed the rock, and nothing else ever
+      // corrected that divergence once it happened -- the same rock stayed
+      // wrong, differently, on each screen for the rest of the match.
+      for (let i = 0; i < this.rocks.length; i++) {
+        if (packet.rk[i] !== undefined) this.rocks[i].hp = clamp(packet.rk[i], 0, BALANCE.ROCK_HP);
+      }
       this.turnNo = next;
       this.turn = clamp(Math.round(packet.o), 0, this.ships.length - 1);
       this.lastFired[this.ships[this.turn].team] = this.turn;
     } else {
       const rnd = this.rngFor(next + 977);
-      this.wind = this.cfg.rules.wind
-        ? clamp(this.wind + (rnd() * 2 - 1) * BALANCE.WIND_STEP, -BALANCE.WIND_MAX, BALANCE.WIND_MAX)
-        : 0;
       for (let i = 0; i < this.ships.length; i++) this.ships[i].x = this.drift(i, rnd);
       const shooter = this.turn;
       this.turnNo = next;
@@ -948,7 +948,7 @@ export class BattleEngine {
           hp: this.ships.map((s) => Math.round(s.hp)),
           f: this.ships.map((s) => s.burn),
           d: this.ships.map((s) => Math.round(s.x)),
-          w: round3(this.wind),
+          rk: this.rocks.map((r) => Math.round(r.hp)),
           o: this.turn,
         });
       }
@@ -1272,7 +1272,6 @@ export class BattleEngine {
     // off at it would draw nothing at all.
     const localSeaY = this.waterLevelFor(this.turn);
     for (let i = 0; i < dots * perDot; i++) {
-      if (!card.windproof) vx += this.wind * BALANCE.WIND_ACCEL * dt;
       vy += BALANCE.GRAVITY * card.gravity * dt;
       x += vx * dt;
       y += vy * dt;

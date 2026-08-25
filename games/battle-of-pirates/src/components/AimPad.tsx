@@ -43,8 +43,8 @@ interface Drag {
  * opening stretch of the ball's actual path, and it turned out to be the whole
  * game: you dragged until the dots lined up with the enemy and let go. An
  * arrow says direction and strength — the two things the gesture is setting —
- * and says nothing at all about where the ball comes down. Reading the wind
- * and the range is the player's job again.
+ * and says nothing at all about where the ball comes down. Reading the range
+ * is the player's job again.
  *
  * A free-floating flag rather than a shaft with a head on it: it sits just
  * past the guide circle's edge, pointing the way the shot leaves, and does
@@ -149,7 +149,13 @@ export default function AimPad({
   useEffect(() => {
     const measure = () => {
       const small = Math.min(window.innerWidth, window.innerHeight);
-      reach.current = Math.max(42, Math.min(78, small * 0.12));
+      // A coarse pointer -- a thumb, not a mouse tip -- needs a bigger target
+      // to pull back against. The same radius a mouse can place precisely
+      // just read as small and fiddly to drag on a phone.
+      const touch = window.matchMedia('(pointer: coarse)').matches;
+      reach.current = touch
+        ? Math.max(64, Math.min(120, small * 0.2))
+        : Math.max(42, Math.min(78, small * 0.12));
     };
     measure();
     window.addEventListener('resize', measure);
