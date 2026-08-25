@@ -124,10 +124,18 @@ export const BALANCE = {
   SCHOOL_ALIGN: 0.9,
   SCHOOL_SPACING: 80,
   SCHOOL_SPREAD: 300,
-  /** Share of spawns that arrive as a shoal rather than a lone fish. */
-  SHOAL_CHANCE: 0.3,
-  SHOAL_MIN: 5,
-  SHOAL_MAX: 9,
+  /**
+   * Share of spawns that arrive as a shoal rather than a lone fish.
+   *
+   * Raised from 0.3, alongside a bigger SHOAL_MIN/MAX below: shoals are
+   * always genuinely small (see SHOAL_MAX_SIZE in fish.ts, and the tiny-prey
+   * band in spawnEnemy), so they are the most reliable source of "the water
+   * is full of little fish" -- a lone spawnEnemy() prey fish is only small
+   * *relative to you*, and stops looking small at all once you've grown.
+   */
+  SHOAL_CHANCE: 0.45,
+  SHOAL_MIN: 7,
+  SHOAL_MAX: 13,
 
   // Boss
   BOSS_INTERVAL: 90,
@@ -373,6 +381,11 @@ export class GameEngine {
     fish.name = name;
     fish.size = p[4];
     fish.score = p[5];
+    // A remote fish's peak is whatever the packets we've seen from it have
+    // shown so far -- there is no local grow() to hook for someone else's
+    // fish, and this is the only place their score and size ever arrive.
+    if (fish.score > fish.bestScore) fish.bestScore = fish.score;
+    if (fish.size > fish.bestSize) fish.bestSize = fish.size;
     fish.asset = p[6];
     fish.angle = p[7];
     fish.dead = p[8] === 1;
@@ -486,6 +499,8 @@ export class GameEngine {
     fish.size = FISH_ASSETS[asset].size;
     fish.asset = asset;
     fish.score = 0;
+    // bestScore/bestSize are deliberately untouched -- that's the whole
+    // record a leaderboard is for. See the Fish and leaderboard() comments.
     fish.dead = false;
     fish.vx = 0;
     fish.vy = 0;
@@ -522,17 +537,27 @@ export class GameEngine {
     return this.locals.get(id);
   }
 
-  /** Everyone in the water, biggest first — the in-game scoreboard. */
-  leaderboard(): { id: string; name: string; size: number; score: number; local: boolean }[] {
-    const rows: { id: string; name: string; size: number; score: number; local: boolean }[] = [];
+  /**
+   * Every seat that has been in the water this match, ranked by the best
+   * score they have ever reached in it -- not by their current size, which
+   * a respawn quietly wipes back to nothing. `size`/`score` ride along too,
+   * for a HUD that also wants to say how someone is doing *right now*, but
+   * the ranking itself is the record: it is the whole reason a dead or
+   * respawned seat still belongs on this list at all.
+   *
+   * Includes a dead remote seat rather than dropping it -- a leaderboard
+   * that erases someone the instant they're eaten stops being a record of
+   * the match and goes back to being a live "who's biggest" readout.
+   */
+  leaderboard(): { id: string; name: string; size: number; score: number; bestSize: number; bestScore: number; local: boolean }[] {
+    const rows: { id: string; name: string; size: number; score: number; bestSize: number; bestScore: number; local: boolean }[] = [];
     for (const [id, f] of this.locals) {
-      rows.push({ id, name: f.name ?? 'You', size: f.size, score: f.score, local: true });
+      rows.push({ id, name: f.name ?? 'You', size: f.size, score: f.score, bestSize: f.bestSize, bestScore: f.bestScore, local: true });
     }
     for (const [id, f] of this.remotes) {
-      if (f.dead) continue;
-      rows.push({ id, name: f.name ?? 'Player', size: f.size, score: f.score, local: false });
+      rows.push({ id, name: f.name ?? 'Player', size: f.size, score: f.score, bestSize: f.bestSize, bestScore: f.bestScore, local: false });
     }
-    return rows.sort((a, b) => b.size - a.size);
+    return rows.sort((a, b) => b.bestScore - a.bestScore);
   }
 
   // ── sizing ───────────────────────────────────────────────────────────────
@@ -769,32 +794,55 @@ export class GameEngine {
     const ref = this.referenceSize();
     const roll = Math.random();
 
-    // Predators lean in as the fleet grows, so a brand new fish gets a
-    // gentler reef and pressure ramps up to match a player who has already
-    // grown, instead of a fixed 30% predator chance from the first second.
+    /**
+     * Predators lean in as the fleet grows, but prey stays the majority of
+     * every spawn no matter how far that ramp has climbed.
+     *
+     * This used to run preyCut from 0.55 down to 0.35 and split everything
+     * past peerCut 50/50 between small predator and shark -- so a fully
+     * grown reef spawned *predators* nearly two shots in three, and a coin
+     * flip of those was a shark. That is exactly the "I just keep getting
+     * sharks and no other fish" complaint: past a few hundred size the water
+     * stopped looking like an ocean and started looking like a shark tank.
+     * A real reef has vastly more small fish than big ones at every depth;
+     * this now holds prey at a majority throughout, and sharks are the rare
+     * tier they're supposed to be -- unmistakably huge when one shows up,
+     * but a small slice of an already-smaller predator budget rather than
+     * half of it.
+     */
     const grown = this.grownFor(ref);
-    const preyCut = 0.55 - grown * 0.2;
-    const peerCut = preyCut + 0.3;
+    const preyCut = 0.65 - grown * 0.1; // 65% fresh -> 55% fully grown, always the majority
+    const peerCut = preyCut + 0.15; // peers: a fixed 15% slice throughout
+    const predatorBudget = 1 - peerCut; // 20% fresh -> 30% fully grown
+    // Of that predator budget, sharks are always the minority tier -- roughly
+    // a quarter of it, so "predator" mostly still means the small kind you
+    // can out-turn, and a shark stays the exception that makes you look twice.
+    const sharkCut = peerCut + predatorBudget * 0.72;
 
     let size: number;
     if (roll < preyCut) {
-      // Prey: always something to eat, so a run never stalls. A little
-      // bigger than a bare snack so a young fish still feels like it's
-      // eating something, not just noise.
-      size = ref * (0.3 + Math.random() * 0.65);
+      // Prey is two different things, not one ref-scaled band: past the
+      // halfway point it's a truly small fish, an absolute size regardless
+      // of how big the reef's average has grown, which is what keeps the
+      // water looking like it has little fish in it even once everyone is
+      // huge. The other half is the old ref-relative snack -- always
+      // something bite-sized *for you specifically* -- for variety.
+      size =
+        Math.random() < 0.55
+          ? 4 + Math.random() * (SHOAL_MAX_SIZE - 4)
+          : ref * (0.3 + Math.random() * 0.55);
     } else if (roll < peerCut) {
       // Peers: can't eat you, you can't eat them. They make the water feel busy.
       size = ref * (0.85 + Math.random() * 0.3);
-    } else if (Math.random() < 0.5) {
+    } else if (roll < sharkCut) {
       // Small predator: bigger than you, but only just -- a threat you can
       // actually out-turn or out-grow, not a wall.
       size = ref * (1.15 + Math.random() * 0.45);
     } else {
-      // Shark: unmistakably, seriously bigger. Split 50/50 with the small
-      // predator above rather than one smooth 1.2x-2.2x range, so "predator"
-      // means either "watch it" or "run", not an even gradient between the
-      // two that always reads as roughly the same fish.
-      size = ref * (2.0 + Math.random() * 1.2);
+      // Shark: unmistakably, seriously bigger, and deliberately the
+      // narrowest slice of the roll -- a rare sight, not the default
+      // predator you meet once the reef has grown up.
+      size = ref * (2.0 + Math.random() * 1.4);
     }
     // A safety ceiling, not a real limit -- big enough that a predator's own
     // ref-relative formula above decides its size long before this ever
@@ -1179,6 +1227,8 @@ export class GameEngine {
     // `asset` is deliberately untouched. You stay the fish you chose and simply
     // get bigger; swapping the sprite as the score climbed meant players stopped
     // recognising themselves halfway through a run.
+    if (fish.score > fish.bestScore) fish.bestScore = fish.score;
+    if (fish.size > fish.bestSize) fish.bestSize = fish.size;
     audioService.playEatSound();
   }
 
@@ -1194,6 +1244,8 @@ export class GameEngine {
       vy: 0,
       size,
       score: 0,
+      bestScore: 0,
+      bestSize: size,
       asset,
       angle: 0,
       dead: false,

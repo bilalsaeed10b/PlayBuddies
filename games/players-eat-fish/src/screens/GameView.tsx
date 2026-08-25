@@ -89,8 +89,10 @@ export default function GameView({
   const [ready, setReady] = useState(false);
   const [peerCount, setPeerCount] = useState(0);
   const [link, setLink] = useState<'direct' | 'relayed' | 'alone'>('alone');
-  const [scoreboard, setScoreboard] = useState<{ id: string; name: string; size: number; score: number; local: boolean }[]>([]);
-  const [defeat, setDefeat] = useState<{ by: string; score: number } | null>(null);
+  const [scoreboard, setScoreboard] = useState<
+    { id: string; name: string; size: number; score: number; bestSize: number; bestScore: number; local: boolean }[]
+  >([]);
+  const [defeat, setDefeat] = useState<{ by: string; score: number; best: number } | null>(null);
 
   const online = Boolean(roomId && uid);
   const isHost = !online || hostId === uid;
@@ -146,7 +148,7 @@ export default function GameView({
         // With two or three players sharing a keyboard, one being eaten must
         // not freeze the others — the screen only comes up once nobody is left.
         if (engineRef.current?.allLocalsDead()) {
-          setDefeat({ by: killedBy, score: fish?.score ?? 0 });
+          setDefeat({ by: killedBy, score: fish?.score ?? 0, best: fish?.bestScore ?? 0 });
           onMatchOver(engineRef.current.leaderboard()[0]?.local === true);
         }
 
@@ -407,10 +409,17 @@ export default function GameView({
           <p className="text-[10px] font-bold uppercase tracking-widest text-slate-600">Size</p>
           <p className="text-2xl font-black leading-none text-emerald-700">{Math.floor(me?.size ?? 0)}</p>
           <p className="text-[11px] font-bold text-slate-500">{me?.score ?? 0} pts</p>
+          {/* The run's own score resets on every respawn; this is the one
+              number on screen that doesn't -- your best this match, however
+              many lives it took to get there. */}
+          {(me?.bestScore ?? 0) > 0 && (
+            <p className="text-[11px] font-bold text-amber-600">Best {me?.bestScore} pts</p>
+          )}
         </div>
 
         {scoreboard.length > 1 && (
           <div className="hidden sm:block rounded-2xl border border-black/10 bg-white/80 px-3 py-2 shadow-sm">
+            <p className="mb-1 text-[9px] font-black uppercase tracking-widest text-slate-400">Best this game</p>
             {scoreboard.slice(0, 5).map((row, i) => (
               <div
                 key={row.id}
@@ -418,7 +427,11 @@ export default function GameView({
               >
                 <span className="w-3 text-slate-400">{i + 1}</span>
                 <span className="max-w-[8rem] truncate">{row.name}</span>
-                <span className="ml-auto tabular-nums">{Math.floor(row.size)}</span>
+                {/* Current size stays visible in small type -- it's who's
+                    dangerous right now, which the peak score next to it
+                    doesn't tell you if they've since respawned tiny. */}
+                <span className="text-[10px] font-normal text-slate-400 tabular-nums">{Math.floor(row.size)}</span>
+                <span className="ml-auto tabular-nums">{row.bestScore}</span>
               </div>
             ))}
           </div>
@@ -483,6 +496,9 @@ export default function GameView({
             <div className="rounded-2xl bg-slate-900/5 p-6">
               <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500">Score</p>
               <p className="text-5xl font-black text-emerald-600">{defeat.score}</p>
+              {defeat.best > defeat.score && (
+                <p className="mt-1 text-xs font-bold text-amber-600">Best this game: {defeat.best}</p>
+              )}
             </div>
             <div className="flex flex-col gap-3">
               <button

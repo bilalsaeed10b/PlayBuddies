@@ -16,6 +16,14 @@ export interface Fish {
   /** Collision radius, and the currency of the whole game. */
   size: number;
   score: number;
+  /**
+   * The high-water mark for this seat, for this match. Unlike `size` and
+   * `score`, a respawn never touches these -- they are what makes a
+   * leaderboard mean something once eating and respawning is part of the
+   * game. See `leaderboard()`.
+   */
+  bestScore: number;
+  bestSize: number;
   asset: number;
   angle: number;
   dead: boolean;
