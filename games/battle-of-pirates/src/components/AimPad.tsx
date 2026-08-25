@@ -154,8 +154,8 @@ export default function AimPad({
       // just read as small and fiddly to drag on a phone.
       const touch = window.matchMedia('(pointer: coarse)').matches;
       reach.current = touch
-        ? Math.max(64, Math.min(120, small * 0.2))
-        : Math.max(42, Math.min(78, small * 0.12));
+        ? Math.max(76, Math.min(148, small * 0.24))
+        : Math.max(52, Math.min(96, small * 0.15));
     };
     measure();
     window.addEventListener('resize', measure);
@@ -301,11 +301,14 @@ export default function AimPad({
               strokeLinecap="round"
             />
             <Arrow ox={drag.ox} oy={drag.oy} x={drag.x} y={drag.y} power={drag.power} reach={reach.current} />
-            <circle cx={drag.ox} cy={drag.oy} r={9} fill="rgba(255, 232, 170, 0.9)" />
+            {/* Anchor and knob, both sized off the ring rather than fixed, so
+                growing the reach grows the whole gesture instead of leaving a
+                thumb-sized knob rattling around inside a much larger circle. */}
+            <circle cx={drag.ox} cy={drag.oy} r={reach.current * 0.1} fill="rgba(255, 232, 170, 0.9)" />
             <circle
               cx={drag.x}
               cy={drag.y}
-              r={26}
+              r={Math.max(24, reach.current * 0.28)}
               fill="rgba(8, 20, 34, 0.55)"
               stroke="rgba(255, 232, 170, 0.9)"
               strokeWidth={3}

@@ -6,14 +6,13 @@
  * keeps the simulation testable and the transport swappable.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Loader2, Ship as ShipIcon } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Loader2, Ship as ShipIcon } from 'lucide-react';
 import AimPad, { Aim } from '../components/AimPad';
 import CardHand, { HAND_HEIGHT, HAND_HEIGHT_COMPACT } from '../components/CardHand';
 import { BattleEngine, Seat } from '../engine/BattleEngine';
 import { Brain, chooseShot, newBrain } from '../engine/ai';
 import { BALANCE, CardId, TEAM_COLORS, angleOf, clamp, elevOf, elevRange } from '../game/rules';
 import { QualityGovernor } from '../game/quality';
-import { SHIPS } from '../game/ships';
 import { IN_IFRAME, toggleFullscreen } from '../fullscreen';
 import ControlsTray from '@shared/controls/ControlsTray';
 import { audioService } from '../services/audio';
@@ -130,6 +129,19 @@ export default function BattleView({
     setWireGeneration((n) => n + 1);
   }, []);
   const [dragging, setDragging] = useState(false);
+  /**
+   * Whether the two rosters are showing names or just bars.
+   *
+   * Folded by default on anything being aimed with a thumb. A phone in
+   * landscape is the tightest screen this game runs on and the one where the
+   * roster covered actual water, and the information it holds -- who is on
+   * which side, and roughly how hurt -- is already on the water: every hull
+   * carries its own bar above it. Read once at mount rather than off the
+   * `coarse` state below, which only lands after the first paint.
+   */
+  const [hudOpen, setHudOpen] = useState(
+    () => typeof matchMedia !== 'function' || !matchMedia('(pointer: coarse)').matches,
+  );
   const [coarse, setCoarse] = useState(false);
   const [compact, setCompact] = useState(false);
   const [portrait, setPortrait] = useState(false);
@@ -653,27 +665,48 @@ export default function BattleView({
       {/* -- every hull, at a glance, pinned to the edge its own side sails on --
           left is always team 0, right is always team 1, the same split the
           arena itself draws them in, so a glance at either edge tells you
-          who's where without reading a name. */}
+          who's where without reading a name.
+
+          Kept deliberately thin. On a phone in landscape there are barely 400
+          points of height to work with, and two stacks of full-width cards ate
+          a third of the water each -- so this is a name, a number and a hairline
+          bar, and the ship's class name is gone entirely: it is the one line
+          here that never changes and never affects a shot. The chevron folds
+          even that away to a column of bare bars for anyone who wants the sea
+          back, and folded is the default wherever a thumb is doing the aiming. */}
       {([0, 1] as Team[]).map((team) => (
         <div
           key={team}
-          className={`pointer-events-none absolute top-16 z-20 w-32 sm:w-40 ${team === 0 ? 'left-2' : 'right-2'}`}
+          className={`pointer-events-none absolute top-14 z-20 flex flex-col ${team === 0 ? 'left-1.5 items-start' : 'right-1.5 items-end'}`}
         >
-          <div className="space-y-1 rounded-2xl border border-white/15 bg-slate-950/55 p-1.5 backdrop-blur-md">
+          <div
+            className={`pointer-events-none space-y-0.5 rounded-lg border border-white/10 bg-slate-950/50 p-1 backdrop-blur-md ${
+              hudOpen ? 'w-[92px] sm:w-[116px]' : 'w-8'
+            }`}
+          >
             {config.seats.map((seat, i) =>
               seat.team !== team ? null : (
                 <HullMeter
                   key={i}
                   name={seat.name}
-                  skin={seat.skin}
                   hp={hp[i] ?? 0}
                   team={team}
                   mine={localShips.has(i)}
                   active={turn === i && !over}
+                  open={hudOpen}
                 />
               ),
             )}
           </div>
+          <button
+            onClick={() => setHudOpen((open) => !open)}
+            aria-label={hudOpen ? 'Fold the roster away' : 'Show the roster'}
+            className="pointer-events-auto mt-1 flex h-6 w-6 items-center justify-center rounded-md border border-white/10 bg-slate-950/50 text-white/40 backdrop-blur-md active:bg-white/10"
+          >
+            {/* Points the way the panel is about to move: outward to fold, back
+                inward to open. */}
+            {(team === 0) === hudOpen ? <ChevronLeft className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+          </button>
         </div>
       ))}
 
@@ -819,46 +852,57 @@ export default function BattleView({
 
 function HullMeter({
   name,
-  skin,
   hp,
   team,
   mine,
   active,
+  open,
 }: {
   name: string;
-  skin: number;
   hp: number;
   team: Team;
   mine: boolean;
   active: boolean;
+  /** Folded, this is a bare bar and nothing else. */
+  open: boolean;
 }) {
   const frac = clamp(hp / BALANCE.MAX_HP, 0, 1);
   const colors = TEAM_COLORS[team];
-  return (
-    <div
-      className={`min-w-0 flex-1 rounded-xl px-2.5 py-1.5 transition-colors ${active ? 'bg-white/10' : ''}`}
-      style={{ boxShadow: active ? `inset 0 0 0 1.5px ${colors.main}` : undefined }}
-    >
-      <div className="flex items-baseline justify-between gap-2">
-        <span className="truncate text-[11px] font-black uppercase tracking-wider" style={{ color: colors.light }}>
-          {/* The marker is dropped when the seat is already called "You", which
-              is what the solo seat is named. "You - you" reads as a bug. */}
-          {name}
-          {mine && name.toLowerCase() !== 'you' ? ' - you' : ''}
-        </span>
-        <span className="shrink-0 text-sm font-black tabular-nums">{hp}</span>
-      </div>
-      <div className="mt-1 h-2 w-full overflow-hidden rounded-full bg-white/15">
+  const fill = frac > 0.55 ? '#4ade80' : frac > 0.3 ? '#fbbf24' : '#f87171';
+
+  if (!open) {
+    return (
+      <div
+        className="h-1.5 w-full overflow-hidden rounded-full bg-white/20"
+        style={{ boxShadow: active ? `0 0 0 1.5px ${colors.main}` : undefined }}
+      >
         <div
           className="h-full rounded-full transition-[width] duration-300"
-          style={{
-            width: `${frac * 100}%`,
-            background: frac > 0.55 ? '#4ade80' : frac > 0.3 ? '#fbbf24' : '#f87171',
-          }}
+          style={{ width: `${frac * 100}%`, background: fill }}
         />
       </div>
-      <div className="mt-0.5 truncate text-[9px] font-bold uppercase tracking-wider text-white/35">
-        {SHIPS[clamp(skin, 0, SHIPS.length - 1)].name}
+    );
+  }
+
+  return (
+    <div
+      className={`min-w-0 rounded-md px-1 py-0.5 transition-colors ${active ? 'bg-white/10' : ''}`}
+      style={{ boxShadow: active ? `inset 0 0 0 1px ${colors.main}` : undefined }}
+    >
+      <div className="flex items-center gap-1">
+        {/* A dot rather than the " - you" that used to be spelled out: at this
+            width the suffix was eating the name it was attached to. */}
+        {mine && <span className="h-1 w-1 shrink-0 rounded-full bg-amber-300" />}
+        <span className="truncate text-[9px] font-black uppercase tracking-wide" style={{ color: colors.light }}>
+          {name}
+        </span>
+        <span className="ml-auto shrink-0 text-[10px] font-black tabular-nums text-white/85">{hp}</span>
+      </div>
+      <div className="mt-0.5 h-1 w-full overflow-hidden rounded-full bg-white/20">
+        <div
+          className="h-full rounded-full transition-[width] duration-300"
+          style={{ width: `${frac * 100}%`, background: fill }}
+        />
       </div>
     </div>
   );
