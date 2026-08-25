@@ -18,6 +18,7 @@ import { IN_IFRAME, toggleFullscreen } from '../fullscreen';
 import ControlsTray from '@shared/controls/ControlsTray';
 import { audioService } from '../services/audio';
 import { packRules, unpackRules } from '../types/game';
+import { devLog } from '@shared/devlog/devlog';
 import type { GameSettings, MatchRules, NetPacket, Phase, Team } from '../types/game';
 // Type only: the runtime value arrives through the dynamic import below, which
 // is what keeps the Firebase SDK out of an offline player's bundle.
@@ -231,6 +232,7 @@ export default function BattleView({
 
   const handlePacket = useCallback(
     (packet: NetPacket, from: string) => {
+      devLog('battle-of-pirates', 'wire:recv', { from, type: packet.t, n: 'n' in packet ? packet.n : undefined });
       if (packet.t === 'start') {
         setSession((current) =>
           current && current.seed === packet.seed
@@ -282,12 +284,14 @@ export default function BattleView({
         // The match can be left while this import is still in flight; without
         // the guard the listener opens with nothing left to close it.
         if (disposed) return;
+        devLog('battle-of-pirates', 'wire:open', { roomId: config.roomId, isHost: config.isHost, peerUids: config.peerUids });
         link = new Link(
           config.roomId as string,
           config.uid as string,
           config.peerUids,
           handlePacket,
           (message) => {
+            devLog('battle-of-pirates', 'wire:error', { message });
             setNotice(message);
             // Every message TurnLink reports on its own -- the open failing,
             // the listener dropping, a send bouncing -- means the link itself
@@ -303,6 +307,7 @@ export default function BattleView({
         // The whole negotiation, sent once: a seed, a coin toss and the rules.
         // Everything else about the match is derived from those.
         if (config.isHost) {
+          devLog('battle-of-pirates', 'wire:send', { type: 'start', seed: config.seed, first: config.first });
           link.send({
             t: 'start',
             n: Date.now(),
@@ -342,6 +347,14 @@ export default function BattleView({
 
     const governor = new QualityGovernor(settingsRef.current.lowPower);
 
+    devLog('battle-of-pirates', 'engine:build', {
+      seed: session.seed,
+      first: session.first,
+      players: session.rules.players,
+      seats: config.seats.map((s) => ({ team: s.team, id: s.id, control: s.control })),
+      localShips: config.localShips,
+    });
+
     const engine = new BattleEngine({
       seats: config.seats,
       seed: session.seed,
@@ -356,7 +369,12 @@ export default function BattleView({
         else if (kind === 'burn') audioService.playBurn();
         else if (kind === 'sink') audioService.playSink();
       },
-      onLocalShot: online ? (packet) => linkRef.current?.send(packet) : undefined,
+      onLocalShot: online
+        ? (packet) => {
+            devLog('battle-of-pirates', 'wire:send', { type: packet.t, n: packet.n });
+            linkRef.current?.send(packet);
+          }
+        : undefined,
       onOver: (winner) => {
         setOver({ winner });
         // With a fleet, "did I win" is about the side I am sailing on, and the
@@ -375,8 +393,13 @@ export default function BattleView({
     queued.current = [];
 
     brains.current = engine.ships.map(() => newBrain());
+    // Seeded per shot rather than Math.random(): every connected client runs
+    // this same decide() for the same bot on the same turn, and an unseeded
+    // roll meant each one picked a different aim, card or target for the
+    // identical shot -- see aiRng's own comment for what that looked like
+    // online.
     const decide = (ship: number) =>
-      chooseShot(engine, ship, engine.ships[ship].aiLevel, brains.current[ship]);
+      chooseShot(engine, ship, engine.ships[ship].aiLevel, brains.current[ship], engine.aiRng(ship));
 
     // Dev-only handles. "Who is on the water, whose turn does the engine think
     // it is, and what would a bot do from here" are the first three questions
@@ -455,6 +478,12 @@ export default function BattleView({
         setHp(engine.hp);
       }
       if (engine.turn !== shown.turn) {
+        devLog('battle-of-pirates', 'turn:change', {
+          from: shown.turn,
+          to: engine.turn,
+          control: engine.ships[engine.turn]?.control,
+          seatId: config.seats[engine.turn]?.id,
+        });
         shown.turn = engine.turn;
         setTurn(engine.turn);
       }

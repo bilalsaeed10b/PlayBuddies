@@ -339,6 +339,30 @@ export class BattleEngine {
   }
 
   /**
+   * A fresh, seeded stream for one bot's decision this turn.
+   *
+   * `chooseShot` used to reach for `Math.random()` directly, which was fine
+   * for the single-device case it was written for but not for an online
+   * match: every connected client runs its own copy of this engine and its
+   * own copy of `update()`'s `ship.control === 'ai'` branch, so an
+   * unseeded bot decision meant the host, and every guest, independently
+   * rolled a *different* shot for the exact same bot on the exact same turn
+   * -- different aim, different card, sometimes a different target -- and
+   * then each broadcast its own guess as if it were authoritative. Two
+   * clients disagreeing about what a bot just did, mid-turn-cycle, is what
+   * "not synced" and "wasn't waiting for other players" both look like from
+   * the outside.
+   *
+   * Salted on the shooter as well as the turn so two different bots acting
+   * in the same match never draw from the same stream, the same reason
+   * `rngFor` itself is keyed on the turn rather than one long-running
+   * generator.
+   */
+  aiRng(shooter: number): () => number {
+    return this.rngFor(this.turnNo * 97 + shooter * 131 + 700003);
+  }
+
+  /**
    * The mountain between the two anchors.
    *
    * One landmass, not a reef of two or three -- tall enough (see ROCK_R_MIN)
@@ -497,8 +521,12 @@ export class BattleEngine {
 
     // Sent before a single physics step has run. Only for a shot this device
     // actually owns -- not a replay of what the wire just handed us, and not
-    // this device's own bot firing on behalf of a partner who is still here.
-    this.firedPreviewThisShot = Boolean(this.cfg.onLocalShot) && ship.control !== 'remote';
+    // a bot's turn, which every client now decides identically on its own
+    // (see aiRng) and so never needs to send at all. This used to read
+    // `!== 'remote'`, which -- despite what this very comment already
+    // claimed -- included 'ai' and broadcast every bot decision from every
+    // connected device at once.
+    this.firedPreviewThisShot = Boolean(this.cfg.onLocalShot) && ship.control === 'local';
     if (this.firedPreviewThisShot) {
       this.localSeq += 1;
       this.cfg.onLocalShot!({
@@ -897,10 +925,15 @@ export class BattleEngine {
       this.turnNo = next;
       this.turn = this.nextTurn(shooter);
 
-      // Only a seat this device is responsible for produces a packet. A bot
-      // standing in for someone who left is one of those; an offline match has
-      // nobody listening and the hook is simply absent.
-      if (this.cfg.onLocalShot && this.lastShot && this.ships[shooter].control !== 'remote') {
+      // Only a real local human's seat produces a packet. A bot never does --
+      // whether it started the match that way or took over for someone who
+      // left, aiRng makes its decision a pure function of the match seed, the
+      // turn and the seat, so every connected client (host, every guest, and
+      // a device that only just inherited the wheel after a `bye`) computes
+      // the identical shot on its own and there is nothing to exchange. An
+      // offline match has nobody listening either way, and the hook is
+      // simply absent.
+      if (this.cfg.onLocalShot && this.lastShot && this.ships[shooter].control === 'local') {
         this.cfg.onLocalShot({
           t: 'shot',
           // The same number the preview went out under, so the two halves of

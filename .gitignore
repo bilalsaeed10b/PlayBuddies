@@ -30,6 +30,10 @@ dist
 *.pem
 Thumbs.db
 
+# dev-only playtest log, written by games/_shared/devlog's Vite plugin.
+# Local debugging output, never committed.
+/dev-logs/
+
 # debug
 npm-debug.log*
 yarn-debug.log*

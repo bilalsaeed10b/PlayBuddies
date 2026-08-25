@@ -23,6 +23,7 @@ import { GameWallet, reportResult } from './platform/wallet';
 import BattleView, { MatchConfig } from './screens/BattleView';
 import type { Seat } from './engine/BattleEngine';
 import { DEFAULT_RULES, packRules, unpackRules } from './types/game';
+import { devLog } from '@shared/devlog/devlog';
 import type { GameSettings, MatchRules, MountainRule, PlayerCount, Team } from './types/game';
 
 /**
@@ -216,6 +217,13 @@ export default function App() {
             return;
           }
           setLobbyError(null);
+          devLog('battle-of-pirates', 'lobby:snapshot', {
+            hostId: data.hostId,
+            iAmHost: data.hostId === uid,
+            playerCount: Object.keys(data.players ?? {}).length,
+            matchStarted: Boolean(data.matchStarted),
+            matchRules: data.matchRules,
+          });
           setLobby(data);
           // The host's rules, arriving on the one channel every client is
           // already subscribed to. Without this a guest's `rules.players` is
@@ -341,6 +349,7 @@ export default function App() {
       // does -- there is no room for a guest to flip to the game view on a
       // `rules.players` that hasn't been corrected yet (see the lobby
       // snapshot handler above).
+      devLog('battle-of-pirates', 'host:start-match', { players: rules.players, packed: packRules(rules) });
       await updateDoc(doc(db, 'lobbies', handoff.room), { matchStarted: true, matchRules: packRules(rules) });
     } catch (e) {
       console.error('Could not start the battle', e);
@@ -449,10 +458,26 @@ export default function App() {
       }
     }
 
+    const peerUids = crew.filter((p) => p.uid !== uid).map((p) => p.uid);
+    // The exact thing that was silently wrong before: a guest whose local
+    // `rules.players` hadn't caught up to the host's built a shorter seats
+    // array than the host did. Logged every time this runs so that mismatch
+    // is visible across two tabs' logs without having to reproduce it live.
+    devLog('battle-of-pirates', 'seats:built', {
+      rulesPlayers: rules.players,
+      peopleCount: people.length,
+      crewCount: crew.length,
+      peerUids,
+      seatCount: seats.length,
+      seats: seats.map((s) => ({ team: s.team, id: s.id, control: s.control })),
+      localShips,
+      isHost,
+    });
+
     return {
       roomId: handoff.room,
       uid,
-      peerUids: crew.filter((p) => p.uid !== uid).map((p) => p.uid),
+      peerUids,
       isHost,
       seats,
       // A player who arrived after the berths filled up has no hull; the

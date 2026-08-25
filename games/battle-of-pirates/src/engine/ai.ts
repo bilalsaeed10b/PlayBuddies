@@ -94,7 +94,7 @@ function pickTarget(engine: BattleEngine, me: number): number {
   return best;
 }
 
-export function chooseShot(engine: BattleEngine, me: number, level: number, brain: Brain): Shot {
+export function chooseShot(engine: BattleEngine, me: number, level: number, brain: Brain, rnd: () => number): Shot {
   const tier = TIERS[clamp(level, 0, TIERS.length - 1)];
   const foe = pickTarget(engine, me);
   const facing = engine.facing(me);
@@ -116,7 +116,7 @@ export function chooseShot(engine: BattleEngine, me: number, level: number, brai
 
   const blockedByMountain = mountainBetween(engine, engine.ships[me].x, enemy.x);
   const targetY = engine.shipY(foe) - 24;
-  const aimX = enemy.x + (Math.random() * 2 - 1) * tier.spread * brain.focus;
+  const aimX = enemy.x + (rnd() * 2 - 1) * tier.spread * brain.focus;
 
   // Lofting over the mountain is worth doing on purpose, so both arcs are
   // tried and the one with a clear line wins. A bot that fires flat into the
@@ -142,7 +142,7 @@ export function chooseShot(engine: BattleEngine, me: number, level: number, brai
     return found;
   };
 
-  let card = pickCard(engine, me, foe, tier, blockedByMountain);
+  let card = pickCard(engine, me, foe, tier, blockedByMountain, rnd);
   let options = solveFor(card);
 
   // The picked card couldn't thread the mountain -- a solid one never wears
@@ -169,13 +169,13 @@ export function chooseShot(engine: BattleEngine, me: number, level: number, brai
     // certainty of not.
     const [, hiElev] = elevRange(card);
     const elev = blockedByMountain ? hiElev * 0.92 : 0.72;
-    return { angle: angleOf(elev, facing), power: 0.85 + Math.random() * 0.1, card };
+    return { angle: angleOf(elev, facing), power: 0.85 + rnd() * 0.1, card };
   }
 
   // Prefer a middling power: it keeps the flight watchable and leaves the bot
   // somewhere to go when it needs to correct.
   options.sort((a, b) => Math.abs(a.power - 0.74) - Math.abs(b.power - 0.74));
-  return options[Math.floor(Math.random() * Math.min(3, options.length))];
+  return options[Math.floor(rnd() * Math.min(3, options.length))];
 }
 
 /**
@@ -211,9 +211,16 @@ function mountainBetween(engine: BattleEngine, ax: number, bx: number): boolean 
   return engine.rocks.some((r) => r.hp > 0 && r.x > lo && r.x < hi);
 }
 
-function pickCard(engine: BattleEngine, self: number, target: number, tier: Tier, mountainInTheWay: boolean): CardId {
+function pickCard(
+  engine: BattleEngine,
+  self: number,
+  target: number,
+  tier: Tier,
+  mountainInTheWay: boolean,
+  rnd: () => number,
+): CardId {
   const hand = engine.hand;
-  if (!tier.reads) return hand[Math.floor(Math.random() * hand.length)] ?? 'round';
+  if (!tier.reads) return hand[Math.floor(rnd() * hand.length)] ?? 'round';
 
   const me = engine.ships[self];
   const foe = engine.ships[target];

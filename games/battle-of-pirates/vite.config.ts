@@ -2,9 +2,13 @@ import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
 import { defineConfig } from 'vite';
+import { devLogPlugin } from '../_shared/devlog/vitePlugin';
 
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  // One combined log file for every game's dev server -- see
+  // games/_shared/devlog. Dev-only: devLogPlugin's middleware never exists
+  // in a production build.
+  plugins: [react(), tailwindcss(), devLogPlugin(path.resolve(__dirname, '../../dev-logs/combined.log'))],
   // Relative base so the bundle works under any deploy prefix, including the
   // /PlayBuddies/ path GitHub Pages serves from.
   base: './',
