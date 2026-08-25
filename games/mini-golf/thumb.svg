@@ -1,0 +1,91 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!--
+    Vector rather than a screenshot: it stays sharp at every card size the
+    catalog renders, and it is a couple of kilobytes instead of the few hundred
+    a WebP of the same green would cost. The palette is the canvas's own, so
+    the card and the game look like the same course.
+  -->
+  <defs>
+    <linearGradient id="rough" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2f7a3d" />
+      <stop offset="1" stop-color="#1d4f2a" />
+    </linearGradient>
+    <radialGradient id="sandg" cx="0.4" cy="0.35" r="0.7">
+      <stop offset="0" stop-color="#e6cf9c" />
+      <stop offset="1" stop-color="#cbb079" />
+    </radialGradient>
+    <linearGradient id="ballg" x1="0.3" y1="0.2" x2="0.8" y2="1">
+      <stop offset="0" stop-color="#ffffff" />
+      <stop offset="1" stop-color="#d2d8e0" />
+    </linearGradient>
+    <filter id="drop" x="-40%" y="-40%" width="180%" height="180%">
+      <feDropShadow dx="0" dy="7" stdDeviation="9" flood-color="#08200f" flood-opacity="0.42" />
+    </filter>
+  </defs>
+
+  <rect width="512" height="512" fill="url(#rough)" />
+
+  <!-- the green: a half-round, flat side down, which is one of the two shapes -->
+  <g filter="url(#drop)">
+    <path d="M 48 392 A 208 208 0 0 1 464 392 Z" fill="#3f9c4f" />
+  </g>
+
+  <!-- mowing stripes, clipped to the green -->
+  <clipPath id="turf">
+    <path d="M 48 392 A 208 208 0 0 1 464 392 Z" />
+  </clipPath>
+  <g clip-path="url(#turf)">
+    <g fill="#37904a" transform="rotate(-14 256 300)">
+      <rect x="-120" y="90" width="760" height="30" />
+      <rect x="-120" y="150" width="760" height="30" />
+      <rect x="-120" y="210" width="760" height="30" />
+      <rect x="-120" y="270" width="760" height="30" />
+      <rect x="-120" y="330" width="760" height="30" />
+      <rect x="-120" y="390" width="760" height="30" />
+    </g>
+    <!-- the shaggy fringe just inside the boards -->
+    <path d="M 48 392 A 208 208 0 0 1 464 392 Z" fill="none" stroke="#2f7a3d" stroke-width="26" />
+    <!-- a bunker and a pond, the two hazards -->
+    <circle cx="150" cy="316" r="46" fill="url(#sandg)" stroke="rgba(120,96,52,0.35)" stroke-width="3" />
+    <circle cx="366" cy="286" r="40" fill="#2f7fb5" stroke="#57a6d8" stroke-width="4" />
+    <circle cx="366" cy="286" r="22" fill="none" stroke="rgba(255,255,255,0.25)" stroke-width="3" />
+  </g>
+  <path d="M 48 392 A 208 208 0 0 1 464 392 Z" fill="none" stroke="#1b4526" stroke-width="7" />
+
+  <!-- a block to bank off -->
+  <g>
+    <rect x="238" y="196" width="86" height="26" rx="7" fill="#0d2415" opacity="0.35" transform="translate(4 6)" />
+    <rect x="238" y="196" width="86" height="26" rx="7" fill="#5b4636" />
+    <rect x="243" y="201" width="76" height="16" rx="5" fill="#7a6049" />
+  </g>
+
+  <!-- the aim line: dense dots, which is the control scheme in one picture -->
+  <g fill="#ffffff">
+    <circle cx="176" cy="372" r="5.4" opacity="0.9" />
+    <circle cx="196" cy="362" r="5.2" opacity="0.85" />
+    <circle cx="216" cy="352" r="5.0" opacity="0.8" />
+    <circle cx="236" cy="342" r="4.8" opacity="0.74" />
+    <circle cx="256" cy="332" r="4.6" opacity="0.68" />
+    <circle cx="276" cy="322" r="4.4" opacity="0.62" />
+    <circle cx="296" cy="312" r="4.2" opacity="0.55" />
+    <circle cx="316" cy="302" r="4.0" opacity="0.48" />
+    <circle cx="336" cy="292" r="3.8" opacity="0.4" />
+    <circle cx="356" cy="282" r="3.6" opacity="0.32" />
+  </g>
+
+  <!-- the cup, with the flag leaning clear of it -->
+  <circle cx="384" cy="248" r="30" fill="rgba(9,32,18,0.45)" />
+  <circle cx="384" cy="248" r="20" fill="#10261a" />
+  <path d="M 366 240 A 20 20 0 0 1 400 236" fill="none" stroke="rgba(255,255,255,0.3)" stroke-width="4" />
+  <g filter="url(#drop)">
+    <rect x="380" y="140" width="7" height="110" rx="3.5" fill="#e2e8f0" />
+    <path d="M 387 140 L 448 156 L 387 172 Z" fill="#ef4444" />
+  </g>
+
+  <!-- the ball, ringed in its player's colour -->
+  <g filter="url(#drop)">
+    <circle cx="156" cy="378" r="26" fill="#ef4444" />
+    <circle cx="156" cy="378" r="20" fill="url(#ballg)" />
+    <ellipse cx="148" cy="370" rx="7" ry="5" fill="#ffffff" opacity="0.9" transform="rotate(-35 148 370)" />
+  </g>
+</svg>

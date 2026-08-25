@@ -2,6 +2,16 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "playbuddies-localhost",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev"
+      ],
+      "port": 3000,
+      "url": "http://localhost:3000"
+    },
+    {
       "name": "playbuddies-lan",
       "runtimeExecutable": "npm",
       "runtimeArgs": [
@@ -65,6 +75,36 @@
         "--strictPort"
       ],
       "port": 5196
+    },
+    {
+      "name": "quoridor",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "--prefix",
+        "games/quoridor",
+        "--",
+        "--port",
+        "5195",
+        "--strictPort"
+      ],
+      "port": 5195
+    },
+    {
+      "name": "mini-golf",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "--prefix",
+        "games/mini-golf",
+        "--",
+        "--port",
+        "5194",
+        "--strictPort"
+      ],
+      "port": 5194
     }
   ]
 }

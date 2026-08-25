@@ -1,0 +1,73 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+}
+
+@layer base {
+  body {
+    @apply text-white selection:bg-emerald-400/40;
+    /* Late afternoon over a course. The same greens the canvas paints, so the
+       menu and the round feel like one place. */
+    background: radial-gradient(circle at 30% 12%, #4aa85c 0%, #2f7a3d 34%, #1d4f2a 68%, #10301b 100%);
+    overflow: hidden;
+    -webkit-text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
+  }
+}
+
+@layer utilities {
+  .panel {
+    @apply border border-white/15 bg-black/35 shadow-[0_10px_34px_rgba(0,0,0,0.35)] backdrop-blur-xl;
+  }
+}
+
+/* The big HOLE IN ONE! / IN THE DRINK! text. It lands hard, sits, and lifts
+   away — so it never has to be dismissed and never covers the next putt. */
+.shout {
+  animation: shout 1.9s ease-out forwards;
+}
+
+@keyframes shout {
+  0% {
+    opacity: 0;
+    transform: scale(0.7) translateY(10px);
+  }
+  14% {
+    opacity: 1;
+    transform: scale(1.06) translateY(0);
+  }
+  24% {
+    transform: scale(1) translateY(0);
+  }
+  78% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.96) translateY(-16px);
+  }
+}
+
+/* Respect a system-level request for less motion. Nothing in the round itself
+   is gated on this — a ball that does not roll is not a game. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+
+  /* Except the shout, which has to opt back out. It is a `forwards` animation
+     that ends at opacity 0, so collapsing its duration to nothing does not
+     calm it down — it deletes it, and the reader never sees HOLE IN ONE! at
+     all. It holds still and stays put instead; React unmounts it on a timer
+     regardless. */
+  .shout {
+    animation: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+  }
+}

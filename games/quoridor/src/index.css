@@ -1,0 +1,35 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+}
+
+@layer base {
+  body {
+    @apply text-slate-800 selection:bg-amber-300/50;
+    /* Daylight on a table. The board is warm wood on cool paper, and the menus
+       are the same room, so nothing about a match feels like a different app. */
+    background: radial-gradient(circle at 20% 0%, #fdf8ee 0%, #eef2f7 45%, #dde5ee 100%);
+    overflow: hidden;
+    -webkit-text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
+  }
+}
+
+@layer utilities {
+  .panel {
+    @apply border border-black/10 bg-white/80 shadow-[0_10px_30px_rgba(30,41,59,0.08)] backdrop-blur-xl;
+  }
+}
+
+/* Respect a system-level request for less motion: the menu stops breathing.
+   The board's own pawn slide is not gated on this — a piece that teleports
+   makes a game harder to follow, not easier. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}

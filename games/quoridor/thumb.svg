@@ -1,0 +1,157 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!--
+    Vector rather than a screenshot: it stays sharp at every card size the
+    catalog renders, and it is a couple of kilobytes instead of the few hundred
+    a WebP of the same board would cost. The palette is the board's own, so the
+    card and the game look like the same table.
+  -->
+  <defs>
+    <linearGradient id="cloth" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#fdf8ee" />
+      <stop offset="0.55" stop-color="#eef2f7" />
+      <stop offset="1" stop-color="#dae3ed" />
+    </linearGradient>
+    <linearGradient id="plate" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#eddcbd" />
+      <stop offset="0.5" stop-color="#e2c9a0" />
+      <stop offset="1" stop-color="#cdae82" />
+    </linearGradient>
+    <linearGradient id="amber" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fcd34d" />
+      <stop offset="1" stop-color="#b45309" />
+    </linearGradient>
+    <linearGradient id="azure" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#7dd3fc" />
+      <stop offset="1" stop-color="#0369a1" />
+    </linearGradient>
+    <filter id="lift" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#3f2d1a" flood-opacity="0.3" />
+    </filter>
+  </defs>
+
+  <rect width="512" height="512" fill="url(#cloth)" />
+
+  <!-- the board, with a little perspective so it reads as a table, not a grid -->
+  <g transform="translate(256 268) rotate(-8) translate(-256 -268)">
+    <rect x="60" y="72" width="392" height="392" rx="26" fill="url(#plate)" filter="url(#lift)" />
+    <rect x="60" y="72" width="392" height="392" rx="26" fill="none" stroke="#b08d5c" stroke-width="4" />
+
+    <!-- goal bands: amber runs north, azure runs south -->
+    <rect x="82" y="80" width="348" height="12" rx="6" fill="#f59e0b" opacity="0.65" />
+    <rect x="82" y="444" width="348" height="12" rx="6" fill="#0ea5e9" opacity="0.65" />
+
+    <!-- nine by nine -->
+    <g fill="#f6ecd8">
+      <!-- rows are laid out by hand so the alternating tone survives minification -->
+      <g id="grid">
+        <rect x="82" y="102" width="34" height="34" rx="6" />
+        <rect x="122" y="102" width="34" height="34" rx="6" fill="#f0e3ca" />
+        <rect x="162" y="102" width="34" height="34" rx="6" />
+        <rect x="202" y="102" width="34" height="34" rx="6" fill="#f0e3ca" />
+        <rect x="242" y="102" width="34" height="34" rx="6" />
+        <rect x="282" y="102" width="34" height="34" rx="6" fill="#f0e3ca" />
+        <rect x="322" y="102" width="34" height="34" rx="6" />
+        <rect x="362" y="102" width="34" height="34" rx="6" fill="#f0e3ca" />
+        <rect x="402" y="102" width="34" height="34" rx="6" />
+
+        <rect x="82" y="142" width="34" height="34" rx="6" fill="#f0e3ca" />
+        <rect x="122" y="142" width="34" height="34" rx="6" />
+        <rect x="162" y="142" width="34" height="34" rx="6" fill="#f0e3ca" />
+        <rect x="202" y="142" width="34" height="34" rx="6" />
+        <rect x="242" y="142" width="34" height="34" rx="6" fill="#f0e3ca" />
+        <rect x="282" y="142" width="34" height="34" rx="6" />
+        <rect x="322" y="142" width="34" height="34" rx="6" fill="#f0e3ca" />
+        <rect x="362" y="142" width="34" height="34" rx="6" />
+        <rect x="402" y="142" width="34" height="34" rx="6" fill="#f0e3ca" />
+
+        <rect x="82" y="182" width="34" height="34" rx="6" />
+        <rect x="122" y="182" width="34" height="34" rx="6" fill="#f0e3ca" />
+        <rect x="162" y="182" width="34" height="34" rx="6" />
+        <rect x="202" y="182" width="34" height="34" rx="6" fill="#f0e3ca" />
+        <rect x="242" y="182" width="34" height="34" rx="6" />
+        <rect x="282" y="182" width="34" height="34" rx="6" fill="#f0e3ca" />
+        <rect x="322" y="182" width="34" height="34" rx="6" />
+        <rect x="362" y="182" width="34" height="34" rx="6" fill="#f0e3ca" />
+        <rect x="402" y="182" width="34" height="34" rx="6" />
+
+        <rect x="82" y="222" width="34" height="34" rx="6" fill="#f0e3ca" />
+        <rect x="122" y="222" width="34" height="34" rx="6" />
+        <rect x="162" y="222" width="34" height="34" rx="6" fill="#f0e3ca" />
+        <rect x="202" y="222" width="34" height="34" rx="6" />
+        <rect x="242" y="222" width="34" height="34" rx="6" fill="#f0e3ca" />
+        <rect x="282" y="222" width="34" height="34" rx="6" />
+        <rect x="322" y="222" width="34" height="34" rx="6" fill="#f0e3ca" />
+        <rect x="362" y="222" width="34" height="34" rx="6" />
+        <rect x="402" y="222" width="34" height="34" rx="6" fill="#f0e3ca" />
+
+        <rect x="82" y="262" width="34" height="34" rx="6" />
+        <rect x="122" y="262" width="34" height="34" rx="6" fill="#f0e3ca" />
+        <rect x="162" y="262" width="34" height="34" rx="6" />
+        <rect x="202" y="262" width="34" height="34" rx="6" fill="#f0e3ca" />
+        <rect x="242" y="262" width="34" height="34" rx="6" />
+        <rect x="282" y="262" width="34" height="34" rx="6" fill="#f0e3ca" />
+        <rect x="322" y="262" width="34" height="34" rx="6" />
+        <rect x="362" y="262" width="34" height="34" rx="6" fill="#f0e3ca" />
+        <rect x="402" y="262" width="34" height="34" rx="6" />
+
+        <rect x="82" y="302" width="34" height="34" rx="6" fill="#f0e3ca" />
+        <rect x="122" y="302" width="34" height="34" rx="6" />
+        <rect x="162" y="302" width="34" height="34" rx="6" fill="#f0e3ca" />
+        <rect x="202" y="302" width="34" height="34" rx="6" />
+        <rect x="242" y="302" width="34" height="34" rx="6" fill="#f0e3ca" />
+        <rect x="282" y="302" width="34" height="34" rx="6" />
+        <rect x="322" y="302" width="34" height="34" rx="6" fill="#f0e3ca" />
+        <rect x="362" y="302" width="34" height="34" rx="6" />
+        <rect x="402" y="302" width="34" height="34" rx="6" fill="#f0e3ca" />
+
+        <rect x="82" y="342" width="34" height="34" rx="6" />
+        <rect x="122" y="342" width="34" height="34" rx="6" fill="#f0e3ca" />
+        <rect x="162" y="342" width="34" height="34" rx="6" />
+        <rect x="202" y="342" width="34" height="34" rx="6" fill="#f0e3ca" />
+        <rect x="242" y="342" width="34" height="34" rx="6" />
+        <rect x="282" y="342" width="34" height="34" rx="6" fill="#f0e3ca" />
+        <rect x="322" y="342" width="34" height="34" rx="6" />
+        <rect x="362" y="342" width="34" height="34" rx="6" fill="#f0e3ca" />
+        <rect x="402" y="342" width="34" height="34" rx="6" />
+
+        <rect x="82" y="382" width="34" height="34" rx="6" fill="#f0e3ca" />
+        <rect x="122" y="382" width="34" height="34" rx="6" />
+        <rect x="162" y="382" width="34" height="34" rx="6" fill="#f0e3ca" />
+        <rect x="202" y="382" width="34" height="34" rx="6" />
+        <rect x="242" y="382" width="34" height="34" rx="6" fill="#f0e3ca" />
+        <rect x="282" y="382" width="34" height="34" rx="6" />
+        <rect x="322" y="382" width="34" height="34" rx="6" fill="#f0e3ca" />
+        <rect x="362" y="382" width="34" height="34" rx="6" />
+        <rect x="402" y="382" width="34" height="34" rx="6" fill="#f0e3ca" />
+
+        <rect x="82" y="422" width="34" height="34" rx="6" />
+        <rect x="122" y="422" width="34" height="34" rx="6" fill="#f0e3ca" />
+        <rect x="162" y="422" width="34" height="34" rx="6" />
+        <rect x="202" y="422" width="34" height="34" rx="6" fill="#f0e3ca" />
+        <rect x="242" y="422" width="34" height="34" rx="6" />
+        <rect x="282" y="422" width="34" height="34" rx="6" fill="#f0e3ca" />
+        <rect x="322" y="422" width="34" height="34" rx="6" />
+        <rect x="362" y="422" width="34" height="34" rx="6" fill="#f0e3ca" />
+        <rect x="402" y="422" width="34" height="34" rx="6" />
+      </g>
+    </g>
+
+    <!-- three walls, mid-game: a corridor being closed off -->
+    <g filter="url(#lift)">
+      <rect x="202" y="216" width="74" height="8" rx="4" fill="url(#azure)" />
+      <rect x="276" y="256" width="8" height="74" rx="4" fill="url(#azure)" />
+      <rect x="322" y="336" width="74" height="8" rx="4" fill="url(#amber)" />
+    </g>
+
+    <!-- the two pawns, mid-race -->
+    <g filter="url(#lift)">
+      <ellipse cx="259" cy="286" rx="15" ry="5" fill="#3f2d1a" opacity="0.25" />
+      <circle cx="259" cy="279" r="15" fill="url(#amber)" stroke="#7c3d06" stroke-width="2.5" />
+      <ellipse cx="253" cy="273" rx="5" ry="3" fill="#fff" opacity="0.45" transform="rotate(-30 253 273)" />
+
+      <ellipse cx="179" cy="206" rx="15" ry="5" fill="#3f2d1a" opacity="0.25" />
+      <circle cx="179" cy="199" r="15" fill="url(#azure)" stroke="#075985" stroke-width="2.5" />
+      <ellipse cx="173" cy="193" rx="5" ry="3" fill="#fff" opacity="0.45" transform="rotate(-30 173 193)" />
+    </g>
+  </g>
+</svg>

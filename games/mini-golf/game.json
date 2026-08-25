@@ -1,0 +1,19 @@
+{
+  "id": "mini-golf",
+  "name": "Mini Golf",
+  "subtitle": "Top-down, one putt at a time",
+  "description": "A small green seen from directly above, a flag somewhere across it, and one ball each. Drag back from anywhere and let go — the further you pull, the harder it goes. Every hole is built fresh: a rectangle or a half-round, with bunkers to bog you down, ponds to avoid and blocks to bank off. Fewest strokes takes it. Play a quick round against the bot, share a device, or take three friends online.",
+  "category": "strategy",
+  "minPlayers": 1,
+  "maxPlayers": 4,
+  "estimatedDuration": "4-10 min",
+  "controls": "Drag back from anywhere with a mouse or a finger and let go to putt. Arrows aim, Space putts.",
+  "thumbnail": "thumb.svg",
+  "accent": {
+    "from": "#22c55e",
+    "to": "#f8fafc"
+  },
+  "featured": true,
+  "available": true,
+  "version": "1.0.0"
+}
