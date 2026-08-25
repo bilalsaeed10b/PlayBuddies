@@ -288,7 +288,7 @@ export default function BattleView({
 
     let disposed = false;
     let link: TurnLink | null = null;
-    let leave: (() => void) | undefined;
+    let leave: ((e: PageTransitionEvent) => void) | undefined;
 
     void import('../net/turnLink')
       .then(({ TurnLink: Link }) => {
@@ -328,7 +328,19 @@ export default function BattleView({
           });
         }
 
-        leave = () => link?.close();
+        // A tab going into the browser's back/forward cache -- the screen
+        // locking, switching apps, backgrounding the browser -- fires this
+        // exactly like a real close, but the page is still alive and typically
+        // comes right back. `persisted` is what tells the two apart: true
+        // means bfcache, false means an actual unload. Without this check
+        // every player whose phone dimmed mid-match announced a real bye and
+        // handed their still-very-present seat to a bot -- worse the longer a
+        // match runs, which is exactly what a 4-player game does, since each
+        // player waits through three other turns before their own comes up.
+        leave = (e) => {
+          if (e.persisted) return;
+          link?.close();
+        };
         window.addEventListener('pagehide', leave);
       })
       .catch((err) => {

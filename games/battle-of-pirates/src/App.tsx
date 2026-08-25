@@ -960,6 +960,47 @@ function RoomScreen({
   onFullscreen: () => void;
   onPlayOffline: () => void;
 }) {
+  /**
+   * Whether the roster gets the compact chip strip or the roomy card list.
+   *
+   * A Tailwind width breakpoint got this wrong: a phone turned sideways is
+   * wide enough to cross `sm:` and pick up the roomy layout, but it is
+   * *short* on height, not width, which is the dimension actually being
+   * fought over here. The roomy roster plus the mobile start/rules block
+   * above it left as little as 49px for the ship grid on a landscape phone --
+   * worse than doing nothing at all. Read like `compact`/`portrait` in
+   * BattleView: real height, not a width proxy for it. Left off past desktop
+   * width, where the roomy layout's own column is doing the flexing (see
+   * `lg:max-h-none lg:flex-1` below) rather than fighting anything above it.
+   */
+  const [compactRoster, setCompactRoster] = useState(
+    () => typeof window !== 'undefined' && window.innerHeight < 620 && window.innerWidth < 1024,
+  );
+  /**
+   * A landscape phone: short *and* wider than it is tall. Short enough that
+   * the roster and the CTA block stacked on top of each other, even both
+   * compacted, still left the ship grid a sliver -- 129px in testing at
+   * 812x375, less than one card's own height. Wide enough, though, that they
+   * fit fine side by side in a single row instead of stacked in two. See the
+   * `sideBySide` branch below.
+   */
+  const [sideBySide, setSideBySide] = useState(
+    () => typeof window !== 'undefined' && window.innerHeight < 480 && window.innerWidth > window.innerHeight,
+  );
+  useEffect(() => {
+    const probe = () => {
+      setCompactRoster(window.innerHeight < 620 && window.innerWidth < 1024);
+      setSideBySide(window.innerHeight < 480 && window.innerWidth > window.innerHeight);
+    };
+    probe();
+    window.addEventListener('resize', probe);
+    window.addEventListener('orientationchange', probe);
+    return () => {
+      window.removeEventListener('resize', probe);
+      window.removeEventListener('orientationchange', probe);
+    };
+  }, []);
+
   const pickedBy = useMemo(() => {
     const map: Record<number, string[]> = {};
     for (const p of people) {
@@ -1001,161 +1042,253 @@ function RoomScreen({
   const canStart = iAmReady && everyonePicked;
   const waitingFor = people.filter((p) => p.skin === undefined || p.skin === null).length;
 
-  return (
-    <div className="mx-auto flex h-full w-full max-w-6xl flex-col gap-3 p-3 sm:gap-4 sm:p-6">
-      <div className="flex shrink-0 items-center justify-between gap-2">
-        <div className="min-w-0">
-          <h2 className="truncate text-lg font-black tracking-tight sm:text-2xl">Pick your ship</h2>
-          <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-amber-300/80">
-            {formatSides(rules.players)} across open water
-            {emptyBerths > 0 && ` · ${emptyBerths} ${emptyBerths === 1 ? 'helm' : 'helms'} to bots`}
-          </p>
-        </div>
-        <div className="flex shrink-0 items-center gap-2">
-          <div className="panel flex items-center gap-2 rounded-2xl px-3 py-2 font-bold text-amber-300">
-            <Coins className="h-4 w-4" /> {coins}
-          </div>
-          <button onClick={onFullscreen} className="panel rounded-2xl p-2.5" title="Full screen">
-            <Maximize2 className="h-5 w-5" />
-          </button>
-          <button onClick={onSettings} aria-label="Settings" className="panel rounded-2xl p-2.5">
-            <SettingsIcon className="h-5 w-5" />
-          </button>
-          {isHost && (
-            <button onClick={askHostToEndGame} aria-label="End game" className="panel rounded-2xl p-2.5" title="End the match for everyone">
-              <LogOut className="h-5 w-5" />
-            </button>
-          )}
-        </div>
+  const header = (
+    <div className="flex shrink-0 items-center justify-between gap-2">
+      <div className="min-w-0">
+        <h2 className="truncate text-lg font-black tracking-tight sm:text-2xl">Pick your ship</h2>
+        <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-amber-300/80">
+          {formatSides(rules.players)} across open water
+          {emptyBerths > 0 && ` · ${emptyBerths} ${emptyBerths === 1 ? 'helm' : 'helms'} to bots`}
+        </p>
       </div>
-
-      {/* On a phone the start button would otherwise sit below the fold, which
-          is exactly what made it unreachable in the other games. */}
-      <div className="panel shrink-0 rounded-2xl p-3 lg:hidden">
-        {isHost ? (
-          <button
-            onClick={onStart}
-            disabled={!canStart}
-            className="flex w-full items-center justify-center gap-2 rounded-xl bg-amber-400 py-3 text-base font-black text-slate-900 disabled:opacity-40"
-          >
-            <Play className="h-5 w-5 fill-current" /> WEIGH ANCHOR
+      <div className="flex shrink-0 items-center gap-2">
+        <div className="panel flex items-center gap-2 rounded-2xl px-3 py-2 font-bold text-amber-300">
+          <Coins className="h-4 w-4" /> {coins}
+        </div>
+        <button onClick={onFullscreen} className="panel rounded-2xl p-2.5" title="Full screen">
+          <Maximize2 className="h-5 w-5" />
+        </button>
+        <button onClick={onSettings} aria-label="Settings" className="panel rounded-2xl p-2.5">
+          <SettingsIcon className="h-5 w-5" />
+        </button>
+        {isHost && (
+          <button onClick={askHostToEndGame} aria-label="End game" className="panel rounded-2xl p-2.5" title="End the match for everyone">
+            <LogOut className="h-5 w-5" />
           </button>
-        ) : (
-          <p className="text-center text-sm font-bold text-white/60">
-            {!iAmReady
-              ? 'Pick a ship to be ready.'
-              : !everyonePicked
-                ? 'Waiting for everyone to pick...'
-                : 'Waiting for the host...'}
-          </p>
         )}
+      </div>
+    </div>
+  );
+
+  /**
+   * WEIGH ANCHOR plus Rules/Offline, without its own wrapper -- the caller
+   * decides whether that goes in its own full-width panel or shares a row
+   * with the roster, so this is written once for both.
+   */
+  const ctaButtons = (
+    <>
+      {isHost ? (
+        <button
+          onClick={onStart}
+          disabled={!canStart}
+          className="flex w-full items-center justify-center gap-2 rounded-xl bg-amber-400 py-2.5 text-sm font-black text-slate-900 disabled:opacity-40"
+        >
+          <Play className="h-4 w-4 fill-current" /> WEIGH ANCHOR
+        </button>
+      ) : (
+        <p className="py-1 text-center text-xs font-bold text-white/60">
+          {!iAmReady
+            ? 'Pick a ship to be ready.'
+            : !everyonePicked
+              ? 'Waiting for everyone to pick...'
+              : 'Waiting for the host...'}
+        </p>
+      )}
+      <div className="mt-2 grid grid-cols-2 gap-2">
         <button
           onClick={onRules}
-          className="mt-2 flex w-full flex-col items-center gap-0.5 rounded-xl border border-white/20 bg-white/5 py-2 text-sm font-black text-white/70 transition-colors hover:bg-white/15"
+          className="flex items-center justify-center gap-1.5 rounded-lg border border-white/20 bg-white/5 py-2 text-xs font-black text-white/70 transition-colors active:bg-white/15"
         >
-          <span className="flex items-center gap-2">
-            <ScrollText className="h-4 w-4" /> {isHost ? 'Battle rules' : 'Battle rules (host sets these)'}
-          </span>
-          <span className="px-2 text-[10px] font-semibold leading-tight text-white/45">{rulesSummary(rules)}</span>
+          <ScrollText className="h-3.5 w-3.5" /> Rules
         </button>
         <button
           onClick={onPlayOffline}
-          className="mt-2 w-full rounded-xl border border-white/20 bg-white/5 py-2.5 text-sm font-black text-white/70 transition-colors hover:bg-white/15"
+          className="rounded-lg border border-white/20 bg-white/5 py-2 text-xs font-black text-white/70 transition-colors active:bg-white/15"
         >
           Play offline
         </button>
       </div>
+    </>
+  );
 
-      <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[auto_minmax(0,1fr)] gap-3 sm:gap-4 lg:grid-cols-3 lg:grid-rows-[minmax(0,1fr)]">
-        <div className="panel order-2 min-h-0 overflow-y-auto overscroll-contain rounded-[2rem] p-3 sm:p-6 lg:order-1 lg:col-span-2">
-          <ShipGrid owned={owned} coins={coins} selected={mine ?? null} pickedBy={pickedBy} onPick={onPick} />
+  /** Avatar-only chips in a horizontal strip. Used both by the compact roster panel and, on a landscape phone, next to the CTA. */
+  const rosterChips = (
+    <div className="flex min-h-0 flex-1 gap-2 overflow-x-auto overscroll-contain">
+      {people.map((p) => (
+        <div
+          key={p.uid}
+          className="flex shrink-0 flex-col items-center gap-1 rounded-lg border px-2 py-1"
+          style={{ borderColor: `${TEAM_COLORS[p.team].main}55`, background: `${TEAM_COLORS[p.team].main}18` }}
+        >
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-black/25">
+            {p.skin !== undefined && p.skin !== null ? (
+              <Portrait index={p.skin} size={36} />
+            ) : (
+              <Anchor className="h-4 w-4 text-white/40" />
+            )}
+          </div>
+          <div className="min-w-0 max-w-[64px]">
+            <p className="flex items-center justify-center gap-1 truncate text-[9px] font-bold">
+              {p.displayName}
+              {p.uid === hostId && <Crown className="h-2.5 w-2.5 shrink-0 text-amber-300" />}
+            </p>
+          </div>
         </div>
+      ))}
+    </div>
+  );
+
+  const shipGridPanel = (extra: string) => (
+    <div className={`panel min-h-0 overflow-y-auto overscroll-contain rounded-[2rem] p-3 sm:p-6 ${extra}`}>
+      <ShipGrid owned={owned} coins={coins} selected={mine ?? null} pickedBy={pickedBy} onPick={onPick} />
+    </div>
+  );
+
+  const desktopCta = (
+    <div className="panel hidden shrink-0 rounded-[2rem] p-5 lg:block">
+      {isHost ? (
+        <>
+          <button
+            onClick={onStart}
+            disabled={!canStart}
+            className="flex w-full items-center justify-center gap-2 rounded-2xl bg-amber-400 py-4 text-lg font-black text-slate-900 disabled:opacity-40"
+          >
+            <Play className="h-5 w-5 fill-current" /> WEIGH ANCHOR
+          </button>
+          <p className="mt-2 text-center text-[11px] text-white/50">
+            {!iAmReady
+              ? 'Pick your own ship first.'
+              : !everyonePicked
+                ? `Waiting on ${waitingFor} more to pick a ship.`
+                : emptyBerths > 0
+                  ? `Bots will sail ${emptyBerths} of the ${rules.players} hulls.`
+                  : 'Which side fires first is drawn at the start.'}
+          </p>
+        </>
+      ) : (
+        <p className="text-center text-sm font-bold text-white/60">
+          {!iAmReady
+            ? 'Pick a ship to be ready.'
+            : !everyonePicked
+              ? 'Waiting for everyone to pick...'
+              : 'Waiting for the host...'}
+        </p>
+      )}
+      <button
+        onClick={onRules}
+        className="mt-3 flex w-full flex-col items-center gap-1 rounded-2xl border border-white/20 bg-white/5 py-3 font-black text-white/60 transition-colors hover:bg-white/15"
+      >
+        <span className="flex items-center gap-2">
+          <ScrollText className="h-4 w-4" /> {isHost ? 'Battle rules' : 'Battle rules (host sets these)'}
+        </span>
+        <span className="px-3 text-[10px] font-semibold leading-tight text-white/45">{rulesSummary(rules)}</span>
+      </button>
+      <button
+        onClick={onPlayOffline}
+        className="mt-3 w-full rounded-2xl border border-white/20 bg-white/5 py-3 font-black text-white/60 transition-colors hover:bg-white/15"
+      >
+        Play offline
+      </button>
+    </div>
+  );
+
+  // A landscape phone is wide enough to build a row but short on the one
+  // thing that matters here -- see `sideBySide` above. CTA and roster share
+  // a single slim row instead of stacking, and the ship grid gets everything
+  // below it rather than splitting a second row with the roster again.
+  if (sideBySide) {
+    return (
+      <div className="mx-auto flex h-full w-full max-w-6xl flex-col gap-2 p-2.5">
+        {header}
+        <div className="flex shrink-0 gap-2">
+          <div className="panel min-w-0 flex-1 rounded-2xl p-2">{ctaButtons}</div>
+          <div className="panel flex w-32 shrink-0 flex-col rounded-2xl p-1.5">
+            <h3 className="mb-1 flex shrink-0 items-center gap-1 text-[8px] font-black uppercase tracking-wide text-white/50">
+              <Users className="h-2.5 w-2.5" /> {people.length} up
+            </h3>
+            {rosterChips}
+          </div>
+        </div>
+        {shipGridPanel('flex-1')}
+      </div>
+    );
+  }
+
+  return (
+    <div className="mx-auto flex h-full w-full max-w-6xl flex-col gap-2 p-2.5 sm:gap-4 sm:p-6">
+      {header}
+
+      {/* On a phone the start button would otherwise sit below the fold, which
+          is exactly what made it unreachable in the other games. Kept to two
+          short rows now rather than three stacked full-height buttons: that
+          block plus the roster below it used to eat most of a phone's height
+          before the ship grid -- the one thing this whole screen is for --
+          ever got a pixel, leaving it a sliver you had to scroll through
+          three cards at a time. */}
+      <div className="panel shrink-0 rounded-2xl p-2.5 lg:hidden">{ctaButtons}</div>
+
+      <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[auto_minmax(0,1fr)] gap-2 sm:gap-4 lg:grid-cols-3 lg:grid-rows-[minmax(0,1fr)]">
+        {shipGridPanel('order-2 lg:order-1 lg:col-span-2')}
 
         <div className="order-1 flex min-h-0 flex-col gap-3 sm:gap-4 lg:order-2">
-          <div className="panel flex max-h-44 min-h-0 flex-col rounded-[2rem] p-4 sm:p-5 lg:max-h-none lg:flex-1">
-            <h3 className="mb-3 flex shrink-0 items-center gap-2 text-[11px] font-black uppercase tracking-[0.2em] text-white/50">
-              <Users className="h-4 w-4" /> On the water ({people.length})
+          {/* A horizontal strip of avatar chips when height is tight, the
+              roomy vertical card list when it isn't. The roster only needs to
+              say who's on the water and what side -- it does not need a
+              quarter of a short screen to say it. See `compactRoster` above
+              for why this branches on measured height rather than a width
+              breakpoint. */}
+          <div
+            className={`panel flex min-h-0 shrink-0 flex-col lg:max-h-none lg:flex-1 lg:rounded-[2rem] lg:p-5 ${
+              compactRoster ? 'max-h-[72px] rounded-2xl p-2' : 'max-h-44 rounded-[2rem] p-4 sm:p-5'
+            }`}
+          >
+            <h3
+              className={`mb-1 flex shrink-0 items-center gap-1.5 text-[9px] font-black uppercase tracking-[0.18em] text-white/50 lg:mb-3 lg:gap-2 lg:text-[11px] lg:tracking-[0.2em] ${
+                compactRoster ? '' : 'mb-3 gap-2 text-[11px] tracking-[0.2em]'
+              }`}
+            >
+              <Users className={compactRoster ? 'h-3 w-3' : 'h-4 w-4'} /> On the water ({people.length})
             </h3>
-            <div className="min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain pr-1">
-              {people.map((p) => (
-                <div
-                  key={p.uid}
-                  className="flex items-center gap-3 rounded-2xl border p-2.5"
-                  style={{
-                    borderColor: `${TEAM_COLORS[p.team].main}55`,
-                    background: `${TEAM_COLORS[p.team].main}18`,
-                  }}
-                >
-                  <div className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-black/25">
-                    {p.skin !== undefined && p.skin !== null ? (
-                      <Portrait index={p.skin} size={42} />
-                    ) : (
-                      <Anchor className="h-5 w-5 text-white/40" />
-                    )}
+            {compactRoster ? (
+              rosterChips
+            ) : (
+              <div className="flex min-h-0 flex-1 flex-col gap-0 space-y-2 overflow-x-hidden overflow-y-auto pr-1 lg:overflow-x-hidden lg:overflow-y-auto">
+                {people.map((p) => (
+                  <div
+                    key={p.uid}
+                    className="flex w-auto shrink-0 flex-row items-center gap-3 rounded-2xl border p-2.5"
+                    style={{
+                      borderColor: `${TEAM_COLORS[p.team].main}55`,
+                      background: `${TEAM_COLORS[p.team].main}18`,
+                    }}
+                  >
+                    <div className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-black/25">
+                      {p.skin !== undefined && p.skin !== null ? (
+                        <Portrait index={p.skin} size={42} />
+                      ) : (
+                        <Anchor className="h-5 w-5 text-white/40" />
+                      )}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="flex items-center justify-start gap-1 truncate text-sm font-bold">
+                        {p.displayName}
+                        {p.uid === hostId && <Crown className="h-3.5 w-3.5 shrink-0 text-amber-300" />}
+                      </p>
+                      <p
+                        className="text-[10px] font-black uppercase tracking-widest"
+                        style={{ color: TEAM_COLORS[p.team].light }}
+                      >
+                        {TEAM_COLORS[p.team].name}
+                        {p.uid === uid ? ' - you' : ''}
+                      </p>
+                    </div>
                   </div>
-                  <div className="min-w-0">
-                    <p className="flex items-center gap-1 truncate text-sm font-bold">
-                      {p.displayName}
-                      {p.uid === hostId && <Crown className="h-3.5 w-3.5 shrink-0 text-amber-300" />}
-                    </p>
-                    <p
-                      className="text-[10px] font-black uppercase tracking-widest"
-                      style={{ color: TEAM_COLORS[p.team].light }}
-                    >
-                      {TEAM_COLORS[p.team].name}
-                      {p.uid === uid ? ' - you' : ''}
-                    </p>
-                  </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </div>
 
-          <div className="panel hidden shrink-0 rounded-[2rem] p-5 lg:block">
-            {isHost ? (
-              <>
-                <button
-                  onClick={onStart}
-                  disabled={!canStart}
-                  className="flex w-full items-center justify-center gap-2 rounded-2xl bg-amber-400 py-4 text-lg font-black text-slate-900 disabled:opacity-40"
-                >
-                  <Play className="h-5 w-5 fill-current" /> WEIGH ANCHOR
-                </button>
-                <p className="mt-2 text-center text-[11px] text-white/50">
-                  {!iAmReady
-                    ? 'Pick your own ship first.'
-                    : !everyonePicked
-                      ? `Waiting on ${waitingFor} more to pick a ship.`
-                      : emptyBerths > 0
-                        ? `Bots will sail ${emptyBerths} of the ${rules.players} hulls.`
-                        : 'Which side fires first is drawn at the start.'}
-                </p>
-              </>
-            ) : (
-              <p className="text-center text-sm font-bold text-white/60">
-                {!iAmReady
-                  ? 'Pick a ship to be ready.'
-                  : !everyonePicked
-                    ? 'Waiting for everyone to pick...'
-                    : 'Waiting for the host...'}
-              </p>
-            )}
-            <button
-              onClick={onRules}
-              className="mt-3 flex w-full flex-col items-center gap-1 rounded-2xl border border-white/20 bg-white/5 py-3 font-black text-white/60 transition-colors hover:bg-white/15"
-            >
-              <span className="flex items-center gap-2">
-                <ScrollText className="h-4 w-4" /> {isHost ? 'Battle rules' : 'Battle rules (host sets these)'}
-              </span>
-              <span className="px-3 text-[10px] font-semibold leading-tight text-white/45">{rulesSummary(rules)}</span>
-            </button>
-            <button
-              onClick={onPlayOffline}
-              className="mt-3 w-full rounded-2xl border border-white/20 bg-white/5 py-3 font-black text-white/60 transition-colors hover:bg-white/15"
-            >
-              Play offline
-            </button>
-          </div>
+          {desktopCta}
         </div>
       </div>
     </div>
