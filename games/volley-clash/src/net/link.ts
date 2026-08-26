@@ -30,6 +30,8 @@
 import { BALANCE } from '../game/rules';
 import { NetMessage } from '../types/game';
 import { Mesh } from './mesh';
+import { PeerClocks, localNow } from './clock';
+import type { PeerTiming } from './clock';
 
 /**
  * How often the Firestore relay writes while any peer is not yet reachable
@@ -59,8 +61,10 @@ export interface LinkStatus {
   relayed: string[];
   /** Peers we cannot reach at all yet. */
   missing: string[];
-  /** Best round-trip estimate in ms across everyone we can reach. */
+  /** Worst round-trip estimate in ms across everyone we can reach. */
   rtt: number;
+  /** How much that round trip is moving about, in ms. */
+  jitter: number;
   /** Why peer-to-peer is not happening, when it is not. Fit to show a player. */
   reason: string | null;
 }
@@ -71,13 +75,15 @@ type FirestoreWrite = (batch: NetMessage[], seq: number) => Promise<void>;
 export class Link {
   private mesh: Mesh;
   private peers: string[] = [];
-  private rtts = new Map<string, number>();
+  private clocks = new PeerClocks();
   private fsWrite: FirestoreWrite | null = null;
   private stopFirestore: (() => void) | null = null;
   private fsTimer: number | null = null;
   private lastFsWrite = 0;
   private pingTimer: number | null = null;
   private relaySeq = 0;
+  /** Peers with a timing probe queued for the next relay write. */
+  private relayProbes = new Set<string>();
   private seen = new Map<string, number>();
   private pendingState: NetMessage | null = null;
   private pendingEvents: NetMessage[] = [];
@@ -114,6 +120,11 @@ export class Link {
   setPeers(uids: string[]) {
     this.peers = uids.filter((u) => u && u !== this.selfId);
     this.mesh.setPeers(this.peers);
+    // Stop reporting a departed player's connection, and drop their clock —
+    // a uid that returns is a fresh page with a fresh timebase, so keeping the
+    // old offset would be worse than having none.
+    this.clocks.retain(this.peers);
+    for (const id of [...this.seen.keys()]) if (!this.peers.includes(id)) this.seen.delete(id);
     this.publishStatus();
   }
 
@@ -140,21 +151,38 @@ export class Link {
     else if (this.pendingEvents.length < MAX_EVENTS) this.pendingEvents.push(msg);
   }
 
-  /** Round trip to the peer we care most about, or the room's best guess. */
+  /** The worst round trip in the room, for the badge. */
   get rtt(): number {
-    if (this.rtts.size === 0) return 0;
-    let worst = 0;
-    for (const v of this.rtts.values()) worst = Math.max(worst, v);
-    return worst;
+    return this.clocks.worstRtt;
   }
 
   rttTo(id: string): number {
-    return this.rtts.get(id) ?? this.rtt;
+    return this.clocks.timingFor(id).rtt;
+  }
+
+  timingTo(id: string): PeerTiming {
+    return this.clocks.timingFor(id);
+  }
+
+  /**
+   * How old a packet from `from` is, in seconds — measured, not inferred.
+   *
+   * `sentAt` is the stamp the sender put on it with `stamp()`. Capped by the
+   * caller, because how far it is worth extrapolating is a game decision and
+   * not this file's business.
+   */
+  ageOf(from: string, sentAt: number, cap: number): number {
+    return this.clocks.ageOf(from, sentAt, cap);
+  }
+
+  /** The stamp to put on an outgoing packet so the receiver can date it. */
+  stamp(): number {
+    return localNow();
   }
 
   /** True once anybody at all is reachable. */
   get connected(): boolean {
-    return this.mesh.connectedPeers.length > 0 || this.rtts.size > 0;
+    return this.mesh.connectedPeers.length > 0 || this.clocks.measured.length > 0;
   }
 
   close() {
@@ -169,25 +197,24 @@ export class Link {
 
   private receive(from: string, msg: NetMessage) {
     if (!msg || typeof msg !== 'object') return;
-    // Round-trip probes are answered here and never reach the game.
+    // Timing probes are answered here and never reach the game.
     if (msg.t === 'q') {
-      this.replyTo(from, { t: 'a', n: msg.n, to: from });
+      // Not for us. Over the relay every slot is world-readable, so most
+      // probes in a 2v2 are somebody else's.
+      if (msg.to !== this.selfId) return;
+      const t1 = localNow();
+      // t1 and t2 are read separately on purpose. The gap between them is
+      // whatever this machine spends holding the reply — most of it the relay
+      // write batch below — and sending both is what lets the prober subtract
+      // that out instead of charging it to the network.
+      this.replyTo(from, { t: 'a', id: msg.id, to: from, t1, t2: localNow() });
       return;
     }
     if (msg.t === 'a') {
-      // The relay is a broadcast medium: an echo meant for another player is
-      // stamped with *their* clock, and treating it as ours would produce a
-      // round-trip figure invented out of the difference between two machines'
-      // ideas of the time.
       if (msg.to !== this.selfId) return;
-      const sample = Date.now() - msg.n;
-      if (sample >= 0 && sample < 5000) {
-        const previous = this.rtts.get(from);
-        // Smoothed, because one slow packet is not a slow connection — but not
-        // so smoothed that a genuinely degraded link takes ten seconds to show.
-        this.rtts.set(from, previous === undefined ? sample : previous * 0.7 + sample * 0.3);
-        this.publishStatus();
-      }
+      // The probe's own send time never travelled; it is matched from `id`
+      // against what we recorded locally.
+      if (this.clocks.closeProbe(from, msg.id, msg.t1, msg.t2)) this.publishStatus();
       return;
     }
     this.onMessage(from, msg);
@@ -198,20 +225,33 @@ export class Link {
     if (this.pendingEvents.length < MAX_EVENTS) this.pendingEvents.push(msg);
   }
 
+  /**
+   * One addressed probe per peer.
+   *
+   * Addressed rather than broadcast because each peer now needs its own `id`
+   * to pair an echo against, and because a shared probe measured whichever
+   * path happened to answer first — on a peer reachable both ways, the slower
+   * relayed echo would arrive second and overwrite a perfectly good direct
+   * measurement.
+   */
   private ping() {
     if (this.closed) return;
-    const probe: NetMessage = { t: 'q', n: Date.now() };
-    let needsRelayProbe = false;
     for (const id of this.peers) {
-      if (!this.mesh.sendTo(id, probe)) needsRelayProbe = true;
+      // A relayed peer already has a probe waiting to be written. Minting a
+      // second one now would only measure the queue: probes cannot usefully go
+      // out faster than the relay writes, and at PING_HZ they would crowd the
+      // batch out of room for the game's own packets.
+      if (this.relayProbes.has(id)) continue;
+
+      const { id: probeId } = this.clocks.openProbe(id);
+      const probe: NetMessage = { t: 'q', id: probeId, to: id };
+      if (this.mesh.sendTo(id, probe)) continue;
+
+      if (this.pendingEvents.length < MAX_EVENTS) {
+        this.relayProbes.add(id);
+        this.pendingEvents.push(probe);
+      }
     }
-    // One probe covers every relayed peer at once: they all read the same slot.
-    // Queued after the loop, so an unreachable peer early in the list cannot
-    // cost the reachable ones their direct probe.
-    if (needsRelayProbe && this.pendingEvents.length < MAX_EVENTS) this.pendingEvents.push(probe);
-    // Forget the round trip to anyone who has left, so `rtt` doesn't keep
-    // reporting a departed player's connection.
-    for (const id of this.rtts.keys()) if (!this.peers.includes(id)) this.rtts.delete(id);
   }
 
   private needsRelay(): boolean {
@@ -228,15 +268,19 @@ export class Link {
     // Gameplay itself proves the relay works; a slow first ping should not
     // leave the badge claiming there is no connection while a rally is
     // already in progress.
+    const measured = new Set(this.clocks.measured);
     const relayed = this.peers.filter(
-      (id) => !directSet.has(id) && (this.seen.has(id) || this.rtts.has(id)),
+      (id) => !directSet.has(id) && (this.seen.has(id) || measured.has(id)),
     );
     const relayedSet = new Set(relayed);
+    let jitter = 0;
+    for (const id of this.peers) jitter = Math.max(jitter, this.clocks.timingFor(id).jitter);
     this.onStatus?.({
       direct,
       relayed,
       missing: this.peers.filter((id) => !directSet.has(id) && !relayedSet.has(id)),
       rtt: this.rtt,
+      jitter,
       // Only worth saying while it is still true: a peer that came up on a
       // retry should not leave a stale explanation on screen.
       reason: direct.length === this.peers.length ? null : this.reason,
@@ -331,6 +375,19 @@ export class Link {
     this.pendingState = null;
     this.pendingEvents.length = 0;
     if (batch.length === 0) return;
+
+    // Both halves of a timing probe are stamped *here*, at the moment they
+    // actually leave, rather than when they were queued. Everything above this
+    // line may have waited up to a full batch interval, and a probe that
+    // counted its own time in this queue as time on the wire would report the
+    // relay as roughly twice as slow as it is — which then becomes twice as
+    // much extrapolation, on every body and the ball.
+    const leaving = localNow();
+    for (const msg of batch) {
+      if (msg.t === 'q') this.clocks.restampProbe(msg.id, leaving);
+      else if (msg.t === 'a') msg.t2 = leaving;
+    }
+    this.relayProbes.clear();
 
     this.lastFsWrite = now;
     try {

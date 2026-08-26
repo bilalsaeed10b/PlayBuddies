@@ -198,12 +198,13 @@ export interface Snapshot {
   t: 's';
   n: number;
   /**
-   * The host's clock when this was built, in ms.
+   * The host's clock when this was built, from `localNow()` in net/clock.ts.
    *
-   * Not used as a clock — the two machines never agree on one. It is used as a
-   * *stopwatch*: the receiver measures how long the packet spent in flight from
-   * its own round-trip estimate and runs the contents forward by that much, so
-   * what it draws is where the ball is now rather than where it was.
+   * This *is* used as a clock now. The receiver knows its offset to the host
+   * from the probe exchange, so it converts this stamp onto its own timebase
+   * and subtracts — measuring how old the packet is rather than inferring it
+   * from half a round trip, which was only ever correct on a path whose two
+   * directions cost the same.
    */
   ts: number;
   b: BallPacket;
@@ -232,7 +233,7 @@ export interface BodyMessage {
   d: BodyPacket;
   /** Input bitmask, as packInput. */
   i: number;
-  /** Sender's clock in ms, for the same stopwatch trick as Snapshot.ts. */
+  /** Sender's `localNow()`, converted against the measured offset on arrival. */
   ts: number;
   /** Monotonic sequence. The channel is unordered, so stale packets are dropped. */
   n: number;
@@ -251,12 +252,25 @@ export type NetMessage =
   /** Client → host: input bitmask plus a sequence number. */
   | { t: 'i'; d: number; n: number }
   /**
-   * Round-trip probe, and its echo. `n` is the prober's clock in ms, and `to`
-   * is who the echo belongs to — the relay carries it to the whole room, and
-   * only the machine that sent the probe can read that number as a time.
+   * The two halves of a timing probe.
+   *
+   * Both carry `to`, and both are ignored by anyone else, because the relay is
+   * a broadcast medium: everything written to one player's slot is read by the
+   * whole room. Without the address, a third player's echo would be folded
+   * into the wrong peer's clock.
+   *
+   * The prober's own send time deliberately does not travel. It is held
+   * against `id` locally (see PeerClocks.openProbe), so no peer can influence
+   * this machine's idea of when it spoke.
+   *
+   * The echo carries the responder's clock twice — when the probe arrived and
+   * when the reply left — and the gap between them is what lets the prober
+   * subtract the responder's own queueing out of the round trip instead of
+   * charging it to the network. On the Firestore relay that gap is most of
+   * the measurement.
    */
-  | { t: 'q'; n: number }
-  | { t: 'a'; n: number; to: string }
+  | { t: 'q'; id: number; to: string }
+  | { t: 'a'; id: number; to: string; t1: number; t2: number }
   /** Host → everyone: a point was scored, with the shout to display. */
   | { t: 'pt'; team: Team; sc: [number, number]; call: string }
   /** Anyone → everyone: I am leaving, hand my seat to the AI. */

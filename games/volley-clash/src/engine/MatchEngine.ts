@@ -18,6 +18,10 @@ import { bakeCourt, drawFallbackCourt } from '../game/court';
 import { CHARACTERS, drawCharacter } from '../game/characters';
 import { Arena, BALANCE, POWER_META, TEAM_COLORS, clamp } from '../game/rules';
 import { newBrain, thinkFor } from './ai';
+// The engine's own timebase, shared with the wire so a packet's stamp and the
+// clock it is dated against are the same kind of number. Pure arithmetic —
+// importing it does not pull the network or Firebase into this chunk.
+import { localNow } from '../net/clock';
 import type { Quality } from '../game/quality';
 import {
   ActivePower,
@@ -781,7 +785,7 @@ export class MatchEngine {
     this.touches++;
     // Noted so applySnapshot can tell a host that has not seen this hit yet
     // from one that has. See the ball exception there.
-    if (p.control === 'local') this.lastOwnedHit = Date.now();
+    if (p.control === 'local') this.lastOwnedHit = localNow();
 
     const outgoing = Math.hypot(b.vx, b.vy);
     const heat = clamp(outgoing / BALANCE.BALL_MAX_SPEED, 0, 1);
@@ -958,7 +962,7 @@ export class MatchEngine {
     return {
       t: 's',
       n: this.tick,
-      ts: Date.now(),
+      ts: localNow(),
       b: [
         Math.round(this.ball.x),
         Math.round(this.ball.y),
@@ -1086,7 +1090,7 @@ export class MatchEngine {
      * ball only*. The score, the phase and everybody's body in the same packet
      * are still taken: none of them are in dispute.
      */
-    const hostSawOurHit = Date.now() - lag * 1000 >= this.lastOwnedHit;
+    const hostSawOurHit = localNow() - lag * 1000 >= this.lastOwnedHit;
     if (restart || hostSawOurHit) {
       const ball: Ball & { age: number } = {
         x: s.b[0],

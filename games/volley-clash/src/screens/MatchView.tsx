@@ -125,12 +125,14 @@ export default function MatchView({
     peers: number;
     relayed: number;
     rtt: number;
+    jitter: number;
     stalled: boolean;
     reason: string | null;
   }>({
     peers: 0,
     relayed: 0,
     rtt: 0,
+    jitter: 0,
     stalled: false,
     reason: null,
   });
@@ -418,7 +420,7 @@ export default function MatchView({
                   t: 'b',
                   d: body,
                   i: bits,
-                  ts: Date.now(),
+                  ts: link.stamp(),
                   n: ++seq,
                   k: engine.lastAppliedTick,
                 } satisfies BodyMessage,
@@ -530,10 +532,32 @@ export default function MatchView({
           (from, msg) => {
             const engine = engineRef.current;
             if (!engine) return;
-            // Half the round trip: how long this packet has been travelling,
-            // and therefore how far its contents have to be run forward before
-            // they describe the present.
-            const lag = (link?.rttTo(from) ?? 0) / 2000;
+
+            /**
+             * How far this packet's contents have to be run forward to
+             * describe the present.
+             *
+             * Measured from the sender's own stamp against the offset between
+             * the two clocks, rather than assumed to be half a round trip.
+             * The old assumption only held on a path costing the same in both
+             * directions, which the Firestore relay very much is not — see
+             * net/clock.ts.
+             *
+             * The jitter lead on top is the one part still a guess: the packet
+             * after this one has not arrived, and on an unsteady link it is
+             * late more often than early, so leaning a fraction of the
+             * measured jitter forward lands closer than sitting still does.
+             */
+            const lagOf = (msg: { ts?: number }) => {
+              if (!link) return 0;
+              const t = link.timingTo(from);
+              const lead = Math.min(
+                (t.jitter / 1000) * BALANCE.JITTER_LEAD,
+                BALANCE.MAX_JITTER_LEAD,
+              );
+              const age = link.ageOf(from, msg.ts ?? 0, BALANCE.MAX_EXTRAP);
+              return Math.min(age + lead, BALANCE.MAX_EXTRAP);
+            };
 
             switch (msg.t) {
               case 's':
@@ -553,7 +577,7 @@ export default function MatchView({
                   stalledRef.current = false;
                   setWire((w) => ({ ...w, stalled: false }));
                 }
-                engine.applySnapshot(msg as Snapshot, lag);
+                engine.applySnapshot(msg as Snapshot, lagOf(msg));
                 break;
               case 'b':
                 // A guest's own account of itself. The input rides along so the
@@ -564,7 +588,7 @@ export default function MatchView({
                 // Back from a dropout: their seat is theirs again.
                 engine.reclaim(from);
                 remoteInputs.current.set(from, unpackInput(msg.i));
-                engine.applyBody(from, msg.d, msg.k, lag);
+                engine.applyBody(from, msg.d, msg.k, lagOf(msg));
                 break;
               case 'i':
                 heardAt.current.set(from, performance.now());
@@ -583,6 +607,7 @@ export default function MatchView({
               peers: status.direct.length,
               relayed: status.relayed.length,
               rtt: Math.round(status.rtt),
+              jitter: Math.round(status.jitter),
               reason: status.reason,
             })),
         );
@@ -695,7 +720,12 @@ export default function MatchView({
                 title={
                   wire.peers + wire.relayed === 0
                     ? 'Connecting to the other players…'
-                    : `${wire.peers} direct, ${wire.relayed} relayed · ${wire.rtt}ms round trip`
+                    : `${wire.peers} direct, ${wire.relayed} relayed · ${wire.rtt}ms round trip` +
+                      // Jitter is the half of the picture a ping alone hides: a
+                      // steady 120ms plays better than a 60ms that keeps moving,
+                      // because the steady one can be predicted and the other
+                      // cannot.
+                      (wire.jitter > 0 ? ` ±${wire.jitter}ms` : '')
                 }
               >
                 {wire.peers + wire.relayed > 0 ? (

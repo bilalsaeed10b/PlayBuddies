@@ -237,16 +237,40 @@ export const BALANCE = {
    * against packet loss on an unreliable channel — not the input rate.
    */
   INPUT_HEARTBEAT_HZ: 10,
-  /** Round-trip probes per second. Feeds the extrapolation below. */
-  PING_HZ: 1,
+  /**
+   * Timing probes per second, per peer.
+   *
+   * Was 1. At that rate the clock offset and round trip that every piece of
+   * extrapolation depends on took several seconds to follow a change, so on a
+   * phone — where the latency moves further than that between two rallies —
+   * the numbers being fed to the physics described the network as it had been.
+   * Eight is enough to re-converge inside a single rally and still costs
+   * nothing on a data channel; probes that would go over the Firestore relay
+   * are throttled to one per write in Link.ping, since the relay cannot carry
+   * them faster than that anyway.
+   */
+  PING_HZ: 8,
   /**
    * How far a received packet may be extrapolated forward, in seconds.
    *
-   * Everything on the wire is already old by one trip when it arrives, so it is
-   * run forward by that much before being used. Past this the estimate is worse
+   * Everything on the wire is already old when it arrives, so it is run
+   * forward by that much before being used. Past this the estimate is worse
    * than the local simulation and it is dropped.
    */
   MAX_EXTRAP: 0.3,
+  /**
+   * Extra extrapolation allowed for an unsteady connection, in seconds, and
+   * the ceiling on it.
+   *
+   * A packet's age is measured, not guessed, but the *next* one's arrival is
+   * still unknown, and on a jittery link it is late more often than it is
+   * early. Leaning forward by a fraction of the measured jitter puts the
+   * remote body closer to where it will be when the next packet confirms it,
+   * which is what stops a laggy opponent from appearing to stutter backwards
+   * on every correction.
+   */
+  JITTER_LEAD: 0.5,
+  MAX_JITTER_LEAD: 0.08,
   /** How fast remote characters and the ball are eased onto their target. */
   INTERP: 22,
   /**
