@@ -1,0 +1,51 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+}
+
+@layer base {
+  body {
+    @apply text-amber-950 selection:bg-rose-300/50;
+    /* An aged wanted poster nailed to a board in afternoon sun. Every other
+       game on the platform owns a different light — the sea, a lit table, a
+       green — and this one is dry paper and dust, so a glance at a screenshot
+       says which game it is before anything on it is read. */
+    background:
+      radial-gradient(circle at 18% 8%, rgba(255, 249, 232, 0.9) 0%, rgba(255, 249, 232, 0) 55%),
+      radial-gradient(circle at 82% 92%, rgba(146, 96, 42, 0.18) 0%, rgba(146, 96, 42, 0) 50%),
+      linear-gradient(160deg, #f6e8c9 0%, #eddcb8 45%, #ddc79b 100%);
+    overflow: hidden;
+    -webkit-text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
+  }
+}
+
+@layer utilities {
+  .panel {
+    @apply border-2 border-amber-900/15 bg-[#f7ecd6]/85 shadow-[0_10px_30px_rgba(80,50,20,0.10)] backdrop-blur-xl;
+  }
+}
+
+/* The reveal: five cards turning over together. Kept short — it plays every
+   single round, and an animation you watch twelve times a game has to be
+   quick enough that nobody starts waiting for it to finish. */
+@keyframes flip {
+  from {
+    transform: rotateX(-80deg);
+    opacity: 0;
+  }
+  to {
+    transform: rotateX(0);
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}

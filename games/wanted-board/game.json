@@ -1,0 +1,19 @@
+{
+  "id": "wanted-board",
+  "name": "Wanted Board",
+  "subtitle": "Everybody draws at once",
+  "description": "Six places in a frontier town and a price on every head. Each round everybody secretly picks one card — ride, lay low, wait in ambush, rig a trap, or cash in — and all of them turn over at the same moment. Your bounty climbs while you run, but it is only yours once you have banked it, and the Bank is the one building everyone knows you have to walk into. Nobody waits for a turn. Play against bots, pass a phone around, or take three friends online.",
+  "category": "strategy",
+  "minPlayers": 1,
+  "maxPlayers": 4,
+  "estimatedDuration": "5-9 min",
+  "controls": "Tap a card, tap where it points, then lock it in. Everything reveals together.",
+  "thumbnail": "thumb.svg",
+  "accent": {
+    "from": "#b91c1c",
+    "to": "#d9a441"
+  },
+  "featured": true,
+  "available": true,
+  "version": "1.0.0"
+}

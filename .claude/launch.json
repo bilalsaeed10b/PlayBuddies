@@ -92,6 +92,21 @@
       "port": 5195
     },
     {
+      "name": "wanted-board",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "--prefix",
+        "games/wanted-board",
+        "--",
+        "--port",
+        "5193",
+        "--strictPort"
+      ],
+      "port": 5193
+    },
+    {
       "name": "mini-golf",
       "runtimeExecutable": "npm",
       "runtimeArgs": [

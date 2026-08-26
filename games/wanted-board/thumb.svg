@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <rect width="32" height="32" rx="6" fill="#eddcb8"/>
+  <rect x="5" y="4" width="22" height="24" rx="2" fill="#f7ecd6" stroke="#7c2d12" stroke-width="1.5"/>
+  <text x="16" y="12" font-family="system-ui,sans-serif" font-size="5.5" font-weight="900"
+        text-anchor="middle" fill="#7c2d12" letter-spacing="0.5">WANTED</text>
+  <circle cx="16" cy="19" r="5.2" fill="#8b5a2b"/>
+  <path d="M11.2 16.4 Q16 18 20.8 16.4 Q19.9 15.9 18.8 15.7 Q18.5 13.4 16 13.4 Q13.5 13.4 13.2 15.7 Q12.1 15.9 11.2 16.4 Z" fill="#e0c9a6"/>
+  <path d="M12.6 20 Q16 19.3 19.4 20 Q19.4 23 16 23 Q12.6 23 12.6 20 Z" fill="#b91c1c"/>
+</svg>
