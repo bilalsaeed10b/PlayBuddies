@@ -8,6 +8,9 @@ import { GameSettings, NetMessage, PlayerPacket } from '../types/game';
 import type { Mesh } from '../net/mesh';
 import { audioService } from '../services/audio';
 import ControlsTray from '@shared/controls/ControlsTray';
+import { createLogger } from '@shared/log/logger';
+
+const log = createLogger('players-eat-fish');
 
 /**
  * How often each client publishes itself, and how often the host publishes the
@@ -240,7 +243,10 @@ export default function GameView({
             }
           }
         },
-        (connected) => setPeerCount(connected.length),
+        (connected) => {
+          log.info('mesh:peers', { connected: connected.length, of: live.current.people.length });
+          setPeerCount(connected.length);
+        },
       );
       meshRef.current = mesh;
 
@@ -312,7 +318,12 @@ export default function GameView({
           if (stale && !e.runningAI) e.setSimulateAI(true);
         }
 
-        setLink(others.length === 0 ? 'alone' : fallbackReaders.current.size === 0 ? 'direct' : 'relayed');
+        const nextLink = others.length === 0 ? 'alone' : fallbackReaders.current.size === 0 ? 'direct' : 'relayed';
+        // A room that has quietly fallen back to the slow Firestore path still
+        // plays, so nobody reports it -- but it is exactly the kind of thing
+        // worth finding in a log afterwards.
+        if (nextLink === 'relayed') log.warn('mesh:relayed', { unreachable: fallbackReaders.current.size });
+        setLink(nextLink);
       }, 1000);
 
       // Slow position publish for peers we have no channel to.
@@ -328,7 +339,12 @@ export default function GameView({
       // Deliberately not awaited: the reef starts rendering immediately and the
       // networking attaches to it a moment later, rather than the whole match
       // waiting on a download.
-      void startNetworking(roomId, uid).catch((e) => console.error('Could not start networking', e));
+      log.context({ room: roomId });
+      log.info('match:start', { roomId, isHost, seats: localIds.length });
+      void startNetworking(roomId, uid).catch((e) => {
+        log.error('mesh:start-failed', { message: String(e?.message ?? e) });
+        console.error('Could not start networking', e);
+      });
     }
 
     const board = window.setInterval(() => {

@@ -26,6 +26,9 @@ import type { MatchConfig } from './screens/MatchView';
 import type { Seat } from './engine/GolfEngine';
 import { DEFAULT_RULES } from './types/game';
 import type { GameSettings, HoleCount, MatchRules, PlayerCount } from './types/game';
+import { createLogger } from '@shared/log/logger';
+
+const log = createLogger('mini-golf');
 
 /**
  * The platform owns the lobby.
@@ -227,9 +230,19 @@ export default function App() {
             return;
           }
           setLobbyError(null);
+          log.context({ room: handoff.room, who: handoff.displayName || undefined });
+          log.info('lobby:snapshot', {
+            hostId: data.hostId,
+            iAmHost: data.hostId === uid,
+            players: Object.keys(data.players ?? {}).length,
+            matchStarted: Boolean(data.matchStarted),
+          });
           setLobby(data);
         },
-        () => setLobbyError('Lost contact with the lobby.'),
+        () => {
+          log.error('lobby:lost');
+          setLobbyError('Lost contact with the lobby.');
+        },
       );
     });
     return () => {
@@ -327,6 +340,7 @@ export default function App() {
       const { db, doc, updateDoc } = await import('./firebase');
       await updateDoc(doc(db, 'lobbies', handoff.room), { matchStarted: true });
     } catch (e) {
+      log.error('match:start-failed', { message: String((e as Error)?.message ?? e) });
       console.error('Could not start the round', e);
     }
   }, [isHost, handoff.room]);

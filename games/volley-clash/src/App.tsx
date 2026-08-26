@@ -21,6 +21,9 @@ import { audioService } from './services/audio';
 import { GameWallet, reportResult } from './platform/wallet';
 import MatchView, { MatchConfig, Person } from './screens/MatchView';
 import { GameSettings, Team } from './types/game';
+import { createLogger } from '@shared/log/logger';
+
+const log = createLogger('volley-clash');
 
 /**
  * The platform owns the lobby.
@@ -191,9 +194,19 @@ export default function App() {
             return;
           }
           setLobbyError(null);
+          log.context({ room: handoff.room, who: handoff.displayName || undefined });
+          log.info('lobby:snapshot', {
+            hostId: data.hostId,
+            iAmHost: data.hostId === uid,
+            players: Object.keys(data.players ?? {}).length,
+            matchStarted: Boolean(data.matchStarted),
+          });
           setLobby(data);
         },
-        () => setLobbyError('Lost contact with the lobby.'),
+        () => {
+          log.error('lobby:lost');
+          setLobbyError('Lost contact with the lobby.');
+        },
       );
     });
     return () => {
@@ -265,6 +278,7 @@ export default function App() {
       const { db, doc, updateDoc } = await import('./firebase');
       await updateDoc(doc(db, 'lobbies', handoff.room), { matchStarted: true });
     } catch (e) {
+      log.error('match:start-failed', { message: String((e as Error)?.message ?? e) });
       console.error('Could not start the match', e);
     }
   }, [isHost, handoff.room]);

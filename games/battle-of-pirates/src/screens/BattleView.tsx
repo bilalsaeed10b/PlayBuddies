@@ -17,11 +17,13 @@ import { IN_IFRAME, toggleFullscreen } from '../fullscreen';
 import ControlsTray from '@shared/controls/ControlsTray';
 import { audioService } from '../services/audio';
 import { packRules, unpackRules } from '../types/game';
-import { devLog } from '@shared/devlog/devlog';
+import { createLogger } from '@shared/log/logger';
 import type { GameSettings, MatchRules, NetPacket, Phase, Team } from '../types/game';
 // Type only: the runtime value arrives through the dynamic import below, which
 // is what keeps the Firebase SDK out of an offline player's bundle.
 import type { TurnLink } from '../net/turnLink';
+
+const log = createLogger('battle-of-pirates');
 
 export interface MatchConfig {
   /** null for offline play. */
@@ -249,7 +251,7 @@ export default function BattleView({
 
   const handlePacket = useCallback(
     (packet: NetPacket, from: string) => {
-      devLog('battle-of-pirates', 'wire:recv', { from, type: packet.t, n: 'n' in packet ? packet.n : undefined });
+      log.info('wire:recv', { from, type: packet.t, n: 'n' in packet ? packet.n : undefined });
       if (packet.t === 'start') {
         setSession((current) =>
           current && current.seed === packet.seed
@@ -301,14 +303,14 @@ export default function BattleView({
         // The match can be left while this import is still in flight; without
         // the guard the listener opens with nothing left to close it.
         if (disposed) return;
-        devLog('battle-of-pirates', 'wire:open', { roomId: config.roomId, isHost: config.isHost, peerUids: config.peerUids });
+        log.info('wire:open', { roomId: config.roomId, isHost: config.isHost, peerUids: config.peerUids });
         link = new Link(
           config.roomId as string,
           config.uid as string,
           config.peerUids,
           handlePacket,
           (message) => {
-            devLog('battle-of-pirates', 'wire:error', { message });
+            log.info('wire:error', { message });
             setNotice(message);
             // Every message TurnLink reports on its own -- the open failing,
             // the listener dropping, a send bouncing -- means the link itself
@@ -324,7 +326,7 @@ export default function BattleView({
         // The whole negotiation, sent once: a seed, a coin toss and the rules.
         // Everything else about the match is derived from those.
         if (config.isHost) {
-          devLog('battle-of-pirates', 'wire:send', { type: 'start', seed: config.seed, first: config.first });
+          log.info('wire:send', { type: 'start', seed: config.seed, first: config.first });
           link.send({
             t: 'start',
             n: Date.now(),
@@ -376,7 +378,7 @@ export default function BattleView({
 
     const governor = new QualityGovernor(settingsRef.current.lowPower);
 
-    devLog('battle-of-pirates', 'engine:build', {
+    log.info('engine:build', {
       seed: session.seed,
       first: session.first,
       players: session.rules.players,
@@ -400,7 +402,7 @@ export default function BattleView({
       },
       onLocalShot: online
         ? (packet) => {
-            devLog('battle-of-pirates', 'wire:send', { type: packet.t, n: packet.n });
+            log.info('wire:send', { type: packet.t, n: packet.n });
             linkRef.current?.send(packet);
           }
         : undefined,
@@ -505,7 +507,7 @@ export default function BattleView({
         setHp(engine.hp);
       }
       if (engine.turn !== shown.turn) {
-        devLog('battle-of-pirates', 'turn:change', {
+        log.info('turn:change', {
           from: shown.turn,
           to: engine.turn,
           control: engine.ships[engine.turn]?.control,

@@ -11,7 +11,8 @@
     "lint": "npm run registry && eslint",
     "typecheck": "npm run registry && tsc --noEmit",
     "serve": "node scripts/serve.mjs",
-    "host": "npm run build && node scripts/serve.mjs"
+    "host": "npm run build && node scripts/serve.mjs",
+    "logs": "node scripts/logs.mjs"
   },
   "dependencies": {
     "firebase": "^12.11.0",

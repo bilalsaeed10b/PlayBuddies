@@ -2,9 +2,17 @@ import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
 import { defineConfig } from 'vite';
+import { logPlugin } from '../_shared/log/vitePlugin';
 
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [
+    react(),
+    tailwindcss(),
+    // Collects log batches while running this one game's dev server. The LAN
+    // host (scripts/serve.mjs) mounts the same collector, so a playtest on
+    // real phones lands in the same place -- see games/_shared/log/.
+    logPlugin(path.resolve(__dirname, `../../dev-logs/session-${new Date().toISOString().slice(0, 10)}.ndjson`)),
+  ],
   // Relative base so the bundle works under any deploy prefix, including the
   // /PlayBuddies/ path GitHub Pages serves from.
   base: './',

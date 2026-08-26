@@ -27,6 +27,9 @@ import { audioService } from '../services/audio';
 import { decodeChoice, encodeChoice, packRules } from '../types/game';
 import type { Choice, EncodedRound, GameSettings, MatchRules, NetPacket } from '../types/game';
 import type { TurnLink } from '../net/turnLink';
+import { createLogger } from '@shared/log/logger';
+
+const log = createLogger('wanted-board');
 
 export interface MatchConfig {
   roomId: string | null;
@@ -197,6 +200,12 @@ export default function MatchView({
     });
 
     collected.current.clear();
+    log.info('round:resolve', {
+      round,
+      cards: encoded,
+      banked: engine.players.map((p) => p.banked),
+      bounty: engine.players.map((p) => p.bounty),
+    });
     engine.applyRound(encoded);
     repaint();
     playReveal();
@@ -259,6 +268,7 @@ export default function MatchView({
       }
 
       if (packet.t === 'round') {
+        log.info('wire:recv-round', { from, rounds: packet.h?.length, locked: packet.lk });
         if (config.isHost || packet.s !== config.seed) return;
         setLockedMask(packet.lk ?? 0);
         if (packet.h.length <= engine.history.length) return;
@@ -315,7 +325,10 @@ export default function MatchView({
         };
         window.addEventListener('pagehide', leave);
       })
-      .catch(() => setNotice('Could not reach the other players.'));
+      .catch((e) => {
+        log.error('wire:open-failed', { message: String(e?.message ?? e) });
+        setNotice('Could not reach the other players.');
+      });
 
     return () => {
       disposed = true;

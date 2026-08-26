@@ -23,8 +23,10 @@ import { GameWallet, reportResult } from './platform/wallet';
 import BattleView, { MatchConfig } from './screens/BattleView';
 import type { Seat } from './engine/BattleEngine';
 import { DEFAULT_RULES, packRules, unpackRules } from './types/game';
-import { devLog } from '@shared/devlog/devlog';
+import { createLogger } from '@shared/log/logger';
 import type { GameSettings, MatchRules, MountainRule, PlayerCount, Team } from './types/game';
+
+const log = createLogger('battle-of-pirates');
 
 /**
  * The platform owns the lobby.
@@ -217,7 +219,7 @@ export default function App() {
             return;
           }
           setLobbyError(null);
-          devLog('battle-of-pirates', 'lobby:snapshot', {
+          log.info('lobby:snapshot', {
             hostId: data.hostId,
             iAmHost: data.hostId === uid,
             playerCount: Object.keys(data.players ?? {}).length,
@@ -349,7 +351,7 @@ export default function App() {
       // does -- there is no room for a guest to flip to the game view on a
       // `rules.players` that hasn't been corrected yet (see the lobby
       // snapshot handler above).
-      devLog('battle-of-pirates', 'host:start-match', { players: rules.players, packed: packRules(rules) });
+      log.info('host:start-match', { players: rules.players, packed: packRules(rules) });
       await updateDoc(doc(db, 'lobbies', handoff.room), { matchStarted: true, matchRules: packRules(rules) });
     } catch (e) {
       console.error('Could not start the battle', e);
@@ -463,7 +465,7 @@ export default function App() {
     // `rules.players` hadn't caught up to the host's built a shorter seats
     // array than the host did. Logged every time this runs so that mismatch
     // is visible across two tabs' logs without having to reproduce it live.
-    devLog('battle-of-pirates', 'seats:built', {
+    log.info('seats:built', {
       rulesPlayers: rules.players,
       peopleCount: people.length,
       crewCount: crew.length,

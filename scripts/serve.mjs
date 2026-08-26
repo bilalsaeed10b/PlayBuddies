@@ -13,6 +13,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { createLogCollector } from '../games/_shared/log/collector.mjs';
 
 const SEP = path.sep;
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -25,6 +26,15 @@ function arg(name, fallback) {
 const PORT = Number(arg('port', process.env.PORT || 3000));
 const HOST = arg('host', process.env.HOST || '0.0.0.0');
 const DIR = path.resolve(ROOT, arg('dir', 'out'));
+/**
+ * Where a playtest gets written down.
+ *
+ * This host is the one four phones are pointed at, so it is the only place
+ * that can collect a whole match. One file per day, appended: read it back
+ * with `npm run logs`.
+ */
+const LOG_FILE = path.resolve(ROOT, 'dev-logs', `session-${new Date().toISOString().slice(0, 10)}.ndjson`);
+const handleLog = createLogCollector(LOG_FILE);
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -75,6 +85,10 @@ function resolveFile(urlPath) {
 }
 
 const server = http.createServer((req, res) => {
+  // Log batches first: they are a POST to a path no file will ever match, and
+  // handleLog answers them itself.
+  if (handleLog(req, res)) return;
+
   const file = resolveFile(req.url || '/');
 
   if (!file) {
@@ -116,6 +130,7 @@ server.listen(PORT, HOST, () => {
   console.log(`[serve] serving ${path.relative(ROOT, DIR)}/ on ${HOST}:${PORT}`);
   console.log(`[serve]   local:   http://localhost:${PORT}`);
   for (const a of addrs) console.log(`[serve]   network: http://${a}:${PORT}`);
+  console.log(`[serve]   logs:    ${path.relative(ROOT, LOG_FILE)}  (read with: npm run logs)`);
 });
 
 server.on('error', (e) => {

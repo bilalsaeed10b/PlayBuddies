@@ -24,7 +24,10 @@ import MatchView from './screens/MatchView';
 import type { MatchConfig } from './screens/MatchView';
 import type { Seat } from './engine/WantedEngine';
 import { DEFAULT_RULES, TARGET_CHOICES, packRules, unpackRules } from './types/game';
+import { createLogger } from '@shared/log/logger';
 import type { GameSettings, MatchRules, PlayerCount } from './types/game';
+
+const log = createLogger('wanted-board');
 
 /**
  * The platform owns the lobby.
@@ -176,6 +179,13 @@ export default function App() {
             return;
           }
           setLobbyError(null);
+          log.context({ room: handoff.room, who: handoff.displayName || undefined });
+          log.info('lobby:snapshot', {
+            hostId: data.hostId,
+            iAmHost: data.hostId === uid,
+            players: Object.keys(data.players ?? {}).length,
+            matchStarted: Boolean(data.matchStarted),
+          });
           setLobby(data);
           // The host's terms, arriving on the one channel every client already
           // listens to. Without this a guest seats the table by its own idea of
