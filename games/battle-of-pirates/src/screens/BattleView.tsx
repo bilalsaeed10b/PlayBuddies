@@ -154,8 +154,14 @@ export default function BattleView({
   const draggingRef = useRef(false);
   /** One per hull, since every seat can end up driven by a bot. */
   const brains = useRef<Brain[]>([]);
-  /** Shots that arrived before the engine existed. */
-  const queued = useRef<NetPacket[]>([]);
+  /**
+   * Shots that arrived before the engine existed.
+   *
+   * The sender rides along with the packet. Staleness is judged per sender
+   * (see `remoteSeq` in the engine), so a queued packet that has lost track
+   * of who wrote it cannot be replayed correctly once the engine turns up.
+   */
+  const queued = useRef<{ packet: NetPacket; from: string }[]>([]);
 
   /**
    * Everything below keys on numbers, never on the config object.
@@ -273,11 +279,11 @@ export default function BattleView({
       // The engine drops a packet stamped with a different seed, so a leftover
       // document from an earlier match cannot replay itself here.
       if (!engine) {
-        queued.current.push(packet);
+        queued.current.push({ packet, from });
         return;
       }
-      if (packet.t === 'fire') engine.applyFire(packet);
-      else engine.applyShot(packet);
+      if (packet.t === 'fire') engine.applyFire(packet, from);
+      else engine.applyShot(packet, from);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [shipOfUid, aiLevel],
@@ -409,9 +415,9 @@ export default function BattleView({
       },
     });
     engineRef.current = engine;
-    for (const packet of queued.current) {
-      if (packet.t === 'fire') engine.applyFire(packet);
-      else if (packet.t === 'shot') engine.applyShot(packet);
+    for (const { packet, from } of queued.current) {
+      if (packet.t === 'fire') engine.applyFire(packet, from);
+      else if (packet.t === 'shot') engine.applyShot(packet, from);
     }
     queued.current = [];
 

@@ -238,8 +238,24 @@ export class BattleEngine {
   private lastShot: Shot | null = null;
   /** Counted separately: one is what we have sent, the other what we have seen. */
   private localSeq = 0;
-  private remoteFireSeq = 0;
-  private remoteSeq = 0;
+  /**
+   * The last sequence number seen FROM EACH SENDER, keyed by their uid.
+   *
+   * Per sender, not one number for "the wire", and that distinction is the
+   * whole reason a fleet action works at all. `localSeq` is a per-client
+   * counter that starts at zero, so every player's first shot of a match is
+   * numbered 1, their second 2, and so on -- the numbers are only meaningful
+   * relative to the person who wrote them. A single shared counter therefore
+   * did the right thing in a duel, where there is exactly one other person
+   * sending, and silently ate shots in a 2v2: the first captain to fire set
+   * it to 1, and the next captain's own first shot arrived as 1, failed the
+   * `<=` staleness test, and was dropped without a trace. Which shots
+   * vanished depended on the order people had fired on each particular
+   * device, so the same turn would land on some screens and not others --
+   * exactly the report this fixes.
+   */
+  private remoteFireSeq = new Map<string, number>();
+  private remoteSeq = new Map<string, number>();
 
   // Viewport transform, recomputed on resize.
   private scale = 1;
@@ -587,10 +603,10 @@ export class BattleEngine {
    * itself trusted for the outcome -- ShotPacket still is -- only for what
    * to point the barrel at and when to let go.
    */
-  applyFire(packet: FirePacket) {
+  applyFire(packet: FirePacket, from: string) {
     if (packet.s !== this.cfg.seed) return;
-    if (packet.n <= this.remoteFireSeq) return;
-    this.remoteFireSeq = packet.n;
+    if (packet.n <= (this.remoteFireSeq.get(from) ?? 0)) return;
+    this.remoteFireSeq.set(from, packet.n);
     this.pendingFire = packet;
   }
 
@@ -602,12 +618,12 @@ export class BattleEngine {
    * or came from a peer old enough not to send one, this doubles as its own
    * trigger -- it carries the same angle and power a FirePacket would have.
    */
-  applyShot(packet: ShotPacket) {
+  applyShot(packet: ShotPacket, from: string) {
     // A player's update document outlives the match that wrote it, so the
     // first snapshot after subscribing can be last night's final shot.
     if (packet.s !== this.cfg.seed) return;
-    if (packet.n <= this.remoteSeq) return;
-    this.remoteSeq = packet.n;
+    if (packet.n <= (this.remoteSeq.get(from) ?? 0)) return;
+    this.remoteSeq.set(from, packet.n);
     this.pendingRemote = packet;
   }
 
