@@ -5,7 +5,7 @@ import { onAuthStateChanged, type User } from "firebase/auth";
 import { auth, db } from "@/lib/firebase";
 import { useAuthStore } from "@/store/useAuthStore";
 import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
-import { generateFriendCode } from "@/lib/rooms";
+import { FRIEND_CODE_LENGTH, generateFriendCode } from "@/lib/rooms";
 import { useOnlinePresence } from "@/hooks/usePresence";
 
 const SYNC_TTL_MS = 24 * 60 * 60 * 1000;
@@ -53,13 +53,16 @@ async function syncUserDocuments(user: User) {
 
   let friendCode: string | undefined = profileSnap.data()?.friendCode;
 
-  if (!friendCode || friendCode.length !== 8) {
+  if (!friendCode || friendCode.length !== FRIEND_CODE_LENGTH) {
     // Carry over a code from before the profile split so existing friend codes
-    // keep working, rather than silently reissuing one.
+    // keep working, rather than silently reissuing one. A code from the old
+    // 8-character era fails this same length check, so it gets reissued at the
+    // new length too instead of lingering unsearchable.
     try {
       const legacy = await getDoc(doc(db, "users", user.uid));
       const legacyCode = legacy.data()?.friendCode;
-      friendCode = legacyCode && legacyCode.length === 8 ? legacyCode : generateFriendCode();
+      friendCode =
+        legacyCode && legacyCode.length === FRIEND_CODE_LENGTH ? legacyCode : generateFriendCode();
     } catch {
       friendCode = generateFriendCode();
     }

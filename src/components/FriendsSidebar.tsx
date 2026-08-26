@@ -1,25 +1,31 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import {
-  doc,
-  getDoc,
-  deleteDoc,
-  setDoc,
-  addDoc,
-  collection,
-} from "firebase/firestore";
+import { usePathname } from "next/navigation";
+import { doc, getDoc, addDoc, collection } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useAuthStore } from "@/store/useAuthStore";
 import { useFriends, type FriendProfile } from "@/hooks/useFriends";
+import { useFriendRequests } from "@/hooks/useFriendRequests";
 import { useFriendsOnline } from "@/hooks/usePresence";
 import { normalizeRoomCode, inviteTimestamps } from "@/lib/rooms";
-import { FRIEND_CODE_LENGTH, findByFriendCode, sendFriendRequest } from "@/lib/friends";
+import {
+  FRIEND_CODE_LENGTH,
+  acceptFriendRequest,
+  declineFriendRequest,
+  findByFriendCode,
+  sendFriendRequest,
+} from "@/lib/friends";
 import { Users, X, UserPlus, Check, MessageCircle, Search } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
 export default function FriendsSidebar() {
   const user = useAuthStore((s) => s.user);
+  const pathname = usePathname();
+  // The lobby has its own fixed bottom-right button (mobile only, for the
+  // players/chat panel) in this same corner — nudge ours above it there so
+  // the two don't stack on top of each other.
+  const isLobby = pathname?.startsWith("/lobby");
   const [isOpen, setIsOpen] = useState(false);
   const [tab, setTab] = useState<"friends" | "requests" | "add">("friends");
 
@@ -30,9 +36,13 @@ export default function FriendsSidebar() {
   const [sentTo, setSentTo] = useState<string | null>(null);
   const [notice, setNotice] = useState<string>("");
 
-  // The listener only runs while the panel is open — it used to stay open on
-  // every page for every signed-in user, including during gameplay.
-  const { friends, requests } = useFriends(isOpen);
+  // The friends-list listener only runs while the panel is open — it used to
+  // stay open on every page for every signed-in user, including during
+  // gameplay. Requests are different: a badge that only updates once the
+  // panel is already open can never announce that a request just arrived, so
+  // that listener (below) stays on regardless.
+  const { friends } = useFriends(isOpen);
+  const requests = useFriendRequests();
   const friendUids = useMemo(() => friends.map((f) => f.uid), [friends]);
   const onlineUids = useFriendsOnline(friendUids);
 
@@ -80,21 +90,8 @@ export default function FriendsSidebar() {
     setTimeout(() => setNotice(""), 2500);
   };
 
-  const acceptRequest = async (connId: string) => {
-    try {
-      await setDoc(doc(db, "connections", connId), { status: "accepted" }, { merge: true });
-    } catch (e) {
-      console.error("Could not accept request", e);
-    }
-  };
-
-  const denyRequest = async (connId: string) => {
-    try {
-      await deleteDoc(doc(db, "connections", connId));
-    } catch (e) {
-      console.error("Could not decline request", e);
-    }
-  };
+  const acceptRequest = (connId: string) => acceptFriendRequest(connId);
+  const denyRequest = (connId: string) => declineFriendRequest(connId);
 
   const inviteFriend = async (friendId: string) => {
     if (!user) return;
@@ -132,14 +129,43 @@ export default function FriendsSidebar() {
       {!isOpen && (
         <motion.button
           initial={{ opacity: 0, x: 20 }}
-          animate={{ opacity: 1, x: 0 }}
-          onClick={() => setIsOpen(true)}
-          className="fixed bottom-6 right-6 z-50 p-4 rounded-full bg-primary/80 backdrop-blur-md shadow-[0_0_20px_#ff4400] text-white hover:bg-primary transition-colors flex items-center gap-2"
+          animate={{
+            opacity: 1,
+            x: 0,
+            boxShadow:
+              requests.length > 0
+                ? [
+                    "0 0 20px 4px rgba(239,68,68,0.7)",
+                    "0 0 32px 10px rgba(239,68,68,0.95)",
+                    "0 0 20px 4px rgba(239,68,68,0.7)",
+                  ]
+                : "0 0 20px #ff4400",
+          }}
+          transition={
+            requests.length > 0
+              ? { boxShadow: { duration: 1.4, repeat: Infinity, ease: "easeInOut" } }
+              : undefined
+          }
+          onClick={() => {
+            if (requests.length > 0) setTab("requests");
+            setIsOpen(true);
+          }}
+          aria-label={
+            requests.length > 0
+              ? `Open friends panel, ${requests.length} pending friend request${requests.length === 1 ? "" : "s"}`
+              : "Open friends panel"
+          }
+          className={`fixed ${isLobby ? "bottom-24 lg:bottom-6" : "bottom-6"} right-6 z-50 p-4 rounded-full backdrop-blur-md text-white transition-colors flex items-center gap-2 ${
+            requests.length > 0 ? "bg-red-500/90 hover:bg-red-500" : "bg-primary/80 hover:bg-primary"
+          }`}
         >
           <Users size={24} />
           <span className="font-bold hidden sm:inline-block">Friends</span>
           {requests.length > 0 && (
-            <span className="absolute -top-2 -right-2 w-6 h-6 bg-red-500 rounded-full text-xs flex items-center justify-center font-black">
+            <span
+              className="absolute -top-2 -right-2 min-w-6 h-6 px-1 bg-white text-red-600 rounded-full text-xs flex items-center justify-center font-black animate-pulse"
+              aria-hidden
+            >
               {requests.length}
             </span>
           )}
@@ -306,7 +332,7 @@ export default function FriendsSidebar() {
                         <input
                           id="friend-code"
                           type="text"
-                          placeholder="Search 8-digit friend code…"
+                          placeholder={`Search ${FRIEND_CODE_LENGTH}-digit friend code…`}
                           value={searchQuery}
                           onChange={(e) => {
                             setSearchQuery(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ""));

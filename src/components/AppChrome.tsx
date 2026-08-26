@@ -3,6 +3,7 @@
 import { usePathname } from "next/navigation";
 import FriendsSidebar from "@/components/FriendsSidebar";
 import InviteListener from "@/components/InviteListener";
+import FriendRequestListener from "@/components/FriendRequestListener";
 
 /**
  * Global overlays, mounted only where they make sense.
@@ -17,12 +18,13 @@ export default function AppChrome() {
   const isLanding = pathname === "/";
   if (isLanding) return null;
 
-  // The lobby renders its own invite UI and friends picker inline.
-  const isLobby = pathname?.startsWith("/lobby");
-
+  // The lobby has its own invite UI, but a friend request can land at any
+  // time — including mid-lobby — so the friends panel (and its accept/deny
+  // controls) has to be reachable there too, not just from the dashboard.
   return (
     <>
-      {!isLobby && <FriendsSidebar />}
+      <FriendsSidebar />
+      <FriendRequestListener />
       <InviteListener />
     </>
   );

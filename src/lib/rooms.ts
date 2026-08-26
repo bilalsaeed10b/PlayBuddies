@@ -53,14 +53,15 @@ export function inviteTimestamps() {
   return { createdAt: now, expiresAt: new Date(now + INVITE_TTL_MS) };
 }
 
-export const FRIEND_CODE_LENGTH = 8;
+export const FRIEND_CODE_LENGTH = 6;
 
 /**
- * An 8-character friend code, always exactly that length.
+ * A 6-character friend code, always exactly that length.
  *
  * The previous version concatenated two base-36 numbers and sliced to 8, which
  * yields a shorter string whenever both numbers are small — and the search box
- * requires exactly 8 characters, so those users could never be found.
+ * requires exactly FRIEND_CODE_LENGTH characters, so those users could never
+ * be found.
  */
 export function generateFriendCode(): string {
   const max = 256 - (256 % ALPHABET.length);

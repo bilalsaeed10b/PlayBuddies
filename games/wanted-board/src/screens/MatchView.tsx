@@ -67,6 +67,21 @@ export default function MatchView({
   const online = Boolean(config.roomId && config.uid && config.peerUids.length > 0);
   const rulesBits = packRules(config.rules);
 
+  /**
+   * The seed every wire packet is actually checked against.
+   *
+   * The host's `config.seed` is authoritative from the start. A guest's
+   * `config.seed` is only ever this device's own locally-rolled guess — App.tsx
+   * never learns the host's real one — so filtering wire packets on it
+   * directly meant a guest rejected every `round` packet the host ever sent,
+   * and the host rejected every `pick` the guest sent back, because the two
+   * numbers were independently random and essentially never matched. This ref
+   * starts at the local guess and is corrected the moment a guest hears the
+   * real value from the host, via the `start` packet or the `seed` stamped on
+   * the first `round` packet, whichever lands first.
+   */
+  const effectiveSeedRef = useRef<number>(config.seed);
+
   const engine = useMemo(
     () => new WantedEngine({ seats: config.seats, seed: config.seed, rules: config.rules }),
     // Rebuilt only when the match itself changes — a settings tweak must not
@@ -256,8 +271,19 @@ export default function MatchView({
 
   const handlePacket = useCallback(
     (packet: NetPacket, from: string) => {
+      if (packet.t === 'start') {
+        // The host's word on what this match's seed actually is. A guest that
+        // never hears this (or the same value stamped on the first `round`
+        // packet, below) has no way to pass the staleness check on anything
+        // it sends or receives for the rest of the match.
+        if (config.isHost) return;
+        effectiveSeedRef.current = packet.seed;
+        linkRef.current?.setStamp({ seed: packet.seed, r: packet.r });
+        return;
+      }
+
       if (packet.t === 'pick') {
-        if (!config.isHost || packet.s !== config.seed) return;
+        if (!config.isHost || packet.s !== effectiveSeedRef.current) return;
         // A card for a round that has already resolved is a straggler, not a move.
         if (packet.rd !== engine.round) return;
         const seat = seatOfUid.get(from);
@@ -269,7 +295,11 @@ export default function MatchView({
 
       if (packet.t === 'round') {
         log.info('wire:recv-round', { from, rounds: packet.h?.length, locked: packet.lk });
-        if (config.isHost || packet.s !== config.seed) return;
+        if (config.isHost) return;
+        // The host stamps its real seed on every round packet too, so a guest
+        // that missed (or raced) the `start` packet still catches up here.
+        if (typeof packet.seed === 'number') effectiveSeedRef.current = packet.seed;
+        if (packet.s !== effectiveSeedRef.current) return;
         setLockedMask(packet.lk ?? 0);
         if (packet.h.length <= engine.history.length) return;
         // Replay rather than patch: a guest that missed three packets catches
@@ -386,7 +416,11 @@ export default function MatchView({
       linkRef.current?.send({
         t: 'pick',
         n: Date.now(),
-        s: config.seed,
+        // The learned seed, not config.seed — see effectiveSeedRef above. Using
+        // this device's own local guess here is what made the host discard
+        // every guest's card: the two seeds are independently random and
+        // essentially never match.
+        s: effectiveSeedRef.current,
         rd: engine.round,
         c: encodeChoice(choice),
       });

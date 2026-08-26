@@ -2,6 +2,7 @@
 
 import {
   collection,
+  deleteDoc,
   doc,
   getDoc,
   getDocs,
@@ -73,5 +74,27 @@ export async function sendFriendRequest(myUid: string, targetUid: string): Promi
   } catch (e) {
     console.error("Could not send friend request", e);
     return "error";
+  }
+}
+
+/** Accepts a pending incoming request. Shared by the friends panel and the toast. */
+export async function acceptFriendRequest(connId: string): Promise<boolean> {
+  try {
+    await setDoc(doc(db, "connections", connId), { status: "accepted" }, { merge: true });
+    return true;
+  } catch (e) {
+    console.error("Could not accept friend request", e);
+    return false;
+  }
+}
+
+/** Declines a pending incoming request. Shared by the friends panel and the toast. */
+export async function declineFriendRequest(connId: string): Promise<boolean> {
+  try {
+    await deleteDoc(doc(db, "connections", connId));
+    return true;
+  } catch (e) {
+    console.error("Could not decline friend request", e);
+    return false;
   }
 }
