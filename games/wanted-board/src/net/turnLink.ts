@@ -131,10 +131,36 @@ export class TurnLink {
       void this.ready;
       return;
     }
-    this.write(packet).catch((err) => {
-      console.error('[turnLink] could not send:', err);
-      this.onError?.('That move did not reach the other players.');
-    });
+    void this.writeWithRetries(packet);
+  }
+
+  /**
+   * A single Firestore write drops far more often on a phone than the same
+   * write from a laptop on wifi — a brief cell handoff is enough — and the
+   * caller here is a card the player will not get to pick again this round.
+   * Two retries, a beat apart, cover exactly that: a blip that clears on its
+   * own within a second or so. Retrying the *same* packet is safe because
+   * `write` always replaces the whole document — an old attempt landing after
+   * a newer send would be wrong, but there is no newer send in flight while
+   * this one is still retrying.
+   *
+   * The error is only surfaced to the player once every attempt is spent, so
+   * "that move did not reach the other players" means what it says: not one
+   * write failed, three did.
+   */
+  private async writeWithRetries(packet: NetPacket, attempt = 0) {
+    if (this.closed || !this.write) return;
+    try {
+      await this.write(packet);
+    } catch (err) {
+      if (attempt >= 2) {
+        console.error('[turnLink] could not send after retries:', err);
+        this.onError?.('That move did not reach the other players.');
+        return;
+      }
+      await new Promise((r) => setTimeout(r, 350 * (attempt + 1)));
+      await this.writeWithRetries(packet, attempt + 1);
+    }
   }
 
   /**
