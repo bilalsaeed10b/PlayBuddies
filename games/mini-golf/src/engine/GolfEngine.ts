@@ -9,7 +9,7 @@
  */
 import { BALL_R, HOLE_R, PHYSICS, SEATS, TURF, clamp, scoreName } from '../game/rules';
 import type { HoleCount, PlayerCount, Shout } from '../game/rules';
-import { blockDistance, buildCourse, dist, insideShape, pickupAt } from '../game/course';
+import { buildCourse, dist, insideShape, pickupAt } from '../game/course';
 import type { Block, Course, Vec } from '../game/course';
 import { advance, launch, noEvents, surfaceAt } from '../game/physics';
 import type { Ball, ShotEvents } from '../game/physics';
@@ -92,13 +92,15 @@ export class GolfEngine {
   card: (number | null)[][] = [];
   turn: number;
   phase: Phase = 'aim';
-  /** Lowest total once the round is over. -1 until then. */
-  winner = -1;
+  /**
+   * Every seat sharing the lowest total once the round is over. Empty until
+   * then, more than one entry when the round ends in a tie.
+   */
+  winners: number[] = [];
 
-  /** Live aim, written straight from the pad and read by the draw. */
+  /** Live aim, written straight from the pad and read by keyboard aiming. */
   aimAngle = 0;
   aimPower = 0.5;
-  dragging = false;
 
   private view: View = { scale: 1, ox: 0, oy: 0 };
   private cssW = 1;
@@ -134,7 +136,8 @@ export class GolfEngine {
       onLocalFire?: (seat: number, angle: number, power: number, hole: number) => void;
       /** Fired once a local putt has settled and the green is authoritative. */
       onLocalShot?: (report: ShotReport) => void;
-      onOver?: (winner: number, totals: number[]) => void;
+      /** Every seat sharing the lowest total — more than one of them on a tie. */
+      onOver?: (winners: number[], totals: number[]) => void;
     },
   ) {
     this.seats = opts.seats;
@@ -178,7 +181,7 @@ export class GolfEngine {
         x = this.course.tee.x;
         y = this.course.tee.y;
       }
-      this.balls.push({ x, y, vx: 0, vy: 0, moving: false });
+      this.balls.push({ x, y, vx: 0, vy: 0, moving: false, overHole: false });
     }
     this.strokes = new Array(this.players).fill(0);
     this.done = new Array(this.players).fill(false);
@@ -387,10 +390,11 @@ export class GolfEngine {
 
   private finish() {
     this.phase = 'over';
-    let best = 0;
-    for (let i = 1; i < this.players; i++) if (this.totals[i] < this.totals[best]) best = i;
-    this.winner = best;
-    this.opts.onOver?.(best, this.totals.slice());
+    const low = Math.min(...this.totals.slice(0, this.players));
+    const winners: number[] = [];
+    for (let i = 0; i < this.players; i++) if (this.totals[i] === low) winners.push(i);
+    this.winners = winners;
+    this.opts.onOver?.(winners, this.totals.slice());
   }
 
   /** Points the aim straight at the flag, which is where anybody starts from. */
@@ -583,7 +587,6 @@ export class GolfEngine {
     this.drawBlocks(ctx);
     this.drawTee(ctx);
     this.drawCup(ctx);
-    this.drawAim(ctx);
     this.drawTrail(ctx);
     this.drawBalls(ctx);
     this.drawFlag(ctx);
@@ -818,70 +821,6 @@ export class GolfEngine {
     ctx.stroke();
   }
 
-  /**
-   * The aim line: six dots from the ball, out as far as the pull will carry.
-   *
-   * Always six, and evenly spread over however much room there actually is —
-   * the run is cut short at the first thing it would hit, and the dots are
-   * fitted to what is left. So the gaps carry two pieces of information at
-   * once: wide apart is a hard putt with a clear run, bunched up is a hard
-   * putt into something a few units away.
-   *
-   * Fitting them rather than spacing them at a fixed pitch matters now that
-   * barriers are laid deliberately across the line to the flag. A fixed pitch
-   * with a hard stop drew one or two dots on most greens and none at all on
-   * some, which reads as a broken guide rather than a short one.
-   *
-   * It deliberately does not predict the bounce past the obstruction. Where
-   * the ball goes after the boards is the part worth being good at.
-   */
-  private drawAim(ctx: CanvasRenderingContext2D) {
-    if (this.phase !== 'aim' || this.roll) return;
-    if (this.seats[this.turn]?.control !== 'local') return;
-    const ball = this.balls[this.turn];
-    if (!ball) return;
-
-    const k = this.view.scale;
-    const power = clamp(this.aimPower, 0, 1);
-    const reach = 26 + power * 118;
-    const cos = Math.cos(this.aimAngle);
-    const sin = Math.sin(this.aimAngle);
-    const start = BALL_R * 2.2;
-
-    // March out until the line meets a wall or a block, and keep that length.
-    let clear = reach;
-    for (let d = start; d <= reach; d += 2) {
-      const x = ball.x + cos * d;
-      const y = ball.y + sin * d;
-      if (
-        !insideShape(this.course.shape, this.course.w, this.course.h, x, y, BALL_R * 0.4) ||
-        this.course.blocks.some((b) => blockHit(b, x, y))
-      ) {
-        clear = d;
-        break;
-      }
-    }
-
-    const count = 6;
-    const span = Math.max(2, clear - start);
-    // Bunched into a short run means the way ahead is short: dim the line a
-    // little so a blocked aim does not look as confident as an open one.
-    const crowded = clamp(span / reach, 0.35, 1);
-
-    ctx.save();
-    for (let i = 1; i <= count; i++) {
-      const t = i / count;
-      const x = ball.x + cos * (start + t * span);
-      const y = ball.y + sin * (start + t * span);
-      ctx.globalAlpha = (this.dragging ? 0.95 : 0.55) * (1 - t * 0.45) * crowded;
-      ctx.fillStyle = '#ffffff';
-      ctx.beginPath();
-      ctx.arc(this.sx(x), this.sy(y), Math.max(1.3, (2.1 - t * 0.7) * k * 0.5), 0, Math.PI * 2);
-      ctx.fill();
-    }
-    ctx.restore();
-  }
-
   private drawTrail(ctx: CanvasRenderingContext2D) {
     if (this.trail.length < 4) return;
     const k = this.view.scale;
@@ -952,11 +891,6 @@ export class GolfEngine {
     ctx.fill();
     ctx.restore();
   }
-}
-
-/** Point-in-block, for stopping the aim line at the first thing in its way. */
-function blockHit(b: Block, x: number, y: number): boolean {
-  return blockDistance(b, x, y) < 0;
 }
 
 /** Re-exported so screens can name a score without reaching into game/rules. */

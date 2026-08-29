@@ -24,6 +24,18 @@ export interface Ball {
   vx: number;
   vy: number;
   moving: boolean;
+  /**
+   * True while the ball is inside the cup's capture ring.
+   *
+   * A fast ball crosses that ring over several physics steps, not one, and the
+   * lip-out below is a single rim event — struck once, on the way in. Judging
+   * it fresh on every step it happens to still be inside re-damped the same
+   * ball again and again as it crossed, which bled off enough speed that a putt
+   * hit well over the lip-out threshold still ended up captured a few steps
+   * later. This flag makes the judgement once, at the rim, and lets the ball
+   * actually carry through for the rest of the crossing.
+   */
+  overHole: boolean;
 }
 
 export type Surface = 'green' | 'rough' | 'sand';
@@ -197,7 +209,9 @@ export function advance(course: Course, ball: Ball, dt: number, events: ShotEven
 
   // The cup, before the walls: a ball dropping in is done, wherever it is.
   const toHole = dist(ball, course.hole);
-  if (toHole < HOLE_R - BALL_R * 0.3) {
+  const overHoleNow = toHole < HOLE_R - BALL_R * 0.3;
+  if (overHoleNow && !ball.overHole) {
+    ball.overHole = true;
     const speed = Math.hypot(ball.vx, ball.vy);
     if (speed < PHYSICS.CAPTURE_SPEED) {
       ball.x = course.hole.x;
@@ -209,10 +223,16 @@ export function advance(course: Course, ball: Ball, dt: number, events: ShotEven
       return;
     }
     // Too quick. It rides the rim and carries on, a good deal slower and
-    // pushed off line — which is what a lip-out looks like.
+    // pushed off line — which is what a lip-out looks like. Struck once, here,
+    // at the rim: `overHole` stops this from firing again on every following
+    // step the ball still happens to be over the cup, which would otherwise
+    // bleed off its speed a second and third time before it has crossed and
+    // drag it back under the capture threshold mid-flight.
     ball.vx *= PHYSICS.LIP_DAMP;
     ball.vy *= PHYSICS.LIP_DAMP;
     events.lipped = true;
+  } else if (!overHoleNow) {
+    ball.overHole = false;
   }
 
   for (const p of course.water) {
@@ -251,6 +271,7 @@ export function launch(from: Vec, angle: number, power: number): Ball {
     vx: Math.cos(angle) * speed,
     vy: Math.sin(angle) * speed,
     moving: true,
+    overHole: false,
   };
 }
 

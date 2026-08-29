@@ -146,22 +146,28 @@ export const inPatch = (p: Patch, x: number, y: number) => Math.hypot(x - p.x, y
 // -- can it be finished? ------------------------------------------------------
 
 /**
- * The distance a ball actually has to travel to get from the tee to the cup,
- * or -1 when it cannot get there at all.
+ * The route distance from one point to every reachable point on a course, in
+ * world units — the ball's-eye view of the green rather than the ruler's.
  *
- * Water counts as a wall, and that is the whole point of the check: a rolling
- * ball cannot cross a pond, so a flag ringed by one is unreachable even though
- * nothing solid is in the way. Blocks are grown by a ball's radius so a "gap"
- * the ball could never fit through is not mistaken for a route.
+ * Water counts as a wall: a rolling ball cannot cross a pond, so a flag ringed
+ * by one is unreachable even though nothing solid is in the way. Blocks are
+ * grown by a ball's radius so a "gap" the ball could never fit through is not
+ * mistaken for a route.
  *
- * It returns a length rather than a yes/no because par is worked out from the
- * same walk. Judging par on the straight line from tee to cup stopped meaning
- * anything once barriers were deliberately laid across that line — every hole
- * came back "blocked, add a stroke" and nine in ten were par 4. What a hole is
- * worth is how far the ball has to go *round* things, which is exactly what
- * this already knows.
+ * Built once from a source and queried by point rather than computed per pair,
+ * because both of its callers want to ask it many times over: par comes from
+ * one lookup against the tee, and the bot scores every candidate landing spot
+ * of a search against the hole. Eight-connected, so a diagonal run is not
+ * measured as a staircase — a four-connected walk reports a straight diagonal
+ * as 40% longer than it is, which would push every angled hole up a stroke for
+ * no reason.
  */
-function routeCost(course: Course): number {
+export interface RouteField {
+  /** Route distance from the source to this point, in world units. -1 off the walkable grid or unreached. */
+  at(x: number, y: number): number;
+}
+
+export function routeField(course: Course, source: Vec): RouteField {
   const cell = BALL_R * 1.5;
   const cols = Math.ceil(course.w / cell);
   const rows = Math.ceil(course.h / cell);
@@ -185,47 +191,66 @@ function routeCost(course: Course): number {
     const cy = clamp(Math.floor(v.y / cell), 0, rows - 1);
     return cy * cols + cx;
   };
-  const from = cellOf(course.tee);
-  const to = cellOf(course.hole);
-  if (!open[from] || !open[to]) return -1;
-
-  // Eight-connected, so a diagonal run is not measured as a staircase — a
-  // four-connected walk reports a straight diagonal as 40% longer than it is,
-  // which would push every angled hole up a stroke for no reason.
-  const STRAIGHT = 1;
-  const DIAGONAL = Math.SQRT2;
+  const from = cellOf(source);
   const best = new Float32Array(cols * rows).fill(Infinity);
-  const queued = new Uint8Array(cols * rows);
-  const queue: number[] = [from];
-  best[from] = 0;
-  queued[from] = 1;
 
-  for (let head = 0; head < queue.length; head++) {
-    const at = queue[head];
-    queued[at] = 0;
-    const cx = at % cols;
-    const cy = (at / cols) | 0;
-    for (let d = 0; d < 8; d++) {
-      const dx = d < 4 ? [1, -1, 0, 0][d] : [1, 1, -1, -1][d - 4];
-      const dy = d < 4 ? [0, 0, 1, -1][d] : [1, -1, 1, -1][d - 4];
-      const nx = cx + dx;
-      const ny = cy + dy;
-      if (nx < 0 || nx >= cols || ny < 0 || ny >= rows) continue;
-      const i = ny * cols + nx;
-      if (!open[i]) continue;
-      const step = d < 4 ? STRAIGHT : DIAGONAL;
-      const cost = best[at] + step;
-      if (cost < best[i] - 1e-4) {
-        best[i] = cost;
-        if (!queued[i]) {
-          queued[i] = 1;
-          queue.push(i);
+  if (open[from]) {
+    const STRAIGHT = 1;
+    const DIAGONAL = Math.SQRT2;
+    const queued = new Uint8Array(cols * rows);
+    const queue: number[] = [from];
+    best[from] = 0;
+    queued[from] = 1;
+
+    for (let head = 0; head < queue.length; head++) {
+      const at = queue[head];
+      queued[at] = 0;
+      const cx = at % cols;
+      const cy = (at / cols) | 0;
+      for (let d = 0; d < 8; d++) {
+        const dx = d < 4 ? [1, -1, 0, 0][d] : [1, 1, -1, -1][d - 4];
+        const dy = d < 4 ? [0, 0, 1, -1][d] : [1, -1, 1, -1][d - 4];
+        const nx = cx + dx;
+        const ny = cy + dy;
+        if (nx < 0 || nx >= cols || ny < 0 || ny >= rows) continue;
+        const i = ny * cols + nx;
+        if (!open[i]) continue;
+        const step = d < 4 ? STRAIGHT : DIAGONAL;
+        const cost = best[at] + step;
+        if (cost < best[i] - 1e-4) {
+          best[i] = cost;
+          if (!queued[i]) {
+            queued[i] = 1;
+            queue.push(i);
+          }
         }
       }
     }
   }
 
-  return best[to] === Infinity ? -1 : best[to] * cell;
+  return {
+    at(x: number, y: number): number {
+      const cx = clamp(Math.floor(x / cell), 0, cols - 1);
+      const cy = clamp(Math.floor(y / cell), 0, rows - 1);
+      const v = best[cy * cols + cx];
+      return v === Infinity ? -1 : v * cell;
+    },
+  };
+}
+
+/**
+ * The distance a ball actually has to travel to get from the tee to the cup,
+ * or -1 when it cannot get there at all.
+ *
+ * It returns a length rather than a yes/no because par is worked out from the
+ * same walk. Judging par on the straight line from tee to cup stopped meaning
+ * anything once barriers were deliberately laid across that line — every hole
+ * came back "blocked, add a stroke" and nine in ten were par 4. What a hole is
+ * worth is how far the ball has to go *round* things, which is exactly what
+ * this already knows.
+ */
+function routeCost(course: Course): number {
+  return routeField(course, course.tee).at(course.hole.x, course.hole.y);
 }
 
 // -- generation ---------------------------------------------------------------
@@ -283,8 +308,15 @@ function layout(
   let shape: Shape;
 
   if (semi) {
-    const r = range(64, 86) * roomy;
-    const facing = pick(['up', 'down', 'left', 'right'] as const);
+    const r = range(58, 92) * roomy;
+    // The four cardinal facings keep a tight bounding box — half a disc is
+    // exactly r by 2r along its own axis — so they stay first-class. The
+    // in-between facings cannot: the tight box of a diagonal cut depends on
+    // the angle, and working that out case by case is a lot of geometry for
+    // what is only ever a little extra canvas padding around the green. They
+    // get the full disc's box instead, which is generic enough that the cut
+    // could point anywhere at all and the formula would not care.
+    const facing = pick(['up', 'down', 'left', 'right', 'diag'] as const);
     if (facing === 'up') {
       w = r * 2;
       h = r;
@@ -297,14 +329,19 @@ function layout(
       w = r;
       h = r * 2;
       shape = { kind: 'semi', cx: r, cy: r, r, nx: -1, ny: 0 };
-    } else {
+    } else if (facing === 'right') {
       w = r;
       h = r * 2;
       shape = { kind: 'semi', cx: 0, cy: r, r, nx: 1, ny: 0 };
+    } else {
+      const theta = range(0, Math.PI * 2);
+      w = r * 2;
+      h = r * 2;
+      shape = { kind: 'semi', cx: r, cy: r, r, nx: Math.cos(theta), ny: Math.sin(theta) };
     }
   } else {
-    w = range(112, 166) * roomy;
-    h = range(80, 120) * roomy;
+    w = range(100, 190) * roomy;
+    h = range(72, 132) * roomy;
     shape = { kind: 'rect' };
   }
 
@@ -462,7 +499,7 @@ function layout(
    * alternate sides, which turns a corridor into an S-bend: the ball has to be
    * worked round one and then back round the next.
    */
-  const gateCount = generosity <= 0 ? 0 : Math.max(1, Math.round(range(1.2, 3.4) * generosity));
+  const gateCount = generosity <= 0 ? 0 : Math.max(1, Math.round(range(1, 4.4) * generosity));
   let side = rand() < 0.5 ? 1 : -1;
   // Kept clear of both ends in world units rather than as a fraction, so a
   // short hole does not get a barrier dropped on top of its own tee.
@@ -509,7 +546,7 @@ function layout(
     side = -side;
   }
 
-  const rockCount = Math.round(range(0, 2.2) * generosity);
+  const rockCount = Math.round(range(0, 3.4) * generosity);
   let rocks = 0;
   for (let i = 0; i < rockCount * 6 && rocks < rockCount; i++) {
     const r = range(6, 13);
@@ -532,7 +569,7 @@ function layout(
     return { x: lineX + crossX * off, y: lineY + crossY * off, r };
   };
 
-  const sandCount = Math.round(range(0.4, 3) * generosity);
+  const sandCount = Math.round(range(0, 3.6) * generosity);
   for (let i = 0; i < sandCount * 8 && course.sand.length < sandCount; i++) {
     const r = range(10, 20);
     const c = nearLine(r, 42);
@@ -547,7 +584,7 @@ function layout(
     placed.push(c);
   }
 
-  const waterCount = Math.round(range(0, 2.2) * generosity);
+  const waterCount = Math.round(range(0, 3) * generosity);
   for (let i = 0; i < waterCount * 8 && course.water.length < waterCount; i++) {
     const r = range(11, 21);
     const c = nearLine(r, 50);

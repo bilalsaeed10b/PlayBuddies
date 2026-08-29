@@ -12,14 +12,19 @@
  *
  * Opened on its own, with no host to ask, everything falls back to
  * localStorage and the game plays exactly as it always did.
+ *
+ * Coins are per game, the same as unlocks: what this game pays out cannot be
+ * spent in any other. Every game on the platform is served from the same
+ * origin, so a bare `localStorage` key would be shared the moment two games
+ * happened to pick the same name — exactly why `unlockKey` below has always
+ * been per-game, and why the coins key now is too.
  */
 
 /** How long to wait for the host before deciding there is not one. */
 const HANDSHAKE_MS = 1500;
 
-const COINS_KEY = 'fishy_coins';
-
 export interface Purse {
+  /** This game's own balance. Never shared with, or spendable in, any other game. */
   coins: number;
   /** Item indices this player owns in THIS game. */
   unlocks: number[];
@@ -33,9 +38,9 @@ const embedded = (() => {
   }
 })();
 
-function readLocal(unlockKey: string): Purse {
+function readLocal(coinsKey: string, unlockKey: string): Purse {
   try {
-    const coins = Number(localStorage.getItem(COINS_KEY) || 0);
+    const coins = Number(localStorage.getItem(coinsKey) || 0);
     const raw = localStorage.getItem(unlockKey);
     const unlocks: number[] = raw ? JSON.parse(raw) : [];
     return {
@@ -47,9 +52,9 @@ function readLocal(unlockKey: string): Purse {
   }
 }
 
-function writeLocal(unlockKey: string, purse: Purse) {
+function writeLocal(coinsKey: string, unlockKey: string, purse: Purse) {
   try {
-    localStorage.setItem(COINS_KEY, String(purse.coins));
+    localStorage.setItem(coinsKey, String(purse.coins));
     localStorage.setItem(unlockKey, JSON.stringify(purse.unlocks));
   } catch {
     /* private browsing: the account copy is the real one anyway */
@@ -59,23 +64,26 @@ function writeLocal(unlockKey: string, purse: Purse) {
 /**
  * The wallet for one game.
  *
- * `gameId` is the key this game's unlocks sit under in the account record, and
- * `unlockKey` is the localStorage key the game shipped with, kept so an
- * existing player's collection carries over rather than vanishing.
+ * `gameId` is the key this game's coins and unlocks sit under in the account
+ * record, and `unlockKey` is the localStorage key the game shipped with, kept
+ * so an existing player's collection carries over rather than vanishing.
  */
 export class GameWallet {
   private unlocksByGame: Record<string, number[]> = {};
+  private coinsByGame: Record<string, number> = {};
   private purse: Purse;
   private settled = false;
   private onChange: ((purse: Purse) => void) | null = null;
   private timer: number | null = null;
   private listener: ((e: MessageEvent) => void) | null = null;
+  private readonly coinsKey: string;
 
   constructor(
     private gameId: string,
     private unlockKey: string,
   ) {
-    this.purse = readLocal(unlockKey);
+    this.coinsKey = `fishy_coins_${gameId}`;
+    this.purse = readLocal(this.coinsKey, unlockKey);
   }
 
   /** What to show right now. Replaced once the account answers. */
@@ -104,15 +112,16 @@ export class GameWallet {
 
       this.unlocksByGame =
         data.unlocks && typeof data.unlocks === 'object' ? { ...data.unlocks } : {};
+      this.coinsByGame = data.coins && typeof data.coins === 'object' ? { ...data.coins } : {};
       const mine = this.unlocksByGame[this.gameId];
-      const accountCoins = Number(data.coins);
+      const mineCoins = Number(this.coinsByGame[this.gameId]);
 
       // Never hand back less than the browser already had. A player who earned
       // coins before any of this existed keeps them, and the first save pushes
       // that balance up to the account.
-      const local = readLocal(this.unlockKey);
+      const local = readLocal(this.coinsKey, this.unlockKey);
       this.settle({
-        coins: Math.max(Number.isFinite(accountCoins) ? accountCoins : 0, local.coins),
+        coins: Math.max(Number.isFinite(mineCoins) ? mineCoins : 0, local.coins),
         unlocks: [...new Set([...(Array.isArray(mine) ? mine : []), ...local.unlocks])],
       });
     };
@@ -130,21 +139,22 @@ export class GameWallet {
     if (this.timer !== null) window.clearTimeout(this.timer);
     this.timer = null;
     this.purse = purse;
-    writeLocal(this.unlockKey, purse);
+    writeLocal(this.coinsKey, this.unlockKey, purse);
     this.onChange?.(purse);
   }
 
   /** Save a new balance. Local always, and to the account when there is one. */
   save(purse: Purse) {
     this.purse = purse;
-    writeLocal(this.unlockKey, purse);
+    writeLocal(this.coinsKey, this.unlockKey, purse);
     if (!embedded) return;
     this.unlocksByGame[this.gameId] = purse.unlocks;
+    this.coinsByGame[this.gameId] = purse.coins;
     window.parent.postMessage(
       {
         source: 'playbuddies-game',
         type: 'wallet-save',
-        coins: purse.coins,
+        coins: this.coinsByGame,
         unlocks: this.unlocksByGame,
       },
       '*',

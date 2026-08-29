@@ -47,7 +47,7 @@ interface Drag {
  * is a tap, all the way round is everything you have.
  */
 function PowerArc({ ox, oy, reach, power }: { ox: number; oy: number; reach: number; power: number }) {
-  const total = 36;
+  const total = 16;
   const lit = Math.round(power * total);
   const dots = [];
   for (let i = 0; i < total; i++) {
@@ -64,6 +64,27 @@ function PowerArc({ ox, oy, reach, power }: { ox: number; oy: number; reach: num
     );
   }
   return <g>{dots}</g>;
+}
+
+/** How hard the putt is, in the one unit everybody already understands. */
+function PowerLabel({ ox, oy, reach, power }: { ox: number; oy: number; reach: number; power: number }) {
+  const y = oy + reach + 30;
+  const pct = Math.round(power * 100);
+  return (
+    <g>
+      <rect x={ox - 28} y={y - 16} width={56} height={26} rx={13} fill="rgba(8,32,18,0.55)" />
+      <text
+        x={ox}
+        y={y + 2}
+        textAnchor="middle"
+        fontSize={15}
+        fontWeight={800}
+        fill={power > 0.86 ? 'rgb(252,165,165)' : '#ffffff'}
+      >
+        {pct}%
+      </text>
+    </g>
+  );
 }
 
 /**
@@ -123,15 +144,12 @@ function Arrow({
 export default function AimPad({
   enabled,
   onAim,
-  onDragChange,
   onFire,
   onFirstTouch,
 }: {
   enabled: boolean;
   /** Called on every move. Cheap on purpose: it writes straight into the engine. */
   onAim: (aim: Aim) => void;
-  /** True while a drag is live, so the engine knows to brighten its aim line. */
-  onDragChange: (dragging: boolean) => void;
   onFire: (aim: Aim) => void;
   onFirstTouch?: () => void;
 }) {
@@ -167,8 +185,7 @@ export default function AimPad({
     pointer.current = null;
     latest.current = null;
     setDrag(null);
-    onDragChange(false);
-  }, [onDragChange]);
+  }, []);
 
   useEffect(() => {
     window.addEventListener('blur', abort);
@@ -226,7 +243,6 @@ export default function AimPad({
     const d = { ox: e.clientX, oy: e.clientY, x: e.clientX, y: e.clientY, ...shot };
     latest.current = d;
     setDrag(d);
-    onDragChange(true);
   };
 
   const move = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -248,7 +264,6 @@ export default function AimPad({
     cancelAnimationFrame(frame.current);
     frame.current = 0;
     setDrag(null);
-    onDragChange(false);
     // A tap is not a putt. Below a tenth of full pull it was almost certainly
     // somebody touching the screen to look at something.
     if (d && d.power > 0.1) onFire({ angle: d.angle, power: d.power });
@@ -277,6 +292,7 @@ export default function AimPad({
             strokeDasharray="3 5"
           />
           <PowerArc ox={drag.ox} oy={drag.oy} reach={reach.current} power={drag.power} />
+          <PowerLabel ox={drag.ox} oy={drag.oy} reach={reach.current} power={drag.power} />
           <line
             x1={drag.ox}
             y1={drag.oy}

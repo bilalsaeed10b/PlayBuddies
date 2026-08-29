@@ -96,7 +96,7 @@ async function syncUserDocuments(user: User) {
       lastLogin: serverTimestamp(),
       ...(userSnap.exists()
         ? {}
-        : { createdAt: serverTimestamp(), stats: { gamesPlayed: 0, wins: 0 }, coins: 0, unlocks: {} }),
+        : { createdAt: serverTimestamp(), stats: { gamesPlayed: 0, wins: 0 }, coins: {}, unlocks: {} }),
     },
     { merge: true },
   );

@@ -83,31 +83,25 @@ service cloud.firestore {
       }
 
       /**
-       * The wallet. Coins are points with no cash value, so the ceiling here is
+       * The wallet. Coins are points with no cash value, so the checks here are
        * only there to stop a junk write, not to protect an asset.
        *
-       * The per-write gain is deliberately loose. Two of the three games hand
-       * out a flat prize of around a hundred, but Go Eat Fish pays a share of
-       * the run's score, and a long run has no ceiling worth naming. A cap set
-       * tight to the flat prizes would have rejected the write at the end of a
-       * good run, and because the client would then keep retrying with a
-       * balance the rules had already refused, that account's coins would have
-       * stopped saving for good. Refusing obvious junk is worth having;
-       * refusing a good run is not. Spending is unbounded downward, since that
-       * is a purchase.
+       * Coins are keyed per game, the same shape as `unlocks` and for the same
+       * reason: a balance earned in one game should not buy anything in
+       * another. That rules out the old per-write step cap (`next <= previous +
+       * 5000`) along with the scalar it was written against — checking a step
+       * per game would mean iterating the map's values, which the rules
+       * language cannot do without knowing every game's key in advance, and
+       * hard-coding that list here would make shipping a new game a two-repo
+       * change. `unlocks` already accepted that trade: it has never had a
+       * per-write bound on what a list may contain, only a shape and a size
+       * limit on the map itself. Coins get the same deal now.
        */
       function walletStep() {
-        let coins = incoming().get('coins', 0);
+        let coins = incoming().get('coins', {});
         let unlocks = incoming().get('unlocks', {});
-        // The first write is the one that brings a balance up from the browser
-        // it used to live in, and that can be any size. Capping it would have
-        // quietly confiscated the coins of everyone who played before this
-        // existed, which is the exact complaint this change is here to fix.
-        let seeded = 'coins' in resource.data;
-        return coins is int
-               && coins >= 0
-               && coins <= 10000000
-               && (!seeded || coins <= resource.data.coins + 5000)
+        return coins is map
+               && coins.size() <= 12
                && unlocks is map
                && unlocks.size() <= 12;
       }

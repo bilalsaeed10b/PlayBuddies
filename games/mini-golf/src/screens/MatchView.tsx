@@ -130,7 +130,7 @@ export default function MatchView({
   const [card, setCard] = useState<(number | null)[][]>([]);
   const [clock, setClock] = useState(TURN_SECONDS);
   const [banner, setBanner] = useState<Banner | null>(null);
-  const [over, setOver] = useState<{ winner: number; totals: number[] } | null>(null);
+  const [over, setOver] = useState<{ winners: number[]; totals: number[] } | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [rematch, setRematch] = useState(0);
 
@@ -389,9 +389,11 @@ export default function MatchView({
               o: report.next,
             })
         : undefined,
-      onOver: (winner, finalTotals) => {
-        setOver({ winner, totals: finalTotals });
-        const won = config.localSeats.includes(winner);
+      onOver: (winners, finalTotals) => {
+        setOver({ winners, totals: finalTotals });
+        // A tie is not a win for either side of it — only sole possession of
+        // the low score is.
+        const won = winners.length === 1 && config.localSeats.includes(winners[0]);
         const mine = config.localSeats[0] ?? 0;
         onResult(won, finalTotals[mine] ?? 0);
         audioService.playEnd(won);
@@ -591,11 +593,6 @@ export default function MatchView({
     engine.aimPower = aim.power;
   }, []);
 
-  const onDragChange = useCallback((value: boolean) => {
-    const engine = engineRef.current;
-    if (engine) engine.dragging = value;
-  }, []);
-
   const onFire = useCallback(
     (aim: Aim) => {
       const engine = engineRef.current;
@@ -611,7 +608,9 @@ export default function MatchView({
   const holes = session?.rules.holes ?? config.rules.holes;
   const myTurn = localSeats.has(turn) && phase === 'aim';
   const mover = config.seats[turn]?.name ?? 'Someone';
-  const iWon = over ? config.localSeats.includes(over.winner) : false;
+  const tied = (over?.winners.length ?? 0) > 1;
+  const soleWinner = over && !tied ? over.winners[0] : null;
+  const iWon = over ? !tied && config.localSeats.includes(over.winners[0]) : false;
 
   const turnLabel =
     phase === 'over'
@@ -701,7 +700,6 @@ export default function MatchView({
         <AimPad
           enabled={myTurn && !over}
           onAim={onAim}
-          onDragChange={onDragChange}
           onFire={onFire}
           onFirstTouch={() => {
             audioService.unlock();
@@ -791,12 +789,13 @@ export default function MatchView({
         </div>
       )}
 
-      {/* ── how to play, on a device with keys ── */}
-      {myTurn && !over && (
-        <div className="pointer-events-none absolute inset-x-0 bottom-2 z-10 hidden justify-center sm:flex">
-          <div className="rounded-xl border border-white/15 bg-black/35 px-3 py-1 text-[10px] font-semibold text-white/60 backdrop-blur-md">
-            drag back anywhere and release to putt · arrows aim · space putts
-          </div>
+      {/* ── how it works, pinned for the whole round rather than just this turn ── */}
+      {!over && (
+        <div className="pointer-events-none absolute left-2 top-20 z-10 max-w-[10.5rem] rounded-2xl border border-white/15 bg-black/40 p-3 text-[10px] leading-relaxed text-white/70 backdrop-blur-md">
+          <p className="mb-1 font-black uppercase tracking-[0.15em] text-white/45">How it works</p>
+          <p>Drag back from anywhere and release. Further back is harder; the line is the line.</p>
+          <p className="mt-1.5">Bank off the blocks, stay out of the ponds, and get down in fewer than everybody else.</p>
+          <p className="mt-1.5 hidden text-white/45 sm:block">Arrows aim · space putts.</p>
         </div>
       )}
 
@@ -804,14 +803,21 @@ export default function MatchView({
       {over && (
         <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/65 p-6 backdrop-blur-sm">
           <div className="w-full max-w-sm space-y-5 rounded-[2rem] border border-white/20 bg-slate-900/92 p-7 text-center">
-            <Trophy className="mx-auto h-14 w-14" style={{ color: SEATS[over.winner % SEATS.length]?.main }} />
+            <Trophy
+              className="mx-auto h-14 w-14"
+              style={{ color: soleWinner !== null ? SEATS[soleWinner % SEATS.length]?.main : '#cbd5e1' }}
+            />
             <div>
               <h2 className="text-3xl font-black tracking-tight">
                 {/* On a couch every ball is local, so "you win" is true of
                     whoever is reading it and useless. Name the player instead. */}
-                {iWon && config.localSeats.length === 1
-                  ? 'You win'
-                  : `${engineRef.current?.seats[over.winner]?.name ?? SEATS[over.winner % SEATS.length].name} wins`}
+                {tied
+                  ? config.localSeats.length === 1 && over.winners.includes(config.localSeats[0])
+                    ? 'You tied'
+                    : "It's a tie"
+                  : iWon && config.localSeats.length === 1
+                    ? 'You win'
+                    : `${engineRef.current?.seats[soleWinner as number]?.name ?? SEATS[(soleWinner as number) % SEATS.length].name} wins`}
               </h2>
               <p className="mt-1 text-sm font-semibold text-white/50">
                 {holes} {holes === 1 ? 'hole' : 'holes'} · lowest card takes it

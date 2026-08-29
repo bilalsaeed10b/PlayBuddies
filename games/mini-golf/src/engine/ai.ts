@@ -14,8 +14,8 @@
  * fifth of what one grid at the same final resolution would.
  */
 import { BALL_R, PHYSICS, clamp } from '../game/rules';
-import type { Course, Vec } from '../game/course';
-import { blockDistance, dist, inPatch } from '../game/course';
+import type { Course, RouteField, Vec } from '../game/course';
+import { blockDistance, dist, inPatch, routeField } from '../game/course';
 import { simulate } from '../game/physics';
 
 export interface Tier {
@@ -70,14 +70,29 @@ export interface Shot {
 const SEARCH_STEP = PHYSICS.STEP * 3;
 
 /**
- * How bad a resting place is, in "units from the flag" terms.
+ * How bad a resting place is, in "units still to travel" terms.
  *
- * Going in wins outright. Everything else is the distance left, plus a levy on
- * the places that will cost a stroke or a stroke's worth of trouble next turn.
+ * Going in wins outright. Everything else is the *route* distance left, not
+ * the ruler distance, plus a levy on the places that will cost a stroke or a
+ * stroke's worth of trouble next turn.
+ *
+ * The route is what tells the search apart from a bot that just points at the
+ * flag. Ruler distance rates "stopped against the near face of the barrier, a
+ * few units from the cup as the crow flies" above "most of the way round it" —
+ * the first spot looks closer, but the barrier is still entirely between it
+ * and the flag, so the bot picked it, rammed the same wall again next turn,
+ * and looked stuck because it was: nothing in the score ever told it that
+ * "closer" and "further along the way in" were different things. `route` is
+ * built once per shot from the cup outward and answers exactly that question.
  */
-function score(course: Course, rest: Vec, holed: boolean, splash: boolean, sand: boolean): number {
+function score(course: Course, route: RouteField, rest: Vec, holed: boolean, splash: boolean, sand: boolean): number {
   if (holed) return -1000;
-  let s = dist(rest, course.hole);
+  const routed = route.at(rest.x, rest.y);
+  // A spot the field never reached is very close to something solid — the
+  // ball is resting right on a wall it just hit. Treated as roughly as bad as
+  // the ruler distance plus a flat penalty rather than thrown out, since it is
+  // still a real, physically-reachable resting place.
+  let s = routed >= 0 ? routed : dist(rest, course.hole) + 60;
   if (splash) s += 90;
   if (sand) s += 26;
   // Tucked hard against scenery is a bad place to be even when it is close.
@@ -99,9 +114,9 @@ function blockedLine(course: Course, from: Vec): boolean {
   return false;
 }
 
-function evaluate(course: Course, from: Vec, angle: number, power: number): number {
+function evaluate(course: Course, route: RouteField, from: Vec, angle: number, power: number): number {
   const r = simulate(course, from, angle, power, SEARCH_STEP);
-  return score(course, r.rest, r.events.holed, r.events.splash, r.events.endedInSand);
+  return score(course, route, r.rest, r.events.holed, r.events.splash, r.events.endedInSand);
 }
 
 /**
@@ -118,6 +133,10 @@ export function chooseShot(
   rand: () => number = Math.random,
 ): Shot {
   const tier = TIERS[clamp(Math.trunc(level), 0, TIERS.length - 1)];
+  // Built once per putt, from the cup outward, and read by every candidate the
+  // search tries. One flood-fill is a lot cheaper than asking "how far round"
+  // a couple of hundred times.
+  const route = routeField(course, course.hole);
   const straight = Math.atan2(course.hole.y - from.y, course.hole.x - from.x);
   const gap = dist(from, course.hole);
 
@@ -129,7 +148,7 @@ export function chooseShot(
   let best = Infinity;
 
   const consider = (angle: number, power: number) => {
-    const s = evaluate(course, from, angle, clamp(power, PHYSICS.MIN_POWER, 1));
+    const s = evaluate(course, route, from, angle, clamp(power, PHYSICS.MIN_POWER, 1));
     if (s < best) {
       best = s;
       bestAngle = angle;
