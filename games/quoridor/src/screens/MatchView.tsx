@@ -744,6 +744,17 @@ export default function MatchView({
         </div>
       )}
 
+      {/* ── how it works, pinned for the whole match rather than just this turn ── */}
+      {!over && (
+        <div className="pointer-events-none absolute left-2 top-20 z-10 max-w-[11rem] rounded-2xl border border-black/10 bg-white/70 p-3 text-[10px] leading-relaxed text-slate-500 backdrop-blur-md">
+          <p className="mb-1 font-black uppercase tracking-[0.15em] text-slate-400">How it works</p>
+          <p>Race to the far side of the board. First pawn there wins.</p>
+          <p className="mt-1.5">Step one square — up, down, left, right, never diagonal. Facing another pawn with nothing behind it? Jump straight over.</p>
+          <p className="mt-1.5">Walls block a step, never a path: any wall that would seal somebody in is not a legal wall to place.</p>
+          <p className="mt-1.5">{players === 2 ? '10 walls each' : '5 walls each'}, shared between everyone on the board.</p>
+        </div>
+      )}
+
       {/* ── how to play, on a device with keys ── */}
       <div className="pointer-events-none absolute inset-x-0 bottom-14 z-10 hidden justify-center sm:flex">
         <div className="rounded-xl border border-black/10 bg-white/70 px-3 py-1 text-[10px] font-semibold text-slate-500 backdrop-blur">
