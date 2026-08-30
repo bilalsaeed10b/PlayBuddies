@@ -767,7 +767,12 @@ export class GameEngine {
     return Math.min(BALANCE.ENEMY_MAX, Math.round(base + bonus));
   }
 
-  /** Average size of everyone alive — the yardstick the spawner balances against. */
+  /**
+   * Average size of everyone alive — used only for the reef's overall
+   * population count below, never for how big any individual spawn is (see
+   * `spawnEnemy`, which anchors each fish's size to whoever it's actually
+   * appearing next to instead).
+   */
   private referenceSize() {
     let total = 0;
     let count = 0;
@@ -792,7 +797,18 @@ export class GameEngine {
   }
 
   private spawnEnemy(): Fish {
-    const ref = this.referenceSize();
+    // Just outside somebody's view, on the far side of a random angle. Picked
+    // first, not last: everything below sizes this fish against the *anchor
+    // it's actually appearing next to*, not the match's global average. That
+    // used to be the same `ref` for every spawn anywhere in the world, so the
+    // instant one player pulled ahead in size, the whole reef re-centred on
+    // them -- a player who hadn't grown much found nothing left they could
+    // eat, and nothing they could survive either, no matter where they swam.
+    // Anchoring locally means a small player's own neighbourhood keeps
+    // spawning things sized for them, regardless of how big someone else in
+    // the match has gotten.
+    const anchor = this.spawnAnchor();
+    const ref = anchor.size;
     const roll = Math.random();
 
     /**
@@ -824,7 +840,7 @@ export class GameEngine {
     if (roll < preyCut) {
       // Prey is two different things, not one ref-scaled band: past the
       // halfway point it's a truly small fish, an absolute size regardless
-      // of how big the reef's average has grown, which is what keeps the
+      // of how big this neighbourhood has grown, which is what keeps the
       // water looking like it has little fish in it even once everyone is
       // huge. The other half is the old ref-relative snack -- always
       // something bite-sized *for you specifically* -- for variety.
@@ -854,8 +870,6 @@ export class GameEngine {
     const id = this.nextEnemyId++;
     const fish = this.makeFish(String(id), 'enemy', size, assetForSize(size));
 
-    // Just outside somebody's view, on the far side of a random angle.
-    const anchor = this.spawnAnchor();
     const angle = Math.random() * Math.PI * 2;
     const radius = this.viewRadius() * BALANCE.SPAWN_RING;
     fish.x = clamp(anchor.x + Math.cos(angle) * radius, -200, BALANCE.WORLD_W + 200);
@@ -873,11 +887,11 @@ export class GameEngine {
     return fish;
   }
 
-  private spawnAnchor(): { x: number; y: number } {
+  private spawnAnchor(): { x: number; y: number; size: number } {
     const alive: Fish[] = [];
     this.locals.forEach((f) => !f.dead && alive.push(f));
     this.remotes.forEach((f) => !f.dead && alive.push(f));
-    if (alive.length === 0) return { x: BALANCE.WORLD_W / 2, y: BALANCE.WORLD_H / 2 };
+    if (alive.length === 0) return { x: BALANCE.WORLD_W / 2, y: BALANCE.WORLD_H / 2, size: BALANCE.START_SIZE };
     return alive[Math.floor(Math.random() * alive.length)];
   }
 
@@ -1024,13 +1038,18 @@ export class GameEngine {
    * two fish of the same size are very often different species.
    */
   private spawnShoal() {
-    const ref = this.referenceSize();
+    // Anchor first, same reasoning as spawnEnemy: sized for whoever the shoal
+    // is actually appearing next to, not the match's global average, so a
+    // player who hasn't grown much still finds an appropriately tiny cloud of
+    // minnows near them instead of one sized for however big someone else
+    // in the match has gotten.
+    const anchor = this.spawnAnchor();
+    const ref = anchor.size;
     // Always food, and always small — the whole appeal is a cloud of minnows.
     const size = Math.max(4, Math.min(SHOAL_MAX_SIZE, ref * (0.32 + Math.random() * 0.5)));
     const asset = assetForSize(size);
     const count = BALANCE.SHOAL_MIN + Math.floor(Math.random() * (BALANCE.SHOAL_MAX - BALANCE.SHOAL_MIN + 1));
 
-    const anchor = this.spawnAnchor();
     const angle = Math.random() * Math.PI * 2;
     const radius = this.viewRadius() * BALANCE.SPAWN_RING;
     const cx = clamp(anchor.x + Math.cos(angle) * radius, 150, BALANCE.WORLD_W - 150);
