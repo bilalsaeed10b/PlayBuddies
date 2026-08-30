@@ -78,14 +78,10 @@ interface LobbyPerson {
 const randomSeed = () => (Math.random() * 0x7fffffff) | 0;
 
 /**
- * The bot rank used for any seat this device fills in an online room.
- *
- * The tier picker in the menu is only ever reached offline, so it really
- * means "how hard should the practice bot be". Letting that leak into online
- * rooms is how a player who once tried Wordsmith ends up playing friends
- * alongside merciless fill-in bots.
+ * Below this many real people, an online race has nobody to race against.
+ * There are no bots to make up the difference anymore — see `onlineConfig`.
  */
-const ONLINE_AI_LEVEL = 1;
+const MIN_ONLINE_PLAYERS = 2;
 
 export default function App() {
   const [handoff] = useState(readHandoff);
@@ -232,17 +228,30 @@ export default function App() {
    *
    * Sorted by uid rather than by arrival, because arrival order differs
    * between clients and the seat index is what the whole wire protocol is
-   * addressed by.
+   * addressed by. Capped at the hard table max, never at `rules.players` — an
+   * online table is exactly whoever is actually in the room, no more and no
+   * fewer; there are no bots to pad it out to some earlier-chosen number, and
+   * there is no reason to hide a real person who showed up late.
    */
   const people = useMemo(() => {
     return Object.values(lobby?.players ?? {})
       .sort((a, b) => a.uid.localeCompare(b.uid))
-      .slice(0, rules.players)
+      .slice(0, PLAYER_COUNTS[PLAYER_COUNTS.length - 1])
       .map((p) => ({ uid: p.uid, displayName: p.displayName || 'Player', skin: p.fishIndex }));
-  }, [lobby, rules.players]);
+  }, [lobby]);
 
   const mySkin = uid ? lobby?.players?.[uid]?.fishIndex : undefined;
   const isHost = Boolean(uid && lobby && lobby.hostId === uid);
+
+  // The host keeps `rules.players` in lockstep with who is actually in the
+  // room. Nothing online reads it as a target to fill anymore, but Teams'
+  // default split and the wire-packed rules still need a real number, and it
+  // has to be one every client agrees on without anybody having picked it.
+  useEffect(() => {
+    if (!online || !isHost) return;
+    const n = Math.max(MIN_ONLINE_PLAYERS, Math.min(PLAYER_COUNTS[PLAYER_COUNTS.length - 1], people.length || MIN_ONLINE_PLAYERS));
+    if (n !== rules.players) setRules((r) => ({ ...r, players: n as PlayerCount }));
+  }, [online, isHost, people.length, rules.players]);
 
   useEffect(() => {
     if (!online || offlineMatch) return;
@@ -337,35 +346,29 @@ export default function App() {
     const seats: Seat[] = [];
     const localSeats: number[] = [];
 
-    for (let i = 0; i < rules.players; i++) {
-      const person = crew[i];
-      if (person && person.uid === uid) {
+    // Exactly the real people in the room, in the same fixed order — no
+    // filler. A race where everyone but you is a bot racing itself was the
+    // bug, not a feature; a seat left short is just a smaller race.
+    crew.forEach((person, i) => {
+      if (person.uid === uid) {
         localSeats.push(i);
         seats.push({
           id: uid ?? 'me',
           name: handoff.displayName || 'You',
           control: 'local',
-          aiLevel: ONLINE_AI_LEVEL,
+          aiLevel: 1,
           skin: mySkin ?? FREE_FACES[0],
         });
-      } else if (person) {
+      } else {
         seats.push({
           id: person.uid,
           name: person.displayName,
           control: 'remote',
-          aiLevel: ONLINE_AI_LEVEL,
+          aiLevel: 1,
           skin: person.skin ?? otherFace(mySkin ?? FREE_FACES[0], i),
         });
-      } else {
-        seats.push({
-          id: `bot-${i}`,
-          name: `${TIERS[ONLINE_AI_LEVEL].label} ${i + 1}`,
-          control: 'ai',
-          aiLevel: ONLINE_AI_LEVEL,
-          skin: otherFace(mySkin ?? FREE_FACES[0], i),
-        });
       }
-    }
+    });
 
     return {
       roomId: handoff.room,
@@ -495,6 +498,12 @@ export default function App() {
         <RulesPanel
           rules={rules}
           editable={!online || isHost}
+          // The "Players" picker only means anything for an offline bot
+          // table — see `offlineConfig`. Reached from the online room itself
+          // (view === 'room'), the headcount is real people and is not a
+          // knob to turn; reached from the offline menu or a couch match,
+          // it is still the one thing choosing how many bots fill the table.
+          showPlayerCount={!(online && view === 'room')}
           onChange={setRules}
           onClose={() => setShowRules(false)}
         />
@@ -805,8 +814,8 @@ function RoomScreen({
 
   const iAmReady = mine !== undefined && mine !== null;
   const everyonePicked = people.every((p) => p.skin !== undefined && p.skin !== null);
-  const canStart = iAmReady && everyonePicked;
-  const emptySeats = Math.max(0, rules.players - people.length);
+  const enoughPlayers = people.length >= 2;
+  const canStart = iAmReady && everyonePicked && enoughPlayers;
 
   return (
     <div className="mx-auto flex h-full w-full max-w-6xl flex-col gap-2 p-2.5 sm:gap-4 sm:p-5">
@@ -816,7 +825,7 @@ function RoomScreen({
             Pick a face
           </h2>
           <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-lime-400/80">
-            {rules.players} players{emptySeats > 0 && ` · ${emptySeats} to bots`}
+            {people.length} player{people.length === 1 ? '' : 's'} in the room — no bots online
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
@@ -858,16 +867,29 @@ function RoomScreen({
 
       <div className="panel shrink-0 rounded-2xl p-2.5">
         {isHost ? (
-          <button
-            onClick={onStart}
-            disabled={!canStart}
-            className="flex w-full items-center justify-center gap-2 rounded-xl bg-lime-500 py-2.5 text-sm font-black uppercase tracking-[0.18em] text-slate-950 disabled:opacity-40"
-          >
-            <Play className="h-4 w-4 fill-current" /> Start
-          </button>
+          <>
+            <button
+              onClick={onStart}
+              disabled={!canStart}
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-lime-500 py-2.5 text-sm font-black uppercase tracking-[0.18em] text-slate-950 disabled:opacity-40"
+            >
+              <Play className="h-4 w-4 fill-current" /> Start
+            </button>
+            {!enoughPlayers && (
+              <p className="mt-1.5 text-center text-[10px] font-bold text-amber-400/90">
+                Need at least one more player — invite a friend, or play offline against bots below.
+              </p>
+            )}
+          </>
         ) : (
           <p className="py-1 text-center text-xs font-bold text-slate-400">
-            {!iAmReady ? 'Pick a face to be ready.' : !everyonePicked ? 'Waiting for everyone…' : 'Waiting for the host…'}
+            {!iAmReady
+              ? 'Pick a face to be ready.'
+              : !enoughPlayers
+                ? 'Waiting for one more player…'
+                : !everyonePicked
+                  ? 'Waiting for everyone…'
+                  : 'Waiting for the host…'}
           </p>
         )}
         <button
@@ -946,7 +968,9 @@ function ModeAndTeams({
     onChange({ ...rules, teamOf: next });
   };
 
-  const slots = Math.max(rules.players, people.length);
+  // The real roster, not `rules.players` — there is no bot fill to pad up to
+  // anymore, so a team chip only ever exists for someone actually in the room.
+  const slots = people.length;
 
   return (
     <div className="panel shrink-0 space-y-2.5 rounded-2xl p-2.5">
@@ -1007,8 +1031,8 @@ function ModeAndTeams({
                 >
                   <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: color.main }} />
                   <span className="flex max-w-[80px] items-center gap-1 truncate text-[10px] font-black text-slate-100">
-                    <span className="truncate">{person?.displayName ?? `Bot ${seat + 1}`}</span>
-                    {person?.uid === hostId && <Crown className="h-2.5 w-2.5 shrink-0 text-amber-400" />}
+                    <span className="truncate">{person.displayName}</span>
+                    {person.uid === hostId && <Crown className="h-2.5 w-2.5 shrink-0 text-amber-400" />}
                   </span>
                 </button>
               );
@@ -1132,11 +1156,13 @@ function StageStrip() {
 function RulesPanel({
   rules,
   editable,
+  showPlayerCount,
   onChange,
   onClose,
 }: {
   rules: MatchRules;
   editable: boolean;
+  showPlayerCount: boolean;
   onChange: (r: MatchRules) => void;
   onClose: () => void;
 }) {
@@ -1180,25 +1206,32 @@ function RulesPanel({
           </p>
         </div>
 
-        <div className="space-y-1.5">
-          <p className="text-sm font-bold text-slate-100">Players</p>
-          <div className="grid grid-cols-7 gap-1">
-            {PLAYER_COUNTS.map((n) => (
-              <button
-                key={n}
-                disabled={!editable}
-                onClick={() => onChange({ ...rules, players: n })}
-                className={`rounded-lg border-2 py-2 text-xs font-black disabled:opacity-50 ${
-                  rules.players === n
-                    ? 'border-lime-400 bg-lime-400/15 text-lime-200'
-                    : 'border-slate-600/50 bg-slate-800/50 text-slate-400'
-                }`}
-              >
-                {n}
-              </button>
-            ))}
+        {showPlayerCount && (
+          <div className="space-y-1.5">
+            <p className="text-sm font-bold text-slate-100">
+              Players
+              <span className="block text-[11px] font-normal text-slate-400">
+                Seats past who's actually on the couch are filled with bots.
+              </span>
+            </p>
+            <div className="grid grid-cols-7 gap-1">
+              {PLAYER_COUNTS.map((n) => (
+                <button
+                  key={n}
+                  disabled={!editable}
+                  onClick={() => onChange({ ...rules, players: n })}
+                  className={`rounded-lg border-2 py-2 text-xs font-black disabled:opacity-50 ${
+                    rules.players === n
+                      ? 'border-lime-400 bg-lime-400/15 text-lime-200'
+                      : 'border-slate-600/50 bg-slate-800/50 text-slate-400'
+                  }`}
+                >
+                  {n}
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
+        )}
 
         <div className="space-y-1.5">
           <p className="text-sm font-bold text-slate-100">
