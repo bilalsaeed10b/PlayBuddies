@@ -1,63 +1,64 @@
 /**
  * The bots.
  *
- * Every decision is a pure function of (engine state, seeded rng), and the
- * rng is keyed on (match seed, round, actions so far, seat) — so the host and
- * every guest would compute the identical bot even though only the host
- * actually does. `Math.random()` in this file would be a desync waiting for
- * the first time a second client replays a round.
+ * Every decision is a pure function of (engine state, seeded rng), keyed on
+ * (match seed, round, actions so far, seat) so the host and every guest
+ * would compute the identical bot even though only the host actually acts on
+ * it. `Math.random()` here would be a desync waiting to happen the first
+ * time a second client replays a round.
  *
- * A bot that played hangman optimally would be unbeatable and no fun: perfect
- * play here is just "always take the commonest letter that fits the pattern",
- * which never risks anything and never gets hanged. So the ranks differ in
- * how much of the pattern they actually use, and in how much nerve they have
- * as the gallows fills.
+ * Reaction *timing* is the one thing this file does not decide — that lives
+ * in MatchView, which schedules a randomised delay per tier before actually
+ * calling into here. This file only ever answers "what would this bot do",
+ * never "how fast".
  */
-import { ALPHABET, BY_FREQUENCY, LETTER_VALUE, PIECES } from '../game/rules';
+import { ALPHABET, BY_FREQUENCY, LETTER_VALUE } from '../game/rules';
 import { answers } from '../game/words';
-import type { Action } from '../types/game';
 import type { LastGaspEngine } from './LastGaspEngine';
 
 export interface Tier {
   label: string;
-  /**
-   * How often it narrows its guess to letters that actually fit the revealed
-   * pattern, rather than just taking the next commonest letter in English.
-   */
-  deduction: number;
-  /** How willing it is to call the word once it thinks it knows it. */
-  nerve: number;
-  /** How much it prefers a high-scoring rare letter over a safe common one. */
-  greed: number;
+  /** How much of the built-in list a bot's own word choice is allowed to lean on for flavour, purely cosmetic. */
+  vocab: number;
+  /** How willing it is to chase a chain rather than let the table reopen. */
+  boldness: number;
+  /** Base reaction delay band for an open guess, in ms — [min, max]. Lower is sharper. */
+  reactMs: [number, number];
+  /** Reaction band for continuing its own chain, in ms — tight, because the window is only 2000ms. */
+  chainMs: [number, number];
 }
 
 export const TIERS: Tier[] = [
-  { label: 'Doodler', deduction: 0.15, nerve: 0.12, greed: 0.05 },
-  { label: 'Speller', deduction: 0.55, nerve: 0.3, greed: 0.2 },
-  { label: 'Wordsmith', deduction: 0.9, nerve: 0.55, greed: 0.4 },
+  { label: 'Doodler', vocab: 0.2, boldness: 0.3, reactMs: [1600, 3400], chainMs: [900, 2200] },
+  { label: 'Speller', vocab: 0.55, boldness: 0.55, reactMs: [900, 2200], chainMs: [500, 1500] },
+  { label: 'Wordsmith', vocab: 0.9, boldness: 0.8, reactMs: [450, 1300], chainMs: [250, 1000] },
 ];
 
-/**
- * How much of the word a bot has to be able to *see* before it will call it.
- *
- * This exists because a bot can do something no player at the table can: look
- * the answer up. `candidates()` below filters the real answer list, and on a
- * list this size a pattern with two or three letters showing is very often
- * unique — so without this gate the top rank simply identified the word on
- * its second turn, every turn, and won by dictionary lookup rather than by
- * playing.
- *
- * The measured cost of not having it: across 280 simulated matches, 95% of
- * rounds ended in a called word and the stickman was finished in 1.2% of
- * them. The entire mechanic this game is built on never fired.
- *
- * Requiring half the letters on the board first makes the bot call a word for
- * the reason a person does — because they can nearly read it — rather than
- * because they can search for it.
- */
-const CALL_THRESHOLD = 0.5;
+function tierOf(level: number): Tier {
+  return TIERS[Math.max(0, Math.min(TIERS.length - 1, level))];
+}
 
-/** Every answer that still fits the board and the letters already ruled out. */
+/** A word for a bot to set or suggest — always from the built-in list, since a bot cannot type something meaningful. */
+export function botWord(rnd: () => number): { word: string; category: string } {
+  const list = answers();
+  return list[Math.floor(rnd() * list.length) % list.length];
+}
+
+/** How a bot votes: usually for whichever suggestion looks like a real answer-list word, tie-broken toward its own. */
+export function botVote(engine: LastGaspEngine, seat: number, rnd: () => number): number {
+  const known = new Set(answers().map((a) => a.word));
+  const suggestions = engine.suggestions;
+  const scored = suggestions.map((s, i) => ({
+    i,
+    good: known.has(s.word) ? 1 : 0,
+    mine: s.seat === seat ? 1 : 0,
+  }));
+  scored.sort((a, b) => b.good - a.good || b.mine - a.mine || a.i - b.i);
+  // A little noise so a table of bots doesn't vote in perfect lockstep.
+  return rnd() < 0.85 ? scored[0].i : scored[Math.floor(rnd() * scored.length)]?.i ?? 0;
+}
+
+/** Every built-in answer that still fits the board and the letters already ruled out — empty for a human-typed word, which is expected. */
 function candidates(engine: LastGaspEngine): string[] {
   const board = engine.board;
   const called = new Set(engine.called);
@@ -67,53 +68,29 @@ function candidates(engine: LastGaspEngine): string[] {
     .filter((w) => {
       if (w.length !== board.length) return false;
       for (let i = 0; i < w.length; i++) {
-        // A revealed square has to match exactly...
         if (board[i] !== null && w[i] !== board[i]) return false;
-        // ...and a blank cannot be a letter that has already been called,
-        // because that letter would have been revealed if it were there.
         if (board[i] === null && called.has(w[i])) return false;
       }
-      // And it cannot contain anything already established as absent.
       return !ruled.some((c) => w.includes(c));
     });
 }
 
 /**
- * One bot's turn.
+ * The letter a bot would call right now.
  *
- * Reads in priority order: call the word if it is confident and the prize is
- * worth it, otherwise take a letter — narrowed by the pattern if the rank is
- * good enough to do that, and skewed toward valuable letters if it is greedy.
+ * Falls back to plain letter frequency whenever the pattern fit is empty —
+ * which, now that a word is usually typed by a person rather than drawn from
+ * the list, is the common case. A bot leaning on list knowledge it has no
+ * business having for somebody else's word would be the same unfair
+ * dictionary lookup the turn-based version had to be fixed for.
  */
-export function botAction(engine: LastGaspEngine, seat: number, level: number, rnd: () => number): Action {
-  const tier = TIERS[Math.max(0, Math.min(TIERS.length - 1, level))];
-  const fits = candidates(engine);
+export function botGuess(engine: LastGaspEngine, level: number, rnd: () => number): number {
+  const tier = tierOf(level);
   const available = engine.available;
-  const danger = engine.pieces / PIECES;
+  const fits = rnd() < tier.vocab ? candidates(engine) : [];
 
-  // ── call the word ───────────────────────────────────────────────────────
-  //
-  // Gated on how much is actually *visible*, not just on how far the answer
-  // list has narrowed — see CALL_THRESHOLD. A wrong call costs two pieces AND
-  // the rest of the round, so a bot that fished for it would also spend most
-  // of every match sitting out, which reads as broken rather than reckless.
-  const revealed = 1 - engine.hiddenCount / Math.max(1, engine.board.length);
-  if (revealed >= CALL_THRESHOLD && fits.length > 0 && fits.length <= 3 && engine.hiddenCount > 0) {
-    const sure = 1 / fits.length;
-    // More willing the closer the stickman is to finished: at that point a
-    // letter is a real risk too, and being the one who draws the last line is
-    // worse than being wrong.
-    if (rnd() < tier.nerve * sure * (0.5 + danger)) {
-      return { s: seat, w: fits[Math.floor(rnd() * fits.length)] };
-    }
-  }
-
-  // ── take a letter ───────────────────────────────────────────────────────
   let pool = available;
-  if (fits.length > 0 && rnd() < tier.deduction) {
-    // Letters that appear in something still possible. Ranked by how many of
-    // the remaining candidates they would split, which is the actual skill in
-    // hangman and the thing the top rank should look like it is doing.
+  if (fits.length > 0 && fits.length <= 12) {
     const counts = new Map<string, number>();
     for (const w of fits) {
       for (const ch of new Set([...w])) {
@@ -122,45 +99,35 @@ export function botAction(engine: LastGaspEngine, seat: number, level: number, r
       }
     }
     const ranked = [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
-    if (ranked.length > 0) {
-      // Near the top of the list, not always the very top — a bot that is
-      // never surprising is a bot nobody enjoys losing to.
-      const width = Math.max(1, Math.ceil(ranked.length * (1 - tier.deduction * 0.7)));
-      pool = ranked.slice(0, width).map(([ch]) => ch);
-    }
+    if (ranked.length > 0) pool = ranked.slice(0, Math.max(1, Math.ceil(ranked.length * 0.6))).map(([ch]) => ch);
   } else {
-    pool = BY_FREQUENCY.filter((c) => available.includes(c)).slice(0, 6);
+    pool = BY_FREQUENCY.filter((c) => available.includes(c)).slice(0, 8);
     if (pool.length === 0) pool = available;
   }
 
-  if (pool.length === 0) {
-    // Nothing left to call at all: throw the word it likes best rather than
-    // stalling the table.
-    return { s: seat, w: fits[0] ?? engine.word };
+  // A sharper bot still likes a rare letter when it is not desperate to just
+  // land something safe — same greed as any player watching the values on
+  // the keys.
+  if (rnd() < tier.boldness * 0.3) {
+    const best = [...pool].sort((a, b) => (LETTER_VALUE[b] ?? 1) - (LETTER_VALUE[a] ?? 1) || a.localeCompare(b))[0];
+    return ALPHABET.indexOf(best);
   }
-
-  // Greed: bias toward the letter that pays, when the gallows can still take
-  // a hit. Nobody gets greedy on the last line.
-  if (rnd() < tier.greed * (1 - danger)) {
-    const best = [...pool].sort(
-      (a, b) => (LETTER_VALUE[b] ?? 1) - (LETTER_VALUE[a] ?? 1) || a.localeCompare(b),
-    )[0];
-    return { s: seat, l: ALPHABET.indexOf(best) };
-  }
-
-  return { s: seat, l: ALPHABET.indexOf(pool[Math.floor(rnd() * pool.length)] ?? pool[0]) };
+  return ALPHABET.indexOf(pool[Math.floor(rnd() * pool.length)] ?? pool[0] ?? available[0]);
 }
 
-/**
- * What a player who ran out of clock does.
- *
- * The commonest letter still available — the safe, boring guess a distracted
- * player would probably have made anyway. Deliberately not random: a timeout
- * is usually a locked phone or somebody still reading the board, and neither
- * of them consented to a gamble that could hang them.
- */
-export function timeoutAction(engine: LastGaspEngine, seat: number): Action {
-  const available = engine.available;
-  const pick = BY_FREQUENCY.find((c) => available.includes(c)) ?? available[0];
-  return { s: seat, l: ALPHABET.indexOf(pick) };
+/** How long this bot takes to react to an open table, in ms. */
+export function reactionDelay(level: number, rnd: () => number): number {
+  const [lo, hi] = tierOf(level).reactMs;
+  return Math.round(lo + rnd() * (hi - lo));
+}
+
+/** How long this bot takes to press its luck on its own chain, in ms — may exceed the window, meaning it lets the chain lapse on purpose. */
+export function chainDelay(level: number, rnd: () => number): number {
+  const [lo, hi] = tierOf(level).chainMs;
+  return Math.round(lo + rnd() * (hi - lo));
+}
+
+/** Whether a bot bothers continuing its own chain at all, rather than banking what it has. */
+export function willChase(level: number, rnd: () => number): boolean {
+  return rnd() < tierOf(level).boldness;
 }

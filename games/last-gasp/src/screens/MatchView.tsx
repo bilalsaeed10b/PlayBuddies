@@ -1,19 +1,19 @@
 /**
- * The match: the gallows, the word, the keyboard and the wire.
+ * The match: the gallows, the word, the open table, and the wire.
  *
  * The structural decision worth reading before the rest of this file: exactly
  * one client decides what happened, and that is the host. Guests publish the
- * action they want to take and nothing else; the host validates it against
- * the turn order, appends it, and republishes the whole history. A guest
- * never computes a consequence, so there is no arithmetic for two clients to
- * disagree about — the class of bug the alternating-turn games on this
- * platform have each had to be fixed for at least once.
+ * action they want to take and nothing else; the host validates it, appends
+ * it, and republishes the whole history. A guest never computes a
+ * consequence — including the one piece of real time in this game, a chain
+ * window lapsing, which only the host ever decides and always records as a
+ * discrete action rather than something every client independently notices.
  *
- * The engine is pure and knows nothing about React, Firestore or the DOM.
- * This component owns all three.
+ * The engine is pure and knows nothing about React, Firestore, the DOM or a
+ * clock. This component owns all four.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Loader2, Send, Trophy } from 'lucide-react';
+import { Loader2, Send, ThumbsUp, Trophy, Zap } from 'lucide-react';
 import ControlsTray from '@shared/controls/ControlsTray';
 import Gallows from '../components/Gallows';
 import Keyboard from '../components/Keyboard';
@@ -21,10 +21,10 @@ import WordBoard from '../components/WordBoard';
 import FaceToken from '../components/FaceToken';
 import { LastGaspEngine } from '../engine/LastGaspEngine';
 import type { RoundEvent, Seat } from '../engine/LastGaspEngine';
-import { botAction, timeoutAction } from '../engine/ai';
-import { ALPHABET, BALANCE, PIECES, SEAT_COLORS } from '../game/rules';
+import { botGuess, botVote, botWord, chainDelay, reactionDelay } from '../engine/ai';
+import { ALPHABET, BALANCE, PIECES, SEAT_COLORS, TEAM_COLORS } from '../game/rules';
 import { audioService } from '../services/audio';
-import { cleanAttempt, packRules } from '../types/game';
+import { cleanWord, packRules } from '../types/game';
 import type { Action, GameSettings, MatchRules, NetPacket, RoundHistory } from '../types/game';
 import type { TurnLink } from '../net/turnLink';
 import { createLogger } from '@shared/log/logger';
@@ -45,8 +45,6 @@ export interface MatchConfig {
 
 /** How long the round-over card sits before the next word is dealt. */
 const ROUND_CARD_MS = 3600;
-/** How long a bot appears to think, so its turn is watchable. */
-const BOT_THINK_MS = 1100;
 
 export default function MatchView({
   config,
@@ -66,6 +64,7 @@ export default function MatchView({
 
   const online = Boolean(config.roomId && config.uid && config.peerUids.length > 0);
   const rulesBits = packRules(config.rules);
+  const teams = config.rules.mode === 'teams';
 
   const engine = useMemo(
     () => new LastGaspEngine({ seats: config.seats, seed: config.seed, rules: config.rules }),
@@ -79,23 +78,21 @@ export default function MatchView({
   const [version, setVersion] = useState(0);
   const repaint = useCallback(() => setVersion((v) => v + 1), []);
 
-  const [clock, setClock] = useState<number>(BALANCE.TURN_SECONDS);
   const [notice, setNotice] = useState<string | null>(null);
-  const [attempt, setAttempt] = useState('');
-  const [solving, setSolving] = useState(false);
+  const [wordInput, setWordInput] = useState('');
+  /** Which of this device's own seats is "at the keyboard" for guessing, when it is driving more than one. */
+  const [activeLocal, setActiveLocal] = useState(0);
 
   /**
    * A short, wide screen — a phone turned sideways.
    *
-   * Stacked, this screen wants a header, a roster, a gallows, a word, a feed
-   * line and a 26-key rack in one column. At 375px tall that does not fit:
-   * measured at 812x375 the gallows was pushed to y=-20 and the "call the
-   * whole word" button sat at y=384, entirely below the viewport, so the
-   * single highest-stakes action in the game was unreachable. Side by side,
-   * the board takes the height and the rack takes the width there is plenty
-   * of. Measured rather than guessed from a width breakpoint, because a
-   * landscape phone is wide enough to clear `sm:` while being exactly the
-   * case that needs the other layout.
+   * Stacked, this screen wants a gallows, a word, a status line and a 26-key
+   * rack in one column. Measured at 812x375 without this, the gallows sat at
+   * y=-2 (clipped by the header) and the keyboard's own bottom edge landed
+   * at y=416 — 41px below a 375px-tall viewport, on the one row a landscape
+   * phone actually needs to reach. Side by side, the board takes the height
+   * and the rack takes the width there is plenty of. The same measured
+   * approach Wanted Board and the original build of this game both needed.
    */
   const [sideBySide, setSideBySide] = useState(
     () => typeof window !== 'undefined' && window.innerHeight < 520 && window.innerWidth > window.innerHeight,
@@ -112,16 +109,10 @@ export default function MatchView({
   }, []);
 
   /**
-   * The learned match seed.
-   *
-   * The host's `config.seed` is authoritative. A guest's is only ever this
-   * device's own locally-rolled guess — App.tsx never learns the host's real
-   * one — so filtering wire packets on it directly would mean a guest
-   * rejected every state packet the host ever sent, and the host rejected
-   * every play the guest sent back. Corrected the moment the real value
-   * arrives, from the `start` packet or the `seed` stamped on the first
-   * `state` packet, whichever lands first. (Wanted Board shipped without this
-   * and its online play was completely dead until it was found.)
+   * The learned match seed — see the identical field in Wanted Board's
+   * MatchView for why this exists at all. A guest's `config.seed` is only
+   * ever this device's own locally-rolled guess; the host's `start` packet
+   * (or the `seed` stamped on the first `state` packet) corrects it.
    */
   const effectiveSeedRef = useRef<number>(config.seed);
 
@@ -132,9 +123,6 @@ export default function MatchView({
     return map;
   }, [config.seats]);
   const seatSeq = config.seats.map((s) => s.id).join(',');
-
-  const myTurn = localSet.has(engine.turn) && engine.phase === 'guessing';
-  const turnSeat = config.seats[engine.turn];
 
   // ── applying an action (host only) ───────────────────────────────────────
 
@@ -149,25 +137,13 @@ export default function MatchView({
     });
   }, [config.seed, engine, rulesBits]);
 
-  /**
-   * Host-side: run an action through the engine and tell everyone.
-   *
-   * Returns whether it was accepted, so a caller driving a bot or a timeout
-   * can tell the difference between "played" and "that seat was not up".
-   */
   const commit = useCallback(
     (action: Action): boolean => {
       if (!config.isHost) return false;
+      const before = engine.events.length;
       if (!engine.apply(action)) return false;
-      const last = engine.events[engine.events.length - 1];
-      if (last) soundFor(last);
-      log.info('turn:applied', {
-        round: engine.round,
-        seat: action.s,
-        kind: 'l' in action ? ALPHABET[action.l] : 'word',
-        pieces: engine.pieces,
-        phase: engine.phase,
-      });
+      for (const ev of engine.events.slice(before)) soundFor(ev);
+      log.info('action:applied', { round: engine.round, action, phase: engine.phase, pieces: engine.pieces });
       repaint();
       if (online) publish();
       return true;
@@ -175,10 +151,9 @@ export default function MatchView({
     [config.isHost, engine, repaint, online, publish],
   );
 
-  /** Whatever this device is allowed to do with the current turn. */
+  /** Whatever this device is allowed to do, routed to the host directly or over the wire. */
   const play = useCallback(
     (action: Action) => {
-      if (!engine.canAct(action.s)) return;
       audioService.unlock();
       if (config.isHost) {
         commit(action);
@@ -187,17 +162,14 @@ export default function MatchView({
       linkRef.current?.send({
         t: 'play',
         n: Date.now(),
-        // The learned seed, not config.seed — see effectiveSeedRef.
         s: effectiveSeedRef.current,
         rd: engine.round,
         at: engine.actionCount,
-        l: 'l' in action ? action.l : -1,
-        ...('w' in action ? { w: action.w } : {}),
+        a: action,
       });
-      // Optimism would be wrong here: the host may reject this (a turn that
-      // already moved on, a letter somebody else just took) and there is no
-      // "unplay". The board updates when the host says it did, which on a
-      // turn-based game nobody is watching frame-by-frame is imperceptible.
+      // No optimism: the host may reject this (the word already changed
+      // hands, the chain moved on) and there is no "unplay". The board
+      // updates once the host says it did.
     },
     [engine, config.isHost],
   );
@@ -215,13 +187,21 @@ export default function MatchView({
 
       if (packet.t === 'play') {
         if (!config.isHost || packet.s !== effectiveSeedRef.current) return;
-        // A packet for a round that has already ended, or for a turn that has
-        // already been taken, is a straggler rather than a move.
         if (packet.rd !== engine.round || packet.at !== engine.actionCount) return;
         const seat = seatOfUid.get(from);
         if (seat === undefined) return;
+        // Only ever trust the sender's own seat number, never whatever the
+        // packet claims — a guest cannot act, vote or set a word for anyone
+        // but themselves.
+        const claimed = packet.a;
         const action: Action =
-          packet.l >= 0 ? { s: seat, l: packet.l } : { s: seat, w: cleanAttempt(packet.w ?? '') };
+          claimed.t === 'word'
+            ? { t: 'word', s: seat, w: cleanWord(claimed.w) }
+            : claimed.t === 'vote'
+              ? { t: 'vote', s: seat, pick: claimed.pick }
+              : claimed.t === 'guess'
+                ? { t: 'guess', s: seat, l: claimed.l }
+                : { t: 'expire' };
         commit(action);
         return;
       }
@@ -232,11 +212,8 @@ export default function MatchView({
         if (packet.s !== effectiveSeedRef.current) return;
         const incoming = packet.h as RoundHistory[];
         const before = engine.events.length;
-        // Replay rather than patch: a guest that missed three turns catches up
-        // by replaying three turns, and there is no other path to get right.
         engine.replay(incoming);
-        const fresh = engine.events[engine.events.length - 1];
-        if (fresh && engine.events.length !== before) soundFor(fresh);
+        for (const ev of engine.events.slice(before)) soundFor(ev);
         log.info('wire:state', { from, rounds: incoming.length, pieces: engine.pieces });
         repaint();
         return;
@@ -276,9 +253,6 @@ export default function MatchView({
         if (config.isHost) {
           link.send({ t: 'start', n: Date.now(), seed: config.seed, r: rulesBits });
         }
-        // `persisted` separates a real unload from the browser freezing a
-        // backgrounded tab into its bfcache — a phone screen locking must not
-        // announce a bye and hand a present player's seat to a bot.
         leave = (e) => {
           if (e.persisted) return;
           link?.close();
@@ -299,18 +273,130 @@ export default function MatchView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [online, config.roomId, config.uid, config.peerUids.join(','), config.isHost, config.seed, rulesBits, seatSeq]);
 
-  // ── bots ─────────────────────────────────────────────────────────────────
+  // ── bots (host only) ─────────────────────────────────────────────────────
+  //
+  // One heartbeat rather than a pile of individually-tracked timers: every
+  // time anything eligibility-relevant changes, every currently-eligible bot
+  // seat gets a fresh randomised delay before it acts. The delay itself needs
+  // no cross-client agreement — only the host ever runs this, and the choice
+  // it produces (which letter, which word) is what actually gets replayed —
+  // so it is timed with plain Math.random() rather than the seeded rng.
+  const botTimers = useRef(new Map<number, number>());
+  useEffect(() => {
+    if (!config.isHost) return;
+    for (const id of botTimers.current.values()) window.clearTimeout(id);
+    botTimers.current.clear();
+    if (engine.phase === 'roundOver' || engine.phase === 'over') return;
+
+    const schedule = (seat: number, delayMs: number, act: () => void) => {
+      const id = window.setTimeout(() => {
+        botTimers.current.delete(seat);
+        act();
+      }, delayMs);
+      botTimers.current.set(seat, id);
+    };
+
+    for (let seat = 0; seat < config.seats.length; seat++) {
+      if (config.seats[seat].control !== 'ai') continue;
+      const level = config.seats[seat].aiLevel;
+
+      if (engine.canSetWord(seat)) {
+        schedule(seat, reactionDelay(level, Math.random), () => {
+          const { word } = botWord(engine.rngFor(seat));
+          commit({ t: 'word', s: seat, w: word });
+        });
+      } else if (engine.canVote(seat)) {
+        schedule(seat, 400 + Math.random() * 900, () => {
+          commit({ t: 'vote', s: seat, pick: botVote(engine, seat, engine.rngFor(seat)) });
+        });
+      } else if (engine.canGuess(seat)) {
+        const chaining = engine.chainHolder === seat;
+        const delay = chaining ? chainDelay(level, Math.random) : reactionDelay(level, Math.random);
+        schedule(seat, delay, () => {
+          if (!engine.canGuess(seat)) return;
+          commit({ t: 'guess', s: seat, l: botGuess(engine, level, engine.rngFor(seat)) });
+        });
+      }
+    }
+
+    return () => {
+      for (const id of botTimers.current.values()) window.clearTimeout(id);
+      botTimers.current.clear();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [config.isHost, version, engine.phase, engine.chainHolder]);
+
+  // ── human timeouts: a setter, a suggester, or a chain window (host only) ──
+
+  const [setClock, setSetClock] = useState<number>(BALANCE.SET_SECONDS);
+  const [voteClock, setVoteClock] = useState<number>(BALANCE.VOTE_SECONDS);
+  const [chainClock, setChainClock] = useState<number>(BALANCE.CHAIN_WINDOW_MS / 1000);
 
   useEffect(() => {
-    if (!config.isHost || engine.phase !== 'guessing') return;
-    const seat = config.seats[engine.turn];
-    if (!seat || seat.control !== 'ai') return;
-    const id = window.setTimeout(() => {
-      commit(botAction(engine, engine.turn, seat.aiLevel, engine.rngFor(engine.turn)));
-    }, BOT_THINK_MS);
-    return () => window.clearTimeout(id);
+    if (engine.phase !== 'settingWord' && engine.phase !== 'suggesting') return;
+    setSetClock(BALANCE.SET_SECONDS);
+    const id = window.setInterval(() => {
+      setSetClock((c) => {
+        if (c <= 1) {
+          if (config.isHost) {
+            // Whichever human hasn't set/suggested yet gets a bot word so the
+            // table never stalls on someone who stepped away.
+            const stuck = config.seats
+              .map((_, i) => i)
+              .filter((i) => config.seats[i].control !== 'ai' && engine.canSetWord(i));
+            for (const seat of stuck) {
+              const { word } = botWord(engine.rngFor(seat));
+              commit({ t: 'word', s: seat, w: word });
+            }
+          }
+          return BALANCE.SET_SECONDS;
+        }
+        return c - 1;
+      });
+    }, 1000);
+    return () => window.clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [config.isHost, version, engine.phase, engine.turn]);
+  }, [engine.phase, engine.round, engine.suggestions.length, config.isHost, version]);
+
+  useEffect(() => {
+    if (engine.phase !== 'voting') return;
+    setVoteClock(BALANCE.VOTE_SECONDS);
+    const id = window.setInterval(() => {
+      setVoteClock((c) => {
+        if (c <= 1) {
+          if (config.isHost) {
+            const stuck = config.seats
+              .map((_, i) => i)
+              .filter((i) => config.seats[i].control !== 'ai' && engine.canVote(i));
+            for (const seat of stuck) {
+              commit({ t: 'vote', s: seat, pick: botVote(engine, seat, engine.rngFor(seat)) });
+            }
+          }
+          return BALANCE.VOTE_SECONDS;
+        }
+        return c - 1;
+      });
+    }, 1000);
+    return () => window.clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [engine.phase, engine.votes.size, config.isHost, version]);
+
+  useEffect(() => {
+    if (engine.phase !== 'guessing' || engine.chainHolder === null) {
+      setChainClock(BALANCE.CHAIN_WINDOW_MS / 1000);
+      return;
+    }
+    const startedAt = Date.now();
+    const id = window.setInterval(() => {
+      const left = Math.max(0, BALANCE.CHAIN_WINDOW_MS - (Date.now() - startedAt));
+      setChainClock(Math.ceil(left / 1000));
+      if (left <= 0) {
+        if (config.isHost) commit({ t: 'expire' });
+      }
+    }, 120);
+    return () => window.clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [engine.phase, engine.chainHolder, engine.chainDepth, config.isHost]);
 
   // ── the round card, then the next word ───────────────────────────────────
 
@@ -335,176 +421,132 @@ export default function MatchView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [engine.phase]);
 
-  // ── the turn clock ───────────────────────────────────────────────────────
-
   useEffect(() => {
-    if (engine.phase !== 'guessing' || !config.rules.turnTimer) return;
-    if (turnSeat?.control === 'ai') return;
-    setClock(BALANCE.TURN_SECONDS);
-    const id = window.setInterval(() => {
-      setClock((c) => {
-        if (c <= 1) {
-          // Only the host may end a turn. A guest's clock hitting zero just
-          // stops counting; the host decides when a turn is spent.
-          if (config.isHost) commit(timeoutAction(engine, engine.turn));
-          return 0;
-        }
-        if (c <= 6) audioService.playTick();
-        return c - 1;
-      });
-    }, 1000);
-    return () => window.clearInterval(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [engine.phase, engine.turn, engine.round, config.rules.turnTimer, config.isHost, version]);
-
-  // Clear the solve box whenever the turn or the word changes under it.
-  useEffect(() => {
-    setAttempt('');
-    setSolving(false);
-  }, [engine.turn, engine.round]);
+    setWordInput('');
+    setActiveLocal(0);
+  }, [engine.round]);
 
   // ── render ───────────────────────────────────────────────────────────────
 
   const board = engine.board;
-  const hits = useMemo(
-    () => new Set(engine.called.filter((c) => engine.word.includes(c))),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [version, engine.called.length, engine.round],
-  );
   const lastEvent = engine.events[engine.events.length - 1];
-  const latestPiece =
-    lastEvent && (lastEvent.kind === 'miss' || lastEvent.kind === 'wrongWord')
-      ? lastEvent.piece - 1
-      : undefined;
   const standings = engine.standings();
+  const teamStandings = teams ? engine.teamStandings() : [];
   const roundOver = engine.phase === 'roundOver' || engine.phase === 'over';
 
-  const submitSolve = () => {
-    const cleaned = cleanAttempt(attempt);
-    if (cleaned.length === 0) return;
-    play({ s: engine.turn, w: cleaned });
-    setAttempt('');
-    setSolving(false);
+  // Which of my own seats is the one that can act right now, for whichever
+  // phase we are in. On a solo device this is trivially localSeats[0]; on a
+  // shared couch device it is whichever seat the little picker below has set
+  // as "you" — see activeLocal.
+  const actingLocal = (predicate: (seat: number) => boolean) => config.localSeats.find(predicate);
+
+  const mySetter = actingLocal((s) => engine.canSetWord(s));
+  const myVoter = actingLocal((s) => engine.canVote(s));
+  const guessCandidates = config.localSeats.filter((s) => engine.canGuess(s));
+  const myGuesser = guessCandidates.includes(config.localSeats[activeLocal] ?? -1)
+    ? config.localSeats[activeLocal]
+    : guessCandidates[0];
+
+  const submitWord = () => {
+    const cleaned = cleanWord(wordInput);
+    if (cleaned.length < BALANCE.MIN_WORD_LEN) return;
+    const seat = mySetter;
+    if (seat === undefined) return;
+    play({ t: 'word', s: seat, w: cleaned });
+    setWordInput('');
   };
 
-  const boardBlock = (
+  const settingSeatName = () => {
+    if (config.rules.mode === 'ffa') return config.seats[engine.setterSeat]?.name ?? 'Someone';
+    const team = engine.seatsOnTeam(engine.settingTeam);
+    return `${teamNameFor(engine.settingTeam)} (${team.map((s) => config.seats[s]?.name).join(', ')})`;
+  };
+
+  const centerBlock = (
     <>
-        <Gallows pieces={engine.pieces} latest={latestPiece} className="h-[22vh] max-h-52 min-h-24 w-auto shrink-0" />
+      <Gallows pieces={engine.pieces} className="h-[22vh] max-h-52 min-h-24 w-auto shrink-0" />
 
-        {/* The two numbers that matter most, on one row and next to the
-            drawing they are about. The clock started out up in the header
-            and had to move: the shared controls tray wants 250px of a 375px
-            phone row on its own, so a third chip up there left nothing
-            legible. */}
-        <div className="flex items-center gap-3">
-          <p className="text-[10px] font-black uppercase tracking-[0.25em] text-slate-500">
-            {engine.pieces} / {PIECES} lines · {PIECES - engine.pieces} left
-          </p>
-          {engine.phase === 'guessing' && config.rules.turnTimer && turnSeat?.control !== 'ai' && (
-            <span
-              className={`rounded-full border px-2.5 py-0.5 text-[11px] font-black tabular-nums transition-colors ${
-                clock <= 5
-                  ? 'border-rose-500 bg-rose-950/70 text-rose-300'
-                  : 'border-slate-600/60 bg-slate-900/70 text-slate-300'
-              }`}
-            >
-              {clock}s
-            </span>
-          )}
-        </div>
+      <p className="text-[10px] font-black uppercase tracking-[0.25em] text-slate-500">
+        {engine.pieces} / {PIECES} lines · {PIECES - engine.pieces} left
+      </p>
 
-        {/* The category, sitting directly above the blanks it is a hint for. */}
-        <p className="text-center text-[11px] font-black uppercase tracking-[0.22em] text-lime-400/90">
-          {engine.category}
-        </p>
+      {engine.word && <WordBoard board={board} exposed={roundOver} word={engine.word} />}
 
-        <WordBoard board={board} exposed={roundOver} word={engine.word} />
-
-        {/* The one line that always says what just happened, because in a game
-            where a turn can cost you the whole round, "what did that do" is
-            never a question anyone should have to work out. */}
-        <p className="min-h-[2.5em] max-w-md px-2 text-center text-xs font-bold leading-snug text-slate-300">
-          {roundOver ? roundSummary(engine, config.seats) : lastEvent ? describe(lastEvent, config.seats, localSet) : 'First guess of the word.'}
-        </p>
+      <p className="min-h-[2.5em] max-w-md px-2 text-center text-xs font-bold leading-snug text-slate-300">
+        {roundOver
+          ? roundSummary(engine, config.seats, teams)
+          : lastEvent
+            ? describe(lastEvent, config.seats, localSet)
+            : phaseHint(engine, settingSeatName(), mySetter !== undefined)}
+      </p>
     </>
   );
 
   const rackBlock = (
     <>
-        {roundOver ? (
-          <div className="flex items-center justify-center gap-2 rounded-2xl border-2 border-slate-600/50 bg-slate-900/70 py-4">
-            {engine.phase === 'over' ? (
-              <p className="text-sm font-black uppercase tracking-wide text-slate-300">Counting up…</p>
-            ) : (
-              <>
-                <Loader2 className="h-4 w-4 animate-spin text-slate-400" />
-                <p className="text-sm font-black uppercase tracking-wide text-slate-300">Next word…</p>
-              </>
-            )}
-          </div>
-        ) : !myTurn ? (
-          <div className="flex items-center justify-center gap-2 rounded-2xl border-2 border-slate-600/50 bg-slate-900/70 py-4">
-            <Loader2 className="h-4 w-4 animate-spin text-slate-400" />
-            <p className="text-sm font-black uppercase tracking-wide text-slate-300">
-              {turnSeat ? `${turnSeat.name} is thinking` : 'Waiting…'}
-            </p>
-          </div>
-        ) : solving ? (
-          <div className="space-y-2">
-            <div className="flex gap-2">
-              <input
-                autoFocus
-                value={attempt}
-                onChange={(e) => setAttempt(cleanAttempt(e.target.value))}
-                onKeyDown={(e) => e.key === 'Enter' && submitSolve()}
-                placeholder="The whole word…"
-                aria-label="Your guess at the whole word"
-                className="min-w-0 flex-1 rounded-xl border-2 border-slate-500/60 bg-slate-100 px-3 py-3 text-center text-lg font-black uppercase tracking-[0.2em] text-slate-900 placeholder:text-sm placeholder:font-bold placeholder:tracking-normal placeholder:text-slate-400 focus:border-lime-400 focus:outline-none"
-              />
-              <button
-                type="button"
-                onClick={submitSolve}
-                disabled={attempt.length === 0}
-                className="flex shrink-0 items-center gap-1.5 rounded-xl bg-lime-500 px-4 font-black uppercase tracking-wide text-slate-950 disabled:opacity-40"
-              >
-                <Send className="h-4 w-4" /> Call
-              </button>
-            </div>
-            <button
-              type="button"
-              onClick={() => setSolving(false)}
-              className="w-full rounded-xl border border-slate-600/60 py-2 text-xs font-bold uppercase tracking-wide text-slate-400"
-            >
-              Back to letters
-            </button>
-            <p className="text-center text-[10px] font-bold text-rose-400/80">
-              Wrong costs {BALANCE.WRONG_SOLVE_PIECES} lines and the rest of the word.
-            </p>
-          </div>
+      {roundOver ? (
+        <div className="flex items-center justify-center gap-2 rounded-2xl border-2 border-slate-600/50 bg-slate-900/70 py-4">
+          {engine.phase === 'over' ? (
+            <p className="text-sm font-black uppercase tracking-wide text-slate-300">Counting up…</p>
+          ) : (
+            <>
+              <Loader2 className="h-4 w-4 animate-spin text-slate-400" />
+              <p className="text-sm font-black uppercase tracking-wide text-slate-300">Next word…</p>
+            </>
+          )}
+        </div>
+      ) : engine.phase === 'settingWord' ? (
+        mySetter !== undefined ? (
+          <WordEntry value={wordInput} onChange={setWordInput} onSubmit={submitWord} label="Type the word everyone will guess" />
         ) : (
-          <>
-            <Keyboard
-              called={engine.called}
-              hits={hits}
-              disabled={false}
-              markUsed={settings.markUsed}
-              onPick={(letter) => {
-                audioService.playTap();
-                play({ s: engine.turn, l: ALPHABET.indexOf(letter) });
-              }}
-            />
-            <button
-              type="button"
-              onClick={() => setSolving(true)}
-              className="w-full rounded-2xl border-2 border-lime-400/60 bg-lime-400/10 py-2.5 text-sm font-black uppercase tracking-[0.18em] text-lime-300 active:scale-[0.99]"
-            >
-              Call the whole word
-              <span className="ml-2 text-[10px] font-bold tracking-normal text-lime-400/60">
-                +{engine.hiddenCount * BALANCE.SOLVE_BONUS_PER_LETTER} bonus
-              </span>
-            </button>
-          </>
-        )}
+          <WaitingCard text={`${settingSeatName()} is choosing a word…`} seconds={setClock} />
+        )
+      ) : engine.phase === 'suggesting' ? (
+        mySetter !== undefined ? (
+          <WordEntry value={wordInput} onChange={setWordInput} onSubmit={submitWord} label="Suggest a word for your team" />
+        ) : engine.teamOf(config.localSeats[0] ?? -1) === engine.settingTeam ? (
+          <WaitingCard text="Waiting on your teammates' suggestions…" seconds={setClock} />
+        ) : (
+          <WaitingCard text={`${settingSeatName()} is picking a word…`} seconds={setClock} />
+        )
+      ) : engine.phase === 'voting' ? (
+        myVoter !== undefined ? (
+          <VotePanel suggestions={engine.suggestions} seats={config.seats} mine={myVoter} onVote={(pick) => play({ t: 'vote', s: myVoter, pick })} />
+        ) : engine.teamOf(config.localSeats[0] ?? -1) === engine.settingTeam ? (
+          <WaitingCard text="Waiting on your team's vote…" seconds={voteClock} />
+        ) : (
+          <WaitingCard text={`${settingSeatName()} is picking a word…`} seconds={voteClock} />
+        )
+      ) : (
+        <>
+          {guessCandidates.length > 1 && (
+            <div className="flex gap-1.5 overflow-x-auto pb-1">
+              {guessCandidates.map((s) => (
+                <button
+                  key={s}
+                  onClick={() => setActiveLocal(config.localSeats.indexOf(s))}
+                  className={`shrink-0 rounded-full border-2 px-3 py-1 text-[11px] font-black uppercase ${
+                    myGuesser === s ? 'border-lime-400 bg-lime-400/15 text-lime-200' : 'border-slate-600/50 text-slate-400'
+                  }`}
+                >
+                  {config.seats[s]?.name}
+                </button>
+              ))}
+            </div>
+          )}
+          <ChainBanner engine={engine} seats={config.seats} localSet={localSet} chainClock={chainClock} />
+          <Keyboard
+            called={engine.called}
+            hits={new Set(engine.called.filter((c) => engine.word.includes(c)))}
+            disabled={myGuesser === undefined}
+            markUsed={settings.markUsed}
+            onPick={(letter) => {
+              if (myGuesser === undefined) return;
+              play({ t: 'guess', s: myGuesser, l: ALPHABET.indexOf(letter) });
+            }}
+          />
+        </>
+      )}
     </>
   );
 
@@ -512,28 +554,14 @@ export default function MatchView({
     <div ref={shellRef} className="relative flex h-[100dvh] w-full flex-col overflow-hidden">
       {/* ── top bar ── */}
       <div className="flex shrink-0 items-start justify-between gap-2 p-2 sm:p-3">
-        {/* Just the count. The category used to live here too and wrapped to
-            three lines on a 375px phone, squeezing this chip to 27px and
-            pushing the controls tray off the edge — the tray alone wants
-            250 of a 375px row, so there was never space for both. It reads
-            better down beside the word anyway, which is where you are
-            actually looking when you use it. */}
         <div className="shrink-0 rounded-2xl border border-slate-600/50 bg-slate-900/70 px-3 py-1.5 backdrop-blur">
           <p className="text-[9px] font-black uppercase tracking-[0.2em] text-slate-400">Word</p>
           <p className="text-sm font-black leading-tight tabular-nums text-slate-100">
             {Math.min(engine.round + 1, engine.totalRounds)} / {engine.totalRounds}
           </p>
         </div>
-
         <div className="shrink-0">
-        <ControlsTray
-          shellRef={shellRef}
-          online={online}
-          isHost={config.isHost}
-          onSettings={onOpenSettings}
-          onExit={onExit}
-          theme="dark"
-        />
+          <ControlsTray shellRef={shellRef} online={online} isHost={config.isHost} onSettings={onOpenSettings} onExit={onExit} theme="dark" />
         </div>
       </div>
 
@@ -541,32 +569,33 @@ export default function MatchView({
       <div className="shrink-0 px-2 sm:px-3">
         <div className="flex gap-1.5 overflow-x-auto pb-1">
           {config.seats.map((seat, i) => {
-            const state = engine.players[i];
             const colors = SEAT_COLORS[i % SEAT_COLORS.length];
-            const isTurn = engine.turn === i && engine.phase === 'guessing';
+            const setting = config.rules.mode === 'ffa' ? engine.setterSeat === i : engine.teamOf(i) === engine.settingTeam;
+            const acting = engine.chainHolder === i;
             const mine = localSet.has(i);
             return (
               <div
                 key={seat.id}
                 className={`flex min-w-0 flex-1 shrink-0 items-center gap-1.5 rounded-xl border-2 px-1.5 py-1 transition-all ${
-                  isTurn ? 'scale-[1.02]' : ''
-                } ${state?.out ? 'opacity-45' : ''}`}
+                  acting ? 'scale-[1.02]' : ''
+                }`}
                 style={{
-                  borderColor: isTurn ? colors.main : 'rgba(148,163,184,0.22)',
-                  background: isTurn ? `${colors.main}1f` : 'rgba(15,23,42,0.55)',
+                  borderColor: acting ? colors.main : setting ? 'rgba(250,204,21,0.5)' : 'rgba(148,163,184,0.22)',
+                  background: acting ? `${colors.main}1f` : 'rgba(15,23,42,0.55)',
                 }}
               >
-                <FaceToken skin={seat.skin} size={26} ring={colors.main} out={state?.out} />
+                <FaceToken skin={seat.skin} size={26} ring={colors.main} />
                 <div className="min-w-0 flex-1">
                   <p className="flex items-center gap-1 truncate text-[10px] font-black uppercase tracking-wide text-slate-100">
                     {mine ? 'You' : seat.name}
-                    {isTurn && <span style={{ color: colors.main }}>●</span>}
+                    {teams && (
+                      <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: TEAM_COLORS[engine.teamOf(i) % TEAM_COLORS.length]?.main }} />
+                    )}
+                    {acting && <Zap className="h-2.5 w-2.5 shrink-0 text-amber-300" />}
                   </p>
                   <p className="text-[10px] font-bold leading-tight tabular-nums text-slate-400">
                     <span className="text-slate-100">{engine.liveTotal(i)}</span>
-                    {state && state.round > 0 && (
-                      <span className="text-lime-400"> +{state.round}</span>
-                    )}
+                    {engine.players[i] && engine.players[i].round > 0 && <span className="text-lime-400"> +{engine.players[i].round}</span>}
                   </p>
                 </div>
               </div>
@@ -575,32 +604,25 @@ export default function MatchView({
         </div>
       </div>
 
-      {/* Two explicit arrangements rather than one tree bent with `order`:
-          stacked, the rack belongs at the thumb end with the board above it,
-          and no ordering trick gets that right in both orientations. */}
+      {/* ── the body ──
+          Two explicit arrangements rather than one tree bent with `order`:
+          stacked, the rack belongs at the thumb end below the board, and no
+          ordering trick gets that right in both orientations at once. */}
       {sideBySide ? (
         <div className="flex min-h-0 flex-1 gap-2 overflow-hidden px-2 pb-2">
-          <div className="flex min-h-0 min-w-0 flex-1 flex-col items-center justify-center gap-1.5">
-            {boardBlock}
-          </div>
-          <div className="flex w-[52%] max-w-[420px] shrink-0 flex-col justify-center gap-2 overflow-y-auto">
-            {rackBlock}
-          </div>
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col items-center justify-center gap-1.5">{centerBlock}</div>
+          <div className="flex w-[52%] max-w-[420px] shrink-0 flex-col justify-center gap-2 overflow-y-auto">{rackBlock}</div>
         </div>
       ) : (
         <>
-          <div className="mx-auto flex min-h-0 w-full max-w-2xl flex-1 flex-col items-center justify-center gap-3 px-3">
-            {boardBlock}
-          </div>
+          <div className="mx-auto flex min-h-0 w-full max-w-2xl flex-1 flex-col items-center justify-center gap-3 px-3">{centerBlock}</div>
           <div className="mx-auto w-full max-w-2xl shrink-0 space-y-2 p-2 sm:p-3">{rackBlock}</div>
         </>
       )}
 
       {notice && (
         <div className="pointer-events-none absolute inset-x-0 bottom-28 z-30 flex justify-center px-4">
-          <p className="rounded-xl border border-slate-500/50 bg-slate-950/95 px-3 py-1.5 text-center text-xs font-bold text-slate-200">
-            {notice}
-          </p>
+          <p className="rounded-xl border border-slate-500/50 bg-slate-950/95 px-3 py-1.5 text-center text-xs font-bold text-slate-200">{notice}</p>
         </div>
       )}
 
@@ -613,33 +635,36 @@ export default function MatchView({
               {engine.winner !== null && localSet.has(engine.winner) ? 'You won it' : 'They won it'}
             </h2>
             <p className="text-sm font-bold text-slate-400">
-              {config.seats[engine.winner ?? 0]?.name} finished on{' '}
-              {engine.players[engine.winner ?? 0]?.total ?? 0}.
+              {config.seats[engine.winner ?? 0]?.name} finished on {engine.players[engine.winner ?? 0]?.total ?? 0}.
             </p>
+
+            {teams && (
+              <div className="space-y-1 rounded-2xl bg-slate-950/60 p-3 text-left">
+                {teamStandings.map((row, i) => (
+                  <div key={row.team} className="flex items-center gap-2 text-xs">
+                    <span className="w-3 font-black text-slate-500">{i + 1}</span>
+                    <span className="h-2 w-2 rounded-full" style={{ background: TEAM_COLORS[row.team % TEAM_COLORS.length]?.main }} />
+                    <span className="min-w-0 flex-1 truncate font-black uppercase tracking-wide text-slate-100">{teamNameFor(row.team)}</span>
+                    <span className="w-10 text-right font-black tabular-nums text-slate-50">{row.total}</span>
+                  </div>
+                ))}
+              </div>
+            )}
 
             <div className="space-y-1 rounded-2xl bg-slate-950/60 p-3 text-left">
               {standings.map((row, i) => (
                 <div key={config.seats[row.seat].id} className="flex items-center gap-2 text-xs">
                   <span className="w-3 font-black text-slate-500">{i + 1}</span>
-                  <span className="min-w-0 flex-1 truncate font-black uppercase tracking-wide text-slate-100">
-                    {config.seats[row.seat].name}
-                  </span>
+                  <span className="min-w-0 flex-1 truncate font-black uppercase tracking-wide text-slate-100">{config.seats[row.seat].name}</span>
                   <span className="font-bold tabular-nums text-slate-500">
-                    {engine.players[row.seat].hangs > 0
-                      ? `hanged ×${engine.players[row.seat].hangs}`
-                      : `${engine.players[row.seat].solves} solved`}
+                    {engine.players[row.seat].hangs > 0 ? `hanged ×${engine.players[row.seat].hangs}` : `best chain ${engine.players[row.seat].bestChain}`}
                   </span>
-                  <span className="w-10 text-right font-black tabular-nums text-slate-50">
-                    {row.total}
-                  </span>
+                  <span className="w-10 text-right font-black tabular-nums text-slate-50">{row.total}</span>
                 </div>
               ))}
             </div>
 
-            <button
-              onClick={onExit}
-              className="w-full rounded-2xl bg-lime-500 py-3 font-black uppercase tracking-[0.18em] text-slate-950"
-            >
+            <button onClick={onExit} className="w-full rounded-2xl bg-lime-500 py-3 font-black uppercase tracking-[0.18em] text-slate-950">
               Back
             </button>
           </div>
@@ -649,18 +674,142 @@ export default function MatchView({
   );
 }
 
+function teamNameFor(team: number): string {
+  return TEAM_COLORS[team % TEAM_COLORS.length]?.name ?? `Team ${team + 1}`;
+}
+
+function WordEntry({
+  value,
+  onChange,
+  onSubmit,
+  label,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  onSubmit: () => void;
+  label: string;
+}) {
+  return (
+    <div className="space-y-2">
+      <p className="text-center text-[11px] font-black uppercase tracking-wide text-lime-300">{label}</p>
+      <div className="flex gap-2">
+        <input
+          autoFocus
+          value={value}
+          onChange={(e) => onChange(cleanWord(e.target.value))}
+          onKeyDown={(e) => e.key === 'Enter' && onSubmit()}
+          placeholder="Type it here…"
+          aria-label={label}
+          className="min-w-0 flex-1 rounded-xl border-2 border-slate-500/60 bg-slate-100 px-3 py-3 text-center text-lg font-black uppercase tracking-[0.2em] text-slate-900 placeholder:text-sm placeholder:font-bold placeholder:tracking-normal placeholder:text-slate-400 focus:border-lime-400 focus:outline-none"
+        />
+        <button
+          type="button"
+          onClick={onSubmit}
+          disabled={value.length < BALANCE.MIN_WORD_LEN}
+          className="flex shrink-0 items-center gap-1.5 rounded-xl bg-lime-500 px-4 font-black uppercase tracking-wide text-slate-950 disabled:opacity-40"
+        >
+          <Send className="h-4 w-4" /> Set
+        </button>
+      </div>
+      <p className="text-center text-[10px] font-bold text-slate-500">Nobody else can see this until it's guessed or the word ends.</p>
+    </div>
+  );
+}
+
+function VotePanel({
+  suggestions,
+  seats,
+  mine,
+  onVote,
+}: {
+  suggestions: { seat: number; word: string }[];
+  seats: Seat[];
+  mine: number;
+  onVote: (pick: number) => void;
+}) {
+  return (
+    <div className="space-y-2">
+      <p className="text-center text-[11px] font-black uppercase tracking-wide text-lime-300">Pick your team's word</p>
+      <div className="grid grid-cols-2 gap-2">
+        {suggestions.map((s, i) => (
+          <button key={i} onClick={() => onVote(i)} className="rounded-xl border-2 border-slate-600/50 bg-slate-800/60 px-3 py-3 text-center active:scale-95">
+            <p className="text-lg font-black tracking-[0.15em] text-slate-100">{s.word}</p>
+            <p className="text-[9px] font-bold uppercase text-slate-500">{s.seat === mine ? 'yours' : `from ${seats[s.seat]?.name ?? 'a teammate'}`}</p>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function WaitingCard({ text, seconds }: { text: string; seconds: number }) {
+  return (
+    <div className="flex items-center justify-center gap-2 rounded-2xl border-2 border-slate-600/50 bg-slate-900/70 py-4">
+      <Loader2 className="h-4 w-4 animate-spin text-slate-400" />
+      <p className="text-sm font-black uppercase tracking-wide text-slate-300">
+        {text} <span className="text-slate-500">({seconds}s)</span>
+      </p>
+    </div>
+  );
+}
+
+function ChainBanner({
+  engine,
+  seats,
+  localSet,
+  chainClock,
+}: {
+  engine: LastGaspEngine;
+  seats: Seat[];
+  localSet: Set<number>;
+  chainClock: number;
+}) {
+  if (engine.chainHolder === null) {
+    return (
+      <p className="flex items-center justify-center gap-1.5 text-[11px] font-black uppercase tracking-wide text-slate-400">
+        <ThumbsUp className="h-3.5 w-3.5" /> Open table — first correct letter wins it
+      </p>
+    );
+  }
+  const name = localSet.has(engine.chainHolder) ? 'You' : (seats[engine.chainHolder]?.name ?? 'Someone');
+  const mult = (1 + engine.chainDepth * BALANCE.CHAIN_STEP).toFixed(2);
+  return (
+    <div className="flex items-center justify-center gap-2 rounded-xl border-2 border-amber-400/60 bg-amber-400/10 px-3 py-1.5">
+      <Zap className="h-4 w-4 text-amber-300" />
+      <p className="text-[11px] font-black uppercase tracking-wide text-amber-200">
+        {name}'s chain · ×{mult} · {chainClock}s left
+      </p>
+    </div>
+  );
+}
+
+function phaseHint(engine: LastGaspEngine, settingSeatName: string, mine: boolean): string {
+  if (engine.phase === 'settingWord') return mine ? "You're choosing a word." : `${settingSeatName} is choosing a word.`;
+  if (engine.phase === 'suggesting') return `${settingSeatName} are picking a word.`;
+  if (engine.phase === 'voting') return `${settingSeatName} are voting.`;
+  return 'First guess of the word.';
+}
+
 function describe(event: RoundEvent, seats: Seat[], mine: Set<number>): string {
   const name = (i: number) => (mine.has(i) ? 'You' : (seats[i]?.name ?? 'Someone'));
   const was = (i: number) => (mine.has(i) ? 'were' : 'was');
   switch (event.kind) {
+    case 'wordSet':
+      return `${name(event.seat)} set the word.`;
+    case 'suggested':
+      return `${name(event.seat)} suggested a word.`;
+    case 'voted':
+      return `${name(event.seat)} voted.`;
+    case 'wordChosen':
+      return `The team picked ${name(event.author)}'s word.`;
     case 'hit':
-      return `${name(event.seat)} called ${event.letter} — ${event.copies} of them, +${event.points}.`;
+      return event.chain > 0
+        ? `${name(event.seat)} chained ${event.letter} — +${event.points}.`
+        : `${name(event.seat)} called ${event.letter} — ${event.copies} of them, +${event.points}.`;
     case 'miss':
       return `No ${event.letter}. That is line ${event.piece} of ${PIECES}.`;
-    case 'solved':
-      return `${name(event.seat)} called it: ${event.word}. +${event.points}.`;
-    case 'wrongWord':
-      return `${name(event.seat)} said ${event.attempt}. Not even close — out for this word.`;
+    case 'chainEnded':
+      return event.reason === 'expired' ? `${name(event.seat)}'s window closed. Open again.` : '';
     case 'hanged':
       return event.lost > 0
         ? `${name(event.seat)} drew the last line and ${was(event.seat)} out ${event.lost} points.`
@@ -671,31 +820,28 @@ function describe(event: RoundEvent, seats: Seat[], mine: Set<number>): string {
 }
 
 /** The line under the board once a word is done with. */
-function roundSummary(engine: LastGaspEngine, seats: Seat[]): string {
+function roundSummary(engine: LastGaspEngine, seats: Seat[], teams: boolean): string {
   const hanged = engine.events.find((e) => e.kind === 'hanged');
   if (hanged && hanged.kind === 'hanged') {
     return `${seats[hanged.seat]?.name ?? 'Someone'} finished the stickman. The word was ${engine.word}.`;
   }
-  const solved = engine.events.find((e) => e.kind === 'solved');
-  if (solved && solved.kind === 'solved') {
-    return `${seats[solved.seat]?.name ?? 'Someone'} called ${solved.word} and kept everybody alive.`;
+  const cleared = engine.events.find((e) => e.kind === 'cleared');
+  if (cleared && cleared.kind === 'cleared') {
+    return teams ? `Cracked: ${cleared.word}.` : `Cracked it: ${cleared.word}.`;
   }
-  return `The word was ${engine.word}. Nobody hanged.`;
+  return `The word was ${engine.word}.`;
 }
 
 function soundFor(event: RoundEvent) {
   switch (event.kind) {
     case 'hit':
-      audioService.playHit(event.copies);
+      audioService.playHit(event.chain > 0 ? 1 : event.copies);
       break;
     case 'miss':
       audioService.playMiss();
       break;
-    case 'solved':
+    case 'cleared':
       audioService.playSolve();
-      break;
-    case 'wrongWord':
-      audioService.playWrong();
       break;
     case 'hanged':
       audioService.playHang();

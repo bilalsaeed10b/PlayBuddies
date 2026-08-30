@@ -17,16 +17,25 @@ import { askHostToEndGame, toggleFullscreen } from './fullscreen';
 import { FACES, FREE_FACES } from './game/faces';
 import FaceToken from './components/FaceToken';
 import Gallows from './components/Gallows';
-import { BALANCE, LETTER_VALUE, PIECES, PLAYER_COUNTS, SEAT_COLORS } from './game/rules';
+import {
+  BALANCE,
+  LETTER_VALUE,
+  MAX_TEAMS,
+  MIN_TEAMS,
+  PIECES,
+  PLAYER_COUNTS,
+  SEAT_COLORS,
+  TEAM_COLORS,
+} from './game/rules';
 import { TIERS } from './engine/ai';
 import { audioService } from './services/audio';
 import { GameWallet, reportResult } from './platform/wallet';
 import MatchView from './screens/MatchView';
 import type { MatchConfig } from './screens/MatchView';
 import type { Seat } from './engine/LastGaspEngine';
-import { DEFAULT_RULES, ROUND_CHOICES, packRules, unpackRules } from './types/game';
+import { DEFAULT_RULES, ROUND_CHOICES, defaultTeams, packRules, unpackRules } from './types/game';
 import { createLogger } from '@shared/log/logger';
-import type { GameSettings, MatchRules, PlayerCount } from './types/game';
+import type { GameSettings, MatchRules, Mode, PlayerCount } from './types/game';
 
 const log = createLogger('last-gasp');
 
@@ -128,6 +137,17 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('lastgasp_rules', JSON.stringify(rules));
   }, [rules]);
+
+  // Keeps `teamOf` the right length whenever the player count or team count
+  // changes, on a fresh even split — a host's individual taps on a roster
+  // chip (see RoomScreen) override single entries after that, but a length
+  // mismatch would otherwise leave stray or missing assignments the moment
+  // either number moved.
+  useEffect(() => {
+    if (rules.mode !== 'teams') return;
+    if (rules.teamOf.length === rules.players) return;
+    setRules((r) => ({ ...r, teamOf: defaultTeams(r.players, r.teamCount) }));
+  }, [rules.mode, rules.players, rules.teamCount, rules.teamOf.length]);
 
   useEffect(() => {
     if (!walletReady) return;
@@ -385,7 +405,20 @@ export default function App() {
       }
     }
 
-    return { roomId: null, uid: null, peerUids: [], isHost: true, seats, localSeats, seed: session.seed, rules };
+    return {
+      roomId: null,
+      uid: null,
+      peerUids: [],
+      isHost: true,
+      seats,
+      localSeats,
+      seed: session.seed,
+      // Always Free-For-All offline: Teams needs a lobby to assign people to
+      // teams in, and there is no lobby here — carrying over whatever mode
+      // an earlier online match happened to be left on would seat a solo or
+      // couch game into teams nobody had any way to configure.
+      rules: { ...rules, mode: 'ffa' },
+    };
   }
 
   const openOffline = (players: number) => {
@@ -451,6 +484,7 @@ export default function App() {
             audioService.unlock();
             setView('offline_menu');
           }}
+          onRulesChange={setRules}
         />
       )}
 
@@ -479,7 +513,7 @@ function rulesSummary(rules: MatchRules): string {
   return [
     `${rules.players} players`,
     `${ROUND_CHOICES[rules.rounds] ?? BALANCE.ROUNDS} words`,
-    rules.turnTimer ? `${BALANCE.TURN_SECONDS}s turns` : 'no clock',
+    rules.mode === 'teams' ? `Teams of ${rules.teamCount}` : 'Free-For-All',
   ].join(' · ');
 }
 
@@ -562,7 +596,7 @@ function Menu({
         >
           Two on one screen
           <span className="mt-0.5 block text-[10px] font-bold normal-case tracking-normal text-slate-400">
-            Nothing is hidden. Just pass it along.
+            Pass it over to set a word, then race for the letters together.
           </span>
         </button>
 
@@ -722,6 +756,7 @@ function RoomScreen({
   onRules,
   onFullscreen,
   onPlayOffline,
+  onRulesChange,
 }: {
   ready: boolean;
   error: string | null;
@@ -739,6 +774,8 @@ function RoomScreen({
   onRules: () => void;
   onFullscreen: () => void;
   onPlayOffline: () => void;
+  /** Match type and team assignment live here, in the lobby itself — not behind the Rules modal. See ModeAndTeams. */
+  onRulesChange: (r: MatchRules) => void;
 }) {
   const pickedBy = useMemo(() => {
     const map: Record<number, string[]> = {};
@@ -817,6 +854,8 @@ function RoomScreen({
         </span>
       </button>
 
+      <ModeAndTeams rules={rules} people={people} hostId={hostId} editable={isHost} onChange={onRulesChange} />
+
       <div className="panel shrink-0 rounded-2xl p-2.5">
         {isHost ? (
           <button
@@ -877,6 +916,113 @@ function RoomScreen({
   );
 }
 
+/**
+ * Who is setting a word for whom, decided right here in the lobby.
+ *
+ * Not in the Rules modal: a modal is for toggles that change what a match
+ * *is* in the abstract (how many words, how fast a chain window closes), but
+ * "which of these specific people are on my team" is a decision about the
+ * actual roster in front of you, and it belongs where the roster already is.
+ */
+function ModeAndTeams({
+  rules,
+  people,
+  hostId,
+  editable,
+  onChange,
+}: {
+  rules: MatchRules;
+  people: { uid: string; displayName: string }[];
+  hostId: string | null;
+  editable: boolean;
+  onChange: (r: MatchRules) => void;
+}) {
+  const teamOf = (seat: number) => rules.teamOf[seat] ?? seat % rules.teamCount;
+  const cycleTeam = (seat: number) => {
+    if (!editable) return;
+    const next = [...rules.teamOf];
+    while (next.length <= seat) next.push(next.length % rules.teamCount);
+    next[seat] = (teamOf(seat) + 1) % rules.teamCount;
+    onChange({ ...rules, teamOf: next });
+  };
+
+  const slots = Math.max(rules.players, people.length);
+
+  return (
+    <div className="panel shrink-0 space-y-2.5 rounded-2xl p-2.5">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500">Match type</p>
+        <div className="flex gap-1 rounded-lg bg-slate-800/70 p-1">
+          {(['ffa', 'teams'] as Mode[]).map((m) => (
+            <button
+              key={m}
+              disabled={!editable}
+              onClick={() => onChange({ ...rules, mode: m, teamOf: m === 'teams' ? defaultTeams(rules.players, rules.teamCount) : rules.teamOf })}
+              className={`rounded-md px-2.5 py-1 text-[10px] font-black uppercase tracking-wide disabled:opacity-60 ${
+                rules.mode === m ? 'bg-slate-100 text-slate-900' : 'text-slate-400'
+              }`}
+            >
+              {m === 'ffa' ? 'Free-For-All' : 'Teams'}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {rules.mode === 'ffa' ? (
+        <p className="text-[10px] leading-snug text-slate-500">
+          One person sets a word each round. Everybody else races to crack it — anyone can call any letter, any time.
+        </p>
+      ) : (
+        <>
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-[10px] font-bold text-slate-500">Teams</p>
+            <div className="flex items-center gap-1">
+              {Array.from({ length: MAX_TEAMS - MIN_TEAMS + 1 }, (_, i) => MIN_TEAMS + i).map((n) => (
+                <button
+                  key={n}
+                  disabled={!editable}
+                  onClick={() => onChange({ ...rules, teamCount: n, teamOf: defaultTeams(rules.players, n) })}
+                  className={`h-6 w-6 rounded-md text-[10px] font-black disabled:opacity-60 ${
+                    rules.teamCount === n ? 'bg-slate-100 text-slate-900' : 'bg-slate-800/70 text-slate-400'
+                  }`}
+                >
+                  {n}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="flex flex-wrap gap-1.5">
+            {Array.from({ length: slots }, (_, seat) => {
+              const person = people[seat];
+              const color = TEAM_COLORS[teamOf(seat) % TEAM_COLORS.length];
+              return (
+                <button
+                  key={seat}
+                  disabled={!editable}
+                  onClick={() => cycleTeam(seat)}
+                  className="flex items-center gap-1.5 rounded-lg border-2 px-2 py-1 disabled:opacity-90"
+                  style={{ borderColor: `${color.main}70`, background: `${color.main}18` }}
+                  title={editable ? 'Tap to change team' : undefined}
+                >
+                  <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: color.main }} />
+                  <span className="flex max-w-[80px] items-center gap-1 truncate text-[10px] font-black text-slate-100">
+                    <span className="truncate">{person?.displayName ?? `Bot ${seat + 1}`}</span>
+                    {person?.uid === hostId && <Crown className="h-2.5 w-2.5 shrink-0 text-amber-400" />}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+          <p className="text-[10px] leading-snug text-slate-500">
+            Your team suggests words and votes on one; the other teams race to crack it together.
+          </p>
+        </>
+      )}
+    </div>
+  );
+}
+
 function SettingsPanel({
   settings,
   onChange,
@@ -932,10 +1078,10 @@ function SettingsPanel({
 /** Four pictures, no reading required, for somebody who has never opened this before. */
 function HowItWorks() {
   const steps = [
-    { n: 1, title: 'Take a letter', body: 'On your turn, call one. Right, and you score what it is worth.' },
-    { n: 2, title: 'Wrong adds a line', body: `Every miss draws one more piece of the stickman. There are ${PIECES}.` },
-    { n: 3, title: 'Do not draw the last', body: 'Whoever finishes him loses everything they earned this word.' },
-    { n: 4, title: 'Or call the word', body: 'Get it and take a bonus. Miss and you are out for the rest of it.' },
+    { n: 1, title: 'Someone sets a word', body: 'Free-For-All: one player types it. Teams: your team suggests, then votes.' },
+    { n: 2, title: 'It is open to everyone', body: 'No turns. Anyone can call any letter, any moment — fastest right guess wins it.' },
+    { n: 3, title: 'A hit buys you a window', body: `Get one right and you alone get ${BALANCE.CHAIN_WINDOW_MS / 1000}s to keep going. Chain hits pay more each time.` },
+    { n: 4, title: 'A miss draws the gallows', body: `${PIECES} wrong guesses and he's finished — whoever drew the last line loses the word's points.` },
   ];
   return (
     <div className="grid grid-cols-2 gap-2">
@@ -1029,8 +1175,8 @@ function RulesPanel({
             ))}
           </div>
           <p className="text-[10px] leading-snug text-slate-400">
-            Per copy found. A safe E is worth one; a Z that lands is worth ten. That is the bet on every
-            turn where nobody is close to hanging yet.
+            Per copy found, before any chain bonus. A safe E is worth one; a Z that lands is worth ten —
+            the bet you're making every time you go for a letter instead of waiting for a safer one.
           </p>
         </div>
 
@@ -1079,21 +1225,9 @@ function RulesPanel({
           </div>
         </div>
 
-        <label className="flex items-center justify-between gap-3">
-          <span className="text-sm font-bold text-slate-100">
-            Turn clock
-            <span className="block text-[11px] font-normal text-slate-400">
-              After {BALANCE.TURN_SECONDS} seconds, the commonest letter left is called for you.
-            </span>
-          </span>
-          <input
-            type="checkbox"
-            disabled={!editable}
-            checked={rules.turnTimer}
-            onChange={(e) => onChange({ ...rules, turnTimer: e.target.checked })}
-            className="h-6 w-6 shrink-0 accent-lime-500 disabled:opacity-50"
-          />
-        </label>
+        <p className="text-center text-[10px] font-bold text-slate-500">
+          Match type and teams are set right in the lobby, not here — see the board below "Pick a face".
+        </p>
       </div>
     </div>
   );

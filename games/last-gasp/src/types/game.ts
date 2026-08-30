@@ -1,6 +1,7 @@
-import type { PlayerCount } from '../game/rules';
+import type { Mode, PlayerCount } from '../game/rules';
+import { MAX_TEAMS, MIN_TEAMS } from '../game/rules';
 
-export type { PlayerCount };
+export type { PlayerCount, Mode };
 
 /**
  * Who is driving a seat.
@@ -11,8 +12,13 @@ export type { PlayerCount };
  */
 export type Control = 'local' | 'remote' | 'ai';
 
-/** What the table is waiting for. */
-export type Phase = 'guessing' | 'roundOver' | 'over';
+/**
+ * What the table is waiting for.
+ *
+ * `settingWord` only exists in Free-For-All; `suggesting`/`voting` only exist
+ * in Teams. `guessing` is where both modes spend most of a round.
+ */
+export type Phase = 'settingWord' | 'suggesting' | 'voting' | 'guessing' | 'roundOver' | 'over';
 
 /** Preferences that belong to this device and nobody else. */
 export interface GameSettings {
@@ -24,15 +30,17 @@ export interface GameSettings {
 /**
  * How this game is played, set by the host and obeyed by everyone.
  *
- * These reach a guest over the wire before its first word is drawn (see
- * `packRules`), because a guest playing a different number of rounds, or
- * seating a different number of players, builds a different match and
- * rejects everything the host sends.
+ * Team assignment lives here rather than in an in-match settings panel —
+ * "who is on which team" is a lobby decision with real consequences for who
+ * you are about to play with, not a toggle to fix mid-match.
  */
 export interface MatchRules {
   players: PlayerCount;
-  /** Lock a guess in for anyone still deciding after TURN_SECONDS. */
-  turnTimer: boolean;
+  mode: Mode;
+  /** Meaningful only when `mode === 'teams'`. */
+  teamCount: number;
+  /** Seat index -> team index (0-based). Meaningful only when `mode === 'teams'`. */
+  teamOf: number[];
   /** How many words the match runs for. Index into ROUND_CHOICES. */
   rounds: number;
 }
@@ -41,58 +49,59 @@ export const ROUND_CHOICES = [3, 5, 8];
 
 export const DEFAULT_RULES: MatchRules = {
   players: 2,
-  turnTimer: true,
+  mode: 'ffa',
+  teamCount: 2,
+  teamOf: [],
   rounds: 1,
 };
 
+/** An even split — team 0, team 1, team 0, team 1, ... — the default before a host drags anyone around. */
+export function defaultTeams(players: number, teamCount: number): number[] {
+  return Array.from({ length: players }, (_, i) => i % Math.max(MIN_TEAMS, Math.min(MAX_TEAMS, teamCount)));
+}
+
 const PLAYER_CODES: PlayerCount[] = [2, 3, 4, 5, 6, 7, 8];
+const TEAM_CODES = [2, 3, 4];
 
 /**
- * The rules as one integer.
+ * The rules as one integer, teams and all.
  *
  * TurnLink stamps a flat `Record<string, number>` onto every packet a client
  * writes, so a guest arriving after the first word still learns the match's
- * terms from whatever packet happens to be in the document. Packing them into
- * a single number is what lets them ride along in that slot.
+ * terms from whatever packet happens to be in the document. Bits 0-7 are the
+ * simple choices; bits 8 upward are two bits per seat holding that seat's
+ * team, which is why this is a single wide integer instead of the small one
+ * the turn-based version got away with.
  */
 export function packRules(rules: MatchRules): number {
-  const players = Math.max(0, PLAYER_CODES.indexOf(rules.players));
-  const rounds = Math.max(0, Math.min(ROUND_CHOICES.length - 1, rules.rounds));
-  return (players & 7) | (rules.turnTimer ? 8 : 0) | (rounds << 4);
+  const playersIdx = Math.max(0, PLAYER_CODES.indexOf(rules.players));
+  const modeBit = rules.mode === 'teams' ? 1 : 0;
+  const teamCountIdx = Math.max(0, TEAM_CODES.indexOf(rules.teamCount));
+  const roundsIdx = Math.max(0, Math.min(ROUND_CHOICES.length - 1, rules.rounds));
+  let teamBits = 0;
+  for (let i = 0; i < 8; i++) teamBits |= (rules.teamOf[i] ?? 0) << (i * 2);
+  return (playersIdx & 7) | (modeBit << 3) | ((teamCountIdx & 3) << 4) | ((roundsIdx & 3) << 6) | (teamBits << 8);
 }
 
 export function unpackRules(bits: number | undefined): MatchRules {
   if (typeof bits !== 'number' || !Number.isFinite(bits)) return DEFAULT_RULES;
+  const players = PLAYER_CODES[bits & 7] ?? DEFAULT_RULES.players;
+  const teamBits = Math.floor(bits / 256);
+  const teamOf: number[] = [];
+  for (let i = 0; i < players; i++) teamOf.push((teamBits >> (i * 2)) & 3);
   return {
-    players: PLAYER_CODES[bits & 7] ?? DEFAULT_RULES.players,
-    turnTimer: (bits & 8) !== 0,
-    rounds: (bits >> 4) & 3,
+    players,
+    mode: (bits & 8) !== 0 ? 'teams' : 'ffa',
+    teamCount: TEAM_CODES[(bits >> 4) & 3] ?? DEFAULT_RULES.teamCount,
+    teamOf,
+    rounds: (bits >> 6) & 3,
   };
 }
 
-// ── one player's turn ──────────────────────────────────────────────────────
+// ── one action, exactly as it goes on the wire and into the history ────────
 
-/**
- * One action, exactly as it goes on the wire and into the history.
- *
- * Deliberately records what was *attempted*, never what it was worth. The
- * engine re-derives every consequence — points, pieces, whose turn is next,
- * whether the round ended — by replaying the list against the word it
- * computed for itself. Recording an outcome instead would mean two clients
- * could disagree about a round and both believe their own copy.
- *
- * `w` carries the actual attempted string rather than a right/wrong flag,
- * because "he guessed PORRIDGE?" is half the fun of watching somebody lose.
- * Capped and sanitised on the way in — see `cleanAttempt`.
- */
-export type Action =
-  /** A letter, as an index into ALPHABET. */
-  | { s: number; l: number }
-  /** A go at the whole word. */
-  | { s: number; w: string };
-
-/** The longest answer is 12 letters; anything longer is not a guess at this word. */
-export const MAX_ATTEMPT = 16;
+/** The longest word this game accepts. Long enough for a real word, short enough to fit the board. */
+export const MAX_WORD_LEN = 18;
 
 /**
  * A word attempt, reduced to something safe to store, replay and draw.
@@ -101,9 +110,30 @@ export const MAX_ATTEMPT = 16;
  * other field is a number — so it is stripped to A-Z here, on the way in,
  * rather than trusted anywhere downstream.
  */
-export function cleanAttempt(raw: string): string {
-  return raw.toUpperCase().replace(/[^A-Z]/g, '').slice(0, MAX_ATTEMPT);
+export function cleanWord(raw: string): string {
+  return raw.toUpperCase().replace(/[^A-Z]/g, '').slice(0, MAX_WORD_LEN);
 }
+
+/**
+ * One action.
+ *
+ * Deliberately records what was *attempted*, never what it was worth — the
+ * engine re-derives every consequence (points, pieces, whose chain it is,
+ * whether the round ended) by replaying the list, so two clients can never
+ * disagree about a round. A guess carries only the letter, not the chain
+ * depth it lands at: that depth is fully determined by the sequence of
+ * guesses before it, so baking it into the wire would just be a second copy
+ * of information already implied by the order the actions arrive in.
+ */
+export type Action =
+  /** The word-setter (FFA) or a team member (Teams, suggesting) proposing a word. */
+  | { t: 'word'; s: number; w: string }
+  /** A team member voting for one of their team's suggestions, by its index this round. */
+  | { t: 'vote'; s: number; pick: number }
+  /** A letter, as an index into ALPHABET. */
+  | { t: 'guess'; s: number; l: number }
+  /** The chain window lapsed with nobody acting. Recorded once, by the host, so every client agrees exactly when the table reopened. */
+  | { t: 'expire' };
 
 /** One round's actions, in the order they were played. */
 export type RoundHistory = Action[];
@@ -113,18 +143,27 @@ export type RoundHistory = Action[];
 /**
  * The whole protocol.
  *
- * Same shape as Wanted Board's, and for the same reason: exactly one client
- * decides what happened. Guests publish the action they want to take and
- * nothing else; the host validates it against the turn order, appends it, and
- * republishes the entire history. A guest never computes a consequence, so
- * there is no arithmetic for two clients to disagree about and no
- * reconciliation path to get wrong.
+ * Same shape as Wanted Board's and the turn-based version of this game: one
+ * client — the host — decides what happened. Guests publish the action they
+ * want to take and nothing else; the host validates it, appends it, and
+ * republishes the entire history. A guest never computes a consequence.
+ *
+ * One honesty note, shared with Wanted Board's card secrecy: the word a
+ * setter types has to end up in `history` for a late guest to be able to
+ * replay the round at all, and every player's own `updates` document in this
+ * room is readable by everyone else in it (`allow read: if signedIn()` in
+ * the security rules is room-wide, not per-recipient). So the word is not
+ * cryptographically hidden from a player willing to open devtools and read
+ * the raw document — only from the interface, which never renders it before
+ * the round reveals it. The same trade-off this platform already makes for a
+ * hangman word list, just with a human typing the secret instead of a seed
+ * picking it.
  */
 
 export interface StartPacket {
   t: 'start';
   n: number;
-  /** Picks every word in the match, and seeds every bot. */
+  /** Seeds bot word choices and bot timing. */
   seed: number;
   /** The host's rules, packed by `packRules`. */
   r: number;
@@ -136,23 +175,20 @@ export interface PlayPacket {
   n: number;
   /** The match this belongs to. A mismatch means a document left over from last night. */
   s: number;
-  /** Which round this is an action for — a late packet for a finished round is dropped. */
+  /** Which round this is for — a late packet for a finished round is dropped. */
   rd: number;
   /** How many actions this round had already seen. The host's guard against a double-send. */
   at: number;
-  /** A letter index, or -1 when `w` carries a word attempt instead. */
-  l: number;
-  w?: string;
+  a: Action;
 }
 
 /**
  * The host publishing the match so far.
  *
- * Every round's actions, every time. A whole match is five rounds of at most
- * a couple of dozen tiny objects, so the complete history is well under a
- * Firestore document and a player who reloads, joins late or sleeps their
- * phone receives the entire game on the very next turn and replays it. There
- * is no resync path because there is nothing to resync.
+ * Every round's actions, every time. A whole match is a handful of words'
+ * worth of small objects, so the complete history is well under a Firestore
+ * document and a player who reloads, joins late or sleeps their phone
+ * receives the entire game on the very next write and replays it.
  */
 export interface StatePacket {
   t: 'state';
@@ -166,7 +202,7 @@ export interface StatePacket {
   seed?: number;
 }
 
-/** Sent on the way out, so a seat is taken over by a bot rather than stalling the turn. */
+/** Sent on the way out, so a seat is taken over by a bot rather than stalling the round. */
 export interface ByePacket {
   t: 'bye';
   n: number;

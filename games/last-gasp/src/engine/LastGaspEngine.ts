@@ -7,15 +7,21 @@
  * same history always lands on the identical result. That is what lets the
  * wire be "here is every action so far" rather than a patch stream, and it
  * is why there is no resync path anywhere in this game: a client that missed
- * six turns catches up by replaying six turns.
+ * six actions catches up by replaying six actions.
  *
- * It knows nothing about React, Firestore or drawing. The screen asks it what
- * happened and animates the answer.
+ * The one piece of real time in the whole game — a correct guess buying a
+ * short exclusive window — is handled without the engine ever touching a
+ * clock. The host decides live when that window has lapsed and appends a
+ * discrete `expire` action recording that it happened; every other client
+ * only ever learns about it by replaying that action, the same as any other.
+ * Nothing here ever asks what time it is.
+ *
+ * It knows nothing about React, Firestore or the DOM. The screen asks it
+ * what happened and animates the answer.
  */
-import { ALPHABET, BALANCE, PIECES, mulberry32, scoreFor } from '../game/rules';
-import { answers } from '../game/words';
+import { ALPHABET, BALANCE, PIECES, chainMultiplier, mulberry32, scoreFor } from '../game/rules';
 import type { Action, Control, MatchRules, Phase, RoundHistory } from '../types/game';
-import { ROUND_CHOICES } from '../types/game';
+import { MAX_WORD_LEN, ROUND_CHOICES, cleanWord } from '../types/game';
 
 export interface Seat {
   id: string;
@@ -27,29 +33,29 @@ export interface Seat {
 }
 
 export interface PlayerState {
-  /** Points safely on the board from finished rounds. Nothing takes these away. */
+  /** Points safely on the board from finished words. Nothing takes these away. */
   total: number;
-  /** Earned this round, and forfeit entirely if this player finishes the stickman. */
+  /** Earned this word, and forfeit entirely if this player draws the last line. */
   round: number;
-  /** Wrong solve this round: no more turns until the next word. */
-  out: boolean;
-  /** Match-long tallies, for the end screen. */
   correct: number;
   wrong: number;
-  solves: number;
   hangs: number;
+  /** Longest unbroken chain this player landed, match-long — the end screen's real bragging right. */
+  bestChain: number;
 }
 
 /**
  * What happened, newest last. The screen reads this straight out as a feed —
- * it is the round's story, and it is deliberately in resolution order rather
- * than a dramatised version of it.
+ * it is the word's story, and it is deliberately in resolution order.
  */
 export type RoundEvent =
-  | { kind: 'hit'; seat: number; letter: string; copies: number; points: number }
+  | { kind: 'wordSet'; seat: number }
+  | { kind: 'suggested'; seat: number }
+  | { kind: 'voted'; seat: number }
+  | { kind: 'wordChosen'; team: number; author: number }
+  | { kind: 'hit'; seat: number; letter: string; copies: number; points: number; chain: number }
   | { kind: 'miss'; seat: number; letter: string; piece: number }
-  | { kind: 'solved'; seat: number; word: string; points: number }
-  | { kind: 'wrongWord'; seat: number; attempt: string; piece: number }
+  | { kind: 'chainEnded'; seat: number; reason: 'expired' | 'miss' }
   | { kind: 'hanged'; seat: number; lost: number }
   | { kind: 'cleared'; word: string };
 
@@ -57,6 +63,11 @@ export interface EngineConfig {
   seats: Seat[];
   seed: number;
   rules: MatchRules;
+}
+
+interface Suggestion {
+  seat: number;
+  word: string;
 }
 
 export class LastGaspEngine {
@@ -70,13 +81,27 @@ export class LastGaspEngine {
   players: PlayerState[] = [];
   /** Letters called this round, in call order. */
   called: string[] = [];
-  /** How much of the stickman is drawn, 0..PIECES. */
   pieces = 0;
-  /** Seat whose turn it is. Meaningless once the round is over. */
-  turn = 0;
-  events: RoundEvent[] = [];
-  phase: Phase = 'guessing';
+  phase: Phase = 'settingWord';
   winner: number | null = null;
+
+  /** The current word. Empty until it has actually been set — see the wire-protocol note on secrecy. */
+  word = '';
+
+  /** Free-For-All only: who is setting this round's word. */
+  setterSeat = 0;
+  /** Teams only: which team is setting this round's word. */
+  settingTeam = 0;
+  /** Teams only, this round: every suggestion offered so far, in submission order. */
+  suggestions: Suggestion[] = [];
+  /** Teams only, this round: seat -> the suggestion index they voted for. */
+  votes = new Map<number, number>();
+
+  /** Who currently holds the guessing chain, and how deep into it they are. Reopens to everyone once this is null. */
+  chainHolder: number | null = null;
+  chainDepth = 0;
+
+  events: RoundEvent[] = [];
 
   constructor(cfg: EngineConfig) {
     this.seats = cfg.seats;
@@ -87,6 +112,10 @@ export class LastGaspEngine {
 
   get playerCount(): number {
     return this.seats.length;
+  }
+
+  get teamCount(): number {
+    return Math.max(1, this.rules.teamCount);
   }
 
   get totalRounds(): number {
@@ -103,32 +132,6 @@ export class LastGaspEngine {
     return this.history[this.round]?.length ?? 0;
   }
 
-  /**
-   * The answer for a round.
-   *
-   * A pure function of (seed, round), so every client picks the same one
-   * without anybody having to send it — which matters, because sending it
-   * would put the answer in a Firestore document that every player in the
-   * room is allowed to read.
-   */
-  answerFor(round: number): { word: string; category: string } {
-    const list = answers();
-    const rnd = mulberry32(this.seed + round * 40503);
-    // Two draws, because a single mulberry32 output straight after seeding is
-    // noticeably flat across nearby seeds — and consecutive rounds are, by
-    // construction, nearby seeds.
-    rnd();
-    return list[Math.floor(rnd() * list.length) % list.length];
-  }
-
-  get word(): string {
-    return this.answerFor(this.round).word;
-  }
-
-  get category(): string {
-    return this.answerFor(this.round).category;
-  }
-
   /** The word as it is currently shown: the letter, or null for a blank. */
   get board(): (string | null)[] {
     const shown = new Set(this.called);
@@ -136,19 +139,11 @@ export class LastGaspEngine {
   }
 
   get solved(): boolean {
-    return this.board.every((c) => c !== null);
+    return this.word.length > 0 && this.board.every((c) => c !== null);
   }
 
-  /** Letters still hidden. Drives the solve bonus. */
   get hiddenCount(): number {
     return this.board.filter((c) => c === null).length;
-  }
-
-  // ── legality ─────────────────────────────────────────────────────────────
-
-  /** Whether this seat may act right now. */
-  canAct(seat: number): boolean {
-    return this.phase === 'guessing' && this.turn === seat && !this.players[seat]?.out;
   }
 
   /** Letters nobody has called yet this round. */
@@ -157,38 +152,66 @@ export class LastGaspEngine {
     return ALPHABET.filter((c) => !used.has(c));
   }
 
-  /**
-   * Whether an action would be accepted, without applying it.
-   *
-   * The host checks this before appending anything, so a stale packet from a
-   * guest whose screen was a turn behind is dropped rather than replayed into
-   * everybody's history.
-   */
-  accepts(action: Action): boolean {
-    if (!this.canAct(action.s)) return false;
-    if ('l' in action) {
-      const letter = ALPHABET[action.l];
-      return Boolean(letter) && !this.called.includes(letter);
+  teamOf(seat: number): number {
+    return this.rules.mode === 'teams' ? (this.rules.teamOf[seat] ?? 0) : seat;
+  }
+
+  seatsOnTeam(team: number): number[] {
+    const out: number[] = [];
+    for (let i = 0; i < this.playerCount; i++) if (this.teamOf(i) === team) out.push(i);
+    return out;
+  }
+
+  // ── legality ─────────────────────────────────────────────────────────────
+
+  /** Whether this seat may set/suggest a word right now. */
+  canSetWord(seat: number): boolean {
+    if (this.phase === 'settingWord') return this.rules.mode === 'ffa' && seat === this.setterSeat;
+    if (this.phase === 'suggesting') {
+      return (
+        this.rules.mode === 'teams' &&
+        this.teamOf(seat) === this.settingTeam &&
+        !this.suggestions.some((s) => s.seat === seat)
+      );
     }
-    return action.w.length > 0;
+    return false;
+  }
+
+  /** Whether this seat may vote right now, and on what. */
+  canVote(seat: number): boolean {
+    return (
+      this.phase === 'voting' &&
+      this.rules.mode === 'teams' &&
+      this.teamOf(seat) === this.settingTeam &&
+      !this.votes.has(seat)
+    );
+  }
+
+  /** Whether this seat may call a letter right now — the open table, or the current chain holder alone. */
+  canGuess(seat: number): boolean {
+    if (this.phase !== 'guessing') return false;
+    const settingSide = this.rules.mode === 'teams' ? this.settingTeam : this.setterSeat;
+    if (this.teamOf(seat) === settingSide) return false;
+    if (this.chainHolder !== null) return this.chainHolder === seat;
+    return true;
+  }
+
+  /** Only the host ever calls this — it is not something a player "does". */
+  canExpire(): boolean {
+    return this.phase === 'guessing' && this.chainHolder !== null;
   }
 
   // ── resolution ───────────────────────────────────────────────────────────
 
-  /** Rebuild the whole match from a history. */
   replay(history: RoundHistory[]) {
     this.players = this.seats.map(() => ({
-      total: 0,
-      round: 0,
-      out: false,
-      correct: 0,
-      wrong: 0,
-      solves: 0,
-      hangs: 0,
+      total: 0, round: 0, correct: 0, wrong: 0, hangs: 0, bestChain: 0,
     }));
     this.history = [];
-    this.phase = 'guessing';
+    this.phase = this.rules.mode === 'teams' ? 'suggesting' : 'settingWord';
     this.winner = null;
+    this.setterSeat = 0;
+    this.settingTeam = 0;
     this.resetRound();
 
     for (let r = 0; r < history.length; r++) {
@@ -200,112 +223,156 @@ export class LastGaspEngine {
   }
 
   private resetRound() {
+    this.word = '';
     this.called = [];
     this.pieces = 0;
     this.events = [];
-    this.turn = 0;
-    for (const p of this.players) {
-      p.round = 0;
-      p.out = false;
-    }
+    this.suggestions = [];
+    this.votes = new Map();
+    this.chainHolder = null;
+    this.chainDepth = 0;
   }
 
-  /** Bank the round, deal the next word, and hand the first turn on. */
   private beginRound() {
     for (const p of this.players) p.total += p.round;
     this.resetRound();
-    this.phase = 'guessing';
-    // The opening turn walks round the table between words, so the same
-    // person is not always first at the blank board — which on a fresh word
-    // is the single most valuable turn there is.
-    this.turn = this.history.length % this.playerCount;
+    this.setterSeat = this.history.length % this.playerCount;
+    this.settingTeam = this.history.length % this.teamCount;
+    this.phase = this.rules.mode === 'teams' ? 'suggesting' : 'settingWord';
     this.history.push([]);
   }
 
   /**
    * One action, start to finish.
    *
-   * Rejects rather than corrects. Wanted Board sanitises a stale choice into
-   * a legal one because every seat there must produce exactly one card per
-   * round and a dropped packet would stall the table; here a rejected action
-   * simply never happened, the turn stays where it was, and the player tries
-   * again. That is only safe because this game is sequential — nobody else is
-   * blocked while one player's packet is in flight.
+   * Rejects rather than corrects. A rejected action simply never happened —
+   * the caller tries again or a timeout picks something for it — which is
+   * only safe because this game has no fixed turn order to stall: rejecting
+   * one player's stale packet blocks nobody else.
    */
   apply(action: Action): boolean {
-    if (this.phase !== 'guessing') return false;
-    if (!this.accepts(action)) return false;
+    if (action.t === 'word') return this.applyWord(action.s, action.w);
+    if (action.t === 'vote') return this.applyVote(action.s, action.pick);
+    if (action.t === 'guess') return this.applyGuess(action.s, action.l);
+    if (action.t === 'expire') return this.applyExpire();
+    return false;
+  }
 
-    const seat = action.s;
-    const me = this.players[seat];
+  private applyWord(seat: number, raw: string): boolean {
+    if (!this.canSetWord(seat)) return false;
+    const word = cleanWord(raw);
+    if (word.length < BALANCE.MIN_WORD_LEN || word.length > MAX_WORD_LEN) return false;
 
-    if ('l' in action) {
-      const letter = ALPHABET[action.l];
-      this.called.push(letter);
-      const copies = [...this.word].filter((c) => c === letter).length;
-
-      if (copies > 0) {
-        const points = scoreFor(letter, copies);
-        me.round += points;
-        me.correct++;
-        this.events.push({ kind: 'hit', seat, letter, copies, points });
-        this.history[this.round].push(action);
-        if (this.solved) {
-          this.events.push({ kind: 'cleared', word: this.word });
-          this.endRound();
-          return true;
-        }
-      } else {
-        me.wrong++;
-        this.pieces++;
-        this.events.push({ kind: 'miss', seat, letter, piece: this.pieces });
-        this.history[this.round].push(action);
-        if (this.pieces >= PIECES) {
-          this.hang(seat);
-          return true;
-        }
-      }
-      this.passTurn();
+    if (this.phase === 'settingWord') {
+      this.word = word;
+      this.phase = 'guessing';
+      this.events.push({ kind: 'wordSet', seat });
+      this.history[this.round].push({ t: 'word', s: seat, w: word });
       return true;
     }
 
-    // A go at the whole word.
-    const attempt = action.w;
-    if (attempt === this.word) {
-      // Paid for what was still hidden, so the reward is largest on a blank
-      // board and near-nothing once everyone else has opened it up.
-      const points = this.hiddenCount * BALANCE.SOLVE_BONUS_PER_LETTER + scoreForRemaining(this.word, this.called);
-      me.round += points;
-      me.solves++;
-      // Fill the board in so the round-over screen shows the whole word.
-      for (const ch of new Set(this.word)) if (!this.called.includes(ch)) this.called.push(ch);
-      this.events.push({ kind: 'solved', seat, word: this.word, points });
-      this.history[this.round].push(action);
-      this.endRound();
-      return true;
-    }
+    // Teams: a suggestion. Recorded now; scored once every teammate is in.
+    this.suggestions.push({ seat, word });
+    this.events.push({ kind: 'suggested', seat });
+    this.history[this.round].push({ t: 'word', s: seat, w: word });
 
-    me.wrong++;
-    me.out = true;
-    this.pieces = Math.min(PIECES, this.pieces + BALANCE.WRONG_SOLVE_PIECES);
-    this.events.push({ kind: 'wrongWord', seat, attempt, piece: this.pieces });
-    this.history[this.round].push(action);
-    if (this.pieces >= PIECES) {
-      this.hang(seat);
-      return true;
+    const team = this.seatsOnTeam(this.settingTeam);
+    if (this.suggestions.length < team.length) return true;
+
+    if (team.length === 1) {
+      // Nobody to vote against. Their one suggestion is the word.
+      this.chooseWord(0);
+    } else {
+      this.phase = 'voting';
     }
-    // Everyone locked out and the stickman still standing: the word beat the
-    // table. Nobody is punished, the round simply ends.
-    if (this.players.every((p) => p.out)) {
-      this.events.push({ kind: 'cleared', word: this.word });
-      this.endRound();
-      return true;
-    }
-    this.passTurn();
     return true;
   }
 
-  /** The player who drew the last line forfeits everything they earned this round. */
+  private applyVote(seat: number, pick: number): boolean {
+    if (!this.canVote(seat)) return false;
+    if (pick < 0 || pick >= this.suggestions.length) return false;
+    this.votes.set(seat, pick);
+    this.events.push({ kind: 'voted', seat });
+    this.history[this.round].push({ t: 'vote', s: seat, pick });
+
+    const team = this.seatsOnTeam(this.settingTeam);
+    if (this.votes.size < team.length) return true;
+
+    const tally = new Array(this.suggestions.length).fill(0);
+    for (const pickIdx of this.votes.values()) tally[pickIdx]++;
+    let winner = 0;
+    for (let i = 1; i < tally.length; i++) if (tally[i] > tally[winner]) winner = i;
+    this.chooseWord(winner);
+    return true;
+  }
+
+  private chooseWord(index: number) {
+    const pick = this.suggestions[index];
+    this.word = pick.word;
+    this.phase = 'guessing';
+    this.events.push({ kind: 'wordChosen', team: this.settingTeam, author: pick.seat });
+  }
+
+  private applyGuess(seat: number, letterIndex: number): boolean {
+    const letter = ALPHABET[letterIndex];
+    if (!letter || this.called.includes(letter)) return false;
+    if (!this.canGuess(seat)) return false;
+
+    this.called.push(letter);
+    const copies = [...this.word].filter((c) => c === letter).length;
+    const me = this.players[seat];
+
+    if (copies > 0) {
+      const depth = this.chainHolder === seat ? this.chainDepth + 1 : 0;
+      const points = Math.round(scoreFor(letter, copies) * chainMultiplier(depth));
+      me.round += points;
+      me.correct++;
+      this.chainHolder = seat;
+      this.chainDepth = depth;
+      if (depth > me.bestChain) me.bestChain = depth;
+      this.events.push({ kind: 'hit', seat, letter, copies, points, chain: depth });
+      this.history[this.round].push({ t: 'guess', s: seat, l: letterIndex });
+
+      if (this.solved) {
+        this.events.push({ kind: 'cleared', word: this.word });
+        this.endRound();
+      }
+      return true;
+    }
+
+    // A miss always ends whatever chain was live, whether it belonged to the
+    // seat that just missed (they had the window and blew it) or nobody
+    // (the table was open and this was just a bad open guess).
+    const hadChain = this.chainHolder !== null;
+    const chainOwner = this.chainHolder;
+    this.chainHolder = null;
+    this.chainDepth = 0;
+
+    me.wrong++;
+    this.pieces++;
+    this.events.push({ kind: 'miss', seat, letter, piece: this.pieces });
+    if (hadChain && chainOwner !== null) {
+      this.events.push({ kind: 'chainEnded', seat: chainOwner, reason: 'miss' });
+    }
+    this.history[this.round].push({ t: 'guess', s: seat, l: letterIndex });
+
+    if (this.pieces >= PIECES) {
+      this.hang(seat);
+    }
+    return true;
+  }
+
+  private applyExpire(): boolean {
+    if (!this.canExpire()) return false;
+    const seat = this.chainHolder as number;
+    this.chainHolder = null;
+    this.chainDepth = 0;
+    this.events.push({ kind: 'chainEnded', seat, reason: 'expired' });
+    this.history[this.round].push({ t: 'expire' });
+    return true;
+  }
+
+  /** The player who drew the last line forfeits everything they earned this word. */
   private hang(seat: number) {
     const lost = this.players[seat].round;
     this.players[seat].round = 0;
@@ -317,25 +384,11 @@ export class LastGaspEngine {
   private endRound() {
     this.phase = this.history.length >= this.totalRounds ? 'over' : 'roundOver';
     if (this.phase === 'over') {
-      // The last round's earnings have to land before anybody is declared the
-      // winner — `beginRound` is what normally banks them and it never runs
-      // after the final word.
       for (const p of this.players) {
         p.total += p.round;
         p.round = 0;
       }
       this.winner = this.standings()[0]?.seat ?? null;
-    }
-  }
-
-  /** Advance to the next seat still in the round. */
-  private passTurn() {
-    for (let step = 1; step <= this.playerCount; step++) {
-      const next = (this.turn + step) % this.playerCount;
-      if (!this.players[next].out) {
-        this.turn = next;
-        return;
-      }
     }
   }
 
@@ -347,32 +400,27 @@ export class LastGaspEngine {
 
   // ── reading ──────────────────────────────────────────────────────────────
 
-  /** Everyone, best first. Banked total decides it; this round's earnings break a tie. */
   standings(): { seat: number; total: number; round: number }[] {
     return this.players
       .map((p, seat) => ({ seat, total: p.total, round: p.round }))
       .sort((a, b) => b.total - a.total || b.round - a.round || a.seat - b.seat);
   }
 
-  /** Total including the round in progress — what the roster shows mid-round. */
+  /** Per-team totals, best first — only meaningful in Teams. */
+  teamStandings(): { team: number; total: number }[] {
+    const totals = new Array(this.teamCount).fill(0);
+    for (let i = 0; i < this.playerCount; i++) totals[this.teamOf(i)] += this.liveTotal(i);
+    return totals.map((total, team) => ({ team, total })).sort((a, b) => b.total - a.total || a.team - b.team);
+  }
+
+  /** Total including the word in progress — what the roster shows mid-round. */
   liveTotal(seat: number): number {
     const p = this.players[seat];
     return p ? p.total + p.round : 0;
   }
 
-  /** Deterministic per (seed, round, action, seat), so every client computes the same bot. */
+  /** Deterministic per (seed, round, actions-so-far, seat), so every client computes the same bot. */
   rngFor(seat: number): () => number {
     return mulberry32(this.seed + this.round * 7919 + this.actionCount * 131 + seat * 104729);
   }
-}
-
-/** What the letters still hidden in `word` are worth, for a correct solve. */
-function scoreForRemaining(word: string, called: string[]): number {
-  const shown = new Set(called);
-  let sum = 0;
-  for (const ch of new Set([...word])) {
-    if (shown.has(ch)) continue;
-    sum += scoreFor(ch, [...word].filter((c) => c === ch).length);
-  }
-  return sum;
 }
