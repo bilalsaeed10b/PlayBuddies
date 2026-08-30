@@ -102,9 +102,9 @@ export default function MatchView({
   /**
    * A short, wide screen — a phone turned sideways.
    *
-   * The stacked layout wants a header, a roster, a square board and a
-   * five-card rack in one column, and on a 375px-tall landscape phone that
-   * leaves the board about 100px. Side by side, the board gets the full height
+   * The stacked layout wants a header, a roster, a square board and a card
+   * rack in one column, and on a 375px-tall landscape phone that leaves the
+   * board about 100px. Side by side, the board gets the full height
    * and the rack takes the width there is plenty of. Measured rather than
    * guessed from a width breakpoint, because a landscape phone is wide enough
    * to clear `sm:` while being exactly the case that needs the other layout.
@@ -453,6 +453,10 @@ export default function MatchView({
   const waiting = config.seats.filter((_, i) => !(lockedMask & (1 << i)) && !myPicks[i]).length;
   const allMineIn = config.localSeats.every((s) => myPicks[s]);
   const standings = engine.standings();
+  // The event that most recently landed — same one `soundFor` just played a
+  // beat ago — is what the pawns are reacting to right now.
+  const activeEvent = phase === 'reveal' ? engine.lastEvents[revealStep - 1] : undefined;
+  const bubbles = bubbleFor(activeEvent);
 
   const townBlock = (
     <TownMap
@@ -463,6 +467,7 @@ export default function MatchView({
       onPick={phase === 'choosing' && !handoff ? (place) => setTarget(place) : undefined}
       myTrap={myTrap}
       hiddenSeats={hiddenSeats}
+      bubbles={bubbles}
     />
   );
 
@@ -721,6 +726,53 @@ function describe(event: RoundEvent, seats: Seat[]): string {
         : `${name(event.seat)} reached the counter with empty pockets.`;
     case 'pay':
       return `${name(event.seat)} +$${event.amount} on their head.`;
+    case 'scout':
+      return event.target === null
+        ? `${name(event.seat)} sent word ahead. Nobody worth chasing.`
+        : `${name(event.seat)} sent word ahead — ${name(event.target)} is at ${PLACES[event.place as number]?.name} carrying $${event.amount}.`;
+  }
+}
+
+/**
+ * What a pawn says during the beat its own event is landing.
+ *
+ * Purely cosmetic and purely local: every client computes the identical
+ * `RoundEvent` from the same public history, but which of several lines gets
+ * picked for it does not have to match from one screen to the next — nobody
+ * is comparing bubbles, so this is the one piece of the reveal that is
+ * allowed to use `Math.random()` instead of the seeded rng everything else
+ * in this game is built on.
+ */
+function bubbleFor(event: RoundEvent | undefined): { seat: number; text: string }[] {
+  if (!event) return [];
+  const pick = (lines: string[]) => lines[Math.floor(Math.random() * lines.length)];
+  switch (event.kind) {
+    case 'move':
+      return [{ seat: event.seat, text: pick(["Yeehaw!", "Ridin' on.", 'See ya.', 'Dust and gone.']) }];
+    case 'trap':
+      return event.amount > 0
+        ? [
+            { seat: event.owner, text: pick(['Gotcha.', 'Works every time.', 'Ha!']) },
+            { seat: event.seat, text: pick(['Blast it!', 'Dagnabbit.', "Should'a watched my step."]) },
+          ]
+        : [{ seat: event.seat, text: pick(['Huh. Empty.', 'Lucky me.']) }];
+    case 'ambush':
+      return [
+        { seat: event.seat, text: pick(["Stick 'em up!", "That's mine now.", 'Easy money.']) },
+        ...event.victims.map((v) => ({ seat: v, text: pick(['Hands up...', 'You got me.', 'No fair!']) })),
+      ];
+    case 'standoff':
+      return event.seats.map((s) => ({ seat: s, text: pick(['Well, howdy.', '...awkward.', 'Same idea, huh?']) }));
+    case 'miss':
+      return [{ seat: event.seat, text: pick(['...Anybody?', "Waited for nothin'.", 'This is embarrassing.']) }];
+    case 'bank':
+      return event.amount > 0
+        ? [{ seat: event.seat, text: pick(['Cha-ching!', 'Safe and sound.', 'Mine for good now.']) }]
+        : [{ seat: event.seat, text: pick(['...nothing to bank.']) }];
+    case 'scout':
+      return [{ seat: event.seat, text: pick(["Found 'em.", 'Now I know.', 'Got eyes on ya.']) }];
+    default:
+      return [];
   }
 }
 
@@ -741,6 +793,9 @@ function soundFor(event: RoundEvent) {
       break;
     case 'bank':
       audioService.playBank();
+      break;
+    case 'scout':
+      audioService.playPop();
       break;
     default:
       break;

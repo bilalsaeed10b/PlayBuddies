@@ -16,7 +16,7 @@ import {
 import { askHostToEndGame, toggleFullscreen } from './fullscreen';
 import { FREE_OUTLAWS, OUTLAWS } from './game/outlaws';
 import OutlawToken from './components/OutlawToken';
-import { BALANCE, CARDS, CARD_ORDER, PLACES, SEAT_COLORS } from './game/rules';
+import { BALANCE, BANK, CARDS, CARD_GLYPH, CARD_ORDER, PLACES, ROADS, SEAT_COLORS } from './game/rules';
 import { TIERS } from './engine/ai';
 import { audioService } from './services/audio';
 import { GameWallet, reportResult } from './platform/wallet';
@@ -566,7 +566,7 @@ function Menu({
 
         <div className="rounded-2xl bg-amber-900/5 p-3 text-center text-[11px] leading-relaxed text-amber-900/70">
           <p className="mb-1 font-black uppercase tracking-[0.15em] text-amber-900/50">How it works</p>
-          <p>Everybody picks a card in secret. All five flip at once.</p>
+          <p>Everybody picks a card in secret. All of them flip at once.</p>
           <p className="mt-1">
             Your bounty climbs while you run — but it is only yours once you have banked it, and the Bank is the
             one place everyone knows you have to visit.
@@ -796,6 +796,24 @@ function RoomScreen({
         </div>
       </div>
 
+      {/* Loud on purpose — this is the one moment before cards are hidden and
+          money is on the line, and the small "Rules" button lower down is easy
+          to never notice at all. */}
+      <button
+        onClick={onRules}
+        className="relative flex shrink-0 items-center gap-3 overflow-hidden rounded-2xl border-2 border-rose-700 bg-rose-100 px-4 py-3 text-left shadow-[0_4px_16px_rgba(190,18,60,0.18)] transition-transform active:scale-[0.99]"
+      >
+        <span className="absolute -right-6 -top-6 h-16 w-16 animate-pulse rounded-full bg-rose-700/20" aria-hidden />
+        <ScrollText className="h-6 w-6 shrink-0 text-rose-800" />
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-black uppercase tracking-wide text-rose-900">New in town? Read the rules</p>
+          <p className="text-[11px] font-bold text-rose-800/70">If you want to win, it's worth a minute.</p>
+        </div>
+        <span className="shrink-0 rounded-xl bg-rose-800 px-3 py-1.5 text-[11px] font-black uppercase tracking-wide text-amber-50">
+          Guide
+        </span>
+      </button>
+
       <div className="panel shrink-0 rounded-2xl p-2.5">
         {isHost ? (
           <button
@@ -916,6 +934,79 @@ function SettingsPanel({
   );
 }
 
+/** Four pictures, no reading required, for someone who has never opened this game before. */
+function HowItWorks() {
+  const steps: { icon: React.ReactNode; title: string; body: string }[] = [
+    { icon: <Lock className="h-4 w-4" />, title: 'Pick in secret', body: 'Everyone chooses a card. Nobody sees anyone else’s.' },
+    { icon: <Users className="h-4 w-4" />, title: 'Reveal together', body: 'All the cards flip at once. No turns, no waiting.' },
+    { icon: <Coins className="h-4 w-4" />, title: 'Bounty grows', body: 'Every card but Cash In adds to what’s on your head.' },
+    { icon: <Crown className="h-4 w-4" />, title: 'Bank it to win', body: 'Only money in the Bank is safe. Get there first, most, or often.' },
+  ];
+  return (
+    <div className="grid grid-cols-2 gap-2">
+      {steps.map((s, i) => (
+        <div key={s.title} className="rounded-2xl border border-amber-900/15 bg-amber-900/5 p-2.5">
+          <div className="flex items-center gap-1.5">
+            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-amber-900 text-[10px] font-black text-amber-50">
+              {i + 1}
+            </span>
+            <span className="text-amber-800">{s.icon}</span>
+          </div>
+          <p className="mt-1.5 text-[11px] font-black uppercase tracking-wide text-amber-950">{s.title}</p>
+          <p className="text-[10px] leading-snug text-amber-900/60">{s.body}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** The board, drawn small and static — the same wheel TownMap draws, just for reading rather than playing. */
+function MapDiagram() {
+  return (
+    <div className="rounded-2xl border border-amber-900/15 bg-amber-900/5 p-3">
+      <svg viewBox="0 0 100 100" className="mx-auto block h-36 w-36 sm:h-44 sm:w-44" aria-hidden>
+        {ROADS.map(([a, b]) => (
+          <line
+            key={`${a}-${b}`}
+            x1={PLACES[a].x}
+            y1={PLACES[a].y}
+            x2={PLACES[b].x}
+            y2={PLACES[b].y}
+            stroke="#8b6f47"
+            strokeWidth={a === BANK || b === BANK ? 1.6 : 1.1}
+            strokeDasharray="2.8 2.4"
+            opacity={a === BANK || b === BANK ? 0.75 : 0.5}
+          />
+        ))}
+        {PLACES.map((place, i) => (
+          <g key={place.name}>
+            <circle
+              cx={place.x}
+              cy={place.y}
+              r={i === BANK ? 7.5 : 5}
+              fill={i === BANK ? '#b45309' : '#f7ecd6'}
+              stroke="#78350f"
+              strokeWidth="1.1"
+            />
+          </g>
+        ))}
+      </svg>
+      <div className="mt-1.5 flex items-center justify-center gap-4 text-[9px] font-bold text-amber-900/60">
+        <span className="flex items-center gap-1">
+          <span className="inline-block h-2.5 w-2.5 rounded-full bg-[#b45309]" /> Bank
+        </span>
+        <span className="flex items-center gap-1">
+          <span className="inline-block h-2.5 w-2.5 rounded-full border border-amber-900/50 bg-[#f7ecd6]" /> everywhere else
+        </span>
+      </div>
+      <p className="mt-1.5 text-center text-[10px] leading-snug text-amber-900/50">
+        Four spokes run straight to the Bank — fast, and everyone can see you take one. The rest of town is the
+        rim: slower, and easier to disappear into.
+      </p>
+    </div>
+  );
+}
+
 /**
  * The rules of the night, set by the host and obeyed by everyone.
  *
@@ -951,10 +1042,13 @@ function RulesPanel({
           </button>
         </div>
 
+        <HowItWorks />
+        <MapDiagram />
+
         <div className="space-y-1.5">
           <p className="text-sm font-bold text-amber-950">Outlaws</p>
-          <div className="grid grid-cols-3 gap-2">
-            {([2, 3, 4] as PlayerCount[]).map((n) => (
+          <div className="grid grid-cols-5 gap-1.5">
+            {([2, 3, 4, 5, 6] as PlayerCount[]).map((n) => (
               <button
                 key={n}
                 disabled={!editable}
@@ -1012,17 +1106,22 @@ function RulesPanel({
           />
         </label>
 
-        <div className="space-y-2 border-t border-amber-900/15 pt-4">
+        <div className="space-y-2.5 border-t border-amber-900/15 pt-4">
           <p className="text-sm font-black uppercase tracking-wide text-amber-950">The cards</p>
           {CARD_ORDER.map((id) => (
-            <div key={id} className="text-[11px] leading-snug">
-              <span className="font-black uppercase tracking-wide text-amber-950">{CARDS[id].name}</span>
-              {CARDS[id].onlyAt !== null && (
-                <span className="ml-1 rounded bg-amber-900/10 px-1 text-[9px] font-black uppercase text-amber-900/60">
-                  {PLACES[CARDS[id].onlyAt as number]?.name} only
-                </span>
-              )}
-              <span className="block text-amber-900/60">{CARDS[id].blurb}</span>
+            <div key={id} className="flex items-start gap-2 text-[11px] leading-snug">
+              <span className="mt-px flex h-6 w-6 shrink-0 items-center justify-center rounded-lg border border-amber-900/20 bg-amber-900/5 text-sm text-amber-900">
+                {CARD_GLYPH[id]}
+              </span>
+              <div>
+                <span className="font-black uppercase tracking-wide text-amber-950">{CARDS[id].name}</span>
+                {CARDS[id].onlyAt !== null && (
+                  <span className="ml-1 rounded bg-amber-900/10 px-1 text-[9px] font-black uppercase text-amber-900/60">
+                    {PLACES[CARDS[id].onlyAt as number]?.name} only
+                  </span>
+                )}
+                <span className="block text-amber-900/60">{CARDS[id].blurb}</span>
+              </div>
             </div>
           ))}
         </div>

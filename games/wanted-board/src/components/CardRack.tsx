@@ -1,5 +1,5 @@
 /**
- * The five cards, and the act of committing to one.
+ * The cards, and the act of committing to one.
  *
  * Locking in is deliberately a second, separate tap rather than something a
  * card press does on its own. Everything in this game is simultaneous and
@@ -8,16 +8,8 @@
  * single worst feeling available here. The confirm also gives the targeting
  * cards somewhere to live: pick the card, then pick the place, then commit.
  */
-import { CARDS, CARD_ORDER, PLACES } from '../game/rules';
+import { CARDS, CARD_GLYPH, CARD_ORDER, PLACES } from '../game/rules';
 import type { CardId } from '../game/rules';
-
-const GLYPH: Record<CardId, string> = {
-  ride: '→',
-  layLow: '▽',
-  ambush: '✷',
-  trap: '⊘',
-  cashIn: '$',
-};
 
 export default function CardRack({
   legal,
@@ -44,7 +36,7 @@ export default function CardRack({
 
   return (
     <div className="w-full space-y-2">
-      <div className="grid grid-cols-5 gap-1.5 sm:gap-2">
+      <div className="grid grid-cols-4 gap-1.5 sm:gap-2">
         {CARD_ORDER.map((id) => {
           const card = CARDS[id];
           const allowed = legal.includes(id);
@@ -64,7 +56,7 @@ export default function CardRack({
               } ${locked ? 'opacity-60' : ''}`}
             >
               <span className={`text-lg leading-none sm:text-xl ${isSelected ? 'text-rose-800' : 'text-amber-900'}`}>
-                {GLYPH[id]}
+                {CARD_GLYPH[id]}
               </span>
               <span
                 className={`text-[8px] font-black uppercase leading-tight tracking-wide sm:text-[9px] ${

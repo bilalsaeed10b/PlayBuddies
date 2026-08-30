@@ -14,10 +14,33 @@
  * a taste for ambushing — and the ranks differ mostly in how well they read
  * the table rather than in how much they cheat.
  */
-import { BALANCE, BANK, CARDS } from '../game/rules';
+import { BALANCE, BANK, CARDS, distanceToBank } from '../game/rules';
 import type { CardId } from '../game/rules';
 import type { Choice } from '../types/game';
 import type { WantedEngine } from './WantedEngine';
+
+/**
+ * The Gallop target worth taking instead of a plain Ride, if there is one.
+ *
+ * "Worth it" means strictly closer to the Bank than the best single step
+ * gets — never merely as close, or Gallop would just be a discount on the
+ * same trip. That only actually happens leaving one of the four rim-only
+ * places, where the spoke sitting one hop further on is a second hop Ride
+ * cannot reach in one card. Shared by both places a bot considers moving,
+ * so a Marshal reads the shortcut the same way whether it is fleeing home
+ * with a full pocket or just killing time between rallies.
+ */
+function gallopShortcut(engine: WantedEngine, seat: number, legal: CardId[]): number | null {
+  if (!legal.includes('gallop')) return null;
+  const targets = engine.legalTargets(seat, 'gallop');
+  let best: number | null = null;
+  for (const t of targets) {
+    if (best === null || distanceToBank(t) < distanceToBank(best)) best = t;
+  }
+  const place = engine.players[seat]?.place ?? 0;
+  const oneStep = distanceToBank(engine.stepToward(place, BANK));
+  return best !== null && distanceToBank(best) < oneStep ? best : null;
+}
 
 export interface Tier {
   label: string;
@@ -57,8 +80,8 @@ export function botChoice(engine: WantedEngine, seat: number, level: number, rnd
   // Checked *before* looking for somebody to rob, and that order is the whole
   // difference between a table that plays the game and one that seizes up. The
   // other way round, a bot carrying $500 that happened to share a place with
-  // anybody would stand there robbing instead of banking — and since four
-  // players on six places share a place constantly, whole tables settled into
+  // anybody would stand there robbing instead of banking — and on a crowded
+  // table sharing a place happens constantly, so whole games settled into
   // mutual muggings where nobody ever banked a dollar. Somebody already
   // holding a fortune has far more to lose by showing themselves than there is
   // in anyone else's pocket.
@@ -75,6 +98,10 @@ export function botChoice(engine: WantedEngine, seat: number, level: number, rnd
     // Head for the Bank. A nervous bot that is carrying a lot will sometimes
     // duck instead, which is what makes it hard to meet it at the door.
     if (here.length > 0 && rnd() < tier.awareness * 0.35) return pick('layLow', me.place);
+    // A sharper bot recognises a genuine Gallop shortcut rather than always
+    // taking the plain Ride everyone can see coming from a mile off.
+    const shortcut = gallopShortcut(engine, seat, legal);
+    if (shortcut !== null && rnd() < tier.awareness * 0.75) return pick('gallop', shortcut);
     return pick('ride', engine.stepToward(me.place, BANK));
   }
 
@@ -94,6 +121,12 @@ export function botChoice(engine: WantedEngine, seat: number, level: number, rnd
     return pick('ambush', me.place);
   }
 
+  // A sharper bot plays the information game: nobody worth robbing is here,
+  // so it is worth finding out who is worth chasing instead of riding blind.
+  if (rnd() < tier.awareness * 0.14 && legal.includes('scout')) {
+    return pick('scout', me.place);
+  }
+
   if (rnd() < 0.18 && legal.includes('trap')) {
     const targets = engine.legalTargets(seat, 'trap');
     // Prefer rigging the approach to the Bank — it is where the money walks.
@@ -103,6 +136,11 @@ export function botChoice(engine: WantedEngine, seat: number, level: number, rnd
       : targets[Math.floor(rnd() * targets.length)] ?? targets[0];
     return pick('trap', target);
   }
+
+  // Still worth taking a free shortcut while wandering, just less urgently
+  // pursued than when there is a full pocket riding on getting home fast.
+  const wanderShortcut = gallopShortcut(engine, seat, legal);
+  if (wanderShortcut !== null && rnd() < tier.awareness * 0.3) return pick('gallop', wanderShortcut);
 
   const targets = engine.legalTargets(seat, 'ride');
   if (targets.length === 0 || !CARDS.ride) return pick('layLow', me.place);

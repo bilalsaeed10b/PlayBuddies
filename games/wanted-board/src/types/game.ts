@@ -61,7 +61,7 @@ export const DEFAULT_RULES: MatchRules = {
   target: 0,
 };
 
-const PLAYER_CODES: PlayerCount[] = [2, 3, 4];
+const PLAYER_CODES: PlayerCount[] = [2, 3, 4, 5, 6];
 
 /**
  * The rules as one integer.
@@ -70,19 +70,22 @@ const PLAYER_CODES: PlayerCount[] = [2, 3, 4];
  * writes, so a guest arriving after the first round still learns the game's
  * terms from whatever packet happens to be in the document. Packing the rules
  * into a single number is what lets them ride along in that slot.
+ *
+ * Five player counts need 3 bits, not the 2 a 2/3/4-only game got away with —
+ * everything above that shifted up a bit to make room.
  */
 export function packRules(rules: MatchRules): number {
   const players = Math.max(0, PLAYER_CODES.indexOf(rules.players));
   const target = Math.max(0, Math.min(TARGET_CHOICES.length - 1, rules.target));
-  return players | (rules.roundTimer ? 4 : 0) | (target << 3);
+  return (players & 7) | (rules.roundTimer ? 8 : 0) | (target << 4);
 }
 
 export function unpackRules(bits: number | undefined): MatchRules {
   if (typeof bits !== 'number' || !Number.isFinite(bits)) return DEFAULT_RULES;
   return {
-    players: PLAYER_CODES[bits & 3] ?? DEFAULT_RULES.players,
-    roundTimer: (bits & 4) !== 0,
-    target: (bits >> 3) & 3,
+    players: PLAYER_CODES[bits & 7] ?? DEFAULT_RULES.players,
+    roundTimer: (bits & 8) !== 0,
+    target: (bits >> 4) & 3,
   };
 }
 
@@ -97,17 +100,19 @@ export interface Choice {
 /**
  * A choice as one small integer, so a whole game fits in one Firestore field.
  *
- * Five cards and six places means everything below 40; packing the card into
- * the high bits and the place into the low three keeps both readable in a log.
+ * Seven cards and nine places means everything below 130; packing the card
+ * into the high bits and the place into the low four keeps both readable in
+ * a log. Four low bits cover places 0-15, room to grow the map again without
+ * touching this.
  */
 export function encodeChoice(choice: Choice): number {
-  return (Math.max(0, CARD_ORDER.indexOf(choice.card)) << 3) | (choice.target & 7);
+  return (Math.max(0, CARD_ORDER.indexOf(choice.card)) << 4) | (choice.target & 15);
 }
 
 export function decodeChoice(code: number): Choice {
   return {
-    card: CARD_ORDER[(code >> 3) % CARD_ORDER.length] ?? 'layLow',
-    target: code & 7,
+    card: CARD_ORDER[(code >> 4) % CARD_ORDER.length] ?? 'layLow',
+    target: code & 15,
   };
 }
 

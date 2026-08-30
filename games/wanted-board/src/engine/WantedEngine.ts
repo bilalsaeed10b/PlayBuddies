@@ -14,13 +14,15 @@
  */
 import {
   BALANCE,
-  BANK,
   CARDS,
   PLACE_COUNT,
   clamp,
+  distanceToBank,
   mulberry32,
   neighbours,
   startPlaces,
+  stepToward,
+  twoHopTargets,
 } from '../game/rules';
 import type { CardId } from '../game/rules';
 import { TARGET_CHOICES, decodeChoice, encodeChoice } from '../types/game';
@@ -78,7 +80,8 @@ export type RoundEvent =
   | { kind: 'standoff'; seats: number[]; place: number }
   | { kind: 'miss'; seat: number; place: number }
   | { kind: 'bank'; seat: number; amount: number }
-  | { kind: 'pay'; seat: number; amount: number };
+  | { kind: 'pay'; seat: number; amount: number }
+  | { kind: 'scout'; seat: number; target: number | null; place: number | null; amount: number };
 
 export interface EngineConfig {
   seats: Seat[];
@@ -165,7 +168,11 @@ export class WantedEngine {
     const place = this.players[seat]?.place ?? 0;
     return (Object.keys(CARDS) as CardId[]).filter((id) => {
       const meta = CARDS[id];
-      return meta.onlyAt === null || meta.onlyAt === place;
+      if (meta.onlyAt !== null && meta.onlyAt !== place) return false;
+      // Gallop has nowhere to point from a place with no two-hop reach — never
+      // actually happens on this graph, but it costs nothing to guarantee.
+      if (meta.needsTarget && this.legalTargets(seat, id).length === 0) return false;
+      return true;
     });
   }
 
@@ -173,9 +180,10 @@ export class WantedEngine {
   legalTargets(seat: number, card: CardId): number[] {
     if (!CARDS[card].needsTarget) return [];
     const place = this.players[seat]?.place ?? 0;
-    // Both targeting cards reach exactly one step around the ring. Ride takes
-    // you there; a trap is left there for somebody else.
-    return neighbours(place);
+    // Ride and a trap both reach exactly one step. A Gallop clears the place
+    // in between entirely, so its targets are two-hop only — never a place
+    // Ride could also reach, or Gallop would just be a strictly better Ride.
+    return card === 'gallop' ? twoHopTargets(place) : neighbours(place);
   }
 
   /** Corrects an illegal or stale choice rather than rejecting it — see `applyRound`. */
@@ -211,8 +219,14 @@ export class WantedEngine {
     const hidden = (seat: number) => choices[seat].card === 'layLow';
 
     // ── 1. movement ────────────────────────────────────────────────────────
+    // Ride and Gallop both just relocate a seat — the only difference between
+    // them is how far `sanitise` let the target be, which is already settled
+    // by the time a choice reaches this point. Whatever was waiting on the
+    // place in between a Gallop's start and end never gets a look at it: that
+    // is the card's entire reason to exist, and it falls out for free here
+    // because every later step only ever checks where a seat *ended up*.
     for (let i = 0; i < this.playerCount; i++) {
-      if (choices[i].card !== 'ride') continue;
+      if (choices[i].card !== 'ride' && choices[i].card !== 'gallop') continue;
       const from = this.players[i].place;
       const to = choices[i].target;
       if (from === to) continue;
@@ -292,18 +306,38 @@ export class WantedEngine {
     }
 
     // ── 5. the round pays out ──────────────────────────────────────────────
+    const PAY: Partial<Record<CardId, number>> = {
+      ride: BALANCE.PAY_RIDE,
+      gallop: BALANCE.PAY_GALLOP,
+      layLow: BALANCE.PAY_LAY_LOW,
+      trap: BALANCE.PAY_TRAP,
+      scout: BALANCE.PAY_SCOUT,
+    };
     for (let i = 0; i < this.playerCount; i++) {
-      const pay =
-        choices[i].card === 'ride'
-          ? BALANCE.PAY_RIDE
-          : choices[i].card === 'layLow'
-            ? BALANCE.PAY_LAY_LOW
-            : choices[i].card === 'trap'
-              ? BALANCE.PAY_TRAP
-              : 0;
+      const pay = PAY[choices[i].card] ?? 0;
       if (pay === 0) continue;
       this.players[i].bounty += pay;
       events.push({ kind: 'pay', seat: i, amount: pay });
+    }
+
+    // ── 5b. scouting ─────────────────────────────────────────────────────
+    // Read last, after every robbery and every bank run this round has
+    // already happened — a scout is reporting where the money genuinely
+    // stands right now, not a stale read from before the dust settled.
+    for (let i = 0; i < this.playerCount; i++) {
+      if (choices[i].card !== 'scout') continue;
+      let target: number | null = null;
+      for (let s = 0; s < this.playerCount; s++) {
+        if (s === i || this.players[s].bounty <= 0) continue;
+        if (target === null || this.players[s].bounty > this.players[target].bounty) target = s;
+      }
+      events.push({
+        kind: 'scout',
+        seat: i,
+        target,
+        place: target === null ? null : this.players[target].place,
+        amount: target === null ? 0 : this.players[target].bounty,
+      });
     }
 
     // ── 6. new traps go live for next round ────────────────────────────────
@@ -355,18 +389,12 @@ export class WantedEngine {
 
   /** How close this seat is to the Bank, in rides. Drives both the HUD and the bots. */
   ridesToBank(seat: number): number {
-    const place = this.players[seat]?.place ?? 0;
-    const forward = (BANK - place + PLACE_COUNT) % PLACE_COUNT;
-    return Math.min(forward, PLACE_COUNT - forward);
+    return distanceToBank(this.players[seat]?.place ?? 0);
   }
 
-  /** One step around the ring toward the Bank. */
+  /** The neighbour that starts the shortest ride from `from` toward `to`. */
   stepToward(from: number, to: number): number {
-    if (from === to) return from;
-    const forward = (to - from + PLACE_COUNT) % PLACE_COUNT;
-    return forward <= PLACE_COUNT - forward
-      ? (from + 1) % PLACE_COUNT
-      : (from + PLACE_COUNT - 1) % PLACE_COUNT;
+    return stepToward(from, to);
   }
 
   /** Clamped for the HUD's progress bars. */

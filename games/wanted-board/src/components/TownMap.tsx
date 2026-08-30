@@ -1,15 +1,15 @@
 /**
- * The town: six places in a ring, everybody's piece on one of them.
+ * The town: a wagon wheel of nine places, everybody's piece on one of them.
  *
  * Drawn in DOM and SVG rather than on a canvas, which is the right call for a
- * game whose entire animation budget is "a token slides one place around a
- * ring once every twenty seconds". A CSS transform transition does that for
+ * game whose entire animation budget is "a token slides to a neighbouring
+ * place once every twenty seconds". A CSS transform transition does that for
  * free, at whatever the display's refresh rate is, and it stays crisp on a
  * phone without anybody having to think about backing stores or device pixel
  * ratios — none of which a canvas would have given us here.
  */
 import { useEffect, useRef, useState } from 'react';
-import { BANK, PLACES, SEAT_COLORS } from '../game/rules';
+import { BANK, PLACES, ROADS, SEAT_COLORS } from '../game/rules';
 import OutlawToken from './OutlawToken';
 import type { Seat, WantedEngine } from '../engine/WantedEngine';
 
@@ -67,6 +67,8 @@ export default function TownMap({
   myTrap,
   /** Who is laying low, once the round has been revealed. Empty while choosing. */
   hiddenSeats,
+  /** What the current reveal beat has somebody saying, and where. */
+  bubbles,
 }: {
   engine: WantedEngine;
   seats: Seat[];
@@ -75,36 +77,39 @@ export default function TownMap({
   onPick?: (place: number) => void;
   myTrap?: number;
   hiddenSeats: number[];
+  bubbles?: { seat: number; text: string }[];
 }) {
   const [box, size] = useSquare();
+  // A bank-and-spoke wheel needs more room to stay readable than the old
+  // ring did — nine places drawn into the same 560px cap the six-place ring
+  // used sat cramped, especially the four rim-only places tucked between a
+  // spoke and its neighbour.
+  const edge = Math.min(size, 760);
   return (
     <div ref={box} className="flex h-full w-full items-center justify-center">
       {/* shrink-0 is load-bearing: the wrapper is a row flex, so without it the
           square is a flex item free to have its *width* squeezed while its
           explicit height stays put — which drew a 186x298 "square". */}
-      <div
-        className="relative shrink-0"
-        style={{ width: Math.min(size, 560), height: Math.min(size, 560) }}
-      >
-      {/* Roads. Under everything, and deliberately faint — the ring is a fact
-          about the rules, not the thing you should be looking at. */}
+      <div className="relative shrink-0" style={{ width: edge, height: edge }}>
+      {/* Roads. Under everything, and deliberately faint — the graph is a fact
+          about the rules, not the thing you should be looking at. Four spokes
+          plus the rim, not a single loop, so "which roads reach the Bank
+          directly" is something the map itself shows rather than something a
+          player has to remember. */}
       <svg viewBox="0 0 100 100" className="absolute inset-0 h-full w-full" aria-hidden>
-        {PLACES.map((place, i) => {
-          const next = PLACES[(i + 1) % PLACES.length];
-          return (
-            <line
-              key={i}
-              x1={place.x}
-              y1={place.y}
-              x2={next.x}
-              y2={next.y}
-              stroke="#8b6f47"
-              strokeWidth="0.9"
-              strokeDasharray="2.4 2"
-              opacity="0.55"
-            />
-          );
-        })}
+        {ROADS.map(([a, b]) => (
+          <line
+            key={`${a}-${b}`}
+            x1={PLACES[a].x}
+            y1={PLACES[a].y}
+            x2={PLACES[b].x}
+            y2={PLACES[b].y}
+            stroke="#8b6f47"
+            strokeWidth={a === BANK || b === BANK ? '1.1' : '0.9'}
+            strokeDasharray="2.4 2"
+            opacity={a === BANK || b === BANK ? '0.7' : '0.5'}
+          />
+        ))}
       </svg>
 
       {PLACES.map((place, i) => {
@@ -123,12 +128,12 @@ export default function TownMap({
                   ? 'border-amber-800/60 bg-amber-100/80'
                   : 'border-amber-900/25 bg-[#f7ecd6]/80'
             } ${lit && onPick ? 'cursor-pointer active:scale-95' : 'cursor-default'}`}
-            style={{ left: `${place.x}%`, top: `${place.y}%`, width: '27%' }}
+            style={{ left: `${place.x}%`, top: `${place.y}%`, width: isBank ? '29%' : '24%' }}
           >
-            <span className="text-[10px] font-black uppercase leading-none tracking-[0.12em] text-amber-950 sm:text-xs">
+            <span className="text-[11px] font-black uppercase leading-none tracking-[0.12em] text-amber-950 sm:text-sm">
               {place.name}
             </span>
-            <span className="mt-0.5 text-[8px] font-bold uppercase tracking-wider text-amber-900/45 sm:text-[9px]">
+            <span className="mt-0.5 text-[9px] font-bold uppercase tracking-wider text-amber-900/45 sm:text-[10px]">
               {isBank ? 'cash in here' : place.tag}
             </span>
             {myTrap === i && (
@@ -153,13 +158,23 @@ export default function TownMap({
         const { dx, dy } = fan(here.indexOf(i), here.length);
         const mine = localSeats.includes(i);
         const colors = SEAT_COLORS[i % SEAT_COLORS.length];
+        const bubbleText = bubbles?.find((b) => b.seat === i)?.text;
         return (
           <div
             key={seat.id}
             className="pointer-events-none absolute -translate-x-1/2 -translate-y-1/2 transition-[left,top] duration-700 ease-in-out"
-            style={{ left: `${place.x + dx}%`, top: `${place.y + dy + 9}%`, zIndex: 10 + i }}
+            style={{ left: `${place.x + dx}%`, top: `${place.y + dy + 9}%`, zIndex: bubbleText ? 50 : 10 + i }}
           >
-            <div className="flex flex-col items-center">
+            <div className="relative flex flex-col items-center">
+              {bubbleText && (
+                <span
+                  key={`${i}-${bubbleText}`}
+                  className="absolute -top-2 left-1/2 z-10 w-max max-w-[38vw] -translate-x-1/2 -translate-y-full animate-[bubble_1.7s_ease-out] rounded-xl border border-amber-900/20 bg-white px-2 py-1 text-[10px] font-bold leading-tight text-amber-950 shadow-md sm:max-w-[220px] sm:text-[11px]"
+                >
+                  {bubbleText}
+                  <span className="absolute left-1/2 top-full h-2 w-2 -translate-x-1/2 -translate-y-1/2 rotate-45 border-b border-r border-amber-900/20 bg-white" />
+                </span>
+              )}
               <OutlawToken
                 skin={seat.skin}
                 size={mine ? 42 : 34}
