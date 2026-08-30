@@ -1,0 +1,19 @@
+{
+  "id": "last-gasp",
+  "name": "Last Gasp",
+  "subtitle": "Don't draw the last line",
+  "description": "Hangman turned into a party game. There is one word, one stickman, and everybody guesses in turn — but the gallows is shared, and whoever draws the line that finishes him forfeits everything they earned that word. Rare letters pay far more than safe ones, and calling the whole word early pays best of all, so every turn is a real bet: take the easy E for a point, gamble on a Z for ten, or risk the round on a hunch. Play against bots, share one screen, or take up to seven friends online.",
+  "category": "party",
+  "minPlayers": 1,
+  "maxPlayers": 8,
+  "estimatedDuration": "6-10 min",
+  "controls": "Tap a letter to call it, or call the whole word. Everything is on one screen — nothing is hidden from anybody.",
+  "thumbnail": "thumb.svg",
+  "accent": {
+    "from": "#84cc16",
+    "to": "#0ea5e9"
+  },
+  "featured": true,
+  "available": true,
+  "version": "1.0.0"
+}

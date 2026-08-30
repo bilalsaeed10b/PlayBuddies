@@ -120,6 +120,21 @@
         "--strictPort"
       ],
       "port": 5194
+    },
+    {
+      "name": "last-gasp",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "--prefix",
+        "games/last-gasp",
+        "--",
+        "--port",
+        "5192",
+        "--strictPort"
+      ],
+      "port": 5192
     }
   ]
 }
