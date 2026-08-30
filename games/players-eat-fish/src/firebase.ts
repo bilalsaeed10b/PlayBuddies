@@ -2,7 +2,7 @@ import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth, onAuthStateChanged } from 'firebase/auth';
 import {
   getFirestore, doc, getDoc, setDoc, onSnapshot, updateDoc, serverTimestamp,
-  addDoc, collection, query, orderBy, limit,
+  addDoc, collection, query, orderBy, limit, runTransaction,
 } from 'firebase/firestore';
 import {
   getDatabase, ref as dbRef, set as dbSet, push as dbPush,
@@ -36,6 +36,6 @@ export const rtdb = getDatabase(app);
 export {
   onAuthStateChanged,
   doc, getDoc, setDoc, onSnapshot, updateDoc, serverTimestamp,
-  addDoc, collection, query, orderBy, limit,
+  addDoc, collection, query, orderBy, limit, runTransaction,
   dbRef, dbSet, dbPush, dbOnValue, dbOnDisconnect, dbRemove,
 };

@@ -67,6 +67,7 @@ export default function App() {
   const [authChecked, setAuthChecked] = useState(false);
   const [lobby, setLobby] = useState<{ hostId: string; players: Record<string, LobbyPerson & { isReady?: boolean }>; matchStarted?: boolean } | null>(null);
   const [lobbyError, setLobbyError] = useState<string | null>(null);
+  const [pickNotice, setPickNotice] = useState<string | null>(null);
 
   const [seatCount, setSeatCount] = useState(1);
   const [seatFish, setSeatFish] = useState<Record<string, number>>({});
@@ -213,14 +214,37 @@ export default function App() {
       try {
         // Already loaded by the session effect on this path; the import cache
         // makes this a no-op lookup rather than a second fetch.
-        const { db, doc, updateDoc } = await import('./firebase');
-        await updateDoc(doc(db, 'lobbies', handoff.room), { [`players.${uid}.fishIndex`]: index });
+        const { db, doc, runTransaction } = await import('./firebase');
+        const ref = doc(db, 'lobbies', handoff.room);
+        // A plain `updateDoc` here raced: two players landing on the picker
+        // at once could both write the same still-shown-as-open fish before
+        // either's snapshot listener caught the other's pick. The transaction
+        // re-reads the room at write time, so whichever write actually lands
+        // second sees the seat is taken and backs off instead of silently
+        // overlapping it.
+        const taken = await runTransaction(db, async (tx) => {
+          const snap = await tx.get(ref);
+          const players = (snap.data()?.players ?? {}) as Record<string, LobbyPerson>;
+          const holder = Object.entries(players).find(
+            ([otherUid, p]) => otherUid !== uid && p.fishIndex === index,
+          );
+          if (holder) return holder[1].displayName || 'Someone';
+          tx.update(ref, { [`players.${uid}.fishIndex`]: index });
+          return null;
+        });
+        if (taken) setPickNotice(`${taken} just took that one — pick another.`);
       } catch (e) {
         console.error('Could not save fish choice', e);
       }
     },
     [uid, unlocked, coins, handoff.room],
   );
+
+  useEffect(() => {
+    if (!pickNotice) return;
+    const id = window.setTimeout(() => setPickNotice(null), 2500);
+    return () => window.clearTimeout(id);
+  }, [pickNotice]);
 
   const startMatch = useCallback(async () => {
     if (!isHost) return;
@@ -410,6 +434,7 @@ export default function App() {
           unlocked={unlocked}
           coins={coins}
           isHost={isHost}
+          pickNotice={pickNotice}
           onPick={pickFishOnline}
           onStart={startMatch}
           onShop={() => setView('shop')}
@@ -598,6 +623,7 @@ function RoomScreen({
   unlocked,
   coins,
   isHost,
+  pickNotice,
   onPick,
   onStart,
   onShop,
@@ -614,6 +640,7 @@ function RoomScreen({
   unlocked: number[];
   coins: number;
   isHost: boolean;
+  pickNotice: string | null;
   onPick: (index: number) => void;
   onStart: () => void;
   onShop: () => void;
@@ -681,6 +708,12 @@ function RoomScreen({
           )}
         </div>
       </div>
+
+      {pickNotice && (
+        <p className="shrink-0 rounded-xl border border-rose-400/40 bg-rose-400/10 px-3 py-1.5 text-center text-xs font-bold text-rose-600">
+          {pickNotice}
+        </p>
+      )}
 
       {/* Main Grid: Responsive for Portrait and Landscape */}
       <div className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-3 landscape:grid-cols-3 gap-2 sm:gap-4">

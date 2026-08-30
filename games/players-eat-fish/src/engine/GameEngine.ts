@@ -5,6 +5,7 @@ import {
   assetForSize,
   isShoalingSize,
   SHOAL_MAX_SIZE,
+  STARTING_SIZE,
   fishSrc,
 } from '../game/fish';
 
@@ -292,7 +293,7 @@ export class GameEngine {
 
     config.localIds.forEach((id, i) => {
       const asset = config.localFish[id] ?? 0;
-      const fish = this.makeFish(id, 'player', FISH_ASSETS[asset].size, asset);
+      const fish = this.makeFish(id, 'player', STARTING_SIZE, asset);
       // Players all move at exactly the same rate. `pace` exists to stop a
       // shoal of AI fish swimming as one rigid block; applying it to a person
       // would hand one player a third more top speed than another for no
@@ -496,7 +497,7 @@ export class GameEngine {
     // Only the dead: in couch co-op the survivors must keep the size they earned.
     if (!fish || !fish.dead) return;
     const asset = this.config.localFish[id] ?? 0;
-    fish.size = FISH_ASSETS[asset].size;
+    fish.size = STARTING_SIZE;
     fish.asset = asset;
     fish.score = 0;
     // bestScore/bestSize are deliberately untouched -- that's the whole

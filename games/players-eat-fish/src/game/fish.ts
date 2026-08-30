@@ -62,6 +62,17 @@ export const BOSS_ASSET = FISH_ASSETS.length - 1;
 export const STARTER_FISH = [0, 1, 2];
 
 /**
+ * Every player's real starting size, no matter which fish they picked.
+ *
+ * `FISH_ASSETS[i].size` still orders the catalogue and decides what a fish
+ * looks like once it's grown into that size on its own, but coins buy a
+ * look, not a head start — a Tiger Shark skin should not spawn already
+ * bigger than everyone who couldn't afford one. Every player enters the
+ * water at the same size and grows from there purely by eating.
+ */
+export const STARTING_SIZE = 10;
+
+/**
  * Sprite for an AI fish of a given size.
  *
  * Only used when spawning. A *player* keeps the fish they chose for the whole
