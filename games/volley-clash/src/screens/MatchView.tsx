@@ -518,7 +518,9 @@ export default function MatchView({
     // import comment in App.tsx.
     let disposed = false;
     let link: Link | null = null;
-    let leave: (() => void) | undefined;
+    let leave: ((e: PageTransitionEvent) => void) | undefined;
+    let cancelLeave: (() => void) | undefined;
+    let onVisible: (() => void) | undefined;
 
     void import('../net/link')
       .then(({ Link }) => {
@@ -614,16 +616,41 @@ export default function MatchView({
         linkRef.current = link;
         link.setPeers(peopleRef.current.map((p) => p.uid));
 
-        leave = () => link?.send({ t: 'bye', id: uid });
+        // `pagehide` fires on a phone screen locking or a tab switch, not
+        // just a real close — a page with an open connection like this one is
+        // not bfcache-eligible in most browsers, so there is no reliable
+        // `persisted` flag to lean on here at all. Give the tab a chance to
+        // come back (cancelled by `pageshow` or the tab going visible again)
+        // before telling everyone else to hand this player over to AI.
+        let leaveTimer: number | undefined;
+        cancelLeave = () => {
+          if (leaveTimer !== undefined) {
+            window.clearTimeout(leaveTimer);
+            leaveTimer = undefined;
+          }
+        };
+        leave = (e) => {
+          if (e.persisted) return;
+          cancelLeave?.();
+          leaveTimer = window.setTimeout(() => link?.send({ t: 'bye', id: uid }), 15000);
+        };
+        onVisible = () => {
+          if (document.visibilityState === 'visible') cancelLeave?.();
+        };
         window.addEventListener('pagehide', leave);
+        window.addEventListener('pageshow', cancelLeave);
+        document.addEventListener('visibilitychange', onVisible);
       })
       .catch((e) => console.error('Could not open the connection', e));
 
     return () => {
       disposed = true;
+      cancelLeave?.();
       if (leave) {
         window.removeEventListener('pagehide', leave);
-        leave();
+        if (cancelLeave) window.removeEventListener('pageshow', cancelLeave);
+        if (onVisible) document.removeEventListener('visibilitychange', onVisible);
+        link?.send({ t: 'bye', id: uid });
       }
       link?.close();
       linkRef.current = null;

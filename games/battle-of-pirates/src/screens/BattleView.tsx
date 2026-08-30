@@ -297,6 +297,8 @@ export default function BattleView({
     let disposed = false;
     let link: TurnLink | null = null;
     let leave: ((e: PageTransitionEvent) => void) | undefined;
+    let cancelLeave: (() => void) | undefined;
+    let onVisible: (() => void) | undefined;
 
     void import('../net/turnLink')
       .then(({ TurnLink: Link }) => {
@@ -338,18 +340,32 @@ export default function BattleView({
 
         // A tab going into the browser's back/forward cache -- the screen
         // locking, switching apps, backgrounding the browser -- fires this
-        // exactly like a real close, but the page is still alive and typically
-        // comes right back. `persisted` is what tells the two apart: true
-        // means bfcache, false means an actual unload. Without this check
-        // every player whose phone dimmed mid-match announced a real bye and
-        // handed their still-very-present seat to a bot -- worse the longer a
-        // match runs, which is exactly what a 4-player game does, since each
-        // player waits through three other turns before their own comes up.
+        // exactly like a real close. `persisted` was meant to tell the two
+        // apart, but a page holding an open Firestore listener is not
+        // bfcache-eligible in most browsers -- `persisted` comes back false
+        // for a phone dimming too, not just a real close, so that check alone
+        // still handed a still-very-present player's seat to a bot. Give the
+        // tab a real chance to come back instead: hold off on the bye,
+        // cancelled by `pageshow` or the tab going visible again, and only
+        // actually announce it once the tab hasn't returned in time.
+        let leaveTimer: number | undefined;
+        cancelLeave = () => {
+          if (leaveTimer !== undefined) {
+            window.clearTimeout(leaveTimer);
+            leaveTimer = undefined;
+          }
+        };
         leave = (e) => {
           if (e.persisted) return;
-          link?.close();
+          cancelLeave?.();
+          leaveTimer = window.setTimeout(() => link?.close(), 15000);
+        };
+        onVisible = () => {
+          if (document.visibilityState === 'visible') cancelLeave?.();
         };
         window.addEventListener('pagehide', leave);
+        window.addEventListener('pageshow', cancelLeave);
+        document.addEventListener('visibilitychange', onVisible);
       })
       .catch((err) => {
         console.error('Could not open the wire', err);
@@ -359,7 +375,10 @@ export default function BattleView({
 
     return () => {
       disposed = true;
+      cancelLeave?.();
       if (leave) window.removeEventListener('pagehide', leave);
+      if (cancelLeave) window.removeEventListener('pageshow', cancelLeave);
+      if (onVisible) document.removeEventListener('visibilitychange', onVisible);
       link?.close(!retryingRef.current);
       retryingRef.current = false;
       linkRef.current = null;

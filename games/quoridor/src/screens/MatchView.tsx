@@ -227,7 +227,9 @@ export default function MatchView({
 
     let disposed = false;
     let link: TurnLink | null = null;
-    let leave: (() => void) | undefined;
+    let leave: ((e: PageTransitionEvent) => void) | undefined;
+    let cancelLeave: (() => void) | undefined;
+    let onVisible: (() => void) | undefined;
 
     void import('../net/turnLink')
       .then(({ TurnLink: Link }) => {
@@ -256,8 +258,30 @@ export default function MatchView({
           link.send({ t: 'start', n: Date.now(), seed: config.seed, first: config.first, r: rulesBits });
         }
 
-        leave = () => link?.close();
+        // `pagehide` fires with `persisted: false` on plenty of things that
+        // are not a real close — a phone screen locking, a tab switch, a page
+        // holding an open Firestore listener not being bfcache-eligible in
+        // most browsers. Give it a chance to come back (cancelled by
+        // `pageshow` or the tab going visible again) before actually handing
+        // the seat to a bot.
+        let leaveTimer: number | undefined;
+        cancelLeave = () => {
+          if (leaveTimer !== undefined) {
+            window.clearTimeout(leaveTimer);
+            leaveTimer = undefined;
+          }
+        };
+        leave = (e) => {
+          if (e.persisted) return;
+          cancelLeave?.();
+          leaveTimer = window.setTimeout(() => link?.close(), 15000);
+        };
+        onVisible = () => {
+          if (document.visibilityState === 'visible') cancelLeave?.();
+        };
         window.addEventListener('pagehide', leave);
+        window.addEventListener('pageshow', cancelLeave);
+        document.addEventListener('visibilitychange', onVisible);
       })
       .catch((err) => {
         console.error('Could not open the wire', err);
@@ -267,7 +291,10 @@ export default function MatchView({
 
     return () => {
       disposed = true;
+      cancelLeave?.();
       if (leave) window.removeEventListener('pagehide', leave);
+      if (cancelLeave) window.removeEventListener('pageshow', cancelLeave);
+      if (onVisible) document.removeEventListener('visibilitychange', onVisible);
       link?.close(!retryingRef.current);
       retryingRef.current = false;
       linkRef.current = null;
