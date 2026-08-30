@@ -440,7 +440,21 @@ function LobbyContent() {
   const selectGame = async (gameId: string) => {
     if (!isHost) return;
     try {
-      await updateDoc(doc(db, "lobbies", roomId), { gameId });
+      // `fishIndex`/`role`/`isReady` are the one small per-player schema every
+      // game shares (see the security rules), so a face picked in one game
+      // was still sitting in the doc when the next game's picker read it --
+      // showing up there as somebody else's fish already locked in, in
+      // whatever unrelated skin happens to share that index. Games differ
+      // entirely on what index N means, so a value from the last game is
+      // never valid for the next one and has to be cleared here, the one
+      // place a game change actually happens, rather than in every game.
+      const reset: Record<string, ReturnType<typeof deleteField>> = {};
+      for (const uid of Object.keys(lobby?.players ?? {})) {
+        reset[`players.${uid}.fishIndex`] = deleteField();
+        reset[`players.${uid}.role`] = deleteField();
+        reset[`players.${uid}.isReady`] = deleteField();
+      }
+      await updateDoc(doc(db, "lobbies", roomId), { gameId, ...reset });
     } catch (e) {
       console.error("Error selecting game:", e);
     }
