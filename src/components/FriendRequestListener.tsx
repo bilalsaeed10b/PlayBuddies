@@ -115,7 +115,7 @@ export default function FriendRequestListener() {
                 : { opacity: 1, x: 0, scale: 1 }
             }
             exit={{ opacity: 0, scale: 0.9, y: -20 }}
-            className="glass-solid p-4 rounded-2xl shadow-2xl border border-red-500/50 relative overflow-hidden"
+            className="glass-solid bg-[#161626] p-4 rounded-2xl shadow-2xl border border-red-500/50 relative overflow-hidden"
           >
             <div className="absolute top-0 left-0 w-1 h-full bg-red-500" />
             <div className="flex items-start gap-4">

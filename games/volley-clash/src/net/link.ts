@@ -34,12 +34,11 @@ import { PeerClocks, localNow } from './clock';
 import type { PeerTiming } from './clock';
 
 /**
- * How often the Firestore relay writes while any peer is not yet reachable
- * directly. Every write here is billed, so this is not the send rate the game
- * would pick if the wire were free — it is the rate that keeps a relayed
- * match playable without keeping a room's write bill unbounded.
+ * How often the RTDB relay writes while any peer is not yet reachable
+ * directly. RTDB doesn't charge per write, so we can run this at the
+ * frame rate for true real-time performance.
  */
-const FS_ACTIVE_MS = 100;
+const RELAY_ACTIVE_MS = 33;
 
 /**
  * How often it writes once every peer is reachable directly.
@@ -47,9 +46,9 @@ const FS_ACTIVE_MS = 100;
  * Not zero: a heartbeat this slow costs almost nothing, and it is what lets
  * the relay take over instantly if the mesh drops mid-match — a fresh
  * connection with no warm-up, rather than a cold start that has to open a
- * Firestore listener and wait for it to catch up before the first packet.
+ * listener and wait for it to catch up before the first packet.
  */
-const FS_IDLE_MS = 1000;
+const RELAY_IDLE_MS = 1000;
 
 /** Events (a `bye`, say) queued for the next relay write, at most. */
 const MAX_EVENTS = 8;
@@ -70,16 +69,16 @@ export interface LinkStatus {
 }
 
 type Handler = (from: string, msg: NetMessage) => void;
-type FirestoreWrite = (batch: NetMessage[], seq: number) => Promise<void>;
+type RelayWrite = (batch: NetMessage[], seq: number) => Promise<void>;
 
 export class Link {
   private mesh: Mesh;
   private peers: string[] = [];
   private clocks = new PeerClocks();
-  private fsWrite: FirestoreWrite | null = null;
-  private stopFirestore: (() => void) | null = null;
-  private fsTimer: number | null = null;
-  private lastFsWrite = 0;
+  private relayWrite: RelayWrite | null = null;
+  private stopRelay: (() => void) | null = null;
+  private relayTimer: number | null = null;
+  private lastRelayWrite = 0;
   private pingTimer: number | null = null;
   private relaySeq = 0;
   /** Peers with a timing probe queued for the next relay write. */
@@ -114,7 +113,7 @@ export class Link {
     // an earlier relay design shared the mesh's own signalling node and could
     // collide with its startup wipe; this one writes to a completely
     // different document and has no such race.
-    void this.openFirestore();
+    void this.openRelay();
   }
 
   setPeers(uids: string[]) {
@@ -133,8 +132,8 @@ export class Link {
    *
    * `live` marks a packet whose only value is being the newest one — a snapshot
    * or a body update. The relay keeps just the last of those; anything else is
-   * queued and delivered. Always captured for Firestore too, regardless of
-   * whether the mesh currently needs the help — see FS_IDLE_MS.
+   * queued and delivered. Always captured for the relay too, regardless of
+   * whether the mesh currently needs the help — see RELAY_IDLE_MS.
    */
   send(msg: NetMessage, live = false) {
     this.mesh.broadcast(msg);
@@ -188,8 +187,8 @@ export class Link {
   close() {
     this.closed = true;
     if (this.pingTimer !== null) clearInterval(this.pingTimer);
-    if (this.fsTimer !== null) clearInterval(this.fsTimer);
-    this.stopFirestore?.();
+    if (this.relayTimer !== null) clearInterval(this.relayTimer);
+    this.stopRelay?.();
     this.mesh.close();
   }
 
@@ -288,53 +287,105 @@ export class Link {
   }
 
   /**
-   * Arms the Firestore relay. Unconditional and immediate — see the note at
-   * the top of this file for why that matters more than which path is fastest.
+   * Arms the RTDB relay, with automatic Firestore fallback if RTDB fails.
    */
-  private async openFirestore() {
+  private async openRelay() {
     try {
-      const { db, doc, setDoc, collection, onSnapshot } = await import('../firebase');
+      const { rtdb, dbRef, dbSet, dbOnValue, db, doc, setDoc, collection, onSnapshot } = await import('../firebase');
       if (this.closed) return;
 
-      const mine = doc(db, 'lobbies', this.roomId, 'updates', this.selfId);
-      this.stopFirestore = onSnapshot(
-        collection(db, 'lobbies', this.roomId, 'updates'),
+      let rtdbActive = true;
+      let fsUnsub: (() => void) | null = null;
+      let fsWriteFn: ((batch: NetMessage[], seq: number) => Promise<void>) | null = null;
+
+      const initFirestore = () => {
+        if (fsUnsub || this.closed) return;
+        try {
+          const mineDoc = doc(db, 'lobbies', this.roomId, 'updates', this.selfId);
+          fsUnsub = onSnapshot(
+            collection(db, 'lobbies', this.roomId, 'updates'),
+            (snap) => {
+              for (const change of snap.docChanges()) {
+                if (change.type === 'removed') continue;
+                const from = change.doc.id;
+                if (from === this.selfId) continue;
+                const data = change.doc.data() as { m?: string; n?: number };
+                if (typeof data.m !== 'string' || typeof data.n !== 'number') continue;
+                if (this.isReplay(from, data.n)) continue;
+                this.markSeen(from, data.n);
+                let batch: NetMessage[];
+                try {
+                  batch = JSON.parse(data.m) as NetMessage[];
+                } catch {
+                  continue;
+                }
+                for (const msg of batch) this.receive(from, msg);
+              }
+            },
+            (err) => console.error('[link] Firestore relay fallback unavailable:', err),
+          );
+          fsWriteFn = async (batch, seq) => {
+            await setDoc(mineDoc, { m: JSON.stringify(batch), n: seq, at: Date.now() });
+          };
+        } catch (e) {
+          console.error('[link] Failed to init Firestore fallback:', e);
+        }
+      };
+
+      const mine = dbRef(rtdb, `lobbies/${this.roomId}/updates/${this.selfId}`);
+      const updatesRef = dbRef(rtdb, `lobbies/${this.roomId}/updates`);
+      
+      const unsubscribe = dbOnValue(
+        updatesRef,
         (snap) => {
-          for (const change of snap.docChanges()) {
-            if (change.type === 'removed') continue;
-            const from = change.doc.id;
-            if (from === this.selfId) continue;
-            const data = change.doc.data() as { m?: string; n?: number };
-            if (typeof data.m !== 'string' || typeof data.n !== 'number') continue;
-            // A Firestore listener replays what it already gave us on
-            // reconnect; the sequence number is what keeps a replayed snapshot
-            // from being mistaken for a fresh one. A counter that jumps a long
-            // way *backwards* is a peer that reloaded, not a replay — treating
-            // that as stale would silence them for the rest of the match.
-            if (this.isReplay(from, data.n)) continue;
+          if (!rtdbActive) return;
+          snap.forEach((child) => {
+            const from = child.key;
+            if (!from || from === this.selfId) return;
+            const data = child.val() as { m?: string; n?: number };
+            if (typeof data.m !== 'string' || typeof data.n !== 'number') return;
+            if (this.isReplay(from, data.n)) return;
             this.markSeen(from, data.n);
             let batch: NetMessage[];
             try {
               batch = JSON.parse(data.m) as NetMessage[];
             } catch {
-              continue;
+              return;
             }
             for (const msg of batch) this.receive(from, msg);
-          }
+          });
         },
-        (err) => console.error('[link] Firestore relay unavailable:', err),
+        (err) => {
+          console.warn('[link] RTDB relay unavailable, enabling Firestore fallback:', err);
+          rtdbActive = false;
+          initFirestore();
+        },
       );
 
-      this.fsWrite = async (batch, seq) => {
-        await setDoc(mine, { m: JSON.stringify(batch), n: seq, at: Date.now() });
+      this.stopRelay = () => {
+        unsubscribe();
+        fsUnsub?.();
       };
 
-      // Ticks far more often than either send rate actually needs, because
-      // each tick decides for itself — via needsRelay() — whether enough time
-      // has passed to be worth a write yet. See FS_ACTIVE_MS / FS_IDLE_MS.
-      this.fsTimer = window.setInterval(() => void this.flushFirestore(), FS_ACTIVE_MS);
+      this.relayWrite = async (batch, seq) => {
+        if (rtdbActive) {
+          try {
+            await dbSet(mine, { m: JSON.stringify(batch), n: seq, at: Date.now() });
+            return;
+          } catch (err) {
+            console.warn('[link] RTDB write failed, enabling Firestore fallback:', err);
+            rtdbActive = false;
+            initFirestore();
+          }
+        }
+        if (fsWriteFn) {
+          await fsWriteFn(batch, seq);
+        }
+      };
+
+      this.relayTimer = window.setInterval(() => void this.flushRelay(), RELAY_ACTIVE_MS);
     } catch (err) {
-      console.error('[link] could not open the Firestore relay:', err);
+      console.error('[link] could not open the relay:', err);
     }
   }
 
@@ -360,14 +411,14 @@ export class Link {
     if (first) this.publishStatus();
   }
 
-  private async flushFirestore() {
-    if (this.closed || !this.fsWrite) return;
+  private async flushRelay() {
+    if (this.closed || !this.relayWrite) return;
     // Fast while somebody still needs the help; a slow heartbeat once nobody
     // does, so the relay stays warm without costing much. Never off outright —
     // that is exactly the gap the old gated version fell into.
-    const interval = this.needsRelay() ? FS_ACTIVE_MS : FS_IDLE_MS;
+    const interval = this.needsRelay() ? RELAY_ACTIVE_MS : RELAY_IDLE_MS;
     const now = Date.now();
-    if (now - this.lastFsWrite < interval) return;
+    if (now - this.lastRelayWrite < interval) return;
 
     const batch: NetMessage[] = [];
     if (this.pendingState) batch.push(this.pendingState);
@@ -389,11 +440,11 @@ export class Link {
     }
     this.relayProbes.clear();
 
-    this.lastFsWrite = now;
+    this.lastRelayWrite = now;
     try {
-      await this.fsWrite(batch, ++this.relaySeq);
+      await this.relayWrite(batch, ++this.relaySeq);
     } catch (err) {
-      console.error('[link] Firestore relay write failed:', err);
+      console.error('[link] RTDB relay write failed:', err);
     }
   }
 }

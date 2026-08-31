@@ -94,7 +94,7 @@ export default function InviteListener() {
             initial={{ opacity: 0, x: 50, scale: 0.9 }}
             animate={{ opacity: 1, x: 0, scale: 1 }}
             exit={{ opacity: 0, scale: 0.9, y: -20 }}
-            className="glass-solid p-4 rounded-2xl shadow-2xl border border-primary/50 relative overflow-hidden"
+            className="glass-solid bg-[#161626] p-4 rounded-2xl shadow-2xl border border-primary/50 relative overflow-hidden"
           >
             <div className="absolute top-0 left-0 w-1 h-full bg-primary" />
             <div className="flex items-start gap-4">

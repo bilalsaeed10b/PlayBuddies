@@ -2,7 +2,7 @@
   "id": "quoridor",
   "name": "Quoridor",
   "subtitle": "Run the gauntlet, build the maze",
-  "description": "A nine-by-nine board, one pawn each, and a fistful of walls. Step forward, back or sideways one square at a time and be the first to reach the far side — or spend a wall instead and make the crossing longer for somebody else. Nobody can ever be sealed in completely, so every wall is a detour, not a cage. Two players with ten walls each, or four with five, against bots, on one device, or online.",
+  "description": "Strategic maze board game. Race your pawn to the opposite side or place walls to block your opponents.",
   "category": "strategy",
   "minPlayers": 1,
   "maxPlayers": 4,

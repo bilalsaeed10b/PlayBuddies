@@ -279,6 +279,13 @@ body {
   border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
+.glass-solid {
+  background: rgba(22, 22, 38, 0.98);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
 
 .glow-purple {
   box-shadow: 0 0 40px rgba(139, 92, 246, 0.15),

@@ -2,7 +2,7 @@
   "id": "mini-golf",
   "name": "Mini Golf",
   "subtitle": "Top-down, one putt at a time",
-  "description": "A small green seen from directly above, a flag somewhere across it, and one ball each. Drag back from anywhere and let go — the further you pull, the harder it goes. Every hole is built fresh: a rectangle or a half-round, with bunkers to bog you down, ponds to avoid and blocks to bank off. Fewest strokes takes it. Play a quick round against the bot, share a device, or take three friends online.",
+  "description": "Top-down mini golf with procedural courses, water hazards, and obstacle banks. Drag and release to putt with the fewest strokes.",
   "category": "strategy",
   "minPlayers": 1,
   "maxPlayers": 4,

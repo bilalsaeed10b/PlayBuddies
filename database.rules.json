@@ -23,22 +23,18 @@
     },
     "signaling": {
       "$roomId": {
+        ".read": "auth != null",
         "$uid": {
+          ".write": "auth != null && auth.uid === $uid"
+        }
+      }
+    },
+    "lobbies": {
+      "$roomId": {
+        "updates": {
           ".read": "auth != null",
-          ".write": "auth != null && auth.uid === $uid",
-          "$peerId": {
-            "desc": {
-              ".validate": "newData.hasChildren(['type', 'sdp'])",
-              "type": { ".validate": "newData.isString() && newData.val().length <= 16" },
-              "sdp": { ".validate": "newData.isString() && newData.val().length <= 20000" },
-              "$other": { ".validate": false }
-            },
-            "candidates": {
-              "$candidateId": {
-                ".validate": "newData.isString() && newData.val().length <= 2000"
-              }
-            },
-            "$other": { ".validate": false }
+          "$uid": {
+            ".write": "auth != null && auth.uid === $uid"
           }
         }
       }
