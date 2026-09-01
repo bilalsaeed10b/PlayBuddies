@@ -221,6 +221,17 @@ export default function MatchView({
         setNotice(`${engineRef.current?.seats[seat]?.name ?? 'A player'} left. A bot is playing their ball.`);
         return;
       }
+      if (packet.t === 'hello') {
+        // Every client runs this, not just the host — same as `bye` above. A
+        // no-op if this seat was never handed to a bot, so a guest's very
+        // first `hello` (the ordinary case) costs nothing extra here.
+        const seat = seatOfUid.get(from);
+        if (seat === undefined) return;
+        const wasAdrift = engineRef.current?.seats[seat]?.control === 'ai';
+        engineRef.current?.reclaimControl(seat);
+        if (wasAdrift) setNotice(`${engineRef.current?.seats[seat]?.name ?? 'A player'} is back.`);
+        return;
+      }
       if (packet.t !== 'fire' && packet.t !== 'shot') return;
 
       // A turn doubles as a start packet. Each document holds exactly one write
@@ -278,6 +289,10 @@ export default function MatchView({
         // rules. Every green in the round is built from those three.
         if (config.isHost) {
           link.send({ t: 'start', n: Date.now(), seed: config.seed, first: config.first, r: rulesBits });
+        } else {
+          // Tells everyone this link is open, whether that is the very first
+          // time or a reconnect after a real `bye`. See HelloPacket.
+          link.send({ t: 'hello', n: Date.now() });
         }
 
         // `pagehide` fires with `persisted: false` on plenty of things that

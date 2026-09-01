@@ -190,10 +190,22 @@ export interface ByePacket {
   n: number;
 }
 
+/**
+ * Sent once, right after a guest's link opens, so a ball handed to a bot by a
+ * `bye` gets handed back the moment its player actually returns — reload,
+ * reopened tab, whatever the drop was. `bye` used to be one-way: nothing ever
+ * told the round the seat's owner was back, so a reconnected player stayed a
+ * spectator on a bot for the rest of it.
+ */
+export interface HelloPacket {
+  t: 'hello';
+  n: number;
+}
+
 /** Written on arrival to clear whatever the last round left in the document. */
 export interface IdlePacket {
   t: 'idle';
   n: number;
 }
 
-export type NetPacket = StartPacket | FirePacket | ShotPacket | ByePacket | IdlePacket;
+export type NetPacket = StartPacket | FirePacket | ShotPacket | ByePacket | HelloPacket | IdlePacket;
