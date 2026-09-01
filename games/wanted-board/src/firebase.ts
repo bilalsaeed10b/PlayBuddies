@@ -16,7 +16,7 @@ const firebaseConfig = {
   storageBucket: env.VITE_FIREBASE_STORAGE_BUCKET ?? 'playbuddies-556cd.firebasestorage.app',
   messagingSenderId: env.VITE_FIREBASE_MESSAGING_SENDER_ID ?? '741516901024',
   appId: env.VITE_FIREBASE_APP_ID ?? '1:741516901024:web:6ee715ebc6438dfb1f27c5',
-  databaseURL: env.VITE_FIREBASE_DATABASE_URL ?? 'https://playbuddies-556cd-default-rtdb.firebaseio.com',
+  databaseURL: env.VITE_FIREBASE_DATABASE_URL ?? 'https://playbuddies-556cd-default-rtdb.asia-southeast1.firebasedatabase.app',
 };
 
 const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);

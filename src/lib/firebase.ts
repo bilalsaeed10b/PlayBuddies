@@ -16,7 +16,7 @@ const firebaseConfig = {
   appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID ?? "1:741516901024:web:6ee715ebc6438dfb1f27c5",
   databaseURL:
     process.env.NEXT_PUBLIC_FIREBASE_DATABASE_URL ??
-    "https://playbuddies-556cd-default-rtdb.firebaseio.com",
+    "https://playbuddies-556cd-default-rtdb.asia-southeast1.firebasedatabase.app",
 };
 
 // getApps() guards against re-initialising across hot reloads.
