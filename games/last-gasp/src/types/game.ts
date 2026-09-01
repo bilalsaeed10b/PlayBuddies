@@ -138,6 +138,41 @@ export type Action =
 /** One round's actions, in the order they were played. */
 export type RoundHistory = Action[];
 
+/**
+ * The history, flattened for Firestore.
+ *
+ * Firestore refuses any document containing an array directly inside another
+ * array, and a list of rounds where each round is itself a list of actions is
+ * exactly that. `setDoc` rejected the entire write with "Nested arrays are
+ * not supported" — so the host's state packet never landed, no guess ever
+ * reached anybody, and the retry path surfaced it as "that move did not reach
+ * the other players": true, but blaming the network for what was really the
+ * shape of the data.
+ *
+ * On the wire it is one flat run of actions plus each round's length. An
+ * array of plain objects is fine; it is only array-inside-array that is not.
+ */
+export function packHistory(rounds: RoundHistory[]): { h: Action[]; hc: number[] } {
+  const h: Action[] = [];
+  const hc: number[] = [];
+  for (const round of rounds) {
+    hc.push(round.length);
+    for (const action of round) h.push(action);
+  }
+  return { h, hc };
+}
+
+export function unpackHistory(h: Action[] | undefined, hc: number[] | undefined): RoundHistory[] {
+  if (!Array.isArray(h) || !Array.isArray(hc)) return [];
+  const rounds: RoundHistory[] = [];
+  let at = 0;
+  for (const length of hc) {
+    rounds.push(h.slice(at, at + length));
+    at += length;
+  }
+  return rounds;
+}
+
 // ── the wire ───────────────────────────────────────────────────────────────
 
 /**
@@ -194,8 +229,10 @@ export interface StatePacket {
   t: 'state';
   n: number;
   s: number;
-  /** Every round's actions, oldest round first. */
-  h: RoundHistory[];
+  /** Every round's actions, oldest round first, flattened by `packHistory` — see there for why. */
+  h: Action[];
+  /** How many actions each round in `h` occupies. */
+  hc: number[];
   /** The host's rules, stamped on every write so a late joiner can still build the match. */
   r?: number;
   /** The seed, stamped for the same reason. */

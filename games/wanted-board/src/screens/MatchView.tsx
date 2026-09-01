@@ -24,7 +24,7 @@ import { botChoice } from '../engine/ai';
 import { BALANCE, CARDS, PLACES, SEAT_COLORS } from '../game/rules';
 import type { CardId } from '../game/rules';
 import { audioService } from '../services/audio';
-import { decodeChoice, encodeChoice, packRules } from '../types/game';
+import { decodeChoice, encodeChoice, packHistory, packRules, unpackHistory } from '../types/game';
 import type { Choice, EncodedRound, GameSettings, MatchRules, NetPacket } from '../types/game';
 import type { TurnLink } from '../net/turnLink';
 import { createLogger } from '@shared/log/logger';
@@ -229,7 +229,7 @@ export default function MatchView({
       t: 'round',
       n: Date.now(),
       s: config.seed,
-      h: engine.history,
+      ...packHistory(engine.history),
       lk: 0,
       r: rulesBits,
       seed: config.seed,
@@ -256,7 +256,7 @@ export default function MatchView({
           t: 'round',
           n: Date.now(),
           s: config.seed,
-          h: engine.history,
+          ...packHistory(engine.history),
           lk: mask,
           r: rulesBits,
           seed: config.seed,
@@ -294,17 +294,18 @@ export default function MatchView({
       }
 
       if (packet.t === 'round') {
-        log.info('wire:recv-round', { from, rounds: packet.h?.length, locked: packet.lk });
+        const rounds = unpackHistory(packet.h, packet.hc);
+        log.info('wire:recv-round', { from, rounds: rounds.length, locked: packet.lk });
         if (config.isHost) return;
         // The host stamps its real seed on every round packet too, so a guest
         // that missed (or raced) the `start` packet still catches up here.
         if (typeof packet.seed === 'number') effectiveSeedRef.current = packet.seed;
         if (packet.s !== effectiveSeedRef.current) return;
         setLockedMask(packet.lk ?? 0);
-        if (packet.h.length <= engine.history.length) return;
+        if (rounds.length <= engine.history.length) return;
         // Replay rather than patch: a guest that missed three packets catches
         // up by replaying three rounds, and there is no other path to get right.
-        engine.replay(packet.h);
+        engine.replay(rounds);
         repaint();
         playReveal();
         return;

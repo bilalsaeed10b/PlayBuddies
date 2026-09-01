@@ -119,6 +119,42 @@ export function decodeChoice(code: number): Choice {
 /** One resolved round: every seat's choice, in seat order. */
 export type EncodedRound = number[];
 
+/**
+ * The history, flattened for Firestore.
+ *
+ * Firestore refuses any document containing an array directly inside another
+ * array, and a list of rounds where each round is itself a list of choices is
+ * exactly that. `setDoc` rejected the whole write, every time, with "Nested
+ * arrays are not supported" — so the host's round packet never landed and no
+ * guest ever saw a card resolve. The retry path then reported it as "that
+ * move did not reach the other players", which was true but pointed at the
+ * network rather than at the shape of the data.
+ *
+ * So it goes on the wire as one flat run of numbers plus the length of each
+ * round, which is enough to cut it back up exactly. Both are single-level
+ * arrays, which Firestore is perfectly happy with.
+ */
+export function packHistory(rounds: EncodedRound[]): { h: number[]; hc: number[] } {
+  const h: number[] = [];
+  const hc: number[] = [];
+  for (const round of rounds) {
+    hc.push(round.length);
+    for (const value of round) h.push(value);
+  }
+  return { h, hc };
+}
+
+export function unpackHistory(h: number[] | undefined, hc: number[] | undefined): EncodedRound[] {
+  if (!Array.isArray(h) || !Array.isArray(hc)) return [];
+  const rounds: EncodedRound[] = [];
+  let at = 0;
+  for (const length of hc) {
+    rounds.push(h.slice(at, at + length));
+    at += length;
+  }
+  return rounds;
+}
+
 // ── the wire ───────────────────────────────────────────────────────────────
 
 /**
@@ -169,8 +205,10 @@ export interface RoundPacket {
   t: 'round';
   n: number;
   s: number;
-  /** Every resolved round, in order. */
-  h: EncodedRound[];
+  /** Every resolved round, in order, flattened by `packHistory` — see there for why. */
+  h: number[];
+  /** How many entries each round in `h` occupies. */
+  hc: number[];
   /**
    * Which seats have locked a card in for the round now in progress, as a bit
    * per seat. Pure UI: it drives "waiting on two players" without anybody

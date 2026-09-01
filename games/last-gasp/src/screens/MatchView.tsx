@@ -24,8 +24,8 @@ import type { RoundEvent, Seat } from '../engine/LastGaspEngine';
 import { botGuess, botVote, botWord, chainDelay, reactionDelay } from '../engine/ai';
 import { ALPHABET, BALANCE, PIECES, SEAT_COLORS, TEAM_COLORS } from '../game/rules';
 import { audioService } from '../services/audio';
-import { cleanWord, packRules } from '../types/game';
-import type { Action, GameSettings, MatchRules, NetPacket, RoundHistory } from '../types/game';
+import { cleanWord, packHistory, packRules, unpackHistory } from '../types/game';
+import type { Action, GameSettings, MatchRules, NetPacket } from '../types/game';
 import type { TurnLink } from '../net/turnLink';
 import { createLogger } from '@shared/log/logger';
 
@@ -131,7 +131,7 @@ export default function MatchView({
       t: 'state',
       n: Date.now(),
       s: config.seed,
-      h: engine.history,
+      ...packHistory(engine.history),
       r: rulesBits,
       seed: config.seed,
     });
@@ -210,7 +210,7 @@ export default function MatchView({
         if (config.isHost) return;
         if (typeof packet.seed === 'number') effectiveSeedRef.current = packet.seed;
         if (packet.s !== effectiveSeedRef.current) return;
-        const incoming = packet.h as RoundHistory[];
+        const incoming = unpackHistory(packet.h, packet.hc);
         const before = engine.events.length;
         engine.replay(incoming);
         for (const ev of engine.events.slice(before)) soundFor(ev);
