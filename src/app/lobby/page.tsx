@@ -42,6 +42,7 @@ import {
   X,
   MoreVertical,
   UserPlus,
+  UserX,
   Search,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -75,6 +76,7 @@ function LobbyContent() {
   const [lobby, setLobby] = useState<Lobby | null>(null);
   const [messages, setMessages] = useState<LobbyMessage[]>([]);
   const [lookupFailed, setLookupFailed] = useState(false);
+  const [wasKicked, setWasKicked] = useState(false);
   // A malformed code is knowable during render — no need to round-trip it.
   const notFound = lookupFailed || (Boolean(roomId) && !isValidRoomCode(roomId));
   const [copied, setCopied] = useState(false);
@@ -189,6 +191,12 @@ function LobbyContent() {
 
     const roomRef = doc(db, "lobbies", roomId);
     let cancelled = false;
+    // Flips true the first time a snapshot actually shows us as a member.
+    // `join()` writes asynchronously, so the very first snapshot or two can
+    // legitimately arrive before it lands — without this guard, that window
+    // would read identically to being kicked and bounce a player who is
+    // mid-join right back out.
+    let wasMember = false;
 
     const join = async () => {
       const profile: LobbyPlayer = {
@@ -243,8 +251,24 @@ function LobbyContent() {
       roomRef,
       (snapshot) => {
         if (cancelled) return;
-        if (snapshot.exists()) setLobby(snapshot.data() as Lobby);
-        else setLookupFailed(true);
+        if (!snapshot.exists()) {
+          setLookupFailed(true);
+          return;
+        }
+        const data = snapshot.data() as Lobby;
+        const amMember = Boolean(data.players?.[user.uid]);
+        if (amMember) {
+          wasMember = true;
+        } else if (wasMember) {
+          // Was here a moment ago, isn't now, and the room itself is still
+          // there: the host removed us. A missing room entirely is handled
+          // above, by `!snapshot.exists()` — this is specifically the
+          // "still a room, just not one with me in it anymore" case.
+          setWasKicked(true);
+          forgetLobby();
+          return;
+        }
+        setLobby(data);
       },
       (e) => {
         console.error("Lobby listener failed", e);
@@ -440,19 +464,25 @@ function LobbyContent() {
   const selectGame = async (gameId: string) => {
     if (!isHost) return;
     try {
-      // `fishIndex`/`role`/`isReady` are the one small per-player schema every
-      // game shares (see the security rules), so a face picked in one game
-      // was still sitting in the doc when the next game's picker read it --
-      // showing up there as somebody else's fish already locked in, in
-      // whatever unrelated skin happens to share that index. Games differ
-      // entirely on what index N means, so a value from the last game is
-      // never valid for the next one and has to be cleared here, the one
-      // place a game change actually happens, rather than in every game.
-      const reset: Record<string, ReturnType<typeof deleteField>> = {};
+      // `fishIndex`/`role` are the small per-player schema every game shares
+      // (see the security rules), so a face picked in one game was still
+      // sitting in the doc when the next game's picker read it -- showing up
+      // there as somebody else's fish already locked in, in whatever
+      // unrelated skin happens to share that index. Games differ entirely on
+      // what index N means, so a value from the last game is never valid for
+      // the next one and has to be cleared here, the one place a game change
+      // actually happens, rather than in every game.
+      //
+      // isReady is reset to true, not cleared. Ready is opt-out everywhere
+      // else in this file (see join()) -- deleting it here made it read as
+      // falsy instead, so every game switch silently un-readied the whole
+      // room with nothing on screen explaining why the host suddenly could
+      // not start.
+      const reset: Record<string, ReturnType<typeof deleteField> | true> = {};
       for (const uid of Object.keys(lobby?.players ?? {})) {
         reset[`players.${uid}.fishIndex`] = deleteField();
         reset[`players.${uid}.role`] = deleteField();
-        reset[`players.${uid}.isReady`] = deleteField();
+        reset[`players.${uid}.isReady`] = true;
       }
       await updateDoc(doc(db, "lobbies", roomId), { gameId, ...reset });
     } catch (e) {
@@ -593,6 +623,51 @@ function LobbyContent() {
   };
 
   /**
+   * Host only: hand the crown to someone else already in the room.
+   *
+   * Permitted by the existing rules with no changes needed — the host branch
+   * in firestore.rules has no restriction on which fields it can touch, only
+   * on who is allowed to write (`isLobbyHost()`), so this is exactly as
+   * legitimate a host write as picking the game already was. The mover loses
+   * host the instant this lands; there's no separate "confirm" step because
+   * undoing it is just the new host doing the same thing back.
+   */
+  const makeHost = async (targetUid: string, name: string) => {
+    if (!isHost) return;
+    setCrewMenuFor(null);
+    try {
+      await updateDoc(doc(db, "lobbies", roomId), { hostId: targetUid });
+    } catch (e) {
+      console.error("Error transferring host:", e);
+      setCrewNotice(`Couldn't make ${name} host.`);
+      setTimeout(() => setCrewNotice(""), 2500);
+    }
+  };
+
+  /**
+   * Host only: remove someone from the room outright.
+   *
+   * Same write shape as a normal self-leave (`players.{uid}` deleted) — the
+   * kicked player's own listener notices they've disappeared from a room that
+   * still exists and treats it as being kicked. See the `wasKicked` branch in
+   * the room snapshot handler above.
+   */
+  const kickPlayer = async (targetUid: string, name: string) => {
+    if (!isHost) return;
+    setCrewMenuFor(null);
+    try {
+      await updateDoc(doc(db, "lobbies", roomId), {
+        [`players.${targetUid}`]: deleteField(),
+      });
+      setCrewNotice(`${name} was removed from the lobby.`);
+    } catch (e) {
+      console.error("Error kicking player:", e);
+      setCrewNotice(`Couldn't remove ${name}.`);
+    }
+    setTimeout(() => setCrewNotice(""), 2500);
+  };
+
+  /**
    * While the game owns the screen, nothing behind it should scroll or rotate.
    * On a phone this is the difference between "bigger" and "fullscreen".
    */
@@ -618,6 +693,23 @@ function LobbyContent() {
       }
     };
   }, [isPseudoFull]);
+
+  if (wasKicked) {
+    return (
+      <div className="min-h-screen bg-background flex flex-col items-center justify-center gap-4 px-6 text-center">
+        <h2 className="text-2xl font-bold text-white">You were removed from this lobby</h2>
+        <p className="text-text-secondary max-w-sm">
+          The host removed you. Ask them for a fresh invite if you want back in.
+        </p>
+        <button
+          onClick={() => router.push("/dashboard")}
+          className="px-6 py-3 bg-primary hover:bg-primary/90 text-white font-bold rounded-2xl transition-colors"
+        >
+          Back to dashboard
+        </button>
+      </div>
+    );
+  }
 
   if (notFound) {
     return (
@@ -890,7 +982,18 @@ function LobbyContent() {
                           initial={{ opacity: 0, x: -20 }}
                           animate={{ opacity: 1, x: 0 }}
                           exit={{ opacity: 0, x: -20 }}
-                          className="relative flex items-center justify-between p-3 rounded-xl glass border border-white/5"
+                          // Ready/not-ready used to be a bare checkmark that only
+                          // ever appeared, never the reverse — a room stuck on
+                          // "why can't I start" had nothing on screen naming who
+                          // it was waiting on. A glowing border does double duty:
+                          // green-and-lit reads as fine at a glance, red-and-lit
+                          // reads as "this one" without having to scan for a tiny
+                          // icon.
+                          className={`relative flex items-center justify-between p-3 rounded-xl glass border transition-colors duration-300 ${
+                            player.isReady
+                              ? "border-success/50 shadow-[0_0_16px_-2px_var(--color-success)]"
+                              : "border-error/60 shadow-[0_0_16px_-2px_var(--color-error)]"
+                          }`}
                         >
                           <div className="flex items-center gap-3 min-w-0">
                             <Avatar uid={player.uid} src={player.photoURL} name={player.displayName} />
@@ -907,11 +1010,17 @@ function LobbyContent() {
                             </div>
                           </div>
                           <div className="flex items-center gap-1 shrink-0">
-                            {player.isReady && (
-                              <span className="text-success" title="Ready">
-                                <Check size={18} />
-                              </span>
-                            )}
+                            <span
+                              className={`flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
+                                player.isReady
+                                  ? "bg-success/15 text-success"
+                                  : "bg-error/15 text-error"
+                              }`}
+                              title={player.isReady ? "Ready" : "Not ready"}
+                            >
+                              {player.isReady ? <Check size={12} /> : <X size={12} />}
+                              {player.isReady ? "Ready" : "Not ready"}
+                            </span>
                             {!isSelf && (
                               <button
                                 onClick={() =>
@@ -944,6 +1053,23 @@ function LobbyContent() {
                                     <UserPlus size={14} /> Add Friend
                                   </button>
                                 )}
+                                {isHost && (
+                                  <>
+                                    <div className="my-1 border-t border-white/10" />
+                                    <button
+                                      onClick={() => makeHost(player.uid, player.displayName)}
+                                      className="w-full flex items-center gap-2 px-3 py-2 text-xs font-bold text-white hover:bg-white/10 transition-colors"
+                                    >
+                                      <Crown size={14} className="text-yellow-400" /> Make Host
+                                    </button>
+                                    <button
+                                      onClick={() => kickPlayer(player.uid, player.displayName)}
+                                      className="w-full flex items-center gap-2 px-3 py-2 text-xs font-bold text-error hover:bg-error/10 transition-colors"
+                                    >
+                                      <UserX size={14} /> Kick
+                                    </button>
+                                  </>
+                                )}
                               </div>
                             </>
                           )}
@@ -957,13 +1083,13 @@ function LobbyContent() {
               {lobby.status !== "playing" && me && (
                 <button
                   onClick={toggleReady}
-                  className={`mt-4 w-full py-3 rounded-xl font-bold text-sm transition-colors ${
+                  className={`mt-4 w-full py-3 rounded-xl font-bold text-sm transition-colors duration-300 border ${
                     me.isReady
-                      ? "bg-success/20 text-success border border-success/40"
-                      : "bg-white/10 text-white hover:bg-white/20"
+                      ? "bg-success/20 text-success border-success/40 shadow-[0_0_18px_-4px_var(--color-success)]"
+                      : "bg-error/20 text-error border-error/40 shadow-[0_0_18px_-4px_var(--color-error)]"
                   }`}
                 >
-                  {me.isReady ? "Ready ✓" : "Not ready. Click when set"}
+                  {me.isReady ? "Ready ✓ — click to un-ready" : "Not ready — click when set"}
                 </button>
               )}
             </div>
