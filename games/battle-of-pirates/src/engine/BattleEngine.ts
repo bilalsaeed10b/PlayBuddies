@@ -640,6 +640,24 @@ export class BattleEngine {
     if (this.phase === 'aim' && this.turn === i) this.botTimer = BALANCE.BOT_THINK;
   }
 
+  /**
+   * The other half of handOverToAI: a captain who came back gets their wheel
+   * back, even mid-match.
+   *
+   * Deliberately does not check whose turn it is. A bot may already be
+   * mid-think for this ship when the real captain returns — the check inside
+   * `update()`'s bot-decision branch is against `ship.control`, so flipping
+   * it here is enough to stop the bot from acting again; there is nothing
+   * further to unwind because nothing has been decided yet, only queued.
+   */
+  reclaimControl(i: number) {
+    const ship = this.ships[i];
+    if (ship.control !== 'ai') return;
+    ship.control = 'remote';
+    ship.name = ship.name.replace(/ \(adrift\)$/, '');
+    this.botTimer = 0;
+  }
+
   // -- simulation -------------------------------------------------------------
 
   update(dt: number, decide?: (ship: number) => Shot) {

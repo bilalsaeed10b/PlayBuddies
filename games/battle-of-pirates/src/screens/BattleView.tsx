@@ -267,6 +267,19 @@ export default function BattleView({
         setNotice(`${config.seats[ship]?.name ?? 'A captain'} abandoned ship. A bot has the wheel.`);
         return;
       }
+      if (packet.t === 'hello') {
+        // Every client runs this, not just the host — same as `bye` above.
+        // A no-op if this ship was never handed to a bot, so a guest's very
+        // first `hello` (the ordinary case) costs nothing extra here.
+        const ship = shipOfUid.get(from);
+        if (ship === undefined) return;
+        const wasAdrift = engineRef.current?.ships[ship]?.control === 'ai';
+        engineRef.current?.reclaimControl(ship);
+        if (wasAdrift) {
+          setNotice(`${config.seats[ship]?.name ?? 'A captain'} is back at the wheel.`);
+        }
+        return;
+      }
       if (packet.t !== 'fire' && packet.t !== 'shot') return;
       // A turn doubles as a start packet. The host's document holds exactly one
       // write at a time, so a guest that arrives after the opening shot finds a
@@ -336,6 +349,10 @@ export default function BattleView({
             first: config.first,
             r: rulesBits,
           });
+        } else {
+          // Tells the host this link is open, whether that is the very first
+          // time or a reconnect after a real `bye`. See HelloPacket.
+          link.send({ t: 'hello', n: Date.now() });
         }
 
         // A tab going into the browser's back/forward cache -- the screen

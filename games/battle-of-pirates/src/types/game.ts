@@ -322,10 +322,25 @@ export interface ByePacket {
   n: number;
 }
 
+/**
+ * Sent once, right after a guest's link opens, so the host can tell a
+ * reconnect apart from the connection simply settling for the first time.
+ *
+ * `bye` hands a ship to a bot; nothing used to hand it back. A captain who
+ * came back — reloaded, reopened the tab, whatever the drop actually was —
+ * stayed a spectator on their own ship for the rest of the match, watching a
+ * bot fight in their place with no way to take the wheel back. This is that
+ * "I'm here" the host was missing.
+ */
+export interface HelloPacket {
+  t: 'hello';
+  n: number;
+}
+
 /** Written on arrival to clear whatever the last match left in the document. */
 export interface IdlePacket {
   t: 'idle';
   n: number;
 }
 
-export type NetPacket = StartPacket | FirePacket | ShotPacket | ByePacket | IdlePacket;
+export type NetPacket = StartPacket | FirePacket | ShotPacket | ByePacket | HelloPacket | IdlePacket;
