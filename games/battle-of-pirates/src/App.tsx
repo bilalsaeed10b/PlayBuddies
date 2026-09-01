@@ -146,12 +146,20 @@ export default function App() {
    * arrive on the wire.
    */
   const [rules, setRules] = useState<MatchRules>(() => {
-    const saved = localStorage.getItem('pirates_rules');
+    // Key bumped once, deliberately. Aim arc is meant to be on for a fresh
+    // player and only off if someone actually chose that -- but a device that
+    // had ever toggled it off under the old key kept getting that `false`
+    // forever, merged straight over the true default on every load, with
+    // nothing on screen suggesting a stale preference was the reason a
+    // beginner-friendly game suddenly stopped being one. A new key means
+    // every device starts clean on the documented default again; the very
+    // next toggle here writes to `_v2` and persists exactly as before.
+    const saved = localStorage.getItem('pirates_rules_v2');
     return saved ? { ...DEFAULT_RULES, ...JSON.parse(saved) } : DEFAULT_RULES;
   });
   const [showRules, setShowRules] = useState(false);
   useEffect(() => {
-    localStorage.setItem('pirates_rules', JSON.stringify(rules));
+    localStorage.setItem('pirates_rules_v2', JSON.stringify(rules));
   }, [rules]);
 
   // The coin balance is shared with the rest of PlayBuddies on purpose. Coins
