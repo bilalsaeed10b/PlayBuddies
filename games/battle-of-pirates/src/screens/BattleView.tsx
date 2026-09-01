@@ -105,6 +105,24 @@ export default function BattleView({
   const [hp, setHp] = useState<number[]>(() =>
     config.seats.map((seat) => Math.round(BALANCE.MAX_HP * hullAt(seat.hull).hp)),
   );
+  /**
+   * Full health per hull, taken from the engine rather than from the lobby.
+   *
+   * The numerator of the health bar comes from the engine and the denominator
+   * used to come from `config.seats`, which App rebuilds from every lobby
+   * snapshot. The engine is deliberately *not* rebuilt when that changes --
+   * it would reset a live battle -- so any late-arriving change to who is in
+   * which berth left the two halves of the same bar describing two different
+   * ships, and a Man-o'-War reading as a Sloop at 68% health it had not lost.
+   * One source, and it is the one actually running the fight.
+   */
+  const [maxHp, setMaxHp] = useState<number[]>(() =>
+    config.seats.map((seat) => Math.round(BALANCE.MAX_HP * hullAt(seat.hull).hp)),
+  );
+  /** Class names, from the same source as `maxHp` and for the same reason. */
+  const [hullNames, setHullNames] = useState<string[]>(() =>
+    config.seats.map((seat) => hullAt(seat.hull).name),
+  );
   /** Index into  of whoever has the helm, not a side. */
   const [turn, setTurn] = useState<number>(0);
   const [phase, setPhase] = useState<Phase>('deal');
@@ -495,6 +513,7 @@ export default function BattleView({
     // nothing costs no React work at all.
     const shown = {
       hp: '' as string,
+      maxHp: '' as string,
       turn: -1 as number,
       phase: '' as string,
       selected: '' as string,
@@ -545,6 +564,14 @@ export default function BattleView({
       if (hpKey !== shown.hp) {
         shown.hp = hpKey;
         setHp(engine.hp);
+      }
+      // Only ever changes when a new engine is built, so this compares a
+      // joined string like the rest rather than pushing a render per frame.
+      const maxKey = engine.ships.map((sh) => `${sh.hull}:${sh.maxHp}`).join(',');
+      if (maxKey !== shown.maxHp) {
+        shown.maxHp = maxKey;
+        setMaxHp(engine.ships.map((sh) => Math.round(sh.maxHp)));
+        setHullNames(engine.ships.map((sh) => hullAt(sh.hull).name));
       }
       if (engine.turn !== shown.turn) {
         log.info('turn:change', {
@@ -750,8 +777,8 @@ export default function BattleView({
                   key={i}
                   name={seat.name}
                   hp={hp[i] ?? 0}
-                  maxHp={BALANCE.MAX_HP * hullAt(seat.hull).hp}
-                  hull={hullAt(seat.hull).name}
+                  maxHp={maxHp[i] ?? BALANCE.MAX_HP}
+                  hull={hullNames[i] ?? hullAt(seat.hull).name}
                   team={team}
                   mine={localShips.has(i)}
                   active={turn === i && !over}

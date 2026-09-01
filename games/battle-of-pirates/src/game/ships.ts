@@ -291,11 +291,7 @@ function drawCannon(ctx: CanvasRenderingContext2D, d: ShipDraw) {
   ctx.fill();
 
   ctx.rotate(d.aim ?? (d.facing > 0 ? -0.5 : Math.PI + 0.5));
-  const barrel = ctx.createLinearGradient(0, -9, 0, 9);
-  barrel.addColorStop(0, '#6b7280');
-  barrel.addColorStop(0.45, '#374151');
-  barrel.addColorStop(1, '#111827');
-  ctx.fillStyle = barrel;
+  ctx.fillStyle = barrelGradient(ctx);
   ctx.beginPath();
   ctx.moveTo(-14, -11);
   ctx.lineTo(52, -8);
@@ -732,6 +728,34 @@ function rigTattered(ctx: CanvasRenderingContext2D, skin: ShipSkin, accent: stri
 }
 
 // -- the hull ---------------------------------------------------------------
+
+/**
+ * The barrel's steel, built once per canvas.
+ *
+ * The hull is baked into a sprite; the barrel is not, because it turns. That
+ * left this gradient being rebuilt for every ship on every frame -- a fixed
+ * three-stop ramp between two fixed points, recomputed a few hundred times a
+ * second to produce the same ramp.
+ *
+ * Keyed on the context rather than held in a single module-level variable: a
+ * CanvasGradient belongs to the context that made it, and the ship portraits
+ * in the menu each draw onto a canvas of their own.
+ */
+const barrelCache = new WeakMap<CanvasRenderingContext2D, CanvasGradient>();
+
+function barrelGradient(ctx: CanvasRenderingContext2D): CanvasGradient {
+  let g = barrelCache.get(ctx);
+  if (!g) {
+    // Local to the barrel's own rotated frame, so the same ramp is correct
+    // whichever way it is pointing and wherever the ship has drifted to.
+    g = ctx.createLinearGradient(0, -9, 0, 9);
+    g.addColorStop(0, '#6b7280');
+    g.addColorStop(0.45, '#374151');
+    g.addColorStop(1, '#111827');
+    barrelCache.set(ctx, g);
+  }
+  return g;
+}
 
 function paintBody(ctx: CanvasRenderingContext2D, skin: ShipSkin, accent: string) {
   const spec = RIGS[skin.rig];

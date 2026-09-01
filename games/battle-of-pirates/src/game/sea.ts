@@ -318,6 +318,37 @@ function foulWeather(ctx: CanvasRenderingContext2D, arena: Arena) {
  * find, and it finds them mid-flight. This is a closed-form position from the
  * clock, so it costs one loop and allocates nothing.
  */
+/**
+ * The rain field's fixed properties: three numbers per drop, built once.
+ *
+ * These used to be drawn from a fresh `mulberry32` *inside* the draw loop,
+ * which meant a generator closure and four calls into it for every drop on
+ * every frame -- some seven thousand short-lived closures a second at sixty
+ * frames, all of them producing the identical numbers they produced last
+ * frame. Only the vertical position actually moves, and that is a multiply.
+ */
+let rainField: Float32Array | null = null;
+let rainCount = 0;
+
+/** Four numbers per drop: fall speed, streak length, column, start offset. */
+const RAIN_STRIDE = 4;
+
+function buildRain(count: number, w: number, h: number) {
+  const rnd = mulberry32(SEED ^ 0x7a1f0d);
+  const field = new Float32Array(count * RAIN_STRIDE);
+  for (let i = 0; i < count; i++) {
+    field[i * RAIN_STRIDE] = 900 + rnd() * 700;
+    field[i * RAIN_STRIDE + 1] = 34 + rnd() * 46;
+    field[i * RAIN_STRIDE + 2] = rnd() * w;
+    // Its own number rather than reusing the column: the drawn x depends on
+    // the height, so deriving the height from the column too would tie the
+    // two together and comb the field into diagonal ranks.
+    field[i * RAIN_STRIDE + 3] = rnd() * (h + 200);
+  }
+  rainField = field;
+  rainCount = count;
+}
+
 export function drawWeather(
   ctx: CanvasRenderingContext2D,
   arena: Arena,
@@ -327,22 +358,25 @@ export function drawWeather(
 ) {
   if (count <= 0) return;
   const { w, h } = arena;
+  if (!rainField || rainCount !== count) buildRain(count, w, h);
+  const field = rainField as Float32Array;
+
   // Rain leans with the wind, and hard: near-vertical rain in a gale that is
   // visibly pushing the shot sideways looks like two different weathers.
   const lean = clamp(gust / 210, -1, 1) * 0.55;
+  const span = h + 200;
   ctx.save();
   ctx.strokeStyle = 'rgba(196, 224, 236, 0.3)';
   ctx.lineWidth = 2;
   ctx.lineCap = 'round';
   ctx.beginPath();
   for (let i = 0; i < count; i++) {
-    const rnd = mulberry32(SEED + i * 2654435761);
-    const speed = 900 + rnd() * 700;
-    const len = 34 + rnd() * 46;
-    const x0 = rnd() * w;
+    const speed = field[i * RAIN_STRIDE];
+    const len = field[i * RAIN_STRIDE + 1];
+    const x0 = field[i * RAIN_STRIDE + 2];
     // Wrapped rather than respawned, so a drop leaving the bottom is the
     // same drop arriving at the top and the field never thins out.
-    const y = ((rnd() * h + clock * speed) % (h + 200)) - 100;
+    const y = ((field[i * RAIN_STRIDE + 3] + clock * speed) % span) - 100;
     const x = (x0 + y * lean + w) % w;
     ctx.moveTo(x, y);
     ctx.lineTo(x - len * lean, y + len);

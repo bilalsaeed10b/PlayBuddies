@@ -162,6 +162,15 @@ export interface FeedEntry {
   tone: CallTone;
   life: number;
   max: number;
+  /**
+   * Rendered width, measured on the line's first frame and kept.
+   *
+   * `measureText` lays the string out; the text and the font are both fixed
+   * for the life of a line, so measuring all five of them again on every
+   * frame was laying out the same sentences sixty times a second to arrive
+   * at the same five numbers.
+   */
+  w?: number;
 }
 
 /**
@@ -263,6 +272,25 @@ export class BattleEngine {
 
   /** What the shot currently in the air has done so far. Null between turns. */
   private tally: ShotTally | null = null;
+
+  /** This tick's waterline per hull. See `shipY`. */
+  private bobY: number[] = [];
+  /** Round-robin cursor for reusing a live particle once the cap is reached. */
+  private recycle = 0;
+  /** Cached letterbox gradient, and the canvas height it was built for. */
+  private bg: CanvasGradient | null = null;
+  private bgH = -1;
+  /**
+   * Back rows first, so a shallower hull draws over a deeper one.
+   *
+   * Fixed for the whole battle rather than re-sorted every frame: a row sits
+   * 210px deeper than the one in front of it and the bob is ±10, so the bob
+   * can never reorder two rows, and two hulls sharing a row sit at exactly
+   * the same waterline and are separated horizontally instead. This used to
+   * allocate an array and run a comparison sort per frame to arrive at the
+   * same answer it arrived at last frame.
+   */
+  private drawOrder: number[] = [];
 
   /**
    * This battle's shooting, for the captain's log.
@@ -399,6 +427,15 @@ export class BattleEngine {
     // `first` names the side that opens; the hull that actually fires is that
     // side's front rank.
     this.turn = Math.max(0, this.ships.findIndex((s) => s.team === cfg.first));
+    // Before the first update, and therefore before the opening deal or the
+    // first frame can ask where a hull is sitting.
+    this.bobY = this.ships.map(() => 0);
+    this.settleBob();
+    // Stable sort, so hulls sharing a row keep engine order and the two
+    // clients draw the same picture.
+    this.drawOrder = this.ships
+      .map((_, i) => i)
+      .sort((a, b) => this.waterLevelFor(a) - this.waterLevelFor(b));
 
     const rnd = this.rngFor(0);
     for (const ship of this.ships) {
@@ -537,10 +574,28 @@ export class BattleEngine {
   // the same number and the distinction did not exist; with six hulls it is
   // the difference between aiming at a ship and aiming at a side.
 
-  /** Waterline the hull is riding on this instant. The bob is real, not paint. */
+  /**
+   * Waterline the hull is riding on this instant. The bob is real, not paint.
+   *
+   * Read from a table refreshed once per `update`, which is exact rather than
+   * an approximation: `clock` is only ever advanced in `update`, so every
+   * caller inside one tick -- the ten physics steps, the collision boxes, the
+   * bot's solver, the whole render -- was recomputing the same sine from the
+   * same input. In the worst case that is six ships against five grapeshot
+   * pellets at 120Hz, which is some seven thousand identical trig calls a
+   * second on a phone that has better things to do.
+   */
   shipY(i: number): number {
-    const ship = this.ships[i];
-    return this.waterLevelFor(i) + Math.sin(this.clock * BALANCE.BOB_SPEED + ship.bobPhase) * BALANCE.BOB_AMP;
+    return this.bobY[i] ?? this.waterLevelFor(i);
+  }
+
+  /** Recompute the bob table. Called once per tick, before anything reads it. */
+  private settleBob() {
+    for (let i = 0; i < this.ships.length; i++) {
+      this.bobY[i] =
+        this.waterLevelFor(i) +
+        Math.sin(this.clock * BALANCE.BOB_SPEED + this.ships[i].bobPhase) * BALANCE.BOB_AMP;
+    }
   }
 
   /** The still-water level (no bob) a given hull's own row sits at. */
@@ -816,7 +871,16 @@ export class BattleEngine {
 
   update(dt: number, decide?: (ship: number) => Shot) {
     this.clock += dt;
+    this.settleBob();
     this.acc += Math.min(dt, 0.25);
+
+    // Smoke and splinters are decoration -- nothing in the simulation ever
+    // reads them -- so they run at the frame rate rather than inside the
+    // fixed 120Hz physics step, where a full cap of them was being advanced
+    // twice for every frame anybody actually saw. Halves the single largest
+    // loop in the game on a 60Hz display and quarters it on a phone holding
+    // 30, and the picture is identical.
+    this.stepParticles(Math.min(dt, 0.25));
 
     let steps = 0;
     while (this.acc >= STEP && steps < 10) {
@@ -926,15 +990,20 @@ export class BattleEngine {
       if (p.x < -260 || p.x > this.arena.w + 260 || p.age > BALANCE.MAX_FLIGHT) p.alive = false;
     }
 
-    if (this.phase === 'flight' && !this.projectiles.some((p) => p.alive)) {
+    let flying = false;
+    for (const p of this.projectiles) {
+      if (p.alive) {
+        flying = true;
+        break;
+      }
+    }
+    if (this.phase === 'flight' && !flying) {
       this.projectiles.length = 0;
       this.callShot();
       this.phase = 'impact';
       this.phaseTimer = BALANCE.IMPACT_HOLD;
       this.cfg.onPhase?.(this.phase);
     }
-
-    this.stepParticles(dt);
   }
 
   /**
@@ -1239,9 +1308,14 @@ export class BattleEngine {
    */
   private take(): Particle {
     if (this.particles.length >= PARTICLE_CAP) {
-      const oldest = this.particles.shift() as Particle;
-      this.particles.push(oldest);
-      return oldest;
+      // A rotating cursor rather than shift-then-push, which moved all four
+      // hundred and twenty entries for every single particle spawned once
+      // the cap was reached -- which is exactly when the game is busiest.
+      // Round-robin picks a different victim every time, which is what the
+      // shift was actually for.
+      const victim = this.particles[this.recycle % this.particles.length];
+      this.recycle = (this.recycle + 1) % PARTICLE_CAP;
+      return victim;
     }
     const p =
       this.pool.pop() ??
@@ -1517,7 +1591,14 @@ export class BattleEngine {
       const p = this.particles[i];
       p.life -= dt;
       if (p.life <= 0) {
-        this.particles.splice(i, 1);
+        // Swapped with the last and popped rather than spliced out. `splice`
+        // shifts every element after the hole, and a big explosion expires a
+        // few hundred of them within a few frames of each other. Nothing
+        // cares what order these are in -- they are drawn with the same
+        // blend and overlap each other anyway.
+        const last = this.particles.length - 1;
+        if (i !== last) this.particles[i] = this.particles[last];
+        this.particles.length = last;
         this.pool.push(p);
         continue;
       }
@@ -1598,6 +1679,11 @@ export class BattleEngine {
     const localSeaY = this.waterLevelFor(this.turn);
     for (let i = 0; i < dots * perDot; i++) {
       vy += BALANCE.GRAVITY * card.gravity * dt;
+      // The gale bends the guide exactly as much as it bends the ball. Without
+      // this the one aid the game gives a player pointed confidently at a
+      // place the shot could not reach -- and it did it only in a storm,
+      // which is precisely when the guide is being leaned on hardest.
+      vx += this.gust * dt;
       x += vx * dt;
       y += vy * dt;
       if (i % perDot === perDot - 1) out.push({ x, y });
@@ -1628,6 +1714,10 @@ export class BattleEngine {
     this.scale = Math.min(cssW / this.arena.w, cssH / this.arena.h) * this.dpr;
     this.offX = (canvas.width - this.arena.w * this.scale) / 2;
     this.offY = (canvas.height - this.arena.h * this.scale) / 2;
+    // The letterbox gradient is built from the transform above, so this is
+    // the one place it can go stale. A rotation can land on the same pixel
+    // height with a different scale, which a height check alone would miss.
+    this.bg = null;
 
     if (!this.backdrop) this.backdrop = bakeSea(this.arena, q.fancy, this.cfg.rules.storm);
   }
@@ -1646,14 +1736,25 @@ export class BattleEngine {
     // Letterbox bars, painted as sky above the horizon and sea below it
     // rather than a flat colour, so a wide desktop window reads as more sky
     // and more water instead of a stripe of a third colour top and bottom.
-    const horizon = clamp((this.offY + this.arena.seaY * this.scale) / canvas.height, 0.04, 0.96);
-    const bg = ctx.createLinearGradient(0, 0, 0, canvas.height);
-    bg.addColorStop(0, '#071b33');
-    bg.addColorStop(Math.max(0, horizon - 0.08), '#14507f');
-    bg.addColorStop(horizon, '#2f8fb8');
-    bg.addColorStop(Math.min(1, horizon + 0.001), '#1a6a96');
-    bg.addColorStop(1, '#062744');
-    ctx.fillStyle = bg;
+    //
+    // Built once and kept. Every input to it -- the canvas height, the
+    // viewport transform -- only changes on a resize, and a CanvasGradient is
+    // a real object the engine has to compile a colour ramp for; there is no
+    // reason to hand it a new one sixty times a second to describe a picture
+    // that has not moved.
+    if (!this.bg || this.bgH !== canvas.height) {
+      // `bgH` is belt and braces; `resize` above is what actually clears it.
+      const horizon = clamp((this.offY + this.arena.seaY * this.scale) / canvas.height, 0.04, 0.96);
+      const bg = ctx.createLinearGradient(0, 0, 0, canvas.height);
+      bg.addColorStop(0, '#071b33');
+      bg.addColorStop(Math.max(0, horizon - 0.08), '#14507f');
+      bg.addColorStop(horizon, '#2f8fb8');
+      bg.addColorStop(Math.min(1, horizon + 0.001), '#1a6a96');
+      bg.addColorStop(1, '#062744');
+      this.bg = bg;
+      this.bgH = canvas.height;
+    }
+    ctx.fillStyle = this.bg;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     const sx = this.shake ? (Math.random() - 0.5) * this.shake : 0;
@@ -1676,8 +1777,7 @@ export class BattleEngine {
     // silently dropped every third-and-up hull once a side could have more.
     // Sorted by depth so a back-row ship, correctly, draws in front of
     // whatever's shallower where the two overlap on screen.
-    const order = this.ships.map((_, i) => i).sort((a, b) => this.shipY(a) - this.shipY(b));
-    for (const i of order) this.drawOneShip(ctx, i, q);
+    for (const i of this.drawOrder) this.drawOneShip(ctx, i, q);
 
     this.drawProjectiles(ctx, q);
     this.drawParticles(ctx);
@@ -1973,7 +2073,8 @@ export class BattleEngine {
       // fading the moment it appears is unreadable exactly when it matters.
       const fade = Math.min(1, entry.life / 1);
       const y = size * 2.6 + i * lineH;
-      const w = ctx.measureText(entry.text).width;
+      if (entry.w === undefined) entry.w = ctx.measureText(entry.text).width;
+      const w = entry.w;
 
       ctx.globalAlpha = fade * 0.55;
       ctx.fillStyle = '#04101c';
