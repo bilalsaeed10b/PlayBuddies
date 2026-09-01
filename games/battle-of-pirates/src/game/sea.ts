@@ -15,13 +15,13 @@
  * game can do; three baked sprites drawn with an alpha and a scale look the
  * same and cost a blit.
  */
-import { Arena, BALANCE, mulberry32 } from './rules';
+import { Arena, BALANCE, clamp, mulberry32 } from './rules';
 import type { Rock } from '../types/game';
 
 /** Deterministic, so two players in a room see the same horizon. */
 const SEED = 0x5eaf00d;
 
-export function bakeSea(arena: Arena, fancy: boolean): HTMLCanvasElement | null {
+export function bakeSea(arena: Arena, fancy: boolean, storm = false): HTMLCanvasElement | null {
   try {
     const canvas = document.createElement('canvas');
     canvas.width = arena.w;
@@ -29,6 +29,11 @@ export function bakeSea(arena: Arena, fancy: boolean): HTMLCanvasElement | null 
     const ctx = canvas.getContext('2d');
     if (!ctx) return null;
     paint(ctx, arena, fancy);
+    // Painted over the finished fair-weather sea rather than as a second
+    // palette threaded through every gradient below. It is one composite on
+    // a canvas that is baked exactly once a match, and it keeps the calm sea
+    // -- the one nearly every battle is fought on -- untouched.
+    if (storm) foulWeather(ctx, arena);
     return canvas;
   } catch {
     // A device that cannot spare a canvas this size still gets a playable
@@ -225,16 +230,24 @@ function farShip(ctx: CanvasRenderingContext2D, x: number, y: number, scale: num
  * it degrades to two strokes rather than to nothing, because a completely
  * still sea looks broken in a way that a slow one does not.
  */
-export function drawWaves(ctx: CanvasRenderingContext2D, arena: Arena, clock: number, count: number) {
+export function drawWaves(
+  ctx: CanvasRenderingContext2D,
+  arena: Arena,
+  clock: number,
+  count: number,
+  swell = 1,
+) {
   ctx.save();
   ctx.lineCap = 'round';
   for (let i = 0; i < count; i++) {
     const t = i / count;
     const y = arena.seaY + 8 + t * 120;
-    const phase = clock * (0.5 + t * 0.5) + i * 1.7;
-    const amp = 4 + t * 5;
-    ctx.strokeStyle = `rgba(214, 244, 255, ${0.3 - t * 0.16})`;
-    ctx.lineWidth = 2 + t * 2;
+    // Faster as well as taller. Big slow water reads as a swell; a storm is
+    // short, steep and quick.
+    const phase = clock * (0.5 + t * 0.5) * swell + i * 1.7;
+    const amp = (4 + t * 5) * swell * swell;
+    ctx.strokeStyle = `rgba(214, 244, 255, ${(0.3 - t * 0.16) * (swell > 1 ? 1.5 : 1)})`;
+    ctx.lineWidth = (2 + t * 2) * (swell > 1 ? 1.4 : 1);
     ctx.beginPath();
     for (let x = -40; x <= arena.w + 40; x += 80) {
       const yy = y + Math.sin(x * 0.008 + phase) * amp;
@@ -243,6 +256,95 @@ export function drawWaves(ctx: CanvasRenderingContext2D, arena: Arena, clock: nu
     }
     ctx.stroke();
   }
+  ctx.restore();
+}
+
+/**
+ * The gale, laid over the baked sea.
+ *
+ * Drains the warmth out of the sky, drops a bank of low cloud across it and
+ * puts a cold green cast on the water. Everything here is a fill or a stroke
+ * over what `paint` already produced, so it costs one bake and nothing per
+ * frame -- the moving half of the weather (rain, and heavier wave strokes)
+ * lives in `drawWeather` and `drawWaves` instead.
+ */
+function foulWeather(ctx: CanvasRenderingContext2D, arena: Arena) {
+  const { w, seaY, h } = arena;
+  const rnd = mulberry32(SEED ^ 0x5f0a17);
+
+  ctx.save();
+
+  // The sun goes first. A storm with a low golden sun still in it reads as a
+  // colour filter rather than as weather.
+  const gloom = ctx.createLinearGradient(0, 0, 0, seaY);
+  gloom.addColorStop(0, 'rgba(6, 12, 22, 0.92)');
+  gloom.addColorStop(0.55, 'rgba(22, 38, 55, 0.82)');
+  gloom.addColorStop(1, 'rgba(46, 66, 82, 0.72)');
+  ctx.fillStyle = gloom;
+  ctx.fillRect(0, 0, w, seaY);
+
+  // Low, torn cloud right down on the horizon.
+  for (let i = 0; i < 16; i++) {
+    const cx = rnd() * w;
+    const cy = seaY * (0.12 + rnd() * 0.72);
+    const scale = 0.9 + rnd() * 1.9;
+    puff(ctx, cx, cy, scale, `rgba(${28 + rnd() * 26 | 0}, ${38 + rnd() * 28 | 0}, ${52 + rnd() * 30 | 0}, 0.66)`);
+  }
+
+  // Cold green-black water, and the sun road with it.
+  const water = ctx.createLinearGradient(0, seaY, 0, h);
+  water.addColorStop(0, 'rgba(18, 44, 52, 0.74)');
+  water.addColorStop(0.5, 'rgba(8, 26, 38, 0.8)');
+  water.addColorStop(1, 'rgba(3, 12, 22, 0.88)');
+  ctx.fillStyle = water;
+  ctx.fillRect(0, seaY, w, h - seaY);
+
+  // A pale seam where the sky meets the water, so the horizon does not
+  // vanish entirely into the murk.
+  ctx.fillStyle = 'rgba(150, 178, 190, 0.3)';
+  ctx.fillRect(0, seaY - 2, w, 3);
+
+  ctx.restore();
+}
+
+/**
+ * Rain, and the spray coming off the crests. The moving half of the weather.
+ *
+ * Seeded per column off a fixed integer rather than kept as particles: a few
+ * hundred live rain objects is a few hundred more things for the collector to
+ * find, and it finds them mid-flight. This is a closed-form position from the
+ * clock, so it costs one loop and allocates nothing.
+ */
+export function drawWeather(
+  ctx: CanvasRenderingContext2D,
+  arena: Arena,
+  clock: number,
+  gust: number,
+  count: number,
+) {
+  if (count <= 0) return;
+  const { w, h } = arena;
+  // Rain leans with the wind, and hard: near-vertical rain in a gale that is
+  // visibly pushing the shot sideways looks like two different weathers.
+  const lean = clamp(gust / 210, -1, 1) * 0.55;
+  ctx.save();
+  ctx.strokeStyle = 'rgba(196, 224, 236, 0.3)';
+  ctx.lineWidth = 2;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  for (let i = 0; i < count; i++) {
+    const rnd = mulberry32(SEED + i * 2654435761);
+    const speed = 900 + rnd() * 700;
+    const len = 34 + rnd() * 46;
+    const x0 = rnd() * w;
+    // Wrapped rather than respawned, so a drop leaving the bottom is the
+    // same drop arriving at the top and the field never thins out.
+    const y = ((rnd() * h + clock * speed) % (h + 200)) - 100;
+    const x = (x0 + y * lean + w) % w;
+    ctx.moveTo(x, y);
+    ctx.lineTo(x - len * lean, y + len);
+  }
+  ctx.stroke();
   ctx.restore();
 }
 

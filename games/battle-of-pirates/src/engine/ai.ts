@@ -35,6 +35,15 @@ export interface Tier {
   floor: number;
   /** Whether it bothers to think about which card to play. */
   reads: boolean;
+  /**
+   * How much of a storm's crosswind it corrects for, 0 to 1.
+   *
+   * The gale is the one thing on this water that can be read exactly -- it is
+   * drawn on screen in barbs -- so how well a rank reads it is a cleaner
+   * difficulty dial than simply widening the spread again. A Swab fires as
+   * though the sky were clear and watches the ball sail away downwind.
+   */
+  wind: number;
 }
 
 /**
@@ -49,9 +58,9 @@ export interface Tier {
  * misses, which is not difficulty, only a tax on your patience.
  */
 export const TIERS: Tier[] = [
-  { label: 'Swab', spread: 360, learn: 0.9, floor: 0.8, reads: false },
-  { label: 'Gunner', spread: 215, learn: 0.72, floor: 0.6, reads: true },
-  { label: 'Captain', spread: 155, learn: 0.58, floor: 0.45, reads: true },
+  { label: 'Swab', spread: 360, learn: 0.9, floor: 0.8, reads: false, wind: 0 },
+  { label: 'Gunner', spread: 215, learn: 0.72, floor: 0.6, reads: true, wind: 0.65 },
+  { label: 'Captain', spread: 155, learn: 0.58, floor: 0.45, reads: true, wind: 1 },
 ];
 
 export interface Brain {
@@ -114,6 +123,11 @@ export function chooseShot(engine: BattleEngine, me: number, level: number, brai
   }
 
   const blockedByMountain = mountainBetween(engine, engine.ships[me].x, enemy.x);
+  // What this rank thinks the wind is doing, which on a Swab is nothing at
+  // all. The gale itself is `engine.gust`; the trajectory checks below fly the
+  // real one either way, so a bot that ignores the wind still knows when it
+  // is about to put a ball into the mountain.
+  const lead = engine.gust * tier.wind;
   const targetY = engine.shipY(foe) - 24;
   const aimX = enemy.x + (rnd() * 2 - 1) * tier.spread * brain.focus;
 
@@ -126,7 +140,7 @@ export function chooseShot(engine: BattleEngine, me: number, level: number, brai
     const found: Shot[] = [];
     for (const high of [false, true]) {
       for (const power of POWERS) {
-        const angle = solve(engine, me, aimX, targetY, power, meta.gravity, meta.speed, high);
+        const angle = solve(engine, me, aimX, targetY, power, meta.gravity, meta.speed, high, lead);
         if (angle === null) continue;
         // Mortar cannot leave the barrel below 45 degrees, same as a human's
         // aim pad -- without this the solver's flat root would have the bot
@@ -134,7 +148,7 @@ export function chooseShot(engine: BattleEngine, me: number, level: number, brai
         // the target it was aimed at.
         const elev = elevOf(angle, facing);
         if (elev < loElev || elev > hiElev) continue;
-        if (!meta.pierce && blocked(engine, me, angle, power, meta.gravity, meta.speed)) continue;
+        if (!meta.pierce && blocked(engine, me, angle, power, meta.gravity, meta.speed, engine.gust)) continue;
         found.push({ angle, power, card: id });
       }
     }
@@ -268,6 +282,8 @@ function solve(
   gravityMult: number,
   speedMult: number,
   high: boolean,
+  /** Crosswind to lead into, in world px/s². Zero on a calm sea. */
+  wind: number,
 ): number | null {
   const g = BALANCE.GRAVITY * gravityMult;
   const v = (BALANCE.MIN_SPEED + (engine.arena.maxSpeed - BALANCE.MIN_SPEED) * power) * speedMult;
@@ -278,10 +294,16 @@ function solve(
   const mirror = facing < 0 ? -1 : 1;
 
   let angle: number | null = null;
+  /** How far downwind the ball will have been carried by the time it arrives. */
+  let lead = 0;
 
   for (let pass = 0; pass < 3; pass++) {
     const start = engine.muzzle(self, angle ?? (facing > 0 ? -0.7 : -Math.PI + 0.7));
-    const dx = (targetX - start.x) * mirror;
+    // Aiming upwind of the target by exactly what the gale is about to take
+    // back. The same three passes that already converge the muzzle position
+    // converge this: pass one solves as though the air were still, and each
+    // pass after it uses the flight time the last one produced.
+    const dx = (targetX - lead - start.x) * mirror;
     const dy = targetY - start.y;
     if (dx <= 40) return null;
 
@@ -291,6 +313,17 @@ function solve(
     // Kept in the same range the aim pad produces, so a bot's parting shot is
     // a valid starting elevation for whoever takes the wheel after it.
     angle = mirror > 0 ? local : -local - Math.PI;
+
+    if (wind !== 0) {
+      // Constant sideways acceleration over the flight: ½at². The horizontal
+      // speed is what sets the flight time, and a lofted shot hangs longer
+      // and is therefore carried much further -- which is the whole reason
+      // the gale is worth reading rather than memorising one correction.
+      const vx = Math.abs(Math.cos(local) * v);
+      if (vx < 1) return null;
+      const t = dx / vx;
+      lead = 0.5 * wind * t * t;
+    }
   }
   return angle;
 }
@@ -320,6 +353,7 @@ function blocked(
   power: number,
   gravityMult: number,
   speedMult: number,
+  wind: number,
 ): boolean {
   if (engine.rocks.length === 0) return false;
   const g = BALANCE.GRAVITY * gravityMult;
@@ -334,6 +368,7 @@ function blocked(
 
   for (let i = 0; i < 600; i++) {
     vy += g * dt;
+    vx += wind * dt;
     x += vx * dt;
     y += vy * dt;
     if (y > engine.arena.seaY || x < -200 || x > engine.arena.w + 200) return false;

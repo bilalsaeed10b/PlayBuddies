@@ -308,6 +308,40 @@ export const BALANCE = {
   BOT_THINK: 1.1,
 } as const;
 
+/**
+ * Foul weather, and what it actually changes.
+ *
+ * Deliberately only things both clients compute identically. Every connected
+ * device replays every shot for itself, and the two only ever have to agree
+ * on the picture -- but a gale is no good if the picture disagrees, so the
+ * storm is built entirely out of numbers drawn from the match seed and the
+ * turn number, which every client already holds.
+ *
+ * The hull bob is conspicuously not in here. It is driven off wall-clock time
+ * and is therefore already decorrelated between devices; at ±10px against a
+ * 78px hull that is a few pixels of disagreement about a hitbox, corrected by
+ * the shooter's authoritative packet a moment later and invisible. Doubling
+ * it to sell the weather would double that disagreement too, on the one game
+ * that has already been bitten by exactly this. The sea *looks* far angrier
+ * instead -- see `stormSky` and the wave layers, which are paint and cannot
+ * desync anything -- and what genuinely makes the shooting harder is the
+ * gust, which cannot.
+ */
+export const STORM = {
+  /**
+   * Sideways acceleration on every ball in flight, in world px/s².
+   *
+   * Constant for a whole turn and drawn once from that turn's own seeded
+   * stream, so it is a crosswind to be read and corrected for, not noise. At
+   * this strength a full-power round shot crossing 1850px of water lands
+   * roughly a hull and a half off if it is ignored, which is enough to miss
+   * and nowhere near enough to make aiming pointless.
+   */
+  GUST: 210,
+  /** The gale shoves the hulls about between turns as well. */
+  DRIFT: 1.7,
+} as const;
+
 export const TEAM_COLORS: Record<0 | 1, { name: string; main: string; light: string; dark: string }> = {
   0: { name: 'Crimson', main: '#e0453c', light: '#ff8a7d', dark: '#7f1d1d' },
   1: { name: 'Cobalt', main: '#3b82f6', light: '#93c5fd', dark: '#1e3a8a' },

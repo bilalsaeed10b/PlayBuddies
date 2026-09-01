@@ -157,6 +157,15 @@ export interface MatchRules {
   /** Cards. Off means every shot is a plain round shot and the hand is hidden. */
   cards: boolean;
   players: PlayerCount;
+  /**
+   * Foul weather: a crosswind that changes every turn, and a heavier sea.
+   *
+   * A match rule and not a preference, for the same reason `obstacles` had to
+   * become one -- a host sailing through a gale and a guest on flat water
+   * would compute two different flights from the same shot and disagree about
+   * every one of them. See the note on GameSettings.
+   */
+  storm: boolean;
 }
 
 export const DEFAULT_RULES: MatchRules = {
@@ -165,6 +174,7 @@ export const DEFAULT_RULES: MatchRules = {
   mountain: 'solid',
   cards: true,
   players: 2,
+  storm: false,
 };
 
 const MOUNTAIN_CODES: MountainRule[] = ['off', 'breakable', 'solid'];
@@ -184,7 +194,8 @@ export function packRules(rules: MatchRules): number {
     (rules.turnTimer ? 2 : 0) |
     (Math.max(0, MOUNTAIN_CODES.indexOf(rules.mountain)) << 2) |
     (rules.cards ? 16 : 0) |
-    (Math.max(0, PLAYER_CODES.indexOf(rules.players)) << 5)
+    (Math.max(0, PLAYER_CODES.indexOf(rules.players)) << 5) |
+    (rules.storm ? 128 : 0)
   );
 }
 
@@ -196,6 +207,7 @@ export function unpackRules(bits: number | undefined): MatchRules {
     mountain: MOUNTAIN_CODES[(bits >> 2) & 3] ?? DEFAULT_RULES.mountain,
     cards: (bits & 16) !== 0,
     players: PLAYER_CODES[(bits >> 5) & 3] ?? DEFAULT_RULES.players,
+    storm: (bits & 128) !== 0,
   };
 }
 

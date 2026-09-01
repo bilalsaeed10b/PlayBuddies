@@ -646,10 +646,13 @@ function rulesSummary(rules: MatchRules): string {
   return [
     `${formatSides(rules.players)} · ${rules.players} ships`,
     MOUNTAIN_LABEL[rules.mountain],
+    rules.storm ? 'foul weather' : null,
     rules.cards ? 'cards on' : 'round shot only',
     rules.turnTimer ? '15s turns' : 'no clock',
     rules.aimArc ? 'aim arc on' : 'no aim arc',
-  ].join(' · ');
+  ]
+    .filter(Boolean)
+    .join(' · ');
 }
 
 /** The bot sails something other than what the player picked. */
@@ -1402,7 +1405,12 @@ function RulesPanel({
   onChange: (r: MatchRules) => void;
   onClose: () => void;
 }) {
-  const toggles: { key: 'cards' | 'turnTimer' | 'aimArc'; label: string; hint: string }[] = [
+  const toggles: { key: 'storm' | 'cards' | 'turnTimer' | 'aimArc'; label: string; hint: string }[] = [
+    {
+      key: 'storm',
+      label: 'Foul weather',
+      hint: 'A crosswind that changes every turn and is drawn across the top of the water — read the barbs and lean the shot into it. The sea shoves the hulls about harder between turns too.',
+    },
     {
       key: 'cards',
       label: 'Cards',
