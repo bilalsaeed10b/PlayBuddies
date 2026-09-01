@@ -295,6 +295,9 @@ export class MatchEngine {
   private host: boolean;
   /** `performance.now()` of the last contact made by a body this machine owns. */
   private lastOwnedHit = -Infinity;
+
+  /** The tick the ball was last touched on. A rewind may not reach back past it. */
+  private lastContactTick = -Infinity;
   /** Tick of the last snapshot applied, echoed back so the host can date our claims. */
   private appliedTick = 0;
   /** Tick at which this host last reset the court. Older body claims are ignored. */
@@ -303,6 +306,26 @@ export class MatchEngine {
   private lastInput = new Map<string, number>();
   /** What the network last said each character is pressing. */
   private netInputs = new Map<string, Input>();
+
+  /**
+   * One-way delay to each peer, kept per peer rather than as one shared
+   * figure. In a 2v2 the four players are rarely on comparable paths, and a
+   * single `lastLag` — whichever packet happened to arrive most recently —
+   * would rewind a 25ms peer by a relayed peer's 300ms.
+   */
+  private peerLag = new Map<string, number>();
+
+  /**
+   * Where the ball has been, on the host, for the last fraction of a second.
+   *
+   * This is what makes a guest's contact judged against the ball *they* saw
+   * rather than the one the host is looking at now. Without it the host tests
+   * a remote player's reach against a ball that has already travelled on for
+   * their whole round trip, so every marginal contact resolves as a miss and
+   * the guest — who watched themselves make it — sees the hit snatched back.
+   * Small: at 120Hz, MAX_EXTRAP seconds is a few dozen entries of six numbers.
+   */
+  private ballPast: { tick: number; x: number; y: number; vx: number; vy: number; spin: number }[] = [];
   /**
    * How old the newest packet was when it arrived, in seconds.
    *
@@ -508,6 +531,9 @@ export class MatchEngine {
     // has been awarded.
     if (this.phase === 'rally' || this.phase === 'point') this.moveBall(dt);
     if (this.phase === 'rally') this.movePowerUps(dt);
+    // Recorded before contact, so a rewind looks up the ball as it was
+    // travelling, never one already redirected by a hit this same step.
+    if (this.host) this.recordBall();
     for (const p of this.players) this.contact(p);
 
     this.expirePowers(dt);
@@ -715,6 +741,46 @@ export class MatchEngine {
 
   // ── contact ───────────────────────────────────────────────────────────────
 
+  /** Host only. Keeps roughly MAX_EXTRAP seconds of ball positions for rewinding. */
+  private recordBall() {
+    const b = this.ball;
+    this.ballPast.push({ tick: this.tick, x: b.x, y: b.y, vx: b.vx, vy: b.vy, spin: b.spin });
+    // Stamped with the simulation's own tick, not the wall clock. The physics
+    // advances in fixed steps that a busy frame runs several of at once, so
+    // wall-clock stamps would bunch up and a rewind would land on the wrong
+    // step. Ticks are exactly the units the ball actually moved in.
+    const keep = Math.ceil(BALANCE.MAX_EXTRAP / BALANCE.FIXED_DT) + 2;
+    if (this.ballPast.length > keep) this.ballPast.splice(0, this.ballPast.length - keep);
+  }
+
+  /**
+   * The ball as a given peer saw it, or null if we should just use the present.
+   *
+   * Rewinding is deliberately bounded twice over. It never goes back further
+   * than MAX_EXTRAP — the same ceiling the guest's own extrapolation obeys, so
+   * the two agree about how far ahead of a packet it is reasonable to reason —
+   * and it never goes back past the last contact anyone made. That second
+   * bound is the one that keeps this fair rather than merely generous: without
+   * it, a laggier player could reach into a moment that had already been
+   * decided and take a ball out of the hands of someone who legitimately got
+   * there first.
+   */
+  private ballAsSeenBy(id: string): (typeof this.ballPast)[number] | null {
+    const lag = this.peerLag.get(id);
+    if (!lag || lag <= 0) return null;
+    const back = Math.round(Math.min(lag, BALANCE.MAX_EXTRAP) / BALANCE.FIXED_DT);
+    if (back <= 0) return null;
+    // Never past a decided moment: the last contact is the boundary.
+    const floorTick = Math.max(this.tick - back, this.lastContactTick);
+    let best: (typeof this.ballPast)[number] | null = null;
+    for (const shot of this.ballPast) {
+      if (shot.tick <= floorTick) best = shot;
+      else break;
+    }
+    // Already the present? Then there is nothing to compensate for.
+    return best && best.tick < this.tick ? best : null;
+  }
+
   /**
    * A hit is contact, not a button.
    *
@@ -726,11 +792,42 @@ export class MatchEngine {
   private contact(p: Player) {
     if (this.phase !== 'rally' || p.hitCd > 0) return;
     const b = this.ball;
+    const min = p.r + BALANCE.BALL_R;
+
+    /**
+     * Lag compensation, and the reason a guest's hits now land.
+     *
+     * The host used to judge a remote player's reach against the ball in
+     * front of *it*, which by then had travelled on for that player's entire
+     * round trip. The guest had already watched themselves make the contact —
+     * they play their own hits immediately — so every marginal touch resolved
+     * as a miss here and then got yanked back out of their hands a moment
+     * later. That is the "I hit that and nothing happened" of this game, and
+     * no amount of smoothing downstream could fix it, because the two
+     * machines were not disagreeing about position: they were being asked
+     * different questions about different instants.
+     *
+     * Tested before anything is mutated, so a miss costs nothing.
+     */
+    const seen = this.host && p.control === 'remote' ? this.ballAsSeenBy(p.id) : null;
+    const at = seen ?? b;
+    if (Math.hypot(at.x - p.x, at.y - p.y) >= min) return;
+
+    // Committed to a hit. Rewind the ball to the instant being judged, let the
+    // ordinary contact code below play it out there, then run it forward again
+    // so everything after this still sees a ball in the present.
+    const catchUp = seen ? (this.tick - seen.tick) * BALANCE.FIXED_DT : 0;
+    if (seen) {
+      b.x = seen.x;
+      b.y = seen.y;
+      b.vx = seen.vx;
+      b.vy = seen.vy;
+      b.spin = seen.spin;
+    }
+
     let dx = b.x - p.x;
     let dy = b.y - p.y;
-    const min = p.r + BALANCE.BALL_R;
     const dist = Math.hypot(dx, dy);
-    if (dist >= min) return;
 
     if (dist < 0.001) {
       dx = 0;
@@ -783,6 +880,26 @@ export class MatchEngine {
 
     p.hitCd = BALANCE.HIT_COOLDOWN;
     this.touches++;
+    // This instant is now decided, and no later rewind may reach back past it
+    // to contest it. See ballAsSeenBy.
+    this.lastContactTick = this.tick;
+    // Bring a rewound hit back to the present. The ball leaves the contact
+    // where the guest saw it and then flies the part of its path they have
+    // already lived through, so by the time anyone else looks it is where it
+    // would have been had the host judged the touch the instant it happened.
+    if (catchUp > 0) {
+      // Through moveBall, not integrateBall: the replayed stretch has to be
+      // able to end the rally. A rewound spike can easily reach the sand
+      // inside the window being replayed, and running it as bare integration
+      // would swallow the floor touch that scores the point.
+      let left = catchUp;
+      while (left > 0 && this.phase === 'rally') {
+        const slice = Math.min(left, BALANCE.FIXED_DT);
+        this.moveBall(slice);
+        left -= slice;
+      }
+      this.ballPast.length = 0;
+    }
     // Noted so applySnapshot can tell a host that has not seen this hit yet
     // from one that has. See the ball exception there.
     if (p.control === 'local') this.lastOwnedHit = localNow();
@@ -1133,6 +1250,7 @@ export class MatchEngine {
     if (!p || p.control !== 'remote') return;
     if (tick < this.resetTick) return;
     this.lastLag = lag;
+    this.peerLag.set(id, lag);
 
     const target: TargetBody = {
       x: d[0],
@@ -1195,6 +1313,7 @@ export class MatchEngine {
   forget(id: string) {
     this.target.fix.delete(id);
     this.netInputs.delete(id);
+    this.peerLag.delete(id);
   }
 
   /**
