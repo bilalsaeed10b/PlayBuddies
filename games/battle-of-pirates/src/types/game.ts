@@ -82,6 +82,14 @@ export interface Projectile {
   blast: number;
   gravity: number;
   pierce: boolean;
+  /**
+   * A bore shot that has actually passed through the mountain.
+   *
+   * `pierce` only says it is allowed to; this says it did. The two come
+   * apart on every bore shot fired down an open lane, which is most of them,
+   * and only the ones that really went through the rock earn the shout.
+   */
+  through: boolean;
   burn: number;
   alive: boolean;
   age: number;

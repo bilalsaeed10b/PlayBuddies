@@ -138,6 +138,66 @@ interface Box {
   y1: number;
 }
 
+/**
+ * The tone a shout or a feed line is said in.
+ *
+ * Colour is the whole point: a wall of identical cream text scrolling past
+ * the corner of a battle is unreadable at the speed things happen here, and
+ * the one thing a player has to be able to pick out of it at a glance is
+ * whether a hull just went under.
+ */
+export type CallTone = 'kill' | 'big' | 'hit' | 'graze' | 'miss';
+
+/** One line in the running log, top right. Fades on its own. */
+export interface FeedEntry {
+  id: number;
+  text: string;
+  tone: CallTone;
+  life: number;
+  max: number;
+}
+
+/**
+ * What one shot did, gathered while it is still in the air.
+ *
+ * `sweep` used to shout the instant a ball touched a hull, which was fine
+ * when every card fired one ball and wrong the moment grapeshot existed:
+ * five pellets landing is five calls to `shout`, four of which are overwritten
+ * before a frame is drawn, so the loudest thing in the game -- all five
+ * pellets connecting -- looked and sounded exactly like a single glancing
+ * blow. Everything a shot does is banked here instead and read once, when the
+ * last ball has stopped moving.
+ */
+interface ShotTally {
+  shooter: number;
+  /** Hulls struck, counted per projectile: five grape pellets on one ship is five. */
+  hulls: number;
+  rigs: number;
+  damage: number;
+  /** Ships that went under on this shot, by index. */
+  sunk: number[];
+  burned: boolean;
+  /** A bore shot that went through the mountain and hit something anyway. */
+  pierced: boolean;
+  /** Nothing was struck, but a blast still reached a hull. */
+  grazed: boolean;
+}
+
+/** How long a log line stays legible before it starts to go. */
+const FEED_LIFE = 4.2;
+
+/** Said when one shot lands more than one ball. Index is the number that landed. */
+const MULTI = ['', '', 'double hit!', 'triple hit!', 'four aboard!', 'full broadside!'];
+
+/** Cream for the ordinary, gold for the rare, red for a hull going under. */
+const TONE_COLOR: Record<CallTone, string> = {
+  kill: '#ff8a7d',
+  big: '#fbbf24',
+  hit: '#fff7e0',
+  graze: '#bae6fd',
+  miss: '#94a3b8',
+};
+
 export class BattleEngine {
   /**
    * Every hull on the water, in a fixed order both clients agree on.
@@ -163,6 +223,26 @@ export class BattleEngine {
   /** Big centred shout. Fades on its own. */
   call = '';
   callLeft = 0;
+  callTone: CallTone = 'hit';
+
+  /**
+   * The running log of what has actually happened, newest first.
+   *
+   * The centred shout says one thing for a second and a half and is gone.
+   * That is right for the shout -- it is punctuation -- but it means a player
+   * who was looking at their own aim rather than at the middle of the screen
+   * has no way of finding out what the last shot did. This is that record,
+   * and in a six-hull fleet action it is the only way to tell which of the
+   * three ships over there just went under.
+   */
+  feed: FeedEntry[] = [];
+  private feedId = 0;
+
+  /** Consecutive turns this hull has landed a shot. Reset by a miss. */
+  streak: number[] = [];
+
+  /** What the shot currently in the air has done so far. Null between turns. */
+  private tally: ShotTally | null = null;
 
   /** Aim the local player is holding, in world radians and 0..1. */
   aimAngle = -0.7;
@@ -272,6 +352,7 @@ export class BattleEngine {
     this.arena = arenaFor(fleetSizeFor(cfg.seats.length));
     this.ships = cfg.seats.map((seat, i) => this.makeShip(seat, filled[seat.team]++, i * 2.1));
     this.lastShotHit = this.ships.map(() => null);
+    this.streak = this.ships.map(() => 0);
     this.burnBefore = this.ships.map(() => 0);
 
     // `first` names the side that opens; the hull that actually fires is that
@@ -532,6 +613,7 @@ export class BattleEngine {
     this.lastShotHit[shooter] = false;
     this.lastFired[ship.team] = shooter;
     this.burnBefore = this.ships.map((s) => s.burn);
+    this.tally = { shooter, hulls: 0, rigs: 0, damage: 0, sunk: [], burned: false, pierced: false, grazed: false };
 
     // Sent before a single physics step has run. Only for a shot this device
     // actually owns -- not a replay of what the wire just handed us, and not
@@ -578,6 +660,7 @@ export class BattleEngine {
         blast: BALANCE.BLAST_R * card.blast,
         gravity: BALANCE.GRAVITY * card.gravity,
         pierce: Boolean(card.pierce),
+        through: false,
         burn: card.burn ?? 0,
         alive: true,
         age: 0,
@@ -770,6 +853,7 @@ export class BattleEngine {
 
     if (this.phase === 'flight' && !this.projectiles.some((p) => p.alive)) {
       this.projectiles.length = 0;
+      this.callShot();
       this.phase = 'impact';
       this.phaseTimer = BALANCE.IMPACT_HOLD;
       this.cfg.onPhase?.(this.phase);
@@ -813,7 +897,15 @@ export class BattleEngine {
       }
     }
 
-    if (!p.pierce) {
+    if (p.pierce) {
+      // Not a collision test -- a bore shot never stops at the rock. Purely
+      // so the shout can tell a bore that punched through the mountain from
+      // one that simply flew past where the mountain was not.
+      for (const rock of this.rocks) {
+        if (rock.hp <= 0) continue;
+        if (segmentCircle(p.x, p.y, nx, ny, rock.x, rock.y, rockRadius(rock)) !== null) p.through = true;
+      }
+    } else {
       for (const rock of this.rocks) {
         if (rock.hp <= 0) continue;
         const t = segmentCircle(p.x, p.y, nx, ny, rock.x, rock.y, rockRadius(rock) + p.r);
@@ -849,10 +941,19 @@ export class BattleEngine {
       // them.
       const mult = kind === 'rig' ? RIG_MULT : 1;
       this.lastShotHit[p.from] = true;
+      if (this.tally) {
+        if (kind === 'rig') this.tally.rigs++;
+        else this.tally.hulls++;
+        // A bore that has already been through the rock and still found a
+        // hull is the one shot in the deck worth calling by name.
+        if (p.through) this.tally.pierced = true;
+      }
       this.damage(struckShip, p.damage * mult, ix);
-      if (p.burn > 0) this.ships[struckShip].burn = p.burn + 1;
+      if (p.burn > 0) {
+        this.ships[struckShip].burn = p.burn + 1;
+        if (this.tally) this.tally.burned = true;
+      }
       this.explode(ix, iy, p, 'hull', this.waterLevelFor(struckShip));
-      this.shout(kind === 'rig' ? 'rigging hit' : 'direct hit!');
       return;
     }
 
@@ -889,13 +990,20 @@ export class BattleEngine {
       const dealt = BALANCE.BLAST * falloff * falloff * (p.damage / BALANCE.DIRECT);
       if (dealt > 0.7) this.damage(i, dealt, x);
     }
-    if (closest < p.blast) this.shout('close!');
+    if (closest < p.blast && this.tally) this.tally.grazed = true;
   }
 
   private damage(i: number, amount: number, fromX: number) {
     const ship = this.ships[i];
     if (ship.hp <= 0 || amount <= 0) return;
     ship.hp = Math.max(0, ship.hp - amount);
+    if (this.tally) {
+      this.tally.damage += amount;
+      // Checked here rather than by scanning the fleet afterwards, because
+      // this is the only place that knows a hull crossed zero *on this shot*
+      // rather than having already been under before it was fired.
+      if (ship.hp <= 0) this.tally.sunk.push(i);
+    }
     ship.flash = Math.min(1, ship.flash + amount / 30);
     ship.lean += (fromX < ship.x ? 1 : -1) * Math.min(0.12, amount / 260);
     this.shake = Math.min(34, this.shake + amount * 0.4);
@@ -1220,9 +1328,78 @@ export class BattleEngine {
     this.debris(ship.x, this.shipY(i) - 40, 1.6, '#6b4423', this.waterLevelFor(i));
   }
 
-  private shout(text: string) {
+  /**
+   * Everything the shot just did, said once.
+   *
+   * Called the instant the last ball stops moving, which is the only moment
+   * the whole outcome is known and still before `resolve` hands the helm
+   * over -- so the shout lands on the shot that earned it rather than a beat
+   * into the next player's turn. Order here is loudest-first on purpose: a
+   * grapeshot volley that sinks a ship is a sinking, not a five-hit.
+   */
+  private callShot() {
+    const t = this.tally;
+    this.tally = null;
+    if (!t) return;
+
+    const who = this.shipName(t.shooter);
+    const landed = t.hulls + t.rigs;
+    const dealt = Math.round(t.damage);
+
+    // A shot only extends a streak by connecting. Rigging counts -- it is a
+    // real hit for less damage, not a miss.
+    if (landed > 0) this.streak[t.shooter] = (this.streak[t.shooter] ?? 0) + 1;
+    else this.streak[t.shooter] = 0;
+
+    if (t.sunk.length > 0) {
+      const names = t.sunk.map((i) => this.shipName(i)).join(' and ');
+      this.shout(t.sunk.length > 1 ? 'two under!' : 'sank her!', 'kill');
+      this.logLine(`${who} sank ${names}`, 'kill');
+      this.cfg.onSfx?.('sink');
+      return;
+    }
+
+    if (landed === 0) {
+      this.shout(t.grazed ? 'close!' : 'miss', t.grazed ? 'graze' : 'miss');
+      this.logLine(t.grazed ? `${who} — near miss` : `${who} missed`, t.grazed ? 'graze' : 'miss');
+      return;
+    }
+
+    // Multi-hit outranks the flourishes below it: landing four of five
+    // pellets is the rarer and harder thing than the card having been a bore.
+    if (landed >= 2) {
+      this.shout(MULTI[Math.min(landed, MULTI.length - 1)], 'big');
+    } else if (t.pierced) {
+      this.shout('through the rock!', 'big');
+    } else if (t.burned) {
+      this.shout('she burns!', 'big');
+    } else {
+      this.shout(t.hulls > 0 ? 'direct hit!' : 'rigging hit', 'hit');
+    }
+
+    this.logLine(`${who} hit for ${dealt}`, landed >= 2 ? 'big' : 'hit');
+
+    // Said after the hit, not instead of it, so the shout stays about the
+    // shot and the streak is the footnote it should be.
+    const run = this.streak[t.shooter] ?? 0;
+    if (run >= 3) this.logLine(`${who} — ${run} in a row`, 'big');
+  }
+
+  private shout(text: string, tone: CallTone = 'hit') {
     this.call = text;
+    this.callTone = tone;
     this.callLeft = 1.5;
+  }
+
+  /** Push a line onto the running log. Newest first, and the tail is dropped. */
+  private logLine(text: string, tone: CallTone) {
+    this.feed.unshift({ id: ++this.feedId, text, tone, life: FEED_LIFE, max: FEED_LIFE });
+    // Five is what fits down the side of a phone without covering the water.
+    if (this.feed.length > 5) this.feed.length = 5;
+  }
+
+  private shipName(i: number): string {
+    return this.ships[i]?.name ?? 'A ship';
   }
 
   private stepParticles(dt: number) {
@@ -1271,6 +1448,10 @@ export class BattleEngine {
   private decay(dt: number) {
     this.shake = Math.max(0, this.shake - dt * 46);
     this.callLeft = Math.max(0, this.callLeft - dt);
+    for (let i = this.feed.length - 1; i >= 0; i--) {
+      this.feed[i].life -= dt;
+      if (this.feed[i].life <= 0) this.feed.splice(i, 1);
+    }
     for (const ship of this.ships) {
       ship.flash = Math.max(0, ship.flash - dt * 3.2);
       // A hull that is losing lists toward the sea; a healthy one rides level.
@@ -1392,6 +1573,7 @@ export class BattleEngine {
     if (this.cfg.rules.aimArc && this.aiming && this.awaitingLocal) this.drawGuide(ctx, q);
     this.drawOffscreenMarkers(ctx);
     this.drawCall(ctx);
+    this.drawFeed(ctx);
   }
 
   private drawOneShip(ctx: CanvasRenderingContext2D, i: number, q: Quality) {
@@ -1581,13 +1763,54 @@ export class BattleEngine {
     ctx.lineWidth = 10;
     ctx.lineJoin = 'round';
     ctx.strokeStyle = 'rgba(4, 16, 28, 0.75)';
-    ctx.fillStyle = '#fff7e0';
+    ctx.fillStyle = TONE_COLOR[this.callTone];
     const y = 150 - (1 - t) * 26;
     ctx.strokeText(this.call.toUpperCase(), this.arena.w / 2, y);
     ctx.fillText(this.call.toUpperCase(), this.arena.w / 2, y);
     ctx.restore();
   }
+
+  /**
+   * The running log, down the top right.
+   *
+   * Drawn in world space like everything else on this canvas, so it scales
+   * with the arena and needs no separate layout pass -- the trade is that a
+   * six-hull arena is a wider frame, so the type is sized against the arena
+   * width rather than fixed, and reads the same on a phone either way.
+   */
+  private drawFeed(ctx: CanvasRenderingContext2D) {
+    if (this.feed.length === 0) return;
+    const size = Math.round(this.arena.w * 0.0125);
+    const pad = size * 0.7;
+    const lineH = size * 2.05;
+    const right = this.arena.w - size * 1.6;
+
+    ctx.save();
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'middle';
+    ctx.font = `800 ${size}px system-ui, sans-serif`;
+
+    for (let i = 0; i < this.feed.length; i++) {
+      const entry = this.feed[i];
+      // Full strength until the last second, then out. A line that starts
+      // fading the moment it appears is unreadable exactly when it matters.
+      const fade = Math.min(1, entry.life / 1);
+      const y = size * 2.6 + i * lineH;
+      const w = ctx.measureText(entry.text).width;
+
+      ctx.globalAlpha = fade * 0.55;
+      ctx.fillStyle = '#04101c';
+      roundRect(ctx, right - w - pad * 1.4, y - lineH * 0.38, w + pad * 2, lineH * 0.76, size * 0.5);
+      ctx.fill();
+
+      ctx.globalAlpha = fade;
+      ctx.fillStyle = TONE_COLOR[entry.tone];
+      ctx.fillText(entry.text, right, y);
+    }
+    ctx.restore();
+  }
 }
+
 
 // -- helpers -----------------------------------------------------------------
 
