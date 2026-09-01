@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { askHostToEndGame, toggleFullscreen } from './fullscreen';
 import { FREE_SHIPS, SHIPS, drawShip } from './game/ships';
+import { HULLS } from './game/hulls';
 import { CARDS, CARD_ORDER, TEAM_COLORS } from './game/rules';
 import { TIERS } from './engine/ai';
 import { audioService } from './services/audio';
@@ -75,6 +76,18 @@ interface LobbyPerson {
    * one, so a new game inventing its own key would simply be refused.
    */
   fishIndex?: number | null;
+  /**
+   * This player's hull class, as an index into HULLS.
+   *
+   * `role` is the lobby's other per-player slot -- Neon Elements' fire/water
+   * pick, from a game that no longer exists. firestore.rules still names it
+   * as writable by its owner and nothing on the platform reads it, so it is
+   * the one free field a game can claim. It has to travel through the lobby
+   * rather than over the wire because the class is baked into every hull at
+   * the moment each client builds its own engine, and all of them build it
+   * from this same document before a shot is fired.
+   */
+  role?: number | null;
 }
 
 const randomSeed = () => (Math.random() * 0x7fffffff) | 0;
@@ -99,6 +112,8 @@ export default function App() {
   /** Offline setup: how many people are at this device, and as what. */
   const [seatCount, setSeatCount] = useState(1);
   const [seatSkin, setSeatSkin] = useState<Record<number, number>>({});
+  /** Offline: which hull class each person at this device is sailing. */
+  const [seatHull, setSeatHull] = useState<Record<number, number>>({});
   /**
    * The player deliberately asked for an offline battle.
    *
@@ -293,11 +308,16 @@ export default function App() {
         uid: p.uid,
         displayName: p.displayName || 'Player',
         skin: p.fishIndex,
+        // A player who has not touched the picker sails a Frigate, which is
+        // the class every number in BALANCE was tuned against.
+        hull: typeof p.role === 'number' ? p.role : 0,
         team: (i % 2) as Team,
       }));
   }, [lobby, rules.players]);
 
   const mySkin = uid ? lobby?.players?.[uid]?.fishIndex : undefined;
+  const myHullRaw = uid ? lobby?.players?.[uid]?.role : undefined;
+  const myHull = typeof myHullRaw === 'number' ? myHullRaw : 0;
   const isHost = Boolean(uid && lobby && lobby.hostId === uid);
 
   useEffect(() => {
@@ -355,6 +375,25 @@ export default function App() {
       }
     },
     [uid, owned, buy, handoff.room],
+  );
+
+  /**
+   * The hull class, into the lobby so every client reads the same one.
+   *
+   * Free, so unlike `pickOnline` above there is nothing to buy and nothing to
+   * check -- every class is available from the first battle by design.
+   */
+  const pickHullOnline = useCallback(
+    async (index: number) => {
+      if (!uid) return;
+      try {
+        const { db, doc, updateDoc } = await import('./firebase');
+        await updateDoc(doc(db, 'lobbies', handoff.room), { [`players.${uid}.role`]: index });
+      } catch (e) {
+        console.error('Could not save your hull', e);
+      }
+    },
+    [uid, handoff.room],
   );
 
   const startMatch = useCallback(async () => {
@@ -454,6 +493,7 @@ export default function App() {
           control: 'local',
           aiLevel,
           skin: mySkin ?? FREE_SHIPS[0],
+          hull: myHull,
         });
       } else if (person) {
         seats.push({
@@ -463,6 +503,7 @@ export default function App() {
           control: 'remote',
           aiLevel,
           skin: person.skin ?? pickOtherShip(mySkin ?? FREE_SHIPS[0]),
+          hull: person.hull,
         });
       } else {
         seats.push({
@@ -472,6 +513,9 @@ export default function App() {
           control: 'ai',
           aiLevel,
           skin: pickOtherShip(mySkin ?? FREE_SHIPS[0]),
+          // Derived from the seat number, not rolled: every client builds
+          // this same bot and they all have to build the same one.
+          hull: i % HULLS.length,
         });
       }
     }
@@ -528,6 +572,7 @@ export default function App() {
           control: 'local',
           aiLevel,
           skin: seatSkin[i] ?? (i === 0 ? p1 : pickOtherShip(p1)),
+          hull: seatHull[i] ?? 0,
         });
       } else {
         seats.push({
@@ -539,6 +584,7 @@ export default function App() {
           control: 'ai',
           aiLevel,
           skin: pickOtherShip(p1),
+          hull: i % HULLS.length,
         });
       }
     }
@@ -592,8 +638,9 @@ export default function App() {
           coins={coins}
           onBack={() => setView(online ? 'offline_menu' : 'menu')}
           onBuy={buy}
-          onDone={(picks) => {
+          onDone={(picks, hulls) => {
             setSeatSkin(picks);
+            setSeatHull(hulls);
             setView('game');
           }}
         />
@@ -611,6 +658,8 @@ export default function App() {
           coins={coins}
           isHost={isHost}
           onPick={pickOnline}
+          onPickHull={pickHullOnline}
+          myHull={myHull}
           onStart={startMatch}
           onSettings={() => setShowSettings(true)}
           onRules={() => setShowRules(true)}
@@ -891,6 +940,91 @@ function ShipGrid({
   );
 }
 
+/**
+ * The four hulls, as cards.
+ *
+ * Deliberately shows the trade rather than the numbers. "Made of matchwood"
+ * is what a player actually needs to know about a Sloop; "0.8x MAX_HP" is
+ * what the engine needs, and a bar chart of four stats nobody can compare
+ * across four cards on a phone is neither. The bars are there for the shape
+ * of the thing -- tall hull, wide target, roams a long way -- not to be read
+ * to two significant figures.
+ */
+function HullGrid({
+  selected,
+  onPick,
+  pickedBy,
+}: {
+  selected: number;
+  onPick: (index: number) => void;
+  /** Who else has taken this class. Empty offline until a second seat picks. */
+  pickedBy?: Record<number, string[]>;
+}) {
+  return (
+    <div className="grid grid-cols-2 gap-2 sm:gap-3">
+      {HULLS.map((hull, i) => {
+        const isSelected = selected === i;
+        const others = pickedBy?.[i] ?? [];
+        return (
+          <button
+            key={hull.id}
+            onClick={() => onPick(i)}
+            className={`flex flex-col gap-2 rounded-2xl border p-3 text-left transition-colors ${
+              isSelected
+                ? 'border-amber-400 bg-amber-400/15'
+                : 'border-white/15 bg-white/5 hover:bg-white/10'
+            }`}
+          >
+            <div className="flex items-baseline justify-between gap-2">
+              <span className="truncate text-sm font-black">{hull.name}</span>
+              {isSelected && <Check className="h-3.5 w-3.5 shrink-0 text-amber-300" />}
+            </div>
+            <p className="text-[10px] leading-snug text-white/55">{hull.blurb}</p>
+            <div className="space-y-1">
+              <HullBar label="Hull" value={hull.hp} />
+              <HullBar label="Guns" value={hull.damage} />
+              {/* Inverted on purpose: a narrow silhouette is the good end of
+                  this stat, and a bar that grew as the ship got easier to hit
+                  read as an upgrade at a glance. */}
+              <HullBar label="Cover" value={2 - hull.width} />
+              <HullBar label="Roam" value={hull.drift} />
+              <HullBar label="Blast" value={hull.blast} />
+            </div>
+            <p className="text-[9px] font-black uppercase tracking-wider text-rose-300/80">
+              {hull.cost}
+            </p>
+            {others.length > 0 && (
+              <span className="text-[9px] font-black uppercase text-white/40">
+                Also sailed by {others.join(', ')}
+              </span>
+            )}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/** One stat, as a bar centred on the Frigate's 1.0 so a trade reads as a trade. */
+function HullBar({ label, value }: { label: string; value: number }) {
+  // 0.55 to 1.65 is the full range any class uses; mapped so the baseline
+  // sits at roughly half and both directions off it are visible.
+  const share = Math.max(4, Math.min(100, ((value - 0.5) / 1.2) * 100));
+  return (
+    <div className="flex items-center gap-1.5">
+      <span className="w-9 shrink-0 text-[8px] font-black uppercase tracking-wider text-white/35">
+        {label}
+      </span>
+      <span className="h-1 flex-1 overflow-hidden rounded-full bg-white/10">
+        <span
+          className={`block h-full rounded-full ${value > 1 ? 'bg-emerald-400/70' : value < 1 ? 'bg-rose-400/60' : 'bg-white/40'}`}
+          style={{ width: `${share}%` }}
+        />
+      </span>
+    </div>
+  );
+}
+
 function Shell({
   title,
   coins,
@@ -935,10 +1069,23 @@ function OfflinePick({
   coins: number;
   onBack: () => void;
   onBuy: (index: number) => boolean;
-  onDone: (picks: Record<number, number>) => void;
+  onDone: (picks: Record<number, number>, hulls: Record<number, number>) => void;
 }) {
   const [picks, setPicks] = useState<Record<number, number>>({});
-  const seat = Object.keys(picks).length;
+  const [hulls, setHulls] = useState<Record<number, number>>({});
+  /**
+   * Each seat picks a paint job and then a class, in that order.
+   *
+   * Two steps rather than one grid of thirty-two combinations: the two
+   * choices are genuinely unrelated -- one is what you look like and one is
+   * how you fight -- and pairing them would imply a link the game
+   * deliberately does not have. See the note at the top of hulls.ts.
+   *
+   * An explicit cursor rather than one derived from how many picks have been
+   * made: with two steps per seat, a size is no longer a position.
+   */
+  const [seat, setSeat] = useState(0);
+  const choosingHull = picks[seat] !== undefined;
 
   const pickedBy = useMemo(() => {
     const map: Record<number, string[]> = {};
@@ -948,17 +1095,56 @@ function OfflinePick({
     return map;
   }, [picks]);
 
-  const pick = (index: number) => {
+  const hullPickedBy = useMemo(() => {
+    const map: Record<number, string[]> = {};
+    Object.entries(hulls).forEach(([id, index]) => {
+      (map[index] ??= []).push(`P${Number(id) + 1}`);
+    });
+    return map;
+  }, [hulls]);
+
+  const pickShip = (index: number) => {
     if (!owned.includes(index) && !onBuy(index)) return;
-    const next = { ...picks, [seat]: index };
-    setPicks(next);
-    if (Object.keys(next).length >= seatCount) onDone(next);
+    setPicks({ ...picks, [seat]: index });
   };
 
-  const title = seatCount > 1 ? `Player ${seat + 1} - pick a ship` : 'Pick your ship';
+  const pickHull = (index: number) => {
+    const nextHulls = { ...hulls, [seat]: index };
+    setHulls(nextHulls);
+    if (seat + 1 >= seatCount) onDone(picks, nextHulls);
+    else setSeat(seat + 1);
+  };
+
+  const who = seatCount > 1 ? `Player ${seat + 1} - ` : '';
+  const title = choosingHull ? `${who}pick a hull` : `${who}pick a ship`;
   return (
-    <Shell title={title} coins={coins} onBack={onBack}>
-      <ShipGrid owned={owned} coins={coins} selected={null} pickedBy={pickedBy} onPick={pick} />
+    <Shell
+      title={title}
+      coins={coins}
+      onBack={() => {
+        // Back out of the hull step to the ship step rather than all the way
+        // out of the picker, which is what a half-made choice deserves.
+        if (choosingHull) {
+          const next = { ...picks };
+          delete next[seat];
+          setPicks(next);
+        } else if (seat > 0) {
+          // Back through the previous captain's hull choice, not out of the
+          // picker entirely -- the seat before this one is fully made up.
+          setSeat(seat - 1);
+        } else onBack();
+      }}
+    >
+      {choosingHull ? (
+        <div className="space-y-3">
+          <p className="text-center text-[11px] font-semibold text-white/45">
+            All four are free and always have been. Pick how you want to fight, not what you paid for.
+          </p>
+          <HullGrid selected={hulls[seat] ?? 0} onPick={pickHull} pickedBy={hullPickedBy} />
+        </div>
+      ) : (
+        <ShipGrid owned={owned} coins={coins} selected={null} pickedBy={pickedBy} onPick={pickShip} />
+      )}
     </Shell>
   );
 }
@@ -970,10 +1156,12 @@ function RoomScreen({
   people,
   hostId,
   mine,
+  myHull,
   owned,
   coins,
   isHost,
   onPick,
+  onPickHull,
   onStart,
   onSettings,
   onRules,
@@ -984,13 +1172,15 @@ function RoomScreen({
   ready: boolean;
   error: string | null;
   uid: string | null;
-  people: { uid: string; displayName: string; skin?: number | null; team: Team }[];
+  people: { uid: string; displayName: string; skin?: number | null; hull: number; team: Team }[];
   hostId: string | null;
   mine: number | null | undefined;
+  myHull: number;
   owned: number[];
   coins: number;
   isHost: boolean;
   onPick: (index: number) => void;
+  onPickHull: (index: number) => void;
   onStart: () => void;
   onSettings: () => void;
   onRules: () => void;
@@ -1046,6 +1236,18 @@ function RoomScreen({
     }
     return map;
   }, [people, uid]);
+
+  const hullPickedBy = useMemo(() => {
+    const map: Record<number, string[]> = {};
+    // Unlike the paint, everyone has a hull from the moment they walk in --
+    // a player who has not touched this is on a Frigate, and knowing that
+    // about the ship across the water is worth as much as knowing they chose.
+    for (const p of people) if (p.uid !== uid) (map[p.hull] ??= []).push(p.displayName);
+    return map;
+  }, [people, uid]);
+
+  /** Paint or class. Paint first, because it is the one with a price on it. */
+  const [tab, setTab] = useState<'ship' | 'hull'>('ship');
 
   if (error) {
     return (
@@ -1176,9 +1378,41 @@ function RoomScreen({
     </div>
   );
 
+  /**
+   * Two tabs over one panel, rather than two panels stacked.
+   *
+   * The room is already the tightest screen in the game -- see `compactRoster`
+   * and `sideBySide` above, both of which exist because a landscape phone had
+   * 129px left for the ship grid. A second grid below it would have had
+   * neither of them readable; a tab costs one row.
+   */
   const shipGridPanel = (extra: string) => (
-    <div className={`panel min-h-0 overflow-y-auto overscroll-contain rounded-[2rem] p-3 sm:p-6 ${extra}`}>
-      <ShipGrid owned={owned} coins={coins} selected={mine ?? null} pickedBy={pickedBy} onPick={onPick} />
+    <div className={`panel flex min-h-0 flex-col rounded-[2rem] p-3 sm:p-6 ${extra}`}>
+      <div className="mb-3 flex shrink-0 gap-1 rounded-xl bg-black/30 p-1">
+        {(['ship', 'hull'] as const).map((t) => (
+          <button
+            key={t}
+            onClick={() => setTab(t)}
+            className={`flex-1 rounded-lg py-1.5 text-[11px] font-black uppercase tracking-wider transition-colors ${
+              tab === t ? 'bg-amber-400 text-slate-900' : 'text-white/55'
+            }`}
+          >
+            {t === 'ship' ? 'Paint' : `Hull · ${HULLS[myHull]?.name ?? 'Frigate'}`}
+          </button>
+        ))}
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+        {tab === 'ship' ? (
+          <ShipGrid owned={owned} coins={coins} selected={mine ?? null} pickedBy={pickedBy} onPick={onPick} />
+        ) : (
+          <div className="space-y-3">
+            <p className="text-center text-[11px] font-semibold text-white/45">
+              All four are free. The paint is what you bought; this is how you fight.
+            </p>
+            <HullGrid selected={myHull} onPick={onPickHull} pickedBy={hullPickedBy} />
+          </div>
+        )}
+      </div>
     </div>
   );
 

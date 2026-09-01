@@ -241,13 +241,16 @@ export function drawWaves(
   ctx.lineCap = 'round';
   for (let i = 0; i < count; i++) {
     const t = i / count;
-    const y = arena.seaY + 8 + t * 120;
+    // The bands spread as they grow. At a fixed 120px of water and a storm's
+    // amplitude they overlapped every neighbour and the sea came out as a
+    // fishing net rather than as weather -- crossing lines, not crests.
+    const y = arena.seaY + 8 + t * 120 * swell;
     // Faster as well as taller. Big slow water reads as a swell; a storm is
     // short, steep and quick.
     const phase = clock * (0.5 + t * 0.5) * swell + i * 1.7;
-    const amp = (4 + t * 5) * swell * swell;
-    ctx.strokeStyle = `rgba(214, 244, 255, ${(0.3 - t * 0.16) * (swell > 1 ? 1.5 : 1)})`;
-    ctx.lineWidth = (2 + t * 2) * (swell > 1 ? 1.4 : 1);
+    const amp = (4 + t * 5) * swell;
+    ctx.strokeStyle = `rgba(214, 244, 255, ${(0.3 - t * 0.16) * (swell > 1 ? 1.3 : 1)})`;
+    ctx.lineWidth = (2 + t * 2) * (swell > 1 ? 1.25 : 1);
     ctx.beginPath();
     for (let x = -40; x <= arena.w + 40; x += 80) {
       const yy = y + Math.sin(x * 0.008 + phase) * amp;

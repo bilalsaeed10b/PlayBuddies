@@ -21,6 +21,7 @@ import { createLogger } from '@shared/log/logger';
 import type { GameSettings, MatchRules, NetPacket, Phase, Team } from '../types/game';
 // Type only: the runtime value arrives through the dynamic import below, which
 // is what keeps the Firebase SDK out of an offline player's bundle.
+import { hullAt } from '../game/hulls';
 import type { MatchRecord } from '../platform/stats';
 import type { TurnLink } from '../net/turnLink';
 
@@ -101,7 +102,9 @@ export default function BattleView({
   const [session, setSession] = useState<Session | null>(
     online && !config.isHost ? null : { seed: config.seed, first: config.first, rules: config.rules },
   );
-  const [hp, setHp] = useState<number[]>(() => config.seats.map(() => BALANCE.MAX_HP));
+  const [hp, setHp] = useState<number[]>(() =>
+    config.seats.map((seat) => Math.round(BALANCE.MAX_HP * hullAt(seat.hull).hp)),
+  );
   /** Index into  of whoever has the helm, not a side. */
   const [turn, setTurn] = useState<number>(0);
   const [phase, setPhase] = useState<Phase>('deal');
@@ -747,6 +750,8 @@ export default function BattleView({
                   key={i}
                   name={seat.name}
                   hp={hp[i] ?? 0}
+                  maxHp={BALANCE.MAX_HP * hullAt(seat.hull).hp}
+                  hull={hullAt(seat.hull).name}
                   team={team}
                   mine={localShips.has(i)}
                   active={turn === i && !over}
@@ -910,6 +915,8 @@ export default function BattleView({
 function HullMeter({
   name,
   hp,
+  maxHp,
+  hull,
   team,
   mine,
   active,
@@ -917,13 +924,22 @@ function HullMeter({
 }: {
   name: string;
   hp: number;
+  /**
+   * This ship's own full health, which its class decides.
+   *
+   * Against a fixed BALANCE.MAX_HP a Man-o'-War would sit pegged at full for
+   * its first thirty points of damage and a Sloop would never reach the top
+   * of its own bar -- the two hulls people are most likely to notice.
+   */
+  maxHp: number;
+  hull: string;
   team: Team;
   mine: boolean;
   active: boolean;
   /** Folded, this is a bare bar and nothing else. */
   open: boolean;
 }) {
-  const frac = clamp(hp / BALANCE.MAX_HP, 0, 1);
+  const frac = clamp(hp / maxHp, 0, 1);
   const colors = TEAM_COLORS[team];
   const fill = frac > 0.55 ? '#4ade80' : frac > 0.3 ? '#fbbf24' : '#f87171';
 
@@ -961,6 +977,9 @@ function HullMeter({
           style={{ width: `${frac * 100}%`, background: fill }}
         />
       </div>
+      {/* Which class that hull is, because 132 out of 132 and 80 out of 80
+          both read as "full" and only this says which fight you are in. */}
+      <p className="truncate text-[8px] font-bold uppercase tracking-wide text-white/35">{hull}</p>
     </div>
   );
 }

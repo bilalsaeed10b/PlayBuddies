@@ -26,11 +26,15 @@ export interface LobbyPlayer {
   isReady: boolean;
   /**
    * Written by the game, not the platform: Fish Eat Fish uses `fishIndex`.
-   * `role` was Neon Elements' fire/water pick — that game is gone, but the
-   * field is left here since firestore.rules still allows writing it and
-   * nothing depends on it being absent.
+   *
+   * `role` was Neon Elements' fire/water pick. That game is gone, and
+   * Battle of Pirates has since claimed the field for its hull class — a
+   * number, not one of the two strings below. The platform never reads
+   * either; both are here because firestore.rules names them as writable by
+   * their owner, which is what makes this the only spare per-player slot a
+   * game can take without a rules change.
    */
-  role?: "fire" | "water" | null;
+  role?: "fire" | "water" | number | null;
   fishIndex?: number;
   joinedAt?: number;
 }

@@ -523,13 +523,13 @@ export default function MatchView({
         </div>
       ) : engine.phase === 'settingWord' ? (
         mySetter !== undefined ? (
-          <WordEntry value={wordInput} onChange={setWordInput} onSubmit={submitWord} label="Type the word everyone will guess" />
+          <WordEntry value={wordInput} onChange={setWordInput} onSubmit={submitWord} label="Type the word everyone will guess" seconds={setClock} />
         ) : (
           <WaitingCard text={`${settingSeatName()} is choosing a word…`} seconds={setClock} />
         )
       ) : engine.phase === 'suggesting' ? (
         mySetter !== undefined ? (
-          <WordEntry value={wordInput} onChange={setWordInput} onSubmit={submitWord} label="Suggest a word for your team" />
+          <WordEntry value={wordInput} onChange={setWordInput} onSubmit={submitWord} label="Suggest a word for your team" seconds={setClock} />
         ) : engine.teamOf(config.localSeats[0] ?? -1) === engine.settingTeam ? (
           <WaitingCard text="Waiting on your teammates' suggestions…" seconds={setClock} />
         ) : (
@@ -709,15 +709,29 @@ function WordEntry({
   onChange,
   onSubmit,
   label,
+  seconds,
 }: {
   value: string;
   onChange: (v: string) => void;
   onSubmit: () => void;
   label: string;
+  /** The clock only ever ran silently against the person actually typing — everyone else waiting on them saw it, they didn't. */
+  seconds: number;
 }) {
   return (
     <div className="space-y-2">
-      <p className="text-center text-[11px] font-black uppercase tracking-wide text-lime-300">{label}</p>
+      <div className="flex items-center justify-center gap-2">
+        <p className="text-center text-[11px] font-black uppercase tracking-wide text-lime-300">{label}</p>
+        <span
+          className={`rounded-full border px-2 py-0.5 text-[10px] font-black tabular-nums ${
+            seconds <= 5
+              ? 'animate-pulse border-rose-400/60 bg-rose-500/15 text-rose-300'
+              : 'border-lime-400/40 bg-lime-400/10 text-lime-300'
+          }`}
+        >
+          {seconds}s
+        </span>
+      </div>
       <div className="flex gap-2">
         <input
           autoFocus

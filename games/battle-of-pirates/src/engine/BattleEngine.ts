@@ -20,6 +20,8 @@
  */
 import { fxSprites, bakeSea, drawFallbackSea, drawRock, drawWaves, drawWeather, rockRadius } from '../game/sea';
 import { SHIPS, drawShip } from '../game/ships';
+import { HULLS, hullAt } from '../game/hulls';
+import type { HullClass } from '../game/hulls';
 import {
   BALANCE,
   CARDS,
@@ -59,6 +61,8 @@ export interface Seat {
   control: Control;
   aiLevel: number;
   skin: number;
+  /** Index into HULLS. Free, and the only thing about a ship that changes the fight. */
+  hull: number;
 }
 
 export type Sfx = 'fire' | 'hull' | 'splash' | 'rock' | 'deal' | 'burn' | 'sink';
@@ -415,7 +419,9 @@ export class BattleEngine {
       control: seat.control,
       aiLevel: seat.aiLevel,
       skin: clamp(seat.skin, 0, SHIPS.length - 1),
-      hp: BALANCE.MAX_HP,
+      hull: clamp(seat.hull ?? 0, 0, HULLS.length - 1),
+      hp: BALANCE.MAX_HP * hullAt(seat.hull).hp,
+      maxHp: BALANCE.MAX_HP * hullAt(seat.hull).hp,
       anchorX,
       x: anchorX,
       burn: 0,
@@ -561,10 +567,20 @@ export class BattleEngine {
     return { x: t.x + Math.cos(angle) * BARREL, y: t.y + Math.sin(angle) * BARREL };
   }
 
+  /** The class this hull is sailing. Never out of range. */
+  hullOf(i: number): HullClass {
+    return hullAt(this.ships[i]?.hull);
+  }
+
   private hullBox(i: number): Box {
     const x = this.ships[i].x;
     const y = this.shipY(i);
-    return { x0: x - BALANCE.HULL_W / 2, y0: y - 62, x1: x + BALANCE.HULL_W / 2, y1: y + 22 };
+    // Width only. Height is left alone deliberately: a shorter box would make
+    // a Sloop harder to reach with a plunging mortar as well as a flat round
+    // shot, which is two advantages sold as one, and it would put the
+    // waterline in a different place on every class.
+    const half = (BALANCE.HULL_W / 2) * this.hullOf(i).width;
+    return { x0: x - half, y0: y - 62, x1: x + half, y1: y + 22 };
   }
 
   /** Mast and canvas. Worth hitting, worth less than the hull. */
@@ -572,8 +588,9 @@ export class BattleEngine {
     const x = this.ships[i].x;
     const y = this.shipY(i);
     const f = this.facing(i);
-    const a = x + f * -92;
-    const b = x + f * 104;
+    const w = this.hullOf(i).width;
+    const a = x + f * -92 * w;
+    const b = x + f * 104 * w;
     return { x0: Math.min(a, b), y0: y - 242, x1: Math.max(a, b), y1: y - 62 };
   }
 
@@ -689,7 +706,7 @@ export class BattleEngine {
     }
 
     if (card.heal) {
-      ship.hp = Math.min(BALANCE.MAX_HP, ship.hp + card.heal);
+      ship.hp = Math.min(ship.maxHp, ship.hp + card.heal);
       this.cfg.onHp?.(this.hp);
     }
 
@@ -709,8 +726,9 @@ export class BattleEngine {
         r: BALANCE.BALL_R * (card.shots > 2 ? 0.62 : 1),
         team: ship.team,
         from: shooter,
-        damage: BALANCE.DIRECT * card.damage,
-        blast: BALANCE.BLAST_R * card.blast,
+        damage: BALANCE.DIRECT * card.damage * this.hullOf(shooter).damage,
+        blast: BALANCE.BLAST_R * card.blast * this.hullOf(shooter).blast,
+        splash: this.hullOf(shooter).blast,
         gravity: BALANCE.GRAVITY * card.gravity,
         pierce: Boolean(card.pierce),
         through: false,
@@ -1045,7 +1063,7 @@ export class BattleEngine {
       if (dist >= p.blast) continue;
 
       const falloff = 1 - dist / p.blast;
-      const dealt = BALANCE.BLAST * falloff * falloff * (p.damage / BALANCE.DIRECT);
+      const dealt = BALANCE.BLAST * p.splash * falloff * falloff * (p.damage / BALANCE.DIRECT);
       if (dealt > 0.7) this.damage(i, dealt, x);
     }
     if (closest < p.blast && this.tally) this.tally.grazed = true;
@@ -1115,7 +1133,9 @@ export class BattleEngine {
         // A packet from a client that somehow has a different idea of the
         // fleet size leaves the missing hulls exactly as they were, rather
         // than reading `undefined` into the simulation.
-        if (packet.hp[i] !== undefined) this.ships[i].hp = clampClaim(this.ships[i].hp, packet.hp[i]);
+        if (packet.hp[i] !== undefined) {
+          this.ships[i].hp = clampClaim(this.ships[i].hp, packet.hp[i], this.ships[i].maxHp);
+        }
         if (packet.f[i] !== undefined) this.ships[i].burn = clamp(Math.round(packet.f[i]), 0, 4);
         if (packet.d[i] !== undefined) this.ships[i].x = this.clampDrift(i, packet.d[i]);
       }
@@ -1183,7 +1203,8 @@ export class BattleEngine {
   }
 
   private drift(i: number, rnd: () => number): number {
-    const step = this.arena.driftStep * (this.cfg.rules.storm ? STORM.DRIFT : 1);
+    const step =
+      this.arena.driftStep * (this.cfg.rules.storm ? STORM.DRIFT : 1) * this.hullOf(i).drift;
     return this.clampDrift(i, this.ships[i].x + (rnd() * 2 - 1) * step);
   }
 
@@ -1544,7 +1565,7 @@ export class BattleEngine {
     for (const ship of this.ships) {
       ship.flash = Math.max(0, ship.flash - dt * 3.2);
       // A hull that is losing lists toward the sea; a healthy one rides level.
-      const list = ship.hp <= 0 ? 0.55 : (1 - ship.hp / BALANCE.MAX_HP) * 0.09;
+      const list = ship.hp <= 0 ? 0.55 : (1 - ship.hp / ship.maxHp) * 0.09;
       const want = (ship.team === 0 ? 1 : -1) * list;
       ship.lean += (want - ship.lean) * Math.min(1, dt * 3.4);
     }
@@ -1643,7 +1664,7 @@ export class BattleEngine {
     else drawFallbackSea(ctx, this.arena);
 
     const storm = this.cfg.rules.storm;
-    drawWaves(ctx, this.arena, this.clock, storm ? q.waves + 3 : q.waves, storm ? 1.7 : 1);
+    drawWaves(ctx, this.arena, this.clock, storm ? q.waves + 2 : q.waves, storm ? 1.7 : 1);
     // Behind the ships on purpose. Rain in front of the hulls turns a six-ship
     // fleet action into a smear on the cheap phones this has to run on, and
     // the hulls are the one thing that must stay readable in a gale.
@@ -1711,7 +1732,7 @@ export class BattleEngine {
     const h = 17;
     const x = ship.x - w / 2;
     const y = this.shipY(i) - 300;
-    const frac = clamp(ship.hp / BALANCE.MAX_HP, 0, 1);
+    const frac = clamp(ship.hp / ship.maxHp, 0, 1);
 
     ctx.save();
     ctx.fillStyle = 'rgba(4, 16, 28, 0.66)';
@@ -1978,10 +1999,21 @@ function easeIn(t: number): number {
   return t * t;
 }
 
-/** Nothing may take more than one turn's worth of hull off in one write. */
-function clampClaim(current: number, claimed: number): number {
-  const floor = Math.max(0, current - BALANCE.MAX_TURN_DAMAGE);
-  const ceiling = Math.min(BALANCE.MAX_HP, current + 20);
+/**
+ * Nothing may take more than one turn's worth of hull off in one write.
+ *
+ * Both bounds are the *ship's own* full health, not BALANCE.MAX_HP. A
+ * Man-o'-War sails at 132 and a fixed 100 ceiling here would have silently
+ * shaved a third off it on the very first packet that mentioned it -- and
+ * a fixed floor would have refused a legitimate killing blow on a hull with
+ * more than MAX_TURN_DAMAGE left, which is exactly the divergence that ended
+ * a match on one screen and not the other before MAX_TURN_DAMAGE was raised
+ * to MAX_HP in the first place. The most a full-health hull can lose in one
+ * turn is all of it, whatever class it is.
+ */
+function clampClaim(current: number, claimed: number, maxHp: number): number {
+  const floor = Math.max(0, current - Math.max(BALANCE.MAX_TURN_DAMAGE, maxHp));
+  const ceiling = Math.min(maxHp, current + 20);
   return clamp(claimed, floor, ceiling);
 }
 
