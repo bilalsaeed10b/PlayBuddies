@@ -37,6 +37,8 @@ import {
 } from '../game/rules';
 import type { Arena } from '../game/rules';
 import type { Quality } from '../game/quality';
+import { EMPTY_RECORD } from '../platform/stats';
+import type { MatchRecord } from '../platform/stats';
 import type {
   Control,
   MatchRules,
@@ -171,6 +173,9 @@ export interface FeedEntry {
  */
 interface ShotTally {
   shooter: number;
+  /** Balls that left the barrel. One for a round shot, five for grape. */
+  balls: number;
+  card: CardId;
   /** Hulls struck, counted per projectile: five grape pellets on one ship is five. */
   hulls: number;
   rigs: number;
@@ -255,6 +260,17 @@ export class BattleEngine {
   /** What the shot currently in the air has done so far. Null between turns. */
   private tally: ShotTally | null = null;
 
+  /**
+   * This battle's shooting, for the captain's log.
+   *
+   * Only hulls under local control at the moment of firing count towards it.
+   * A bot that inherited an abandoned wheel is not this player, and neither is
+   * a shot replayed off the wire -- both run through the same `fire()` on
+   * every connected client, so counting anything wider would have every
+   * device crediting itself with the whole fleet's gunnery.
+   */
+  readonly record: MatchRecord = { ...EMPTY_RECORD, cards: {} };
+
   /** Aim the local player is holding, in world radians and 0..1. */
   aimAngle = -0.7;
   aimPower = 0.65;
@@ -288,6 +304,15 @@ export class BattleEngine {
 
   /** Burn stacks as they stood before the current shot, so a firebomb cannot tick on itself. */
   private burnBefore: number[] = [];
+  /**
+   * Who lit each fire, so the burn ticks belong to somebody.
+   *
+   * Burn damage is applied in `resolve`, a beat after the shot that caused it
+   * has already been tallied and closed -- so it reached nobody's record and a
+   * match won by burning the last enemy down read as a win with no ships sunk
+   * and no damage dealt. -1 for a hull nobody has set alight.
+   */
+  private burnFrom: number[] = [];
   /** The last hull on each side to take a shot, so the helm goes round a fleet rather than sticking. */
   private lastFired: Record<Team, number> = { 0: -1, 1: -1 };
   /** The preview of the other side's shot: what was fired, before its outcome is known. */
@@ -365,6 +390,7 @@ export class BattleEngine {
     this.lastShotHit = this.ships.map(() => null);
     this.streak = this.ships.map(() => 0);
     this.burnBefore = this.ships.map(() => 0);
+    this.burnFrom = this.ships.map(() => -1);
 
     // `first` names the side that opens; the hull that actually fires is that
     // side's front rank.
@@ -637,7 +663,10 @@ export class BattleEngine {
     this.lastShotHit[shooter] = false;
     this.lastFired[ship.team] = shooter;
     this.burnBefore = this.ships.map((s) => s.burn);
-    this.tally = { shooter, hulls: 0, rigs: 0, damage: 0, sunk: [], burned: false, pierced: false, grazed: false };
+    this.tally = {
+      shooter, balls: card.shots, card: card.id,
+      hulls: 0, rigs: 0, damage: 0, sunk: [], burned: false, pierced: false, grazed: false,
+    };
 
     // Sent before a single physics step has run. Only for a shot this device
     // actually owns -- not a replay of what the wire just handed us, and not
@@ -979,6 +1008,7 @@ export class BattleEngine {
       this.damage(struckShip, p.damage * mult, ix);
       if (p.burn > 0) {
         this.ships[struckShip].burn = p.burn + 1;
+        this.burnFrom[struckShip] = p.from;
         if (this.tally) this.tally.burned = true;
       }
       this.explode(ix, iy, p, 'hull', this.waterLevelFor(struckShip));
@@ -1055,10 +1085,22 @@ export class BattleEngine {
     for (let i = 0; i < this.ships.length; i++) {
       const ship = this.ships[i];
       if ((this.burnBefore[i] ?? 0) > 0 && ship.hp > 0) {
+        const before = ship.hp;
         ship.hp = Math.max(0, ship.hp - BALANCE.BURN_PER_TURN);
         ship.burn = Math.max(0, ship.burn - 1);
         this.burnAt(i);
         this.cfg.onSfx?.('burn');
+
+        // The fire belongs to whoever lit it, however many turns ago.
+        const lit = this.burnFrom[i] ?? -1;
+        if (lit >= 0 && this.ships[lit]?.control === 'local') {
+          this.record.damage += before - ship.hp;
+          if (ship.hp <= 0) this.record.sunk += 1;
+        }
+        if (ship.hp <= 0) {
+          this.shout('burned to the waterline!', 'kill');
+          this.logLine(`${this.shipName(i)} burned out`, 'kill');
+        }
       }
     }
 
@@ -1380,6 +1422,9 @@ export class BattleEngine {
     if (landed > 0) this.streak[t.shooter] = (this.streak[t.shooter] ?? 0) + 1;
     else this.streak[t.shooter] = 0;
 
+    // Banked before the shouting, which returns early in three places below.
+    this.bank(t);
+
     if (t.sunk.length > 0) {
       const names = t.sunk.map((i) => this.shipName(i)).join(' and ');
       this.shout(t.sunk.length > 1 ? 'two under!' : 'sank her!', 'kill');
@@ -1412,6 +1457,21 @@ export class BattleEngine {
     // shot and the streak is the footnote it should be.
     const run = this.streak[t.shooter] ?? 0;
     if (run >= 3) this.logLine(`${who} — ${run} in a row`, 'big');
+  }
+
+  /** One shot, into this battle's running log. Local hulls only -- see `record`. */
+  private bank(t: ShotTally) {
+    if (this.ships[t.shooter]?.control !== 'local') return;
+    const landed = t.hulls + t.rigs;
+    const r = this.record;
+    r.shots += 1;
+    r.balls += t.balls;
+    r.ballsLanded += landed;
+    r.damage += t.damage;
+    r.sunk += t.sunk.length;
+    if (landed > 0) r.hits += 1;
+    r.bestStreak = Math.max(r.bestStreak, this.streak[t.shooter] ?? 0);
+    r.cards[t.card] = (r.cards[t.card] ?? 0) + 1;
   }
 
   private shout(text: string, tone: CallTone = 'hit') {

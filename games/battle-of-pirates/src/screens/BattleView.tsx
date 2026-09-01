@@ -21,6 +21,7 @@ import { createLogger } from '@shared/log/logger';
 import type { GameSettings, MatchRules, NetPacket, Phase, Team } from '../types/game';
 // Type only: the runtime value arrives through the dynamic import below, which
 // is what keeps the Firebase SDK out of an offline player's bundle.
+import type { MatchRecord } from '../platform/stats';
 import type { TurnLink } from '../net/turnLink';
 
 const log = createLogger('battle-of-pirates');
@@ -70,7 +71,7 @@ export default function BattleView({
   settings: GameSettings;
   onOpenSettings: () => void;
   onExit: () => void;
-  onResult: (won: boolean, hpLeft: number) => void;
+  onResult: (won: boolean, hpLeft: number, record: MatchRecord) => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const shellRef = useRef<HTMLDivElement>(null);
@@ -448,7 +449,7 @@ export default function BattleView({
         // hull the prize is counted from is my own — not some crewmate's.
         const won = config.localShips.some((i) => engine.ships[i].team === winner);
         const mine = config.localShips[0] ?? 0;
-        onResult(won, Math.round(Math.max(0, engine.ships[mine].hp)));
+        onResult(won, Math.round(Math.max(0, engine.ships[mine].hp)), engine.record);
         audioService.playEnd(won);
       },
     });

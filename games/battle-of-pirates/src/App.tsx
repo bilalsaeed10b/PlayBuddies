@@ -12,14 +12,18 @@ import {
   Play,
   ScrollText,
   Settings as SettingsIcon,
+  Target,
+  Trophy,
   Users,
 } from 'lucide-react';
 import { askHostToEndGame, toggleFullscreen } from './fullscreen';
 import { FREE_SHIPS, SHIPS, drawShip } from './game/ships';
-import { TEAM_COLORS } from './game/rules';
+import { CARDS, CARD_ORDER, TEAM_COLORS } from './game/rules';
 import { TIERS } from './engine/ai';
 import { audioService } from './services/audio';
 import { GameWallet, reportResult } from './platform/wallet';
+import { accuracy, clearStats, favouriteCard, readStats, recordBattle } from './platform/stats';
+import type { MatchRecord, Stats } from './platform/stats';
 import BattleView, { MatchConfig } from './screens/BattleView';
 import type { Seat } from './engine/BattleEngine';
 import { DEFAULT_RULES, packRules, unpackRules } from './types/game';
@@ -158,6 +162,9 @@ export default function App() {
     return saved ? { ...DEFAULT_RULES, ...JSON.parse(saved) } : DEFAULT_RULES;
   });
   const [showRules, setShowRules] = useState(false);
+  /** The captain's log. Read once on boot, replaced after every battle. */
+  const [stats, setStats] = useState<Stats>(readStats);
+  const [showStats, setShowStats] = useState(false);
   useEffect(() => {
     localStorage.setItem('pirates_rules_v2', JSON.stringify(rules));
   }, [rules]);
@@ -366,11 +373,12 @@ export default function App() {
     }
   }, [isHost, handoff.room, rules]);
 
-  const award = useCallback((won: boolean, hpLeft: number) => {
+  const award = useCallback((won: boolean, hpLeft: number, record: MatchRecord) => {
     // Something for turning up, more for winning, and a bonus for coming
     // through it with your hull mostly intact.
     setCoins((c) => c + (won ? 95 : 30) + (won ? Math.round(hpLeft / 3) : 0));
     reportResult(won);
+    setStats(recordBattle(won, record));
   }, []);
 
   /**
@@ -571,6 +579,7 @@ export default function App() {
           onCouch={() => openOffline(2)}
           onSettings={() => setShowSettings(true)}
           onRules={() => setShowRules(true)}
+          onStats={() => setShowStats(true)}
           rules={rules}
           onBack={view === 'offline_menu' ? () => setView('room') : undefined}
         />
@@ -626,6 +635,17 @@ export default function App() {
           onClose={() => setShowRules(false)}
         />
       )}
+
+      {showStats && (
+        <StatsPanel
+          stats={stats}
+          onClose={() => setShowStats(false)}
+          onClear={() => {
+            clearStats();
+            setStats(readStats());
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -671,6 +691,7 @@ function Menu({
   onCouch,
   onSettings,
   onRules,
+  onStats,
   rules,
   onBack,
 }: {
@@ -681,6 +702,7 @@ function Menu({
   onCouch: () => void;
   onSettings: () => void;
   onRules: () => void;
+  onStats: () => void;
   rules: MatchRules;
   onBack?: () => void;
 }) {
@@ -755,6 +777,9 @@ function Menu({
         </div>
         <button onClick={onRules} className="panel flex items-center gap-2 rounded-2xl px-4 py-3 font-bold text-white/70">
           <ScrollText className="h-5 w-5" /> Rules
+        </button>
+        <button onClick={onStats} aria-label="Captain's log" className="panel rounded-2xl p-3 text-white/70">
+          <Trophy className="h-5 w-5" />
         </button>
         <button onClick={onSettings} aria-label="Settings" className="panel rounded-2xl p-3">
           <SettingsIcon className="h-5 w-5" />
@@ -1394,6 +1419,180 @@ function SettingsPanel({
  * them change a copy that gets overwritten the moment the host presses start
  * would be a lie about who is in charge.
  */
+/**
+ * The captain's log.
+ *
+ * Four numbers up top and the detail below them, in that order on purpose:
+ * accuracy is the one figure a player actually wants and it should not have
+ * to be hunted for. Everything here is this browser's own record -- see
+ * stats.ts on why it does not go to the account.
+ */
+function StatsPanel({
+  stats,
+  onClose,
+  onClear,
+}: {
+  stats: Stats;
+  onClose: () => void;
+  onClear: () => void;
+}) {
+  const [confirming, setConfirming] = useState(false);
+  const fav = favouriteCard(stats);
+  const acc = accuracy(stats);
+  const winRate = stats.battles === 0 ? 0 : Math.round((stats.wins / stats.battles) * 100);
+  // Grapeshot puts five balls in the air for one trigger pull, so this and
+  // `acc` are genuinely different questions: how often a turn achieved
+  // something, against how much of the iron actually arrived.
+  const ballAcc = stats.balls === 0 ? 0 : Math.round((stats.ballsLanded / stats.balls) * 100);
+
+  const rows: { label: string; value: string }[] = [
+    { label: 'Battles fought', value: String(stats.battles) },
+    { label: 'Won', value: `${stats.wins} · ${winRate}%` },
+    { label: 'Shots fired', value: String(stats.shots) },
+    { label: 'Shots that landed', value: String(stats.hits) },
+    { label: 'Iron on target', value: `${stats.ballsLanded} of ${stats.balls} balls · ${ballAcc}%` },
+    { label: 'Damage dealt', value: String(Math.round(stats.damage)) },
+    { label: 'Best run', value: stats.bestStreak > 0 ? `${stats.bestStreak} in a row` : '—' },
+  ];
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm">
+      <div className="panel max-h-[88dvh] w-full max-w-md space-y-5 overflow-y-auto overscroll-contain rounded-[2rem] p-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-xl font-black">Captain&apos;s log</h3>
+            <p className="text-[11px] font-semibold text-white/45">
+              Your own gunnery, counted from every hull you have sailed.
+            </p>
+          </div>
+          <button onClick={onClose} aria-label="Close" className="rounded-xl p-2 hover:bg-white/10">
+            <ArrowLeft className="h-5 w-5" />
+          </button>
+        </div>
+
+        {stats.battles === 0 ? (
+          <div className="rounded-2xl bg-black/25 p-6 text-center">
+            <Anchor className="mx-auto mb-3 h-10 w-10 text-white/25" />
+            <p className="text-sm font-bold text-white/60">Nothing logged yet.</p>
+            <p className="mt-1 text-[11px] text-white/40">
+              Fight a battle and this fills itself in — every shot you take, and what it did.
+            </p>
+          </div>
+        ) : (
+          <>
+            <div className="grid grid-cols-2 gap-2">
+              <Figure icon={<Target className="h-4 w-4" />} label="Accuracy" value={`${acc}%`} tone="amber" />
+              <Figure icon={<Trophy className="h-4 w-4" />} label="Win rate" value={`${winRate}%`} tone="emerald" />
+              <Figure icon={<Anchor className="h-4 w-4" />} label="Ships sunk" value={String(stats.sunk)} tone="rose" />
+              <Figure
+                icon={<ScrollText className="h-4 w-4" />}
+                label="Favourite card"
+                value={fav ? CARDS[fav.id].name : '—'}
+                sub={fav ? `${fav.n} fired` : undefined}
+                tone="sky"
+              />
+            </div>
+
+            <div className="space-y-1 rounded-2xl bg-black/25 p-4">
+              {rows.map((r) => (
+                <div key={r.label} className="flex items-baseline justify-between gap-3 text-sm">
+                  <span className="font-semibold text-white/55">{r.label}</span>
+                  <span className="font-black tabular-nums">{r.value}</span>
+                </div>
+              ))}
+            </div>
+
+            <div className="space-y-2">
+              <p className="text-[11px] font-black uppercase tracking-[0.2em] text-white/45">The deck</p>
+              <div className="space-y-1.5">
+                {CARD_ORDER.map((id) => {
+                  const n = stats.cards[id] ?? 0;
+                  const share = stats.shots === 0 ? 0 : (n / stats.shots) * 100;
+                  return (
+                    <div key={id} className="flex items-center gap-2.5">
+                      <span className="w-24 shrink-0 truncate text-[11px] font-bold text-white/60">
+                        {CARDS[id].name}
+                      </span>
+                      <span className="h-2 flex-1 overflow-hidden rounded-full bg-white/10">
+                        <span
+                          className="block h-full rounded-full bg-amber-400/80"
+                          style={{ width: `${Math.max(n > 0 ? 4 : 0, share)}%` }}
+                        />
+                      </span>
+                      <span className="w-8 shrink-0 text-right text-[11px] font-black tabular-nums text-white/50">
+                        {n}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {confirming ? (
+              <div className="flex gap-2">
+                <button
+                  onClick={() => {
+                    onClear();
+                    setConfirming(false);
+                  }}
+                  className="flex-1 rounded-xl border border-rose-400/50 bg-rose-500/20 py-2.5 text-xs font-black text-rose-200"
+                >
+                  Yes, wipe the log
+                </button>
+                <button
+                  onClick={() => setConfirming(false)}
+                  className="flex-1 rounded-xl border border-white/15 bg-white/5 py-2.5 text-xs font-black text-white/60"
+                >
+                  Keep it
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setConfirming(true)}
+                className="w-full rounded-xl border border-white/10 py-2.5 text-[11px] font-bold text-white/35 hover:bg-white/5"
+              >
+                Start a fresh log
+              </button>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+const FIGURE_TONE = {
+  amber: 'border-amber-400/30 bg-amber-400/10 text-amber-300',
+  emerald: 'border-emerald-400/30 bg-emerald-400/10 text-emerald-300',
+  rose: 'border-rose-400/30 bg-rose-400/10 text-rose-300',
+  sky: 'border-sky-400/30 bg-sky-400/10 text-sky-300',
+};
+
+/** One headline number. Big enough to read at a glance and nothing else on it. */
+function Figure({
+  icon,
+  label,
+  value,
+  sub,
+  tone,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: string;
+  sub?: string;
+  tone: keyof typeof FIGURE_TONE;
+}) {
+  return (
+    <div className={`rounded-2xl border p-3 ${FIGURE_TONE[tone]}`}>
+      <p className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wider opacity-80">
+        {icon} {label}
+      </p>
+      <p className="mt-1 truncate text-xl font-black text-white">{value}</p>
+      {sub && <p className="text-[10px] font-bold opacity-70">{sub}</p>}
+    </div>
+  );
+}
+
 function RulesPanel({
   rules,
   editable,
