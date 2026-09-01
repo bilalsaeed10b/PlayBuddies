@@ -221,8 +221,30 @@ export const BALANCE = {
   BLAST_R: 140,
   /** Splash damage at zero distance, falling linearly to nothing at BLAST_R. */
   BLAST: 15,
-  /** Ceiling on any single resolution, used to clamp what a peer claims. */
-  MAX_TURN_DAMAGE: 62,
+  /**
+   * Ceiling on any single resolution, used to clamp what a peer claims.
+   *
+   * Has to be MAX_HP, not some smaller "plausible single hit" guess. Grape
+   * fires five pellets at the *same* per-pellet damage as a round shot (see
+   * the comment on `grape` below) — that is the entire point of the card,
+   * and landing most or all five on a close target is the card working
+   * exactly as intended, not a fluke. This used to sit at 62: comfortably
+   * enough for one or two pellets, short by a wide margin the moment three
+   * or more actually connected. When that happened, clampClaim floored the
+   * receiver's hp above zero on a shot the sender's own engine had correctly
+   * resolved as lethal — the sender's afloat() check tripped and ended the
+   * match on their screen; the receiver's never did, because their copy of
+   * that ship was still, technically, floating. That is the "I finished the
+   * game and it didn't finish for the other player" bug. The turn order the
+   * two sides kept afterward diverged from there too — a ship one side
+   * considers sunk gets skipped in rotation, a ship the other side still has
+   * afloat does not, and every turn from that point reads as skipped to
+   * whichever side's count fell out of step. Set to the actual maximum a
+   * full-health ship can legitimately lose in one turn, this can never
+   * happen: the worst real hit is bounded, so there's nothing left for the
+   * clamp to have an opinion about.
+   */
+  MAX_TURN_DAMAGE: 100,
   BURN_PER_TURN: 7,
 
   /** Trimmed down from the first pass at this: a smaller silhouette is a harder one to land on. */
