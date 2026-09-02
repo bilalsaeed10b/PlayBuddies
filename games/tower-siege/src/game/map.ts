@@ -132,6 +132,39 @@ export function airPointAt(d: number): Vec {
 }
 
 /**
+ * Tiles that hold scenery instead of a tower.
+ *
+ * Two jobs at once. A field of a hundred and eleven identical plots looks like
+ * a spreadsheet and plays like one — every plot is as good as its neighbour,
+ * so there is nothing to decide. A pond in the middle of the best corridor on
+ * the map, and a copse where the long approach would otherwise be trivially
+ * covered, turn placement into a question. That they also break up the green
+ * is the other half of it.
+ */
+export const SCENERY: { col: number; row: number; kind: 'tree' | 'rock' | 'pond' }[] = [
+  // The pond sits in the double-covered corridor between the row-5 and row-8
+  // runs, which is the single most valuable stretch of ground on the board.
+  { col: 6, row: 6, kind: 'pond' },
+  { col: 7, row: 6, kind: 'pond' },
+  { col: 6, row: 7, kind: 'pond' },
+  { col: 7, row: 7, kind: 'pond' },
+
+  { col: 0, row: 0, kind: 'tree' },
+  { col: 1, row: 0, kind: 'tree' },
+  { col: 9, row: 2, kind: 'tree' },
+  { col: 10, row: 2, kind: 'tree' },
+  { col: 0, row: 4, kind: 'tree' },
+  { col: 15, row: 2, kind: 'tree' },
+  { col: 15, row: 7, kind: 'tree' },
+  { col: 0, row: 9, kind: 'tree' },
+  { col: 11, row: 9, kind: 'tree' },
+
+  { col: 4, row: 7, kind: 'rock' },
+  { col: 14, row: 4, kind: 'rock' },
+  { col: 0, row: 2, kind: 'rock' },
+];
+
+/**
  * Which tiles a tower may stand on.
  *
  * Built by walking the route and blocking out every tile it passes through
@@ -173,6 +206,7 @@ export const BUILDABLE: boolean[] = (() => {
   }
   block(KEEP.col, KEEP.row);
   block(KEEP.col - 1, KEEP.row);
+  for (const s of SCENERY) block(s.col, s.row);
 
   const out: boolean[] = [];
   for (let r = 0; r < ROWS; r++) {

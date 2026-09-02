@@ -56,4 +56,9 @@ What was checked before this shipped:
 - twelve seeds replay to identical outcomes on independent engines
 - a fallen keep stays fallen
 - a send lands exactly its own count on exactly the wave it was bought against
-- the bot ladder: Squire holds to about wave 10, Captain 23, Warlord all 30
+- the bot ladder, over 24 seeds: Squire averages wave 8, Captain 18, Warlord
+  19. Captain and Warlord are closer than the labels suggest — the outcome
+  distribution is strongly bimodal (a run either breaks around wave 8 or
+  snowballs to the end), so two ranks a wave apart on the mean is inside the
+  noise. What is solidly true is that the default rank holds well past ten,
+  and that the ordering is monotonic

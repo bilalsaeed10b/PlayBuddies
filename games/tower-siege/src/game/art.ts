@@ -1,184 +1,17 @@
 /**
- * Everything that puts pixels on the canvas.
+ * Towers, enemies and the keep - everything drawn every frame.
  *
- * The ground, the path and the plot grid never change, so they are baked once
- * into an offscreen canvas and blitted — painting a hundred and seventy-six
- * tiles with their edging twice a frame is exactly the kind of thing that
- * turns a cheap phone into a slideshow, and it is the same trick the rest of
- * the platform uses for its backdrops.
- *
- * Towers and enemies are baked per kind and per level, then drawn as sprites
- * with only their rotation live. A ballista is thirty-odd paths; four keeps'
- * worth of them redrawn every frame is not affordable and is not necessary.
+ * The ground they stand on is a separate job on a separate schedule and lives
+ * in ground.ts: baked once, blitted from then on. What is here is baked per
+ * kind and per level and blitted too, with only the parts that actually move
+ * drawn live on top - a turret tracking a runner, a keep burning. A ballista
+ * is thirty-odd paths, and four keeps' worth of them repainted sixty times a
+ * second is not affordable and is not necessary.
  */
-import {
-  COLS,
-  KEEP,
-  PATH,
-  ROWS,
-  WORLD_H,
-  WORLD_W,
-  centreOf,
-  isBuildable,
-} from './map';
-import { ENEMIES, TILE, TOWERS, mulberry32 } from './rules';
+import { KEEP, centreOf } from './map';
+import { ENEMIES, TILE, TOWERS } from './rules';
 import type { EnemyId, TowerId } from './rules';
-
-const GROUND_SEED = 0x9e3779b1;
-
-/** The road's width, and the darker rut down the middle of it. */
-const ROAD_W = TILE * 0.74;
-
-function rounded(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
-  const rr = Math.min(r, w / 2, h / 2);
-  ctx.beginPath();
-  ctx.moveTo(x + rr, y);
-  ctx.arcTo(x + w, y, x + w, y + h, rr);
-  ctx.arcTo(x + w, y + h, x, y + h, rr);
-  ctx.arcTo(x, y + h, x, y, rr);
-  ctx.arcTo(x, y, x + w, y, rr);
-  ctx.closePath();
-}
-
-// ── the ground ─────────────────────────────────────────────────────────────
-
-let ground: HTMLCanvasElement | null = null;
-
-/**
- * Grass, road and plots, baked once for the whole session.
- *
- * Every keep on screen is the same map, so this is one bitmap shared by all
- * four of them rather than one each.
- */
-export function bakeGround(): HTMLCanvasElement | null {
-  if (ground) return ground;
-  try {
-    const c = document.createElement('canvas');
-    c.width = WORLD_W;
-    c.height = WORLD_H;
-    const ctx = c.getContext('2d');
-    if (!ctx) return null;
-    paintGround(ctx);
-    ground = c;
-    return c;
-  } catch {
-    return null;
-  }
-}
-
-function paintGround(ctx: CanvasRenderingContext2D) {
-  const rnd = mulberry32(GROUND_SEED);
-
-  // Turf, with a slow gradient so the far end of the map reads as further off
-  // rather than as the same green repeated a hundred and seventy-six times.
-  const turf = ctx.createLinearGradient(0, 0, 0, WORLD_H);
-  turf.addColorStop(0, '#2f5d3a');
-  turf.addColorStop(0.55, '#28513a');
-  turf.addColorStop(1, '#1e4232');
-  ctx.fillStyle = turf;
-  ctx.fillRect(0, 0, WORLD_W, WORLD_H);
-
-  // Tufts. Cheap, and they are what stops the turf reading as felt.
-  for (let i = 0; i < 520; i++) {
-    const x = rnd() * WORLD_W;
-    const y = rnd() * WORLD_H;
-    const len = 3 + rnd() * 5;
-    ctx.strokeStyle = `rgba(${120 + rnd() * 40 | 0}, ${170 + rnd() * 50 | 0}, ${110 + rnd() * 40 | 0}, ${0.1 + rnd() * 0.14})`;
-    ctx.lineWidth = 1.4;
-    ctx.lineCap = 'round';
-    ctx.beginPath();
-    ctx.moveTo(x, y);
-    ctx.lineTo(x + (rnd() - 0.5) * 3, y - len);
-    ctx.stroke();
-  }
-
-  // The road. Drawn as one stroked polyline with round joins, so a corner is
-  // a corner rather than two squares meeting at a notch.
-  ctx.lineCap = 'round';
-  ctx.lineJoin = 'round';
-
-  ctx.strokeStyle = '#20362b';
-  ctx.lineWidth = ROAD_W + 10;
-  strokeRoute(ctx);
-
-  ctx.strokeStyle = '#8a7a5e';
-  ctx.lineWidth = ROAD_W;
-  strokeRoute(ctx);
-
-  ctx.strokeStyle = '#9c8c6d';
-  ctx.lineWidth = ROAD_W - 12;
-  strokeRoute(ctx);
-
-  // Ruts, so the road reads as walked rather than paved.
-  ctx.strokeStyle = 'rgba(90, 76, 54, 0.45)';
-  ctx.lineWidth = 3;
-  ctx.setLineDash([16, 13]);
-  strokeRoute(ctx);
-  ctx.setLineDash([]);
-
-  // Gravel along the road, clipped to it so none of it lands on the turf.
-  ctx.save();
-  ctx.lineWidth = ROAD_W;
-  ctx.beginPath();
-  routePath(ctx);
-  ctx.stroke();
-  for (let i = 0; i < 260; i++) {
-    const t = rnd();
-    const seg = Math.min(PATH.length - 2, Math.floor(t * (PATH.length - 1)));
-    const a = PATH[seg];
-    const b = PATH[seg + 1];
-    const f = rnd();
-    const x = a.x + (b.x - a.x) * f + (rnd() - 0.5) * ROAD_W * 0.8;
-    const y = a.y + (b.y - a.y) * f + (rnd() - 0.5) * ROAD_W * 0.8;
-    ctx.fillStyle = `rgba(${110 + rnd() * 50 | 0}, ${98 + rnd() * 40 | 0}, ${74 + rnd() * 30 | 0}, 0.5)`;
-    ctx.beginPath();
-    ctx.arc(x, y, 1 + rnd() * 2, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  ctx.restore();
-
-  // Plots. A faint dashed square on every buildable tile so a player can see
-  // where a tower may go without having to pick one up and find out.
-  for (let r = 0; r < ROWS; r++) {
-    for (let c = 0; c < COLS; c++) {
-      if (!isBuildable(c, r)) continue;
-      const x = c * TILE;
-      const y = r * TILE;
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.035)';
-      rounded(ctx, x + 5, y + 5, TILE - 10, TILE - 10, 8);
-      ctx.fill();
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.07)';
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
-    }
-  }
-
-  drawBreach(ctx);
-}
-
-function routePath(ctx: CanvasRenderingContext2D) {
-  ctx.beginPath();
-  ctx.moveTo(PATH[0].x, PATH[0].y);
-  for (let i = 1; i < PATH.length; i++) ctx.lineTo(PATH[i].x, PATH[i].y);
-}
-
-function strokeRoute(ctx: CanvasRenderingContext2D) {
-  routePath(ctx);
-  ctx.stroke();
-}
-
-/** Where the enemies come in. Broken wall, so the entrance reads as a breach. */
-function drawBreach(ctx: CanvasRenderingContext2D) {
-  const y = PATH[0].y;
-  ctx.save();
-  ctx.fillStyle = '#3a3a44';
-  ctx.fillRect(0, y - TILE * 1.5, 14, TILE);
-  ctx.fillRect(0, y + TILE * 0.5, 14, TILE);
-  ctx.fillStyle = '#22222a';
-  ctx.fillRect(0, y - TILE * 1.5, 14, 6);
-  ctx.fillRect(0, y + TILE * 1.4, 14, 6);
-  ctx.restore();
-}
+import { rounded } from './ground';
 
 // ── the keep ───────────────────────────────────────────────────────────────
 
@@ -293,45 +126,80 @@ export function towerBase(kind: TowerId, level: number): HTMLCanvasElement | nul
 
 function paintTowerBase(ctx: CanvasRenderingContext2D, kind: TowerId, level: number) {
   const meta = TOWERS[kind];
-  const grow = 1 + level * 0.09;
-  const r = 19 * grow;
+  const grow = 1 + level * 0.11;
+  const r = 22 * grow;
 
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+  // A long soft shadow, thrown the same way as every tree's — one light
+  // source across the whole board is most of what makes a flat top-down scene
+  // read as having depth at all.
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.34)';
   ctx.beginPath();
-  ctx.ellipse(0, 9, r * 1.1, r * 0.5, 0, 0, Math.PI * 2);
+  ctx.ellipse(5, 10, r * 1.15, r * 0.5, 0, 0, Math.PI * 2);
   ctx.fill();
 
-  // Plinth.
-  const stone = ctx.createLinearGradient(0, -r, 0, r);
-  stone.addColorStop(0, '#8d8778');
-  stone.addColorStop(1, '#4e4a42');
-  ctx.fillStyle = stone;
+  // A stone footing, then the shaft above it, so the tower has a base it
+  // stands on rather than being a token laid on the grass.
+  const foot = ctx.createLinearGradient(0, -r * 0.4, 0, r * 0.8);
+  foot.addColorStop(0, '#8e8879');
+  foot.addColorStop(0.6, '#665f52');
+  foot.addColorStop(1, '#3f3a32');
+  ctx.fillStyle = foot;
   ctx.beginPath();
-  ctx.ellipse(0, 4, r, r * 0.62, 0, 0, Math.PI * 2);
+  ctx.ellipse(0, 7, r, r * 0.6, 0, 0, Math.PI * 2);
   ctx.fill();
-  ctx.strokeStyle = 'rgba(0,0,0,0.25)';
+  ctx.strokeStyle = 'rgba(0,0,0,0.32)';
   ctx.lineWidth = 2;
   ctx.stroke();
 
-  // Body, in the tower's own colour so the five are told apart at a glance.
-  const body = ctx.createLinearGradient(0, -r, 0, 8);
-  body.addColorStop(0, meta.trim);
-  body.addColorStop(1, meta.hue);
-  ctx.fillStyle = body;
-  rounded(ctx, -r * 0.62, -r * 0.72, r * 1.24, r * 1.3, 6);
-  ctx.fill();
-  ctx.strokeStyle = 'rgba(0,0,0,0.3)';
-  ctx.lineWidth = 1.6;
-  ctx.stroke();
-
-  // Level pips, so an upgraded tower is visibly upgraded without being
-  // selected. R-S2: a small map has to stay readable late.
-  for (let i = 0; i <= level; i++) {
-    ctx.fillStyle = '#ffe9a8';
+  // Blocks around the rim of the footing. Cheap, and it is what turns a grey
+  // ellipse into masonry.
+  const blocks = 9;
+  for (let i = 0; i < blocks; i++) {
+    const a = (i / blocks) * Math.PI * 2;
+    ctx.fillStyle = i % 2 === 0 ? 'rgba(255,255,255,0.09)' : 'rgba(0,0,0,0.12)';
     ctx.beginPath();
-    ctx.arc(-6 + i * 6, r * 0.62, 2.3, 0, Math.PI * 2);
+    ctx.ellipse(Math.cos(a) * r * 0.78, 7 + Math.sin(a) * r * 0.46, 4.5, 3, a, 0, Math.PI * 2);
     ctx.fill();
   }
+
+  // The shaft, in the tower's own colour, so the five kinds are told apart at
+  // a glance without reading anything.
+  const body = ctx.createLinearGradient(-r * 0.5, -r * 0.9, r * 0.5, r * 0.4);
+  body.addColorStop(0, meta.trim);
+  body.addColorStop(0.5, meta.hue);
+  body.addColorStop(1, shade(meta.hue, 0.62));
+  ctx.fillStyle = body;
+  rounded(ctx, -r * 0.56, -r * 0.86, r * 1.12, r * 1.32, 7);
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(0,0,0,0.38)';
+  ctx.lineWidth = 1.8;
+  ctx.stroke();
+
+  // A lit edge down one side, matching the shadow's direction.
+  ctx.fillStyle = 'rgba(255,255,255,0.16)';
+  rounded(ctx, -r * 0.5, -r * 0.8, r * 0.3, r * 1.18, 5);
+  ctx.fill();
+
+  // Level pips on the footing: an upgraded tower has to be visibly upgraded
+  // without being selected (REQUIREMENTS S2).
+  for (let i = 0; i <= level; i++) {
+    ctx.fillStyle = '#ffe07a';
+    ctx.beginPath();
+    ctx.arc(-7 + i * 7, r * 0.66, 2.6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(0,0,0,0.4)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
+}
+
+/** Darken a hex colour toward black by `k`. Used for the shaded face. */
+function shade(hex: string, k: number): string {
+  const n = parseInt(hex.slice(1), 16);
+  const r = Math.round(((n >> 16) & 255) * k);
+  const g = Math.round(((n >> 8) & 255) * k);
+  const b = Math.round((n & 255) * k);
+  return `rgb(${r}, ${g}, ${b})`;
 }
 
 /**
@@ -477,81 +345,130 @@ function paintEnemy(ctx: CanvasRenderingContext2D, kind: EnemyId) {
   const meta = ENEMIES[kind];
   const r = meta.size;
 
-  ctx.fillStyle = 'rgba(0,0,0,0.28)';
+  // Cast the same way as everything else on the board.
+  ctx.fillStyle = 'rgba(0,0,0,0.3)';
   ctx.beginPath();
-  ctx.ellipse(0, r * 0.62, r * 0.9, r * 0.36, 0, 0, Math.PI * 2);
+  ctx.ellipse(r * 0.22, r * 0.68, r * 0.92, r * 0.36, 0, 0, Math.PI * 2);
   ctx.fill();
 
-  const body = ctx.createRadialGradient(-r * 0.3, -r * 0.35, r * 0.2, 0, 0, r * 1.1);
+  const body = ctx.createRadialGradient(-r * 0.34, -r * 0.4, r * 0.14, 0, 0, r * 1.15);
   body.addColorStop(0, meta.trim);
-  body.addColorStop(1, meta.body);
-  ctx.fillStyle = body;
+  body.addColorStop(0.55, meta.body);
+  body.addColorStop(1, shade(meta.body, 0.6));
 
   if (kind === 'flyer') {
-    // Wings, so it reads as airborne at a glance and not merely as a fast
-    // grunt in a different colour.
-    ctx.fillStyle = 'rgba(200, 195, 255, 0.55)';
-    ctx.beginPath();
-    ctx.ellipse(-r * 0.2, -r * 0.75, r * 0.95, r * 0.42, -0.5, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.beginPath();
-    ctx.ellipse(-r * 0.2, r * 0.75, r * 0.95, r * 0.42, 0.5, 0, Math.PI * 2);
-    ctx.fill();
+    // Wings, so it reads as airborne at a glance rather than as a fast grunt
+    // in a different colour — the one thing a player must not misread, since
+    // half the towers cannot touch it.
+    ctx.fillStyle = 'rgba(205, 198, 255, 0.5)';
+    for (const sgn of [-1, 1]) {
+      ctx.beginPath();
+      ctx.ellipse(-r * 0.24, sgn * r * 0.8, r * 1.02, r * 0.44, sgn * 0.55, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.strokeStyle = 'rgba(160, 150, 235, 0.7)';
+    ctx.lineWidth = 1.4;
+    for (const sgn of [-1, 1]) {
+      ctx.beginPath();
+      ctx.ellipse(-r * 0.24, sgn * r * 0.8, r * 1.02, r * 0.44, sgn * 0.55, 0, Math.PI * 2);
+      ctx.stroke();
+    }
     ctx.fillStyle = body;
     ctx.beginPath();
-    ctx.ellipse(0, 0, r * 0.95, r * 0.68, 0, 0, Math.PI * 2);
+    ctx.ellipse(0, 0, r * 0.98, r * 0.7, 0, 0, Math.PI * 2);
     ctx.fill();
   } else if (kind === 'boss') {
+    ctx.fillStyle = body;
     ctx.beginPath();
     ctx.arc(0, 0, r, 0, Math.PI * 2);
     ctx.fill();
-    // Plates, and two eyes that make it obviously the thing to worry about.
+    // Horns and plating. It has to be obviously the thing to worry about from
+    // the moment it comes through the breach.
+    ctx.fillStyle = shade(meta.body, 0.55);
+    for (const sgn of [-1, 1]) {
+      ctx.beginPath();
+      ctx.moveTo(r * 0.16, sgn * r * 0.62);
+      ctx.quadraticCurveTo(r * 0.95, sgn * r * 1.15, r * 1.28, sgn * r * 0.72);
+      ctx.quadraticCurveTo(r * 0.85, sgn * r * 0.82, r * 0.4, sgn * r * 0.38);
+      ctx.closePath();
+      ctx.fill();
+    }
     ctx.strokeStyle = 'rgba(0,0,0,0.35)';
     ctx.lineWidth = 3;
     for (let i = 0; i < 3; i++) {
       ctx.beginPath();
-      ctx.arc(-r * 0.1, 0, r * (0.4 + i * 0.25), -1.1, 1.1);
+      ctx.arc(-r * 0.12, 0, r * (0.38 + i * 0.24), -1.15, 1.15);
       ctx.stroke();
     }
     ctx.fillStyle = '#ffd36e';
     ctx.beginPath();
-    ctx.arc(r * 0.42, -r * 0.28, r * 0.13, 0, Math.PI * 2);
-    ctx.arc(r * 0.42, r * 0.28, r * 0.13, 0, Math.PI * 2);
+    ctx.arc(r * 0.46, -r * 0.28, r * 0.14, 0, Math.PI * 2);
+    ctx.arc(r * 0.46, r * 0.28, r * 0.14, 0, Math.PI * 2);
     ctx.fill();
   } else if (kind === 'brute') {
-    // Square-shouldered, because it is the armoured one and a circle would
-    // read as "big grunt" rather than as a different problem.
-    rounded(ctx, -r * 0.85, -r * 0.85, r * 1.7, r * 1.7, r * 0.4);
+    // Square-shouldered, because it is the armoured one. A circle would read
+    // as "big grunt" rather than as a different problem needing a different
+    // answer.
+    ctx.fillStyle = body;
+    rounded(ctx, -r * 0.88, -r * 0.88, r * 1.76, r * 1.76, r * 0.36);
     ctx.fill();
-    ctx.fillStyle = 'rgba(255,255,255,0.2)';
-    rounded(ctx, -r * 0.5, -r * 0.62, r, r * 0.4, 4);
+    ctx.fillStyle = 'rgba(255,255,255,0.16)';
+    rounded(ctx, -r * 0.55, -r * 0.66, r * 1.1, r * 0.42, 4);
+    ctx.fill();
+    // A shield on the leading face, which is the bit the towers are shooting.
+    ctx.fillStyle = shade(meta.body, 0.5);
+    rounded(ctx, r * 0.42, -r * 0.6, r * 0.4, r * 1.2, 4);
+    ctx.fill();
+  } else if (kind === 'warden') {
+    // Angular: armoured like a brute but plainly quick, which is what makes it
+    // the nastier of the two.
+    ctx.fillStyle = body;
+    ctx.beginPath();
+    ctx.moveTo(r, 0);
+    ctx.lineTo(r * 0.24, -r * 0.86);
+    ctx.lineTo(-r * 0.82, -r * 0.6);
+    ctx.lineTo(-r * 0.82, r * 0.6);
+    ctx.lineTo(r * 0.24, r * 0.86);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.18)';
+    ctx.beginPath();
+    ctx.moveTo(r * 0.9, 0);
+    ctx.lineTo(r * 0.2, -r * 0.62);
+    ctx.lineTo(-r * 0.2, 0);
+    ctx.closePath();
     ctx.fill();
   } else {
+    ctx.fillStyle = body;
     ctx.beginPath();
-    ctx.ellipse(0, 0, r * 0.95, r * 0.85, 0, 0, Math.PI * 2);
+    ctx.ellipse(0, 0, r * 0.98, r * 0.86, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // A snout toward the front, so a runner visibly points the way it is
+    // going and a rank of them reads as marching rather than as beads.
+    ctx.beginPath();
+    ctx.ellipse(r * 0.7, 0, r * 0.34, r * 0.3, 0, 0, Math.PI * 2);
     ctx.fill();
   }
 
-  // Armour studs, so "this one shrugs off arrows" is visible rather than a
-  // number in a panel nobody opens mid-wave.
+  // Armour studs, so "this one shrugs off arrows" is visible on the board
+  // rather than a number in a panel nobody opens mid-wave.
   if (meta.armour >= 5) {
-    ctx.fillStyle = 'rgba(230, 240, 255, 0.8)';
+    ctx.fillStyle = 'rgba(232, 242, 255, 0.85)';
     for (let i = 0; i < 4; i++) {
       const a = (i / 4) * Math.PI * 2 + 0.4;
       ctx.beginPath();
-      ctx.arc(Math.cos(a) * r * 0.62, Math.sin(a) * r * 0.62, 1.9, 0, Math.PI * 2);
+      ctx.arc(Math.cos(a) * r * 0.6, Math.sin(a) * r * 0.6, 2.1, 0, Math.PI * 2);
       ctx.fill();
     }
   }
 
-  ctx.strokeStyle = 'rgba(0,0,0,0.35)';
-  ctx.lineWidth = 1.6;
+  ctx.strokeStyle = 'rgba(0,0,0,0.42)';
+  ctx.lineWidth = 1.7;
   ctx.stroke();
 }
 
-/** Reset every baked sprite. Only used when the tab regains a lost context. */
+/** Reset every baked sprite. Only used when a tab regains a lost context. */
 export function dropCaches() {
-  ground = null;
   towerCache.clear();
   enemyCache.clear();
 }

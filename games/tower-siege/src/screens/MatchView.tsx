@@ -31,7 +31,8 @@ import {
 } from '../game/rules';
 import type { EnemyId, MatchRules, TowerId } from '../game/rules';
 import { COLS, ROWS, WORLD_H, WORLD_W, isBuildable } from '../game/map';
-import { bakeGround, drawKeep, drawTowerHead, enemySprite, towerBase } from '../game/art';
+import { drawKeep, drawTowerHead, enemySprite, towerBase } from '../game/art';
+import { bakeGround, drawPlots } from '../game/ground';
 import { audioService } from '../services/audio';
 import { IN_IFRAME, toggleFullscreen } from '../fullscreen';
 import type { GameSettings, NetPacket } from '../types/game';
@@ -520,6 +521,13 @@ export default function MatchView({
 
     const ground = bakeGround();
     if (ground) ctx.drawImage(ground, 0, 0);
+
+    // The plots only while a tower is actually being placed. Baked into the
+    // ground they were a cage over every inch of the map; see ground.ts.
+    const placing = pickedRef.current !== null && !engine.towerAt(pickedRef.current);
+    if (placing && watchRef.current === mine) {
+      drawPlots(ctx, new Set(engine.towers.map((t) => t.plot)));
+    }
 
     // Range rings under everything, so a tower never hides its own reach.
     const showAll = settingsRef.current.showRanges;

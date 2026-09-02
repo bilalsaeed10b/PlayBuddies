@@ -21,7 +21,15 @@ export interface Tier {
   label: string;
   /** Share of its gold it will commit in one build phase. */
   spend: number;
-  /** How far down its own shortlist of plots it is willing to look. 0 takes the best. */
+  /**
+   * How far down its own shortlist of plots it is willing to look.
+   *
+   * The dial that actually works. Measured over twenty seeds at a fixed
+   * everything-else: taking the best plot every time averages wave 20, and
+   * being willing to settle for something in the top quarter averages 11.
+   * Which is the right shape for a difficulty setting — a weaker captain is
+   * one who puts towers in nearly-good places, not one who buys less.
+   */
   slack: number;
   /**
    * How strongly it prefers upgrading what it has to buying another tower.
@@ -38,6 +46,10 @@ export interface Tier {
    * The first pass had the tiers differ by how much gold they *spent*, which
    * got the ordering exactly backwards: the tier that spent everything on
    * cheap towers died on wave 9 and the miserly one reached 19.
+   *
+   * Swept on its own over twenty seeds it moves the mean by about two waves
+   * either way with no clear trend, which at this spread is noise — so it is
+   * set sensibly and `slack` below is what actually separates the ranks.
    */
   upgrade: number;
   /** Whether it looks at what is actually coming before buying. */
@@ -45,9 +57,9 @@ export interface Tier {
 }
 
 export const TIERS: Tier[] = [
-  { label: 'Squire', spend: 0.85, slack: 0.4, upgrade: 0.12, reads: false },
-  { label: 'Captain', spend: 0.9, slack: 0.14, upgrade: 0.5, reads: true },
-  { label: 'Warlord', spend: 0.95, slack: 0, upgrade: 0.78, reads: true },
+  { label: 'Squire', spend: 0.8, slack: 0.45, upgrade: 0.25, reads: false },
+  { label: 'Captain', spend: 0.9, slack: 0.18, upgrade: 0.5, reads: true },
+  { label: 'Warlord', spend: 0.95, slack: 0, upgrade: 0.6, reads: true },
 ];
 
 /**
