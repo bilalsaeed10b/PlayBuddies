@@ -129,23 +129,7 @@ export default function FriendsSidebar() {
       {!isOpen && (
         <motion.button
           initial={{ opacity: 0, x: 20 }}
-          animate={{
-            opacity: 1,
-            x: 0,
-            boxShadow:
-              requests.length > 0
-                ? [
-                    "0 0 20px 4px rgba(239,68,68,0.7)",
-                    "0 0 32px 10px rgba(239,68,68,0.95)",
-                    "0 0 20px 4px rgba(239,68,68,0.7)",
-                  ]
-                : "0 0 20px #ff4400",
-          }}
-          transition={
-            requests.length > 0
-              ? { boxShadow: { duration: 1.4, repeat: Infinity, ease: "easeInOut" } }
-              : undefined
-          }
+          animate={{ opacity: 1, x: 0 }}
           onClick={() => {
             if (requests.length > 0) setTab("requests");
             setIsOpen(true);

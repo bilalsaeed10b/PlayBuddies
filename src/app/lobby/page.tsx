@@ -982,17 +982,8 @@ function LobbyContent() {
                           initial={{ opacity: 0, x: -20 }}
                           animate={{ opacity: 1, x: 0 }}
                           exit={{ opacity: 0, x: -20 }}
-                          // Ready/not-ready used to be a bare checkmark that only
-                          // ever appeared, never the reverse — a room stuck on
-                          // "why can't I start" had nothing on screen naming who
-                          // it was waiting on. A glowing border does double duty:
-                          // green-and-lit reads as fine at a glance, red-and-lit
-                          // reads as "this one" without having to scan for a tiny
-                          // icon.
                           className={`relative flex items-center justify-between p-3 rounded-xl glass border transition-colors duration-300 ${
-                            player.isReady
-                              ? "border-success/50 shadow-[0_0_16px_-2px_var(--color-success)]"
-                              : "border-error/60 shadow-[0_0_16px_-2px_var(--color-error)]"
+                            player.isReady ? "border-success/50" : "border-error/60"
                           }`}
                         >
                           <div className="flex items-center gap-3 min-w-0">
