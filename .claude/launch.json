@@ -148,6 +148,21 @@
         "--strictPort"
       ],
       "port": 5192
+    },
+    {
+      "name": "tower-siege",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "--prefix",
+        "games/tower-siege",
+        "--",
+        "--port",
+        "5191",
+        "--strictPort"
+      ],
+      "port": 5191
     }
   ]
 }
