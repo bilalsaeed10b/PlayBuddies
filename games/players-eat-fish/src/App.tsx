@@ -68,7 +68,6 @@ export default function App() {
   const [authChecked, setAuthChecked] = useState(false);
   const [lobby, setLobby] = useState<{ hostId: string; players: Record<string, LobbyPerson & { isReady?: boolean }>; matchStarted?: boolean } | null>(null);
   const [lobbyError, setLobbyError] = useState<string | null>(null);
-  const [pickNotice, setPickNotice] = useState<string | null>(null);
 
   const [seatCount, setSeatCount] = useState(1);
   const [seatFish, setSeatFish] = useState<Record<string, number>>({});
@@ -215,37 +214,14 @@ export default function App() {
       try {
         // Already loaded by the session effect on this path; the import cache
         // makes this a no-op lookup rather than a second fetch.
-        const { db, doc, runTransaction } = await import('./firebase');
-        const ref = doc(db, 'lobbies', handoff.room);
-        // A plain `updateDoc` here raced: two players landing on the picker
-        // at once could both write the same still-shown-as-open fish before
-        // either's snapshot listener caught the other's pick. The transaction
-        // re-reads the room at write time, so whichever write actually lands
-        // second sees the seat is taken and backs off instead of silently
-        // overlapping it.
-        const taken = await runTransaction(db, async (tx) => {
-          const snap = await tx.get(ref);
-          const players = (snap.data()?.players ?? {}) as Record<string, LobbyPerson>;
-          const holder = Object.entries(players).find(
-            ([otherUid, p]) => otherUid !== uid && p.fishIndex === index,
-          );
-          if (holder) return holder[1].displayName || 'Someone';
-          tx.update(ref, { [`players.${uid}.fishIndex`]: index });
-          return null;
-        });
-        if (taken) setPickNotice(`${taken} just took that one — pick another.`);
+        const { db, doc, updateDoc } = await import('./firebase');
+        await updateDoc(doc(db, 'lobbies', handoff.room), { [`players.${uid}.fishIndex`]: index });
       } catch (e) {
         console.error('Could not save fish choice', e);
       }
     },
     [uid, unlocked, coins, handoff.room],
   );
-
-  useEffect(() => {
-    if (!pickNotice) return;
-    const id = window.setTimeout(() => setPickNotice(null), 2500);
-    return () => window.clearTimeout(id);
-  }, [pickNotice]);
 
   const startMatch = useCallback(async () => {
     if (!isHost) return;
@@ -342,7 +318,7 @@ export default function App() {
             coins={coins}
             onPick={buy}
             selected={null}
-            takenBy={{}}
+            pickedBy={{}}
             mode="shop"
           />
         </Shell>
@@ -435,7 +411,6 @@ export default function App() {
           unlocked={unlocked}
           coins={coins}
           isHost={isHost}
-          pickNotice={pickNotice}
           onPick={pickFishOnline}
           onStart={startMatch}
           onShop={() => setView('shop')}
@@ -488,15 +463,19 @@ function FishGrid({
   coins,
   onPick,
   selected,
-  takenBy,
+  pickedBy,
   mode,
 }: {
   unlocked: number[];
   coins: number;
   onPick: (index: number) => void;
   selected: number | null;
-  /** index → who already has it, so two players can't be the same fish. */
-  takenBy: Record<number, string>;
+  /**
+   * Everyone else who has also picked this fish. Purely informational — size
+   * is what tells fish apart in the water, so nothing stops two players
+   * choosing the same one.
+   */
+  pickedBy: Record<number, string[]>;
   mode: 'shop' | 'pick';
 }) {
   return (
@@ -515,7 +494,7 @@ function FishGrid({
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2 sm:gap-3">
               {entries.map(({ fish, index }) => {
                 const isUnlocked = unlocked.includes(index);
-                const taken = takenBy[index];
+                const others = pickedBy[index] ?? [];
                 const isSelected = selected === index;
                 const affordable = coins >= fish.price;
 
@@ -523,15 +502,13 @@ function FishGrid({
                   <button
                     key={index}
                     onClick={() => onPick(index)}
-                    disabled={Boolean(taken) || (mode === 'shop' && (isUnlocked || !affordable))}
+                    disabled={mode === 'shop' && (isUnlocked || !affordable)}
                     className={`relative flex flex-col items-center gap-1 overflow-hidden rounded-xl sm:rounded-2xl border p-1.5 sm:p-2 transition-all ${
-                      taken
-                        ? 'cursor-not-allowed border-rose-400/40 opacity-40'
-                        : isSelected
-                          ? 'border-emerald-500 bg-emerald-500/20 shadow-[0_0_0_3px_rgba(16,185,129,0.2)] scale-[1.02]'
-                          : isUnlocked
-                            ? 'border-black/10 bg-white/40 hover:bg-white/70 active:scale-95'
-                            : 'border-amber-400/40 bg-amber-400/10'
+                      isSelected
+                        ? 'border-emerald-500 bg-emerald-500/20 shadow-[0_0_0_3px_rgba(16,185,129,0.2)] scale-[1.02]'
+                        : isUnlocked
+                          ? 'border-black/10 bg-white/40 hover:bg-white/70 active:scale-95'
+                          : 'border-amber-400/40 bg-amber-400/10'
                     }`}
                   >
                     {!isUnlocked && (
@@ -552,8 +529,10 @@ function FishGrid({
                       {fish.name}
                     </span>
                     <span className="text-[9px] sm:text-[10px] font-bold text-slate-500">size {fish.size}</span>
-                    {taken && (
-                      <span className="w-full truncate text-[8px] sm:text-[9px] font-bold uppercase text-rose-500">{taken}</span>
+                    {others.length > 0 && (
+                      <span className="w-full truncate text-[8px] sm:text-[9px] font-bold uppercase text-slate-400">
+                        Also played by {others.join(', ')}
+                      </span>
                     )}
                     {mode === 'shop' && isUnlocked && (
                       <span className="flex items-center gap-1 text-[9px] sm:text-[10px] font-bold text-emerald-600">
@@ -589,10 +568,11 @@ function SoloSelect({
   const [picks, setPicks] = useState<Record<string, number>>({});
   const seat = Object.keys(picks).length;
 
-  const takenBy = useMemo(() => {
-    const map: Record<number, string> = {};
+  const pickedBy = useMemo(() => {
+    const map: Record<number, string[]> = {};
     Object.entries(picks).forEach(([id, index], i) => {
-      map[index] = `Player ${Number(id.split('-')[1]) + 1 || i + 1}`;
+      const label = `Player ${Number(id.split('-')[1]) + 1 || i + 1}`;
+      (map[index] ??= []).push(label);
     });
     return map;
   }, [picks]);
@@ -609,7 +589,7 @@ function SoloSelect({
 
   return (
     <Shell title={`Player ${seat + 1}: pick a fish`} coins={coins} onBack={onBack}>
-      <FishGrid unlocked={unlocked} coins={coins} onPick={pick} selected={null} takenBy={takenBy} mode="pick" />
+      <FishGrid unlocked={unlocked} coins={coins} onPick={pick} selected={null} pickedBy={pickedBy} mode="pick" />
     </Shell>
   );
 }
@@ -624,7 +604,6 @@ function RoomScreen({
   unlocked,
   coins,
   isHost,
-  pickNotice,
   onPick,
   onStart,
   onShop,
@@ -641,7 +620,6 @@ function RoomScreen({
   unlocked: number[];
   coins: number;
   isHost: boolean;
-  pickNotice: string | null;
   onPick: (index: number) => void;
   onStart: () => void;
   onShop: () => void;
@@ -649,11 +627,11 @@ function RoomScreen({
   onFullscreen: () => void;
   onPlayOffline: () => void;
 }) {
-  const takenBy = useMemo(() => {
-    const map: Record<number, string> = {};
+  const pickedBy = useMemo(() => {
+    const map: Record<number, string[]> = {};
     for (const p of people) {
       if (p.uid !== uid && p.fishIndex !== undefined && p.fishIndex !== null) {
-        map[p.fishIndex] = p.displayName;
+        (map[p.fishIndex] ??= []).push(p.displayName);
       }
     }
     return map;
@@ -710,12 +688,6 @@ function RoomScreen({
         </div>
       </div>
 
-      {pickNotice && (
-        <p className="shrink-0 rounded-xl border border-rose-400/40 bg-rose-400/10 px-3 py-1.5 text-center text-xs font-bold text-rose-600">
-          {pickNotice}
-        </p>
-      )}
-
       {/* Main Grid: Responsive for Portrait and Landscape */}
       <div className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-3 landscape:grid-cols-3 gap-2 sm:gap-4">
         {/* Fish Picker */}
@@ -725,7 +697,7 @@ function RoomScreen({
             coins={coins}
             onPick={onPick}
             selected={myFish ?? null}
-            takenBy={takenBy}
+            pickedBy={pickedBy}
             mode="pick"
           />
         </div>

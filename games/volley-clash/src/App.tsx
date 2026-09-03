@@ -635,20 +635,25 @@ function CharacterGrid({
   owned,
   coins,
   selected,
-  takenBy,
+  pickedBy,
   onPick,
 }: {
   owned: number[];
   coins: number;
   selected: number | null;
-  takenBy: Record<number, string>;
+  /**
+   * Everyone else who has also picked this character. Purely informational —
+   * these are skins and nothing else, so nothing stops two players choosing
+   * the same one.
+   */
+  pickedBy: Record<number, string[]>;
   onPick: (index: number) => void;
 }) {
   return (
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
       {CHARACTERS.map((ch: Character, index) => {
         const isOwned = owned.includes(index);
-        const taken = takenBy[index];
+        const others = pickedBy[index] ?? [];
         const isSelected = selected === index;
         const affordable = coins >= ch.price;
 
@@ -656,15 +661,13 @@ function CharacterGrid({
           <button
             key={ch.name}
             onClick={() => onPick(index)}
-            disabled={Boolean(taken) || (!isOwned && !affordable)}
+            disabled={!isOwned && !affordable}
             className={`relative flex flex-col items-center gap-2 overflow-hidden rounded-2xl border p-3 text-left transition-colors ${
-              taken
-                ? 'cursor-not-allowed border-rose-400/40 opacity-40'
-                : isSelected
-                  ? 'border-amber-400 bg-amber-400/20 shadow-[0_0_0_3px_rgba(251,191,36,0.25)]'
-                  : isOwned
-                    ? 'border-white/15 bg-white/10 hover:bg-white/20'
-                    : 'border-amber-400/40 bg-amber-400/10'
+              isSelected
+                ? 'border-amber-400 bg-amber-400/20 shadow-[0_0_0_3px_rgba(251,191,36,0.25)]'
+                : isOwned
+                  ? 'border-white/15 bg-white/10 hover:bg-white/20'
+                  : 'border-amber-400/40 bg-amber-400/10'
             }`}
           >
             {!isOwned && (
@@ -680,7 +683,9 @@ function CharacterGrid({
               <SkinNote />
             </div>
             <span className="text-[10px] leading-tight text-white/50">{ch.blurb}</span>
-            {taken && <span className="text-[9px] font-black uppercase text-rose-300">{taken}</span>}
+            {others.length > 0 && (
+              <span className="text-[9px] font-black uppercase text-white/40">Also played by {others.join(', ')}</span>
+            )}
             {isSelected && (
               <span className="flex items-center gap-1 text-[10px] font-black text-amber-300">
                 <Check className="h-3 w-3" /> picked
@@ -742,10 +747,11 @@ function OfflinePick({
   const [picks, setPicks] = useState<Record<string, number>>({});
   const seat = Object.keys(picks).length;
 
-  const takenBy = useMemo(() => {
-    const map: Record<number, string> = {};
+  const pickedBy = useMemo(() => {
+    const map: Record<number, string[]> = {};
     Object.entries(picks).forEach(([id, index]) => {
-      map[index] = `P${Number(id.split('-')[1]) + 1}`;
+      const label = `P${Number(id.split('-')[1]) + 1}`;
+      (map[index] ??= []).push(label);
     });
     return map;
   }, [picks]);
@@ -760,7 +766,7 @@ function OfflinePick({
   const title = seatCount > 1 ? `Player ${seat + 1}: pick a character` : 'Pick your character';
   return (
     <Shell title={title} coins={coins} onBack={onBack}>
-      <CharacterGrid owned={owned} coins={coins} selected={null} takenBy={takenBy} onPick={pick} />
+      <CharacterGrid owned={owned} coins={coins} selected={null} pickedBy={pickedBy} onPick={pick} />
     </Shell>
   );
 }
@@ -796,10 +802,12 @@ function RoomScreen({
   onFullscreen: () => void;
   onPlayOffline: () => void;
 }) {
-  const takenBy = useMemo(() => {
-    const map: Record<number, string> = {};
+  const pickedBy = useMemo(() => {
+    const map: Record<number, string[]> = {};
     for (const p of people) {
-      if (p.uid !== uid && p.character !== undefined && p.character !== null) map[p.character] = p.displayName;
+      if (p.uid !== uid && p.character !== undefined && p.character !== null) {
+        (map[p.character] ??= []).push(p.displayName);
+      }
     }
     return map;
   }, [people, uid]);
@@ -877,7 +885,7 @@ function RoomScreen({
 
       <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[auto_minmax(0,1fr)] gap-3 sm:gap-4 lg:grid-cols-3 lg:grid-rows-[minmax(0,1fr)]">
         <div className="panel order-2 min-h-0 overflow-y-auto overscroll-contain rounded-[2rem] p-3 sm:p-6 lg:order-1 lg:col-span-2">
-          <CharacterGrid owned={owned} coins={coins} selected={mine ?? null} takenBy={takenBy} onPick={onPick} />
+          <CharacterGrid owned={owned} coins={coins} selected={mine ?? null} pickedBy={pickedBy} onPick={onPick} />
         </div>
 
         <div className="order-1 flex min-h-0 flex-col gap-3 sm:gap-4 lg:order-2">
