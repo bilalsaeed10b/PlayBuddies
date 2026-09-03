@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { scrimProps, useEscape } from '@shared/ui/dismiss';
 import {
   ArrowLeft,
   Check,
@@ -891,8 +892,10 @@ function SettingsPanel({
   onChange: (s: GameSettings) => void;
   onClose: () => void;
 }) {
+  // Escape closes it too. See @shared/ui/dismiss.
+  useEscape(true, onClose);
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-amber-950/60 p-4 backdrop-blur-sm">
+    <div {...scrimProps(onClose)} className="fixed inset-0 z-50 flex items-center justify-center bg-amber-950/60 p-4 backdrop-blur-sm">
       <div className="panel max-h-[88dvh] w-full max-w-md space-y-5 overflow-y-auto rounded-[2rem] p-6">
         <div className="flex items-center justify-between">
           <h3 className="text-xl font-black uppercase tracking-wide text-amber-950">Settings</h3>
@@ -1027,8 +1030,10 @@ function RulesPanel({
   onChange: (r: MatchRules) => void;
   onClose: () => void;
 }) {
+  // Escape closes it too. See @shared/ui/dismiss.
+  useEscape(true, onClose);
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-amber-950/60 p-4 backdrop-blur-sm">
+    <div {...scrimProps(onClose)} className="fixed inset-0 z-50 flex items-center justify-center bg-amber-950/60 p-4 backdrop-blur-sm">
       <div className="panel max-h-[88dvh] w-full max-w-md space-y-5 overflow-y-auto rounded-[2rem] p-6">
         <div className="flex items-start justify-between">
           <div>

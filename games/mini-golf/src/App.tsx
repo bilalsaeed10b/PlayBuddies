@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { scrimProps, useEscape } from '@shared/ui/dismiss';
 import {
   ArrowLeft,
   Check,
@@ -1137,8 +1138,10 @@ function SettingsPanel({
    * them. They are Round Rules now, set by the host. What is left is genuinely
    * local — how loud it is, and whether this player wants to be shouted at.
    */
+  // Escape closes it too. See @shared/ui/dismiss.
+  useEscape(true, onClose);
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm">
+    <div {...scrimProps(onClose)} className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm">
       <div className="panel max-h-[88dvh] w-full max-w-md space-y-6 overflow-y-auto overscroll-contain rounded-[2rem] bg-slate-900/90 p-6">
         <div className="flex items-center justify-between">
           <h3 className="text-xl font-black">Settings</h3>
@@ -1207,8 +1210,10 @@ function RulesPanel({
   onChange: (r: MatchRules) => void;
   onClose: () => void;
 }) {
+  // Escape closes it too. See @shared/ui/dismiss.
+  useEscape(true, onClose);
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm">
+    <div {...scrimProps(onClose)} className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm">
       <div className="panel max-h-[88dvh] w-full max-w-md space-y-6 overflow-y-auto overscroll-contain rounded-[2rem] bg-slate-900/90 p-6">
         <div className="flex items-center justify-between">
           <div>

@@ -137,18 +137,34 @@ export default function MatchView({
     });
   }, [config.seed, engine, rulesBits]);
 
-  const commit = useCallback(
+  /**
+   * Applies an action to this device's own board and nothing more.
+   *
+   * The half of `commit` that everyone is allowed to do. Guests use it to show
+   * a move the instant they hear about it rather than waiting for the host's
+   * authoritative echo to come back round — see `play` for why that matters so
+   * much here.
+   */
+  const applyLocal = useCallback(
     (action: Action): boolean => {
-      if (!config.isHost) return false;
       const before = engine.events.length;
       if (!engine.apply(action)) return false;
       for (const ev of engine.events.slice(before)) soundFor(ev);
-      log.info('action:applied', { round: engine.round, action, phase: engine.phase, pieces: engine.pieces });
       repaint();
+      return true;
+    },
+    [engine, repaint],
+  );
+
+  const commit = useCallback(
+    (action: Action): boolean => {
+      if (!config.isHost) return false;
+      if (!applyLocal(action)) return false;
+      log.info('action:applied', { round: engine.round, action, phase: engine.phase, pieces: engine.pieces });
       if (online) publish();
       return true;
     },
-    [config.isHost, engine, repaint, online, publish],
+    [config.isHost, engine, applyLocal, online, publish],
   );
 
   /** Whatever this device is allowed to do, routed to the host directly or over the wire. */
@@ -167,11 +183,20 @@ export default function MatchView({
         at: engine.actionCount,
         a: action,
       });
-      // No optimism: the host may reject this (the word already changed
-      // hands, the chain moved on) and there is no "unplay". The board
-      // updates once the host says it did.
+      // Shown here immediately, rather than waiting for the host to say it
+      // happened.
+      //
+      // This used to wait, on the reasoning that the host might reject the
+      // action and there is no "unplay". But there is: the host's `state`
+      // packet carries the whole history and `replay` rebuilds the board from
+      // it wholesale, so a rejected guess is corrected completely and
+      // automatically on the very next one. What the caution actually bought
+      // was a rare, self-healing flicker in exchange for *every* letter a
+      // guest called sitting dead for two Firestore round trips -- their own
+      // write out, and the host's republished history back.
+      applyLocal(action);
     },
-    [engine, config.isHost],
+    [engine, config.isHost, applyLocal],
   );
 
   // ── the wire ─────────────────────────────────────────────────────────────
@@ -186,7 +211,7 @@ export default function MatchView({
       }
 
       if (packet.t === 'play') {
-        if (!config.isHost || packet.s !== effectiveSeedRef.current) return;
+        if (packet.s !== effectiveSeedRef.current) return;
         if (packet.rd !== engine.round || packet.at !== engine.actionCount) return;
         const seat = seatOfUid.get(from);
         if (seat === undefined) return;
@@ -202,7 +227,15 @@ export default function MatchView({
               : claimed.t === 'guess'
                 ? { t: 'guess', s: seat, l: claimed.l }
                 : { t: 'expire' };
-        commit(action);
+        // The host resolves it and republishes; everyone else shows it now and
+        // is corrected by that republish if the host disagreed.
+        //
+        // Guests used to drop this packet on the floor and wait, which is why
+        // a letter somebody else called took two round trips to appear rather
+        // than one: theirs out to the host, then the host's history back. They
+        // were already receiving the first of those and throwing it away.
+        if (config.isHost) commit(action);
+        else applyLocal(action);
         return;
       }
 
@@ -229,7 +262,7 @@ export default function MatchView({
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [config.isHost, engine, seatOfUid, commit, repaint],
+    [config.isHost, engine, seatOfUid, commit, applyLocal, repaint],
   );
 
   useEffect(() => {

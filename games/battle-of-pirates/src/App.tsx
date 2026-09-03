@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { scrimProps, useEscape } from '@shared/ui/dismiss';
 import {
   Anchor,
   ArrowLeft,
@@ -1593,8 +1594,10 @@ function SettingsPanel({
     },
   ];
 
+  // Escape closes it too. See @shared/ui/dismiss.
+  useEscape(true, onClose);
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm">
+    <div {...scrimProps(onClose)} className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm">
       <div className="panel max-h-[88dvh] w-full max-w-md space-y-6 overflow-y-auto overscroll-contain rounded-[2rem] p-6">
         <div className="flex items-center justify-between">
           <h3 className="text-xl font-black">Settings</h3>
@@ -1689,8 +1692,10 @@ function StatsPanel({
     { label: 'Best run', value: stats.bestStreak > 0 ? `${stats.bestStreak} in a row` : '—' },
   ];
 
+  // Escape closes it too. See @shared/ui/dismiss.
+  useEscape(true, onClose);
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm">
+    <div {...scrimProps(onClose)} className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm">
       <div className="panel max-h-[88dvh] w-full max-w-md space-y-5 overflow-y-auto overscroll-contain rounded-[2rem] p-6">
         <div className="flex items-center justify-between">
           <div>
@@ -1861,8 +1866,10 @@ function RulesPanel({
     },
   ];
 
+  // Escape closes it too. See @shared/ui/dismiss.
+  useEscape(true, onClose);
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm">
+    <div {...scrimProps(onClose)} className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm">
       <div className="panel max-h-[88dvh] w-full max-w-md space-y-6 overflow-y-auto overscroll-contain rounded-[2rem] p-6">
         <div className="flex items-center justify-between">
           <div>

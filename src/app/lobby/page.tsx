@@ -92,7 +92,23 @@ function LobbyContent() {
   /** Crew and chat share the sidebar as tabs rather than a fixed vertical split. */
   const [sidebarTab, setSidebarTab] = useState<"crew" | "chat">("crew");
   /** Which crew member's "…" menu is open, if any. One at a time. */
+  /**
+   * The crew row whose "..." menu is open, and where on screen to draw it.
+   *
+   * The menu used to live inside the row it belonged to, which broke it three
+   * ways at once. Every row is a framer-motion element with `layout` and an
+   * `animate` x, so it carries a permanent transform: that creates a stacking
+   * context, which trapped the menu's z-index inside its own row and let the
+   * *next* row paint straight over it. The same transform made the menu's
+   * `fixed` click-catcher resolve against the row instead of the viewport, so
+   * clicking away never closed it. And the crew list scrolls, so a menu on the
+   * last row was clipped by the overflow.
+   *
+   * Anchoring it to the button's screen rect and drawing it at the page root
+   * escapes all three.
+   */
   const [crewMenuFor, setCrewMenuFor] = useState<string | null>(null);
+  const [crewMenuAt, setCrewMenuAt] = useState<{ x: number; y: number } | null>(null);
   const [crewNotice, setCrewNotice] = useState("");
   /**
    * How many chat messages have actually been seen.
@@ -126,6 +142,39 @@ function LobbyContent() {
   // it means something.
   const { friends } = useFriends(true);
   const friendUidSet = useMemo(() => new Set(friends.map((f) => f.uid)), [friends]);
+
+  /**
+   * Close the crew menu on a click elsewhere, on Escape, or on anything that
+   * would move it out from under its own anchor.
+   *
+   * A document listener rather than a full-screen click-catcher element: the
+   * catcher has to be `fixed`, and the row it used to live in carries a
+   * transform, which makes `fixed` resolve against the row. It covered the row
+   * and nothing else, so clicking away did nothing at all.
+   */
+  useEffect(() => {
+    if (!crewMenuFor) return;
+    const close = (e: Event) => {
+      // A click on the menu itself is not a click away from it.
+      if (e.target instanceof Element && e.target.closest("[data-crew-menu]")) return;
+      setCrewMenuFor(null);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setCrewMenuFor(null);
+    };
+    // Capture, so it still fires when a handler below stops propagation.
+    document.addEventListener("pointerdown", close, true);
+    document.addEventListener("keydown", onKey);
+    // The anchor is a screen position, so a scroll or a resize invalidates it.
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("resize", close);
+    return () => {
+      document.removeEventListener("pointerdown", close, true);
+      document.removeEventListener("keydown", onKey);
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("resize", close);
+    };
+  }, [crewMenuFor]);
   // Per-friend presence listeners are the more expensive part, though, so
   // those stay scoped to the picker being open.
   const friendUids = useMemo(
@@ -1014,9 +1063,15 @@ function LobbyContent() {
                             </span>
                             {!isSelf && (
                               <button
-                                onClick={() =>
-                                  setCrewMenuFor((cur) => (cur === player.uid ? null : player.uid))
-                                }
+                                onClick={(e) => {
+                                  if (crewMenuFor === player.uid) {
+                                    setCrewMenuFor(null);
+                                    return;
+                                  }
+                                  const r = e.currentTarget.getBoundingClientRect();
+                                  setCrewMenuAt({ x: r.right, y: r.bottom + 6 });
+                                  setCrewMenuFor(player.uid);
+                                }}
                                 aria-label={`Options for ${player.displayName}`}
                                 className="p-1.5 rounded-lg text-text-muted hover:text-white hover:bg-white/10 transition-colors"
                               >
@@ -1025,45 +1080,6 @@ function LobbyContent() {
                             )}
                           </div>
 
-                          {crewMenuFor === player.uid && (
-                            <>
-                              {/* Closes the menu on an outside click, without
-                                  intercepting clicks meant for anything else. */}
-                              <div
-                                className="fixed inset-0 z-30"
-                                onClick={() => setCrewMenuFor(null)}
-                              />
-                              <div className="absolute right-2 top-12 z-40 w-44 py-1 rounded-xl glass-solid border border-white/10 shadow-2xl">
-                                {isFriend ? (
-                                  <p className="px-3 py-2 text-xs text-text-muted">Already friends</p>
-                                ) : (
-                                  <button
-                                    onClick={() => addCrewFriend(player.uid)}
-                                    className="w-full flex items-center gap-2 px-3 py-2 text-xs font-bold text-white hover:bg-white/10 transition-colors"
-                                  >
-                                    <UserPlus size={14} /> Add Friend
-                                  </button>
-                                )}
-                                {isHost && (
-                                  <>
-                                    <div className="my-1 border-t border-white/10" />
-                                    <button
-                                      onClick={() => makeHost(player.uid, player.displayName)}
-                                      className="w-full flex items-center gap-2 px-3 py-2 text-xs font-bold text-white hover:bg-white/10 transition-colors"
-                                    >
-                                      <Crown size={14} className="text-yellow-400" /> Make Host
-                                    </button>
-                                    <button
-                                      onClick={() => kickPlayer(player.uid, player.displayName)}
-                                      className="w-full flex items-center gap-2 px-3 py-2 text-xs font-bold text-error hover:bg-error/10 transition-colors"
-                                    >
-                                      <UserX size={14} /> Kick
-                                    </button>
-                                  </>
-                                )}
-                              </div>
-                            </>
-                          )}
                         </motion.div>
                       );
                     })}
@@ -1252,6 +1268,66 @@ function LobbyContent() {
           )}
         </div>
       </div>
+
+      {/*
+        The crew menu, drawn at the page root and positioned from the button's
+        own screen rect. Everything about it that used to be broken was a
+        consequence of living inside the row: see `crewMenuFor`.
+      */}
+      {crewMenuFor && crewMenuAt && (() => {
+        const player = players.find((p) => p.uid === crewMenuFor);
+        if (!player) return null;
+        const isFriend = friendUidSet.has(player.uid);
+        // Kept on screen: a menu anchored near the right edge would otherwise
+        // hang off it, and one opened low would run past the bottom.
+        const width = 176;
+        const left = Math.max(8, Math.min(crewMenuAt.x - width, window.innerWidth - width - 8));
+        const top = Math.min(crewMenuAt.y, window.innerHeight - 150);
+        return (
+          <div
+            data-crew-menu
+            style={{ left, top, width }}
+            className="fixed z-[200] py-1 rounded-xl glass-solid border border-white/10 shadow-2xl"
+          >
+            {isFriend ? (
+              <p className="px-3 py-2 text-xs text-text-muted">Already friends</p>
+            ) : (
+              <button
+                onClick={() => {
+                  void addCrewFriend(player.uid);
+                  setCrewMenuFor(null);
+                }}
+                className="w-full flex items-center gap-2 px-3 py-2 text-xs font-bold text-white hover:bg-white/10 transition-colors"
+              >
+                <UserPlus size={14} /> Add Friend
+              </button>
+            )}
+            {isHost && (
+              <>
+                <div className="my-1 border-t border-white/10" />
+                <button
+                  onClick={() => {
+                    void makeHost(player.uid, player.displayName);
+                    setCrewMenuFor(null);
+                  }}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-xs font-bold text-white hover:bg-white/10 transition-colors"
+                >
+                  <Crown size={14} className="text-yellow-400" /> Make Host
+                </button>
+                <button
+                  onClick={() => {
+                    void kickPlayer(player.uid, player.displayName);
+                    setCrewMenuFor(null);
+                  }}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-xs font-bold text-error hover:bg-error/10 transition-colors"
+                >
+                  <UserX size={14} /> Kick
+                </button>
+              </>
+            )}
+          </div>
+        );
+      })()}
     </div>
   );
 }

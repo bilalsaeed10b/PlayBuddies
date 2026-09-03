@@ -34,6 +34,16 @@ const ICE_SERVERS: RTCIceServer[] = [
   { urls: 'stun:stun.cloudflare.com:3478' },
 ];
 
+/**
+ * Which mesh instance owns each `room/player` signalling path, and a counter
+ * to tell instances apart.
+ *
+ * Module scope because the point is precisely to be visible across instances:
+ * a rematch builds the next mesh before the last one has finished tidying up.
+ */
+const OWNER = new Map<string, number>();
+let MESH_SESSION = 0;
+
 /** The candidate types inside a set of raw candidate JSON, for diagnostics. */
 function typesOf(raw: Set<string>): Set<string> {
   const out = new Set<string>();
@@ -126,6 +136,15 @@ interface Peer {
 export class Mesh {
   private peers = new Map<string, Peer>();
   private closed = false;
+  /** Identifies this instance among every mesh this tab has opened. See `owns`. */
+  private readonly session = ++MESH_SESSION;
+  private ownerKey: string | null = null;
+  /**
+   * Resolves once the signalling path has been cleared of the last session.
+   *
+   * Every write below waits on it. Nothing outside this class does.
+   */
+  private ready: Promise<void> = Promise.resolve();
 
   constructor(
     private roomId: string,
@@ -146,7 +165,38 @@ export class Mesh {
     // forget: nothing else in this class, or outside it, waits on this settling.
     const mine = dbRef(rtdb, `signaling/${roomId}/${selfId}`);
     dbOnDisconnect(mine).remove().catch(() => {});
-    dbRemove(mine).catch((err) => console.error('[mesh] signalling unavailable:', err));
+
+    // This mesh now owns the path, and any older one for the same room and
+    // player must not touch it again. See `owns`.
+    const key = `${roomId}/${selfId}`;
+    OWNER.set(key, this.session);
+    this.ownerKey = key;
+
+    // Held, not fired and forgotten. Every signalling write below waits on it,
+    // because the wipe and the first offer both target the same node and the
+    // wipe landing second deletes the offer -- which is what made the *second*
+    // match of a session always fall back to the relay. On a first match there
+    // is nothing to delete, so the remove returns immediately and nobody ever
+    // saw it; on a rematch there is a whole session's worth of candidates to
+    // clear, the remove takes real time, and it routinely landed last.
+    this.ready = dbRemove(mine).catch((err) => {
+      console.error('[mesh] signalling unavailable:', err);
+    });
+  }
+
+  /**
+   * Whether this instance still owns its signalling path.
+   *
+   * A mesh is closed and a new one opened for the same room every time a
+   * rematch starts, and the old one's cleanup is asynchronous. Without this,
+   * a delete queued by the *previous* match could land after the next match
+   * had already published its offer and quietly wipe it -- the connection then
+   * never forms, every packet goes the long way round, and the badge reads a
+   * few hundred milliseconds for the rest of the match with nothing in the
+   * console to explain it.
+   */
+  private owns(): boolean {
+    return this.ownerKey !== null && OWNER.get(this.ownerKey) === this.session;
   }
 
   /** Reconciles the connection set against the room roster. Safe to call on every roster change. */
@@ -207,6 +257,10 @@ export class Mesh {
     this.closed = true;
     for (const [id, peer] of this.peers) this.teardown(id, peer);
     this.peers.clear();
+    // Only if a newer mesh has not already taken the path over. A rematch
+    // opens the next one before this one's cleanup has settled.
+    if (!this.owns()) return;
+    if (this.ownerKey) OWNER.delete(this.ownerKey);
     dbRemove(dbRef(rtdb, `signaling/${this.roomId}/${this.selfId}`)).catch(() => {});
   }
 
@@ -219,6 +273,7 @@ export class Mesh {
     this.killAttempt(peer);
     if (peer.retryTimer !== null) clearTimeout(peer.retryTimer);
     if (peer.graceTimer !== null) clearTimeout(peer.graceTimer);
+    if (!this.owns()) return;
     dbRemove(dbRef(rtdb, `signaling/${this.roomId}/${this.selfId}/${id}`)).catch(() => {});
   }
 
@@ -453,7 +508,7 @@ export class Mesh {
     // A retry must not inherit the previous attempt's candidates: they point at
     // ports that are already closed, and the other side would spend its whole
     // ICE budget on them.
-    dbRemove(mineRef).catch(() => {});
+    const cleared = this.ready.then(() => (this.owns() ? dbRemove(mineRef) : undefined)).catch(() => {});
 
     dc.onopen = () => {
       if (a.dead) return;
@@ -480,10 +535,15 @@ export class Mesh {
     pc.onicecandidate = (e) => {
       if (!e.candidate || a.dead) return;
       if (e.candidate.type) a.gathered.add(e.candidate.type);
-      dbPush(
-        dbRef(rtdb, `signaling/${this.roomId}/${this.selfId}/${peerId}/candidates`),
-        JSON.stringify(e.candidate.toJSON()),
-      )
+      // After the clear, or the clear takes the candidate with it.
+      void cleared
+        .then(() => {
+          if (a.dead || !this.owns()) return undefined;
+          return dbPush(
+            dbRef(rtdb, `signaling/${this.roomId}/${this.selfId}/${peerId}/candidates`),
+            JSON.stringify(e.candidate!.toJSON()),
+          );
+        })
         // Loud on purpose. A permission error here means the database rules
         // were never deployed, and the symptom players see is "multiplayer
         // doesn't work" with nothing in the console to explain it.
@@ -522,6 +582,10 @@ export class Mesh {
           await pc.setLocalDescription(local);
           // An answer may already be waiting — see Peer.pendingDesc.
           this.applyAnswer(peerId, peer);
+          // After the path has been cleared of the last session, never before:
+          // the clear targets the node this offer is written into.
+          await cleared;
+          if (a.dead || !this.owns()) return;
           await dbSet(dbRef(rtdb, `signaling/${this.roomId}/${this.selfId}/${peerId}/desc`), {
             type: local.type,
             sdp: local.sdp,
@@ -534,6 +598,8 @@ export class Mesh {
           this.flushCandidates(a);
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);
+          await cleared;
+          if (a.dead || !this.owns()) return;
           await dbSet(dbRef(rtdb, `signaling/${this.roomId}/${this.selfId}/${peerId}/desc`), {
             type: answer.type,
             sdp: answer.sdp,
