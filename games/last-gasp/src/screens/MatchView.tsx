@@ -207,6 +207,7 @@ export default function MatchView({
         if (config.isHost) return;
         effectiveSeedRef.current = packet.seed;
         linkRef.current?.setStamp({ seed: packet.seed, r: packet.r });
+        linkRef.current?.setSeed(packet.seed);
         return;
       }
 
@@ -285,6 +286,10 @@ export default function MatchView({
           config.isHost ? { seed: config.seed, r: rulesBits } : undefined,
         );
         linkRef.current = link;
+        // The host already knows the match; a guest overwrites this the moment
+        // the start packet lands. Either way a `bye` from this link names the
+        // match it belongs to, so the next one can ignore it.
+        link.setSeed(config.seed);
         if (config.isHost) {
           link.send({ t: 'start', n: Date.now(), seed: config.seed, r: rulesBits });
         }
@@ -505,6 +510,49 @@ export default function MatchView({
   const myGuesser = guessCandidates.includes(config.localSeats[activeLocal] ?? -1)
     ? config.localSeats[activeLocal]
     : guessCandidates[0];
+
+  /**
+   * Letters from a real keyboard.
+   *
+   * The on-screen keys were the only way in, which is right on a phone and
+   * absurd on a laptop: the game is a race for a letter and the fastest thing
+   * in the room was being asked to hunt for a button with a mouse.
+   *
+   * Held in a ref and read by one listener rather than re-binding a listener
+   * every time the board changes -- this component re-renders on every letter
+   * anybody calls, and a listener that came and went that often would drop
+   * keys pressed in the gap.
+   */
+  const guessRef = useRef<{ seat: number | undefined; play: (l: number) => void }>({
+    seat: undefined,
+    play: () => {},
+  });
+  guessRef.current = {
+    seat: myGuesser,
+    play: (l: number) => play({ t: 'guess', s: myGuesser as number, l }),
+  };
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      // Never while a word is being typed: the setter is entering letters into
+      // a box, and every one of them would otherwise also be called out loud
+      // to the people trying to guess it.
+      const el = e.target as HTMLElement | null;
+      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.key.length !== 1) return;
+      const letter = e.key.toUpperCase();
+      const at = ALPHABET.indexOf(letter);
+      if (at < 0) return;
+      const { seat, play: send } = guessRef.current;
+      if (seat === undefined) return;
+      e.preventDefault();
+      audioService.unlock();
+      send(at);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   const submitWord = () => {
     const cleaned = cleanWord(wordInput);

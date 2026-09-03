@@ -99,6 +99,23 @@ export const SIDES: readonly SideMeta[] = [
 export type PlayerCount = 2 | 4;
 
 /**
+ * Which pair a seat belongs to in a 2v2, and the pair's own colours.
+ *
+ * Seats alternate axes -- south, north, west, east -- so pairing on turn
+ * parity puts one pawn of each pair on each axis. Partners therefore never
+ * face each other down the same lane, and the turn order alternates sides
+ * every single move instead of letting one pair take two in a row.
+ */
+export function teamOf(seat: number): 0 | 1 {
+  return (seat % 2) as 0 | 1;
+}
+
+export const TEAMS: readonly { name: string; main: string; light: string; dark: string }[] = [
+  { name: 'Gold', main: '#f59e0b', light: '#fcd34d', dark: '#b45309' },
+  { name: 'Blue', main: '#0ea5e9', light: '#7dd3fc', dark: '#0369a1' },
+];
+
+/**
  * Walls in hand at the start.
  *
  * Twenty walls exist either way; a duel splits them two ways and a four-hander

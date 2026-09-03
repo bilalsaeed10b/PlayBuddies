@@ -565,9 +565,9 @@ function Menu({
         <div>
           <p className="text-[10px] font-black uppercase tracking-[0.4em] text-slate-500">One line left</p>
           <h1 className="text-5xl font-black leading-none tracking-tighter text-slate-50 sm:text-6xl">
-            LAST
+            HANG
             <br />
-            GASP
+            MAN
           </h1>
           <p className="mt-1 text-xs font-black uppercase tracking-[0.24em] text-lime-400">
             Don't draw it

@@ -582,7 +582,7 @@ export default function App() {
 /** The rules in one line, for anyone who wants to know what they are walking into. */
 function rulesSummary(rules: MatchRules): string {
   return [
-    rules.players === 2 ? 'Two players' : 'Four players',
+    rules.players === 2 ? 'Two players' : rules.teams ? 'Two against two' : 'Four players',
     `${wallsFor(rules.players)} walls each`,
     '9×9 board',
     rules.turnTimer ? '30s turns' : 'no clock',
@@ -1261,6 +1261,27 @@ function RulesPanel({
               : 'Four corners of the same board. Five walls each, so every one of them has to matter.'}
           </p>
         </div>
+
+        {/* Only at four: a pair needs four pawns to be a pair. */}
+        {rules.players === 4 && (
+          <label className="flex items-center justify-between gap-3">
+            <span className="text-sm font-bold">
+              Two against two
+              <span className="block text-[11px] font-normal text-slate-500">
+                Amber pairs with Jade, Azure with Rose — one pawn each on both axes, so partners never race
+                at each other and the turn passes between the sides every single move. Either partner
+                crossing takes it for both.
+              </span>
+            </span>
+            <input
+              type="checkbox"
+              disabled={!editable}
+              checked={rules.teams}
+              onChange={(e) => onChange({ ...rules, teams: e.target.checked })}
+              className="h-6 w-6 shrink-0 accent-amber-500 disabled:opacity-50"
+            />
+          </label>
+        )}
 
         <label className="flex items-center justify-between gap-3">
           <span className="text-sm font-bold">

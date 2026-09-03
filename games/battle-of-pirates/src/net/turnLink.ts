@@ -82,7 +82,23 @@ export class TurnLink {
               // Who sent it matters once there are more than two of us: a
               // `bye` has to name the hull it is abandoning, and it cannot be
               // inferred from "the other one" any more.
-              if (data && data.t !== 'idle') this.onPacket(data, peer);
+              if (!data || data.t === 'idle') return;
+              // A farewell from a match that is already over. The document it
+              // is sitting in outlived that match, and this listener has only
+              // just opened -- so this is the first thing it sees, and obeying
+              // it hands a player who is right here to a bot before they have
+              // had a turn. Only droppable once both ends stamp the seed; an
+              // unstamped `bye` from an older build is taken at face value, as
+              // it always was.
+              if (
+                data.t === 'bye' &&
+                this.matchSeed !== 0 &&
+                typeof data.s === 'number' &&
+                data.s !== this.matchSeed
+              ) {
+                return;
+              }
+              this.onPacket(data, peer);
             },
             (err) => {
               console.error('[turnLink] lost the wire to', peer, err);
@@ -125,6 +141,22 @@ export class TurnLink {
   }
 
   /**
+   * The match this link belongs to, stamped onto the farewell it writes.
+   *
+   * A player's update document outlives the match that wrote it and a `bye` is
+   * the last thing written into it. Each client clears its *own* document
+   * before subscribing, but it cannot clear a peer's -- so on the next match
+   * whichever client got its listener up first read the other's leftover
+   * farewell and handed a player who was sitting right there to a bot. With
+   * this the receiver can tell a dead goodbye from a live one.
+   */
+  private matchSeed = 0;
+
+  setSeed(seed: number) {
+    this.matchSeed = seed;
+  }
+
+  /**
    * @param announce Tell the other side to give the wheel to a bot, because
    * this player has actually gone. Left true for every real departure. The
    * one caller that passes false is a reconnect: that link is being replaced
@@ -136,6 +168,6 @@ export class TurnLink {
     this.closed = true;
     for (const stop of this.unsubscribes) stop();
     this.unsubscribes = [];
-    if (announce) this.write?.({ t: 'bye', n: Date.now() }).catch(() => {});
+    if (announce) this.write?.({ t: 'bye', n: Date.now(), s: this.matchSeed }).catch(() => {});
   }
 }

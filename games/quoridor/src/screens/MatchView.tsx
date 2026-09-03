@@ -13,7 +13,7 @@ import { QuoridorEngine } from '../engine/QuoridorEngine';
 import type { Seat } from '../engine/QuoridorEngine';
 import { TIERS, chooseMove, fallbackMove, newBrain } from '../engine/ai';
 import type { Brain } from '../engine/ai';
-import { HORIZONTAL, SIDES, VERTICAL, wallsFor } from '../game/rules';
+import { HORIZONTAL, SIDES, TEAMS, VERTICAL, teamOf, wallsFor } from '../game/rules';
 import type { Orientation } from '../game/rules';
 import { IN_IFRAME, toggleFullscreen } from '../fullscreen';
 import { audioService } from '../services/audio';
@@ -196,6 +196,16 @@ export default function MatchView({
         setNotice(`${engineRef.current?.seats[seat]?.name ?? 'A player'} left. A bot has their pawn.`);
         return;
       }
+      if (packet.t === 'hello') {
+        // A no-op unless this pawn was actually handed to a bot, so a guest's
+        // ordinary first hello costs nothing.
+        const seat = seatOfUid.get(from);
+        if (seat === undefined) return;
+        const wasBot = engineRef.current?.seats[seat]?.control === 'ai';
+        engineRef.current?.reclaimControl(seat);
+        if (wasBot) setNotice(`${engineRef.current?.seats[seat]?.name ?? 'A player'} is back.`);
+        return;
+      }
       if (packet.t !== 'move') return;
 
       // A move doubles as a start packet. Each document holds exactly one write
@@ -251,11 +261,19 @@ export default function MatchView({
           config.isHost ? { first: config.first, r: rulesBits } : undefined,
         );
         linkRef.current = link;
+        // The host already knows the match; a guest overwrites this the moment
+        // the start packet lands. Either way a `bye` from this link names the
+        // match it belongs to, so the next one can ignore it.
+        link.setSeed(config.seed);
 
         // The whole negotiation, sent once: which seat starts, and the rules.
         // Nothing else about a Quoridor board needs agreeing on.
         if (config.isHost) {
           link.send({ t: 'start', n: Date.now(), seed: config.seed, first: config.first, r: rulesBits });
+        } else {
+          // Tells everyone this link is open, whether that is the first time or
+          // a return after a real `bye`. See HelloPacket.
+          link.send({ t: 'hello', n: Date.now() });
         }
 
         // `pagehide` fires with `persisted: false` on plenty of things that
@@ -311,6 +329,8 @@ export default function MatchView({
   useEffect(() => {
     if (!session) return;
     linkRef.current?.setStamp({ first: session.first, r: packRules(session.rules) });
+    // So a farewell this link writes names the match it belongs to.
+    linkRef.current?.setSeed(session.seed);
   }, [session]);
 
   // -- the engine and the loop ------------------------------------------------
@@ -337,7 +357,12 @@ export default function MatchView({
         : undefined,
       onOver: (winner) => {
         setOver({ winner });
-        const won = config.localSeats.includes(winner);
+        // A partner crossing pays out and sounds exactly like crossing
+        // yourself, because in a pairs game it is the same result.
+        const paired = session.rules.teams && session.rules.players === 4;
+        const won = paired
+          ? config.localSeats.some((seat) => teamOf(seat) === teamOf(winner))
+          : config.localSeats.includes(winner);
         onResult(won, engine.history.length);
         audioService.playEnd(won);
       },
@@ -569,7 +594,8 @@ export default function MatchView({
   const wallsLeft = stock[turn] ?? 0;
   const mover = config.seats[turn]?.name ?? 'Someone';
   const mySeat = config.localSeats[0] ?? 0;
-  const iWon = over ? config.localSeats.includes(over.winner) : false;
+  /** Pairs, at four players, when the host asked for them. */
+  const teams = (session?.rules.teams ?? config.rules.teams) && players === 4;
 
   const turnLabel = over
     ? ''
@@ -609,17 +635,49 @@ export default function MatchView({
       {/* ── who is who, and how far they have to go ── */}
       <div className="pointer-events-none z-30 flex items-start justify-between gap-2 p-2 sm:p-3">
         <div className="flex min-w-0 flex-wrap gap-1.5">
-          {config.seats.slice(0, players).map((seat, i) => (
-            <PlayerChip
-              key={seat.id}
-              seat={seat}
-              index={i}
-              walls={stock[i] ?? 0}
-              steps={dists[i] ?? -1}
-              active={turn === i && !over}
-              mine={localSeats.has(i)}
-            />
-          ))}
+          {/* In a pairs game the chips are grouped by pair, because "who is on
+              my side" is the first thing a player needs off this row and
+              working it out from four separate colours is not reading, it is
+              arithmetic. */}
+          {teams
+            ? ([0, 1] as const).map((t) => (
+                <div
+                  key={t}
+                  className="flex items-center gap-1 rounded-2xl border px-1.5 py-1"
+                  style={{ borderColor: `${TEAMS[t].main}66`, background: `${TEAMS[t].main}12` }}
+                >
+                  <span
+                    className="px-1 text-[9px] font-black uppercase tracking-wider"
+                    style={{ color: TEAMS[t].dark }}
+                  >
+                    {TEAMS[t].name}
+                  </span>
+                  {config.seats.slice(0, players).map((seat, i) =>
+                    teamOf(i) !== t ? null : (
+                      <PlayerChip
+                        key={seat.id}
+                        seat={seat}
+                        index={i}
+                        walls={stock[i] ?? 0}
+                        steps={dists[i] ?? -1}
+                        active={turn === i && !over}
+                        mine={localSeats.has(i)}
+                      />
+                    ),
+                  )}
+                </div>
+              ))
+            : config.seats.slice(0, players).map((seat, i) => (
+                <PlayerChip
+                  key={seat.id}
+                  seat={seat}
+                  index={i}
+                  walls={stock[i] ?? 0}
+                  steps={dists[i] ?? -1}
+                  active={turn === i && !over}
+                  mine={localSeats.has(i)}
+                />
+              ))}
         </div>
 
         {/* The row is pointer-events-none so taps fall through to the board;
@@ -743,12 +801,20 @@ export default function MatchView({
               <h2 className="text-3xl font-black tracking-tight">
                 {/* On a couch every seat is local, so "you win" is true of
                     whoever is reading it and useless. Name the pawn instead. */}
-                {iWon && config.localSeats.length === 1
+                {/* "You crossed" only when it really was you. In a pairs game a
+                    partner getting there is your win, but it is not your run,
+                    and claiming it reads as the game losing track of who moved. */}
+                {config.localSeats.includes(over.winner) && config.localSeats.length === 1
                   ? 'You crossed'
-                  : `${engine?.seats[over.winner]?.name ?? SIDES[over.winner].name} crosses`}
+                  : teams
+                    ? `${TEAMS[teamOf(over.winner)].name} takes it`
+                    : `${engine?.seats[over.winner]?.name ?? SIDES[over.winner].name} crosses`}
               </h2>
               <p className="mt-1 text-sm font-semibold text-slate-500">
-                {moves} moves · {SIDES[over.winner]?.name} reached the far side
+                {moves} moves ·{' '}
+                {teams
+                  ? `${engine?.seats[over.winner]?.name ?? SIDES[over.winner].name} got there first`
+                  : `${SIDES[over.winner]?.name} reached the far side`}
               </p>
             </div>
             <div className="flex gap-2">

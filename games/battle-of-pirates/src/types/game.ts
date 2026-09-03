@@ -355,10 +355,23 @@ export interface ShotPacket {
   r?: number;
 }
 
-/** Sent on the way out so the opponent's ship is taken over rather than abandoned. */
+/**
+ * Sent on the way out, so a seat is taken over rather than abandoned.
+ *
+ * Carries the match seed for the same reason a turn does, and for a bug that
+ * was much harder to see: a player's update document survives the match that
+ * wrote it, and the last thing a departing player writes is this. On the next
+ * match each client clears its *own* document before subscribing, but it
+ * cannot clear anyone else's -- so whichever client opened its listener first
+ * read the other's leftover farewell as a live one and handed a perfectly
+ * present player's seat to a bot before the first move. Stamping the seed
+ * makes a dead `bye` obvious instead of obeyable.
+ */
 export interface ByePacket {
   t: 'bye';
   n: number;
+  /** The match this farewell belongs to. Absent on a packet from an older build. */
+  s?: number;
 }
 
 /**

@@ -1,13 +1,13 @@
 {
   "id": "last-gasp",
-  "name": "Last Gasp",
-  "subtitle": "Don't draw the last line",
-  "description": "Fast-paced real-time hangman. Type words, race to guess letters, and score combo points without drawing the final stickman line.",
+  "name": "Hangman",
+  "subtitle": "Race for the letters, don't draw the last line",
+  "description": "Hangman as a race. Everyone guesses the same word at once — call a letter before anybody else does, build a combo, and don't be the one who draws the final line.",
   "category": "party",
   "minPlayers": 1,
   "maxPlayers": 8,
   "estimatedDuration": "6-10 min",
-  "controls": "Type a word when setting. Otherwise, tap any letter to guess before opponents do.",
+  "controls": "Type a word when it is your turn to set one. Otherwise just type the letter you want — or tap it — before anybody else does.",
   "thumbnail": "thumb.svg",
   "accent": {
     "from": "#84cc16",

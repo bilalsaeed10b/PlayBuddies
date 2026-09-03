@@ -279,6 +279,7 @@ export default function MatchView({
         if (config.isHost) return;
         effectiveSeedRef.current = packet.seed;
         linkRef.current?.setStamp({ seed: packet.seed, r: packet.r });
+        linkRef.current?.setSeed(packet.seed);
         return;
       }
 
@@ -346,6 +347,10 @@ export default function MatchView({
           config.isHost ? { seed: config.seed, r: rulesBits } : undefined,
         );
         linkRef.current = link;
+        // The host already knows the match; a guest overwrites this the moment
+        // the start packet lands. Either way a `bye` from this link names the
+        // match it belongs to, so the next one can ignore it.
+        link.setSeed(config.seed);
         if (config.isHost) {
           link.send({ t: 'start', n: Date.now(), seed: config.seed, r: rulesBits });
         }

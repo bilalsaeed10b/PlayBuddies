@@ -284,6 +284,10 @@ export default function MatchView({
           config.isHost ? { first: config.first, r: rulesBits } : undefined,
         );
         linkRef.current = link;
+        // The host already knows the match; a guest overwrites this the moment
+        // the start packet lands. Either way a `bye` from this link names the
+        // match it belongs to, so the next one can ignore it.
+        link.setSeed(config.seed);
 
         // The whole negotiation, sent once: a seed, who tees off, and the
         // rules. Every green in the round is built from those three.
@@ -348,6 +352,8 @@ export default function MatchView({
   useEffect(() => {
     if (!session) return;
     linkRef.current?.setStamp({ first: session.first, r: packRules(session.rules) });
+    // So a farewell this link writes names the match it belongs to.
+    linkRef.current?.setSeed(session.seed);
   }, [session]);
 
   // -- actions ----------------------------------------------------------------

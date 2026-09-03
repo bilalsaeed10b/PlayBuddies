@@ -45,11 +45,24 @@ export interface MatchRules {
    * a clock should not spend somebody's walls for them.
    */
   turnTimer: boolean;
+  /**
+   * Four players as two pairs rather than a free-for-all.
+   *
+   * Only meaningful at four. The pairs are the seats that share a turn parity
+   * -- south with west, north with east -- which is what makes the turn order
+   * alternate between the two sides rather than giving one pair two moves in a
+   * row. It also means partners are never racing at each other's goal line, so
+   * a wall that helps one of them rarely hurts the other.
+   *
+   * Either partner reaching their own far side takes it for both.
+   */
+  teams: boolean;
 }
 
 export const DEFAULT_RULES: MatchRules = {
   players: 2,
   turnTimer: false,
+  teams: false,
 };
 
 export const TURN_SECONDS = 30;
@@ -65,7 +78,11 @@ const PLAYER_CODES: PlayerCount[] = [2, 4];
  * into a single number is what lets them ride along in that slot.
  */
 export function packRules(rules: MatchRules): number {
-  return Math.max(0, PLAYER_CODES.indexOf(rules.players)) | (rules.turnTimer ? 2 : 0);
+  return (
+    Math.max(0, PLAYER_CODES.indexOf(rules.players)) |
+    (rules.turnTimer ? 2 : 0) |
+    (rules.teams ? 4 : 0)
+  );
 }
 
 export function unpackRules(bits: number | undefined): MatchRules {
@@ -73,6 +90,7 @@ export function unpackRules(bits: number | undefined): MatchRules {
   return {
     players: PLAYER_CODES[bits & 1] ?? DEFAULT_RULES.players,
     turnTimer: (bits & 2) !== 0,
+    teams: (bits & 4) !== 0,
   };
 }
 
@@ -134,10 +152,23 @@ export interface MovePacket {
   r?: number;
 }
 
-/** Sent on the way out, so a seat is taken over by a bot rather than abandoned. */
+/**
+ * Sent on the way out, so a seat is taken over rather than abandoned.
+ *
+ * Carries the match seed for the same reason a turn does, and for a bug that
+ * was much harder to see: a player's update document survives the match that
+ * wrote it, and the last thing a departing player writes is this. On the next
+ * match each client clears its *own* document before subscribing, but it
+ * cannot clear anyone else's -- so whichever client opened its listener first
+ * read the other's leftover farewell as a live one and handed a perfectly
+ * present player's seat to a bot before the first move. Stamping the seed
+ * makes a dead `bye` obvious instead of obeyable.
+ */
 export interface ByePacket {
   t: 'bye';
   n: number;
+  /** The match this farewell belongs to. Absent on a packet from an older build. */
+  s?: number;
 }
 
 /** Written on arrival to clear whatever the last game left in the document. */
@@ -146,4 +177,17 @@ export interface IdlePacket {
   n: number;
 }
 
-export type NetPacket = StartPacket | MovePacket | ByePacket | IdlePacket;
+/**
+ * Sent once, right after a guest's link opens, so a pawn handed to a bot by a
+ * `bye` is handed back the moment its player actually returns.
+ *
+ * `bye` was one-way: nothing ever told the board its owner was back, so a
+ * player who reloaded, or who stepped out to the lobby and came back, spent
+ * the rest of the game watching a bot move their pawn with no way to take it.
+ */
+export interface HelloPacket {
+  t: 'hello';
+  n: number;
+}
+
+export type NetPacket = StartPacket | MovePacket | ByePacket | HelloPacket | IdlePacket;

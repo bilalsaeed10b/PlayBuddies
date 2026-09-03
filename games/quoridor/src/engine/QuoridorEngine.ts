@@ -294,6 +294,13 @@ export class QuoridorEngine {
     s.aiLevel = aiLevel;
   }
 
+  /** They're back. Take the pawn off the bot and give it back to the wire. */
+  reclaimControl(seat: number) {
+    const s = this.seats[seat];
+    if (!s || s.control !== 'ai') return;
+    s.control = 'remote';
+  }
+
   // -- geometry ---------------------------------------------------------------
 
   resize(canvas: HTMLCanvasElement, cssW: number, cssH: number) {
