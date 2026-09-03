@@ -293,7 +293,7 @@ export const BALANCE = {
   ROCK_MARGIN: 780,
 
   /** Seconds a player gets to aim before the shot goes off on its own. */
-  TURN_TIME: 15,
+  TURN_TIME: 10,
   /** Beat between the explosion settling and the next player getting the helm. */
   IMPACT_HOLD: 1.35,
   /**

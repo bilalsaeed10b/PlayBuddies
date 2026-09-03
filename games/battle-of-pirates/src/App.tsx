@@ -718,7 +718,7 @@ function rulesSummary(rules: MatchRules): string {
     MOUNTAIN_LABEL[rules.mountain],
     rules.storm ? 'foul weather' : null,
     rules.cards ? 'cards on' : 'round shot only',
-    rules.turnTimer ? '15s turns' : 'no clock',
+    rules.turnTimer ? '10s turns' : 'no clock',
     rules.aimArc ? 'aim arc on' : 'no aim arc',
   ]
     .filter(Boolean)
@@ -1857,7 +1857,7 @@ function RulesPanel({
     {
       key: 'turnTimer',
       label: 'Turn clock',
-      hint: 'The shot goes off on its own after 15 seconds. Off lets a turn take as long as it takes.',
+      hint: 'The shot goes off on its own after 10 seconds. Off lets a turn take as long as it takes.',
     },
     {
       key: 'aimArc',
