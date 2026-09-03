@@ -247,7 +247,7 @@ export default function DashboardPage() {
                       setJoinCode(normalizeRoomCode(e.target.value));
                       if (joinError) setJoinError("");
                     }}
-                    className="bg-transparent border-none outline-none text-white px-4 py-2 w-32 uppercase placeholder:text-text-muted/50 placeholder:normal-case font-mono font-bold tracking-widest"
+                    className="bg-transparent border-none outline-none text-white px-4 py-2 w-36 uppercase placeholder:text-text-muted/50 placeholder:normal-case placeholder:tracking-normal font-mono font-bold tracking-widest"
                     maxLength={ROOM_CODE_LENGTH}
                     aria-invalid={Boolean(joinError)}
                   />
@@ -352,14 +352,14 @@ export default function DashboardPage() {
                 Available Games
               </h2>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-6">
               {PLAYABLE_GAMES.map((game, index) => (
                 <motion.div
                   key={game.id}
                   initial={{ opacity: 0, scale: 0.9 }}
                   animate={{ opacity: 1, scale: 1 }}
                   transition={{ delay: index * 0.05 }}
-                  className="group relative glass rounded-2xl p-6 border border-white/5 hover:border-transparent transition-all cursor-pointer overflow-hidden"
+                  className="group relative glass rounded-2xl p-4 border border-white/5 hover:border-transparent transition-all cursor-pointer overflow-hidden"
                   onClick={() => createLobby(game.id)}
                 >
                   <motion.div
@@ -369,15 +369,15 @@ export default function DashboardPage() {
                     }}
                   />
                   <div className="relative z-10">
-                    <div className="w-16 h-16 sm:w-20 sm:h-20 mb-4 transform group-hover:scale-110 group-hover:-translate-y-1 transition-transform overflow-hidden rounded-2xl flex items-center justify-center shadow-lg">
-                      <GameThumb game={game} size={80} className="w-full h-full" />
+                    <div className="w-20 h-20 sm:w-24 sm:h-24 mb-4 transform group-hover:scale-110 group-hover:-translate-y-1 transition-transform overflow-hidden rounded-2xl flex items-center justify-center shadow-lg">
+                      <GameThumb game={game} size={96} className="w-full h-full" />
                     </div>
                     <h3 className="text-xl font-bold text-white mb-1">{game.name}</h3>
-                    <p className="text-xs font-semibold uppercase tracking-wider text-text-muted mb-4">
+                    <p className="text-xs font-semibold uppercase tracking-wider text-text-muted">
                       {game.category} • {playerCountLabel(game)}P
                     </p>
                     <div
-                      className="text-sm opacity-0 group-hover:opacity-100 transition-opacity bg-clip-text text-transparent font-bold flex items-center gap-2"
+                      className="absolute left-0 top-full pt-3 text-sm opacity-0 group-hover:opacity-100 transition-opacity bg-clip-text text-transparent font-bold flex items-center gap-2"
                       style={{ backgroundImage: `linear-gradient(to right, ${gameAccent(game).from}, ${gameAccent(game).to})` }}
                     >
                       Play Now <ArrowRight size={16} />

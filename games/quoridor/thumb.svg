@@ -32,7 +32,7 @@
   <rect width="512" height="512" fill="url(#cloth)" />
 
   <!-- the board, with a little perspective so it reads as a table, not a grid -->
-  <g transform="translate(256 268) rotate(-8) translate(-256 -268)">
+  <g transform="translate(256 268) rotate(-8) scale(1.22) translate(-256 -268)">
     <rect x="60" y="72" width="392" height="392" rx="26" fill="url(#plate)" filter="url(#lift)" />
     <rect x="60" y="72" width="392" height="392" rx="26" fill="none" stroke="#b08d5c" stroke-width="4" />
 

@@ -216,7 +216,13 @@ function Navbar() {
             {["Games", "Features", "About"].map((item) => (
               <motion.a
                 key={item}
-                href={`#${item.toLowerCase()}`}
+                href={item === "Games" && user ? "/dashboard" : `#${item.toLowerCase()}`}
+                onClick={(e) => {
+                  if (item === "Games" && user) {
+                    e.preventDefault();
+                    router.push("/dashboard");
+                  }
+                }}
                 className="text-sm text-text-secondary hover:text-white transition-colors relative group"
                 whileHover={{ y: -2 }}
               >
@@ -276,12 +282,18 @@ function Navbar() {
               {["Games", "Features", "About"].map((item, i) => (
                 <motion.a
                   key={item}
-                  href={`#${item.toLowerCase()}`}
+                  href={item === "Games" && user ? "/dashboard" : `#${item.toLowerCase()}`}
                   initial={{ opacity: 0, x: -20 }}
                   animate={{ opacity: 1, x: 0 }}
                   transition={{ delay: i * 0.1 }}
                   className="text-2xl font-bold text-white"
-                  onClick={() => setMobileMenuOpen(false)}
+                  onClick={(e) => {
+                    setMobileMenuOpen(false);
+                    if (item === "Games" && user) {
+                      e.preventDefault();
+                      router.push("/dashboard");
+                    }
+                  }}
                 >
                   {item}
                 </motion.a>
@@ -372,24 +384,6 @@ function HeroSection() {
       <motion.div
         className="relative z-10 max-w-6xl mx-auto px-6 text-center pt-10"
       >
-
-        {/* Status Badge */}
-        <motion.div
-          initial={{ opacity: 0, y: 30, rotateX: 90 }}
-          animate={{ opacity: 1, y: 0, rotateX: 0 }}
-          transition={{ delay: 0.2, type: "spring", stiffness: 150, damping: 12 }}
-          className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full glass mb-8 border border-success/30 shadow-[0_0_20px_rgba(16,185,129,0.15)] relative overflow-hidden group tracking-wider"
-        >
-          <div className="absolute inset-0 bg-success/10 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-1000" />
-          <motion.div
-            className="w-2.5 h-2.5 rounded-full bg-success shadow-[0_0_10px_#10B981]"
-            animate={{ scale: [1, 1.3, 1], opacity: [1, 0.5, 1] }}
-            transition={{ duration: 1.5, repeat: Infinity }}
-          />
-          <span className="text-xs font-bold text-success tracking-[0.2em] uppercase">
-            Platform • Live Now
-          </span>
-        </motion.div>
 
 
         {/* Main Heading */}

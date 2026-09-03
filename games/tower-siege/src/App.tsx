@@ -6,6 +6,7 @@ import {
   Coins,
   Crown,
   Loader2,
+  Maximize2,
   Play,
   ScrollText,
   Settings as SettingsIcon,
@@ -330,6 +331,7 @@ export default function App() {
           onPractice={() => openOffline(2)}
           onSettings={() => setShowSettings(true)}
           onRules={() => setShowRules(true)}
+          onFullscreen={() => toggleFullscreen(document.documentElement, !document.fullscreenElement)}
           rules={rules}
           onBack={view === 'offline_menu' ? () => setView('room') : undefined}
         />
@@ -406,6 +408,7 @@ function Menu({
   onPractice,
   onSettings,
   onRules,
+  onFullscreen,
   rules,
   onBack,
 }: {
@@ -416,6 +419,7 @@ function Menu({
   onPractice: () => void;
   onSettings: () => void;
   onRules: () => void;
+  onFullscreen: () => void;
   rules: MatchRules;
   onBack?: () => void;
 }) {
@@ -492,6 +496,9 @@ function Menu({
         </div>
         <button onClick={onRules} className="panel flex items-center gap-2 rounded-2xl px-4 py-3 font-bold text-white/70">
           <ScrollText className="h-5 w-5" /> Rules
+        </button>
+        <button onClick={onFullscreen} aria-label="Full screen" className="panel rounded-2xl p-3">
+          <Maximize2 className="h-5 w-5" />
         </button>
         <button onClick={onSettings} aria-label="Settings" className="panel rounded-2xl p-3">
           <SettingsIcon className="h-5 w-5" />
