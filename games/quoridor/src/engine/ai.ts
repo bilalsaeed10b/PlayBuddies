@@ -14,7 +14,6 @@
  */
 import {
   HORIZONTAL,
-  LINES,
   Position,
   VERTICAL,
   clonePosition,
@@ -26,9 +25,12 @@ import {
   rowOf,
   routeToGoal,
   stepTowardGoal,
+  teamOf,
+  wallCode,
   wallLegal,
+  wallSlot,
 } from '../game/rules';
-import type { Orientation, PlayerCount } from '../game/rules';
+import type { Layout, Orientation } from '../game/rules';
 
 export interface Tier {
   label: string;
@@ -67,7 +69,12 @@ export const newBrain = (): Brain => ({ recent: [] });
  * collecting those is exhaustive for "walls that matter" without being
  * anywhere near exhaustive for "walls that exist".
  */
-function candidateSlots(route: number[], from: number, depth: number): { o: Orientation; r: number; c: number }[] {
+function candidateSlots(
+  route: number[],
+  from: number,
+  depth: number,
+  layout: Layout,
+): { o: Orientation; r: number; c: number }[] {
   const path = [from, ...route.slice(0, depth)];
   const seen = new Set<number>();
   const out: { o: Orientation; r: number; c: number }[] = [];
@@ -85,16 +92,19 @@ function candidateSlots(route: number[], from: number, depth: number): { o: Orie
     for (const shift of [0, -1]) {
       const slotR = vertical ? line : along + shift;
       const slotC = vertical ? along + shift : line;
-      if (slotR < 0 || slotR >= LINES || slotC < 0 || slotC >= LINES) continue;
+      if (slotR < 0 || slotR >= layout.lines || slotC < 0 || slotC >= layout.lines) continue;
       const o: Orientation = vertical ? HORIZONTAL : VERTICAL;
-      const key = o * 64 + slotR * 8 + slotC;
+      // `wallCode` rather than a hand-rolled key: the old one packed the slot
+      // as `o * 64 + r * 8 + c`, which quietly assumed an eight-groove board
+      // and collided the moment one got bigger.
+      const key = wallCode(o, slotR, slotC);
       if (seen.has(key)) continue;
       seen.add(key);
       out.push({ o, r: slotR, c: slotC });
       // The perpendicular wall in the same slot is worth a look too: it does
       // not block this step, but it very often blocks the detour around it.
       const other: Orientation = o === HORIZONTAL ? VERTICAL : HORIZONTAL;
-      const otherKey = other * 64 + slotR * 8 + slotC;
+      const otherKey = wallCode(other, slotR, slotC);
       if (!seen.has(otherKey)) {
         seen.add(otherKey);
         out.push({ o: other, r: slotR, c: slotC });
@@ -104,19 +114,46 @@ function candidateSlots(route: number[], from: number, depth: number): { o: Orie
   return out;
 }
 
-/** Whoever is closest to finishing, other than me. */
-function leaderOf(pos: Position, seat: number, players: PlayerCount): { seat: number; dist: number } {
+/**
+ * How far this seat's *side* is from winning.
+ *
+ * In a free-for-all that is just this pawn. In a 2v2 it is whichever partner
+ * is closer, because either of them crossing ends the game — a bot that
+ * measured only its own route would panic and start walling while its partner
+ * was two steps from the line, and would happily drop a wall across that
+ * partner's road to do it.
+ */
+function sideDistance(pos: Position, seat: number, layout: Layout): number {
+  let best = -1;
+  for (let p = 0; p < layout.players; p++) {
+    if (layout.teams ? teamOf(p) !== teamOf(seat) : p !== seat) continue;
+    const d = distanceToGoal(pos, p, layout);
+    if (d >= 0 && (best < 0 || d < best)) best = d;
+  }
+  return best;
+}
+
+/**
+ * The nearest pawn on the other side, and how far its side has to go.
+ *
+ * `seat` is the pawn worth aiming a wall at; `dist` is the whole opposing
+ * side's best route, which is the number that actually decides whether we are
+ * losing the race.
+ */
+function leaderOf(pos: Position, seat: number, layout: Layout): { seat: number; dist: number } {
   let best = -1;
   let bestDist = Infinity;
-  for (let p = 0; p < players; p++) {
-    if (p === seat) continue;
-    const d = distanceToGoal(pos, p, players);
+  for (let p = 0; p < layout.players; p++) {
+    // Never treat a partner as the threat, and never wall one.
+    if (layout.teams ? teamOf(p) === teamOf(seat) : p === seat) continue;
+    const d = distanceToGoal(pos, p, layout);
     if (d >= 0 && d < bestDist) {
       bestDist = d;
       best = p;
     }
   }
-  return { seat: best, dist: bestDist };
+  if (best < 0) return { seat: -1, dist: Infinity };
+  return { seat: best, dist: layout.teams ? sideDistance(pos, best, layout) : bestDist };
 }
 
 /**
@@ -128,17 +165,17 @@ function leaderOf(pos: Position, seat: number, players: PlayerCount): { seat: nu
 export function chooseMove(
   pos: Position,
   seat: number,
-  players: PlayerCount,
+  layout: Layout,
   level: number,
   brain: Brain,
   rng: () => number = Math.random,
 ): number {
   const tier = TIERS[Math.max(0, Math.min(TIERS.length - 1, level))];
-  const options = pawnMoves(pos, seat);
+  const options = pawnMoves(pos, seat, layout);
   if (options.length === 0) return encodeStep(pos.pawns[seat]);
 
   const run = () => {
-    const step = stepTowardGoal(pos, seat, players);
+    const step = stepTowardGoal(pos, seat, layout);
     return encodeStep(step >= 0 ? step : options[0]);
   };
 
@@ -151,8 +188,9 @@ export function chooseMove(
     return encodeStep(pick ?? options[0]);
   }
 
-  const myDist = distanceToGoal(pos, seat, players);
-  const leader = leaderOf(pos, seat, players);
+  // My side's route, not merely my own — see `sideDistance`.
+  const myDist = sideDistance(pos, seat, layout);
+  const leader = leaderOf(pos, seat, layout);
 
   // Winning the race, or nobody left to race: just run.
   if (leader.seat < 0 || myDist <= 1) return run();
@@ -163,7 +201,7 @@ export function chooseMove(
   // walls while ahead is spending its own tempo to slow a race it is winning.
   if (spendable <= 0 || behind < 0) return run();
 
-  const wall = bestWall(pos, seat, leader.seat, players, tier, myDist, leader.dist);
+  const wall = bestWall(pos, seat, leader.seat, layout, tier, myDist, leader.dist);
   if (wall && wall.gain >= tier.threshold - Math.min(behind, 2)) {
     return encodeWall(wall.o, wall.r, wall.c);
   }
@@ -174,25 +212,27 @@ function bestWall(
   pos: Position,
   seat: number,
   target: number,
-  players: PlayerCount,
+  layout: Layout,
   tier: Tier,
   myDist: number,
   targetDist: number,
 ): { o: Orientation; r: number; c: number; gain: number } | null {
-  const route = routeToGoal(pos, target, players);
+  const route = routeToGoal(pos, target, layout);
   if (route.length === 0) return null;
 
   const probe = clonePosition(pos);
   let best: { o: Orientation; r: number; c: number; gain: number } | null = null;
 
-  for (const slot of candidateSlots(route, pos.pawns[target], tier.lookahead)) {
-    if (!wallLegal(pos, seat, slot.o, slot.r, slot.c, players)) continue;
+  for (const slot of candidateSlots(route, pos.pawns[target], tier.lookahead, layout)) {
+    if (!wallLegal(pos, seat, slot.o, slot.r, slot.c, layout)) continue;
 
     const grid = slot.o === HORIZONTAL ? probe.h : probe.v;
-    const i = slot.r * LINES + slot.c;
+    const i = wallSlot(slot.r, slot.c);
     grid[i] = seat + 1;
-    const theirs = distanceToGoal(probe, target, players);
-    const mine = distanceToGoal(probe, seat, players);
+    // Both measured per side, so a wall that lengthens the pawn we aimed at
+    // but leaves its partner a clear run scores as the near-waste it is.
+    const theirs = sideDistance(probe, target, layout);
+    const mine = sideDistance(probe, seat, layout);
     grid[i] = 0;
 
     if (theirs < 0 || mine < 0) continue;
@@ -211,9 +251,9 @@ function remember(brain: Brain, square: number) {
 }
 
 /** Handy for the turn clock: the move a player would make if they did nothing. */
-export function fallbackMove(pos: Position, seat: number, players: PlayerCount): number {
-  const step = stepTowardGoal(pos, seat, players);
+export function fallbackMove(pos: Position, seat: number, layout: Layout): number {
+  const step = stepTowardGoal(pos, seat, layout);
   if (step >= 0) return encodeStep(step);
-  const options = pawnMoves(pos, seat);
+  const options = pawnMoves(pos, seat, layout);
   return encodeStep(options[0] ?? pos.pawns[seat]);
 }

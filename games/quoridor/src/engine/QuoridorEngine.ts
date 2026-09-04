@@ -8,12 +8,10 @@
  */
 import {
   HORIZONTAL,
-  LINES,
   Position,
-  SIDES,
-  SIZE,
   VERTICAL,
   applyMove,
+  cell as cellIndex,
   clamp,
   colOf,
   decodeWall,
@@ -25,10 +23,13 @@ import {
   moveLegal,
   pawnMoves,
   rowOf,
+  TEAMS,
+  teamOf,
   wallLegal,
+  wallSlot,
   winnerOf,
 } from '../game/rules';
-import type { Orientation, PlayerCount } from '../game/rules';
+import type { Layout, Orientation, PlayerCount } from '../game/rules';
 import { drawPawn } from '../game/pawns';
 import type { Control } from '../types/game';
 
@@ -78,6 +79,13 @@ const PAINT = {
 
 export class QuoridorEngine {
   readonly seats: Seat[];
+  /**
+   * The board this match is played on: how big it is, where each seat starts
+   * and which edge it is running for. Handed in rather than derived, because a
+   * guest has to build the same board the host did before it can replay a
+   * single move.
+   */
+  readonly layout: Layout;
   readonly players: PlayerCount;
   /** The seat that moved first. Needed to replay a move list from nothing. */
   readonly first: number;
@@ -121,7 +129,7 @@ export class QuoridorEngine {
   constructor(
     private opts: {
       seats: Seat[];
-      players: PlayerCount;
+      layout: Layout;
       first: number;
       seedTag: number;
       onSfx?: (kind: Sfx) => void;
@@ -131,11 +139,12 @@ export class QuoridorEngine {
     },
   ) {
     this.seats = opts.seats;
-    this.players = opts.players;
-    this.first = first(opts.first, opts.players);
+    this.layout = opts.layout;
+    this.players = opts.layout.players;
+    this.first = first(opts.first, opts.layout.players);
     this.seedTag = opts.seedTag;
     this.turn = this.first;
-    this.pos = emptyPosition(opts.players);
+    this.pos = emptyPosition(opts.layout);
   }
 
   // -- the game ---------------------------------------------------------------
@@ -155,14 +164,14 @@ export class QuoridorEngine {
     if (this.targetCache?.turn === this.turn && this.targetCache.stamp === this.stamp) {
       return this.targetCache.list;
     }
-    const list = this.winner >= 0 ? [] : pawnMoves(this.pos, this.turn);
+    const list = this.winner >= 0 ? [] : pawnMoves(this.pos, this.turn, this.layout);
     this.targetCache = { turn: this.turn, stamp: this.stamp, list };
     return list;
   }
 
   /** Steps still to go for each seat, for the HUD. Cheap enough to call per render. */
   distances(): number[] {
-    return this.seats.map((_, seat) => distanceToGoal(this.pos, seat, this.players));
+    return this.seats.map((_, seat) => distanceToGoal(this.pos, seat, this.layout));
   }
 
   /**
@@ -234,7 +243,7 @@ export class QuoridorEngine {
 
   /** Replays a whole move list onto a fresh board, silently. */
   private rebuild(moves: number[]) {
-    this.pos = emptyPosition(this.players);
+    this.pos = emptyPosition(this.layout);
     this.turn = this.first;
     this.winner = -1;
     this.history = [];
@@ -255,7 +264,7 @@ export class QuoridorEngine {
   private commit(move: number, animate: boolean, silent = false): boolean {
     if (this.winner >= 0) return false;
     const seat = this.turn;
-    if (!moveLegal(this.pos, seat, move, this.players)) return false;
+    if (!moveLegal(this.pos, seat, move, this.layout)) return false;
 
     if (isWallMove(move)) {
       applyMove(this.pos, seat, move);
@@ -271,7 +280,7 @@ export class QuoridorEngine {
     this.history.push(move);
     this.stamp++;
 
-    const won = winnerOf(this.pos, this.players);
+    const won = winnerOf(this.pos, this.layout);
     if (won >= 0) {
       this.winner = won;
       if (!silent) this.opts.onOver?.(won);
@@ -317,7 +326,8 @@ export class QuoridorEngine {
     // 0.42 of a square wide, it carries the goal bands, and it has a drop
     // shadow under it. Sized to the grid alone, all three fell off the canvas.
     const size = Math.max(80, Math.min(cssW, cssH) * 0.88);
-    const cell = size / (SIZE + (SIZE - 1) * 0.26);
+    const squares = this.layout.size;
+    const cell = size / (squares + (squares - 1) * 0.26);
     this.view = {
       x0: (cssW - size) / 2,
       y0: (cssH - size) / 2,
@@ -350,12 +360,13 @@ export class QuoridorEngine {
     const step = cell + gap;
     const c = Math.floor((px - x0) / step);
     const r = Math.floor((py - y0) / step);
-    if (r < 0 || r >= SIZE || c < 0 || c >= SIZE) return -1;
+    const squares = this.layout.size;
+    if (r < 0 || r >= squares || c < 0 || c >= squares) return -1;
     // Inside the square itself, not the groove after it. A little slack, so a
     // fingertip that lands a pixel into the groove still counts.
     if (px - this.squareX(c) > cell + gap * 0.5) return -1;
     if (py - this.squareY(r) > cell + gap * 0.5) return -1;
-    return r * SIZE + c;
+    return cellIndex(r, c);
   }
 
   /**
@@ -375,8 +386,8 @@ export class QuoridorEngine {
 
     const c = Math.round((px - x0 - cell - gap / 2) / step);
     const r = Math.round((py - y0 - cell - gap / 2) / step);
-    const cc = clamp(c, 0, LINES - 1);
-    const rr = clamp(r, 0, LINES - 1);
+    const cc = clamp(c, 0, this.layout.lines - 1);
+    const rr = clamp(r, 0, this.layout.lines - 1);
 
     if (forced !== undefined) return { o: forced, r: rr, c: cc };
 
@@ -392,7 +403,8 @@ export class QuoridorEngine {
       this.hover = null;
       return;
     }
-    const ok = this.awaitingLocal && wallLegal(this.pos, this.turn, slot.o, slot.r, slot.c, this.players);
+    const ok =
+      this.awaitingLocal && wallLegal(this.pos, this.turn, slot.o, slot.r, slot.c, this.layout);
     this.hover = { ...slot, ok };
   }
 
@@ -473,12 +485,26 @@ export class QuoridorEngine {
     const gapFromGrid = cell * 0.1;
     const near = gapFromGrid + band;
 
+    // In a 2v2 both partners are running for the same edge, so seat-by-seat
+    // painting would lay two bands in exactly the same place and double the
+    // alpha of each — the strip came out muddy and neither colour read as
+    // anybody's. One band per edge, in the pair's colour, is what the players
+    // actually need to know: that side of the board is Gold's finish line.
+    const drawn = new Set<string>();
     for (let seat = 0; seat < this.players; seat++) {
-      const side = SIDES[seat];
-      const won = this.winner === seat;
+      const side = this.layout.sides[seat];
+      if (drawn.has(side.home)) continue;
+      drawn.add(side.home);
+
+      const paired = this.layout.teams;
+      const colour = paired ? TEAMS[teamOf(seat)].main : side.main;
+      const won =
+        this.winner >= 0 &&
+        (paired ? teamOf(this.winner) === teamOf(seat) : this.winner === seat);
+
       ctx.save();
       ctx.globalAlpha = won ? 0.95 : 0.6;
-      ctx.fillStyle = side.main;
+      ctx.fillStyle = colour;
       // The goal is the far edge from home.
       if (side.home === 'south') ctx.fillRect(x0, y0 - near, size, band);
       else if (side.home === 'north') ctx.fillRect(x0, y0 + size + gapFromGrid, size, band);
@@ -491,8 +517,8 @@ export class QuoridorEngine {
   private drawSquares(ctx: CanvasRenderingContext2D) {
     const { cell, gap } = this.view;
     ctx.save();
-    for (let r = 0; r < SIZE; r++) {
-      for (let c = 0; c < SIZE; c++) {
+    for (let r = 0; r < this.layout.size; r++) {
+      for (let c = 0; c < this.layout.size; c++) {
         const x = this.squareX(c);
         const y = this.squareY(r);
         ctx.fillStyle = (r + c) % 2 === 0 ? PAINT.square : PAINT.squareAlt;
@@ -512,7 +538,7 @@ export class QuoridorEngine {
   private drawTargets(ctx: CanvasRenderingContext2D) {
     if (!this.showHints || this.mode !== 'move' || !this.awaitingLocal) return;
     const { cell } = this.view;
-    const side = SIDES[this.turn];
+    const side = this.layout.sides[this.turn];
 
     for (const target of this.targets()) {
       const x = this.centreX(colOf(target));
@@ -589,13 +615,14 @@ export class QuoridorEngine {
     const popped = this.wallPop ? decodeWall(this.wallPop.code) : null;
     const grow = this.wallPop ? 0.35 + 0.65 * easeOut(this.wallPop.t) : 1;
 
+    const sides = this.layout.sides;
     for (let o = 0 as Orientation; o <= 1; o = (o + 1) as Orientation) {
       const grid = o === HORIZONTAL ? this.pos.h : this.pos.v;
-      for (let r = 0; r < LINES; r++) {
-        for (let c = 0; c < LINES; c++) {
-          const owner = grid[r * LINES + c];
+      for (let r = 0; r < this.layout.lines; r++) {
+        for (let c = 0; c < this.layout.lines; c++) {
+          const owner = grid[wallSlot(r, c)];
           if (owner === 0) continue;
-          const side = SIDES[(owner - 1) % SIDES.length];
+          const side = sides[(owner - 1) % sides.length];
           const isPop = popped && popped.o === o && popped.r === r && popped.c === c;
           this.paintWall(ctx, o, r, c, side.light, side.dark, 1, isPop ? grow : 1);
         }
@@ -606,7 +633,7 @@ export class QuoridorEngine {
   private drawGhost(ctx: CanvasRenderingContext2D) {
     const hover = this.hover;
     if (!hover || this.mode !== 'wall' || !this.awaitingLocal) return;
-    const side = SIDES[this.turn];
+    const side = this.layout.sides[this.turn];
     if (hover.ok) {
       this.paintWall(ctx, hover.o, hover.r, hover.c, side.light, side.main, 0.62);
       return;
@@ -621,7 +648,7 @@ export class QuoridorEngine {
     const radius = cell * 0.4;
 
     for (let seat = 0; seat < this.players; seat++) {
-      const side = SIDES[seat];
+      const side = this.layout.sides[seat];
       const at = this.pos.pawns[seat];
       let x = this.centreX(colOf(at));
       let y = this.centreY(rowOf(at));

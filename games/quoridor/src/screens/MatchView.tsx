@@ -13,8 +13,8 @@ import { QuoridorEngine } from '../engine/QuoridorEngine';
 import type { Seat } from '../engine/QuoridorEngine';
 import { TIERS, chooseMove, fallbackMove, newBrain } from '../engine/ai';
 import type { Brain } from '../engine/ai';
-import { HORIZONTAL, SIDES, TEAMS, VERTICAL, teamOf, wallsFor } from '../game/rules';
-import type { Orientation } from '../game/rules';
+import { HORIZONTAL, TEAMS, VERTICAL, layoutFor, teamOf } from '../game/rules';
+import type { Orientation, SideMeta } from '../game/rules';
 import { IN_IFRAME, toggleFullscreen } from '../fullscreen';
 import { audioService } from '../services/audio';
 import { TURN_SECONDS, packRules, unpackRules } from '../types/game';
@@ -105,10 +105,15 @@ export default function MatchView({
     online && !config.isHost ? null : { seed: config.seed, first: config.first, rules: config.rules },
   );
 
+  /**
+   * The board these rules describe: how big it is, who starts where, how many
+   * walls each seat gets. Derived rather than stored, so the HUD and the
+   * engine can never be looking at two different boards.
+   */
+  const layout = layoutFor(session?.rules ?? config.rules);
+
   const [turn, setTurn] = useState(config.first);
-  const [stock, setStock] = useState<number[]>(() =>
-    config.seats.map(() => wallsFor(config.rules.players)),
-  );
+  const [stock, setStock] = useState<number[]>(() => config.seats.map(() => layout.walls));
   const [dists, setDists] = useState<number[]>(() => config.seats.map(() => -1));
   const [moves, setMoves] = useState(0);
   const [over, setOver] = useState<{ winner: number } | null>(null);
@@ -343,7 +348,7 @@ export default function MatchView({
       // The engine flips a seat's control to 'ai' when its player leaves, so it
       // gets its own copy rather than mutating the object App rebuilds.
       seats: config.seats.map((s) => ({ ...s })),
-      players: session.rules.players,
+      layout: layoutFor(session.rules),
       first: session.first,
       seedTag: session.seed,
       onSfx: (kind) => {
@@ -426,7 +431,7 @@ export default function MatchView({
             const live = engineRef.current;
             if (!live || live.turn !== seat || live.winner >= 0) return;
             live.play(
-              chooseMove(live.pos, seat, live.players, live.seats[seat]?.aiLevel ?? 1, brains.current[seat] ?? newBrain()),
+              chooseMove(live.pos, seat, live.layout, live.seats[seat]?.aiLevel ?? 1, brains.current[seat] ?? newBrain()),
             );
           },
           THINK_MS + Math.random() * 420,
@@ -441,7 +446,7 @@ export default function MatchView({
         if (clockRef.current === 0) {
           // A step along their own shortest route, never a wall: a clock
           // should not spend somebody's walls for them.
-          engine.play(fallbackMove(engine.pos, engine.turn, engine.players));
+          engine.play(fallbackMove(engine.pos, engine.turn, engine.layout));
         }
       }
 
@@ -479,7 +484,7 @@ export default function MatchView({
     // The board is rebuilt only when the *game* changes — a new seed, a new
     // toss, a rematch. Listing anything the lobby can touch here would reset a
     // game in progress the moment somebody's name or badge changed.
-  }, [session?.seed, session?.first, session?.rules.players, rematch]);
+  }, [session?.seed, session?.first, session?.rules.players, session?.rules.teams, rematch]);
 
   useEffect(() => {
     const engine = engineRef.current;
@@ -595,7 +600,7 @@ export default function MatchView({
   const mover = config.seats[turn]?.name ?? 'Someone';
   const mySeat = config.localSeats[0] ?? 0;
   /** Pairs, at four players, when the host asked for them. */
-  const teams = (session?.rules.teams ?? config.rules.teams) && players === 4;
+  const teams = layout.teams;
 
   const turnLabel = over
     ? ''
@@ -657,7 +662,7 @@ export default function MatchView({
                       <PlayerChip
                         key={seat.id}
                         seat={seat}
-                        index={i}
+                        side={layout.sides[i]}
                         walls={stock[i] ?? 0}
                         steps={dists[i] ?? -1}
                         active={turn === i && !over}
@@ -671,7 +676,7 @@ export default function MatchView({
                 <PlayerChip
                   key={seat.id}
                   seat={seat}
-                  index={i}
+                  side={layout.sides[i]}
                   walls={stock[i] ?? 0}
                   steps={dists[i] ?? -1}
                   active={turn === i && !over}
@@ -722,7 +727,7 @@ export default function MatchView({
           <div className="pointer-events-none absolute inset-x-0 top-1 z-20 flex flex-col items-center gap-1">
             <div
               className="rounded-full border border-black/10 bg-white/85 px-3 py-1 text-[11px] font-black uppercase tracking-[0.16em] shadow-sm backdrop-blur"
-              style={{ color: SIDES[turn]?.dark }}
+              style={{ color: layout.sides[turn]?.dark }}
             >
               {turnLabel}
             </div>
@@ -732,7 +737,7 @@ export default function MatchView({
                   className="h-full rounded-full transition-[width] duration-200"
                   style={{
                     width: `${Math.max(0, Math.min(100, (clock / TURN_SECONDS) * 100))}%`,
-                    background: clock <= 5 ? '#e11d48' : SIDES[turn]?.main,
+                    background: clock <= 5 ? '#e11d48' : layout.sides[turn]?.main,
                   }}
                 />
               </div>
@@ -796,7 +801,7 @@ export default function MatchView({
       {over && (
         <div className="absolute inset-0 z-40 flex items-center justify-center bg-slate-900/45 p-6 backdrop-blur-sm">
           <div className="w-full max-w-sm space-y-5 rounded-[2rem] border border-black/10 bg-white/95 p-7 text-center shadow-2xl">
-            <Trophy className="mx-auto h-14 w-14" style={{ color: SIDES[over.winner]?.main ?? '#f59e0b' }} />
+            <Trophy className="mx-auto h-14 w-14" style={{ color: layout.sides[over.winner]?.main ?? '#f59e0b' }} />
             <div>
               <h2 className="text-3xl font-black tracking-tight">
                 {/* On a couch every seat is local, so "you win" is true of
@@ -808,13 +813,13 @@ export default function MatchView({
                   ? 'You crossed'
                   : teams
                     ? `${TEAMS[teamOf(over.winner)].name} takes it`
-                    : `${engine?.seats[over.winner]?.name ?? SIDES[over.winner].name} crosses`}
+                    : `${engine?.seats[over.winner]?.name ?? layout.sides[over.winner]?.name} crosses`}
               </h2>
               <p className="mt-1 text-sm font-semibold text-slate-500">
                 {moves} moves ·{' '}
                 {teams
-                  ? `${engine?.seats[over.winner]?.name ?? SIDES[over.winner].name} got there first`
-                  : `${SIDES[over.winner]?.name} reached the far side`}
+                  ? `${engine?.seats[over.winner]?.name ?? layout.sides[over.winner]?.name} got there first`
+                  : `${layout.sides[over.winner]?.name} reached the far side`}
               </p>
             </div>
             <div className="flex gap-2">
@@ -841,10 +846,16 @@ export default function MatchView({
       {!over && (
         <div className="pointer-events-none absolute left-2 top-20 z-10 max-w-[11rem] rounded-2xl border border-black/10 bg-white/70 p-3 text-[10px] leading-relaxed text-slate-500 backdrop-blur-md">
           <p className="mb-1 font-black uppercase tracking-[0.15em] text-slate-400">How it works</p>
-          <p>Race to the far side of the board. First pawn there wins.</p>
+          <p>
+            {teams
+              ? 'You and your partner start on the same edge and run for the far one. Either of you crossing wins it for both.'
+              : 'Race to the far side of the board. First pawn there wins.'}
+          </p>
           <p className="mt-1.5">Step one square — up, down, left, right, never diagonal. Facing another pawn with nothing behind it? Jump straight over.</p>
           <p className="mt-1.5">Walls block a step, never a path: any wall that would seal somebody in is not a legal wall to place.</p>
-          <p className="mt-1.5">{players === 2 ? '10 walls each' : '5 walls each'}, shared between everyone on the board.</p>
+          <p className="mt-1.5">
+            {layout.size}×{layout.size} board · {layout.walls} walls each, shared between everyone on it.
+          </p>
         </div>
       )}
 
@@ -894,20 +905,19 @@ function ModeButton({
  */
 function PlayerChip({
   seat,
-  index,
+  side,
   walls,
   steps,
   active,
   mine,
 }: {
   seat: Seat;
-  index: number;
+  side: SideMeta;
   walls: number;
   steps: number;
   active: boolean;
   mine: boolean;
 }) {
-  const side = SIDES[index];
   return (
     <div
       className={`pointer-events-none flex items-center gap-2 rounded-xl border bg-white/85 px-2.5 py-1.5 shadow-sm backdrop-blur transition-transform ${

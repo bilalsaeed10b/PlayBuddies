@@ -18,7 +18,8 @@ import {
 } from 'lucide-react';
 import { askHostToEndGame, toggleFullscreen } from './fullscreen';
 import { FREE_PAWNS, PAWNS, drawPawn } from './game/pawns';
-import { SIDES, wallsFor } from './game/rules';
+import { DEFAULT_SIDES, layoutFor, wallsFor } from './game/rules';
+import type { SideMeta } from './game/rules';
 import { TIERS } from './engine/ai';
 import { audioService } from './services/audio';
 import { GameWallet, reportResult } from './platform/wallet';
@@ -581,10 +582,11 @@ export default function App() {
 
 /** The rules in one line, for anyone who wants to know what they are walking into. */
 function rulesSummary(rules: MatchRules): string {
+  const layout = layoutFor(rules);
   return [
-    rules.players === 2 ? 'Two players' : rules.teams ? 'Two against two' : 'Four players',
-    `${wallsFor(rules.players)} walls each`,
-    '9×9 board',
+    rules.players === 2 ? 'Two players' : layout.teams ? 'Two against two' : 'Four-way free-for-all',
+    `${layout.walls} walls each`,
+    `${layout.size}×${layout.size} board`,
     rules.turnTimer ? '30s turns' : 'no clock',
   ].join(' · ');
 }
@@ -705,7 +707,18 @@ function Menu({
 }
 
 /** A pawn card, drawn with the same code the board uses. */
-function Portrait({ index, seat = 0, size = 84 }: { index: number; seat?: number; size?: number }) {
+function Portrait({
+  index,
+  seat = 0,
+  size = 84,
+  sides = DEFAULT_SIDES,
+}: {
+  index: number;
+  seat?: number;
+  size?: number;
+  /** The seating this card belongs to, so a 2v2 lobby shows its own colours. */
+  sides?: readonly SideMeta[];
+}) {
   const ref = useCallback(
     (canvas: HTMLCanvasElement | null) => {
       if (!canvas) return;
@@ -716,7 +729,7 @@ function Portrait({ index, seat = 0, size = 84 }: { index: number; seat?: number
       if (!ctx) return;
       ctx.scale(dpr, dpr);
       ctx.clearRect(0, 0, size, size);
-      const side = SIDES[seat % SIDES.length];
+      const side = sides[seat % sides.length];
       drawPawn(ctx, {
         skin: index,
         x: size * 0.5,
@@ -952,13 +965,15 @@ function RoomScreen({
   const canStart = iAmReady && everyonePicked;
   const waitingFor = people.filter((p) => p.skin === undefined || p.skin === null).length;
 
+  const seatLayout = layoutFor(rules);
+
   return (
     <div className="mx-auto flex h-full w-full max-w-6xl flex-col gap-3 p-3 sm:gap-4 sm:p-6">
       <div className="flex shrink-0 items-center justify-between gap-2">
         <div className="min-w-0">
           <h2 className="truncate text-lg font-black tracking-tight sm:text-2xl">Pick your pawn</h2>
           <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-amber-600/90">
-            {rules.players} across a 9×9 board · {wallsFor(rules.players)} walls each
+            {rules.players} across a {seatLayout.size}×{seatLayout.size} board · {seatLayout.walls} walls each
             {emptySeats > 0 && ` · ${emptySeats} ${emptySeats === 1 ? 'seat' : 'seats'} to bots`}
           </p>
         </div>
@@ -1040,13 +1055,13 @@ function RoomScreen({
                   key={p.uid}
                   className="flex items-center gap-3 rounded-2xl border p-2.5"
                   style={{
-                    borderColor: `${SIDES[i].main}55`,
-                    background: `${SIDES[i].main}14`,
+                    borderColor: `${seatLayout.sides[i]?.main ?? '#94a3b8'}55`,
+                    background: `${seatLayout.sides[i]?.main ?? '#94a3b8'}14`,
                   }}
                 >
                   <div className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-white/70">
                     {p.skin !== undefined && p.skin !== null ? (
-                      <Portrait index={p.skin} seat={i} size={42} />
+                      <Portrait index={p.skin} seat={i} size={42} sides={seatLayout.sides} />
                     ) : (
                       <Blocks className="h-5 w-5 text-slate-300" />
                     )}
@@ -1056,8 +1071,11 @@ function RoomScreen({
                       {p.displayName}
                       {p.uid === hostId && <Crown className="h-3.5 w-3.5 shrink-0 text-amber-500" />}
                     </p>
-                    <p className="text-[10px] font-black uppercase tracking-widest" style={{ color: SIDES[i].dark }}>
-                      {SIDES[i].name}
+                    <p
+                      className="text-[10px] font-black uppercase tracking-widest"
+                      style={{ color: seatLayout.sides[i]?.dark }}
+                    >
+                      {seatLayout.sides[i]?.name}
                       {p.uid === uid ? ' — you' : ''}
                     </p>
                   </div>
@@ -1251,14 +1269,18 @@ function RulesPanel({
                 }`}
               >
                 {option} players
-                <span className="block text-[10px] font-bold text-slate-400">{wallsFor(option)} walls each</span>
+                <span className="block text-[10px] font-bold text-slate-400">
+                  {wallsFor(option, rules.teams)} walls each
+                </span>
               </button>
             ))}
           </div>
           <p className="text-[11px] text-slate-400">
             {rules.players === 2
               ? 'The duel. Ten walls apiece — enough to build a real maze between you.'
-              : 'Four corners of the same board. Five walls each, so every one of them has to matter.'}
+              : rules.teams
+                ? 'Two pairs on a bigger board. Seven walls each, and a partner who wins it for you.'
+                : 'Four corners of the same board, every pawn for itself. Five walls each, so every one of them has to matter.'}
           </p>
         </div>
 
@@ -1268,9 +1290,10 @@ function RulesPanel({
             <span className="text-sm font-bold">
               Two against two
               <span className="block text-[11px] font-normal text-slate-500">
-                Amber pairs with Jade, Azure with Rose — one pawn each on both axes, so partners never race
-                at each other and the turn passes between the sides every single move. Either partner
-                crossing takes it for both.
+                Amber and Ember line up along the south edge, Azure and Indigo along the north, and each
+                pair runs for the far side together. Played on a bigger 11×11 board with seven walls each,
+                because two pawns starting on one edge need lanes of their own to run in. The turn passes
+                between the pairs every single move, and either partner crossing takes it for both.
               </span>
             </span>
             <input
