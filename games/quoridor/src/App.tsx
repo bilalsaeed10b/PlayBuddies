@@ -408,40 +408,50 @@ export default function App() {
     // button. It should mean bots even in the moment before the roster
     // settles, rather than a game that depends on how fast a snapshot arrived.
     const crew = handoff.solo ? people.filter((p) => p.uid === uid) : people;
-    const seats: Seat[] = [];
-    const localSeats: number[] = [];
 
-    for (let i = 0; i < rules.players; i++) {
-      const person = crew[i];
-      if (person && person.uid === uid) {
-        localSeats.push(i);
-        seats.push({
-          id: uid ?? 'me',
-          name: handoff.displayName || 'You',
-          control: 'local',
-          aiLevel: ONLINE_AI_LEVEL,
-          skin: mySkin ?? FREE_PAWNS[0],
-        });
-      } else if (person) {
-        seats.push({
-          id: person.uid,
-          name: person.displayName,
-          control: 'remote',
-          aiLevel: ONLINE_AI_LEVEL,
-          skin: person.skin ?? otherPawn(mySkin ?? FREE_PAWNS[0]),
-        });
-      } else {
-        seats.push({
-          id: `bot-${i}`,
-          name: `${TIERS[ONLINE_AI_LEVEL].label} Bot`,
-          control: 'ai',
-          aiLevel: ONLINE_AI_LEVEL,
-          skin: otherPawn(mySkin ?? FREE_PAWNS[0]),
-        });
+    // Taken as a function of the player count rather than read off `rules`,
+    // because a guest's `rules` is its own saved copy until the host's reach
+    // it over the wire -- and the seat list has to be the length the *host*
+    // decided or the board has seats nobody is sitting in.
+    const seatsFor = (count: PlayerCount) => {
+      const seats: Seat[] = [];
+      const localSeats: number[] = [];
+      for (let i = 0; i < count; i++) {
+        const person = crew[i];
+        if (person && person.uid === uid) {
+          localSeats.push(i);
+          seats.push({
+            id: uid ?? 'me',
+            name: handoff.displayName || 'You',
+            control: 'local',
+            aiLevel: ONLINE_AI_LEVEL,
+            skin: mySkin ?? FREE_PAWNS[0],
+          });
+        } else if (person) {
+          seats.push({
+            id: person.uid,
+            name: person.displayName,
+            control: 'remote',
+            aiLevel: ONLINE_AI_LEVEL,
+            skin: person.skin ?? otherPawn(mySkin ?? FREE_PAWNS[0]),
+          });
+        } else {
+          seats.push({
+            id: `bot-${i}`,
+            name: `${TIERS[ONLINE_AI_LEVEL].label} Bot`,
+            control: 'ai',
+            aiLevel: ONLINE_AI_LEVEL,
+            skin: otherPawn(mySkin ?? FREE_PAWNS[0]),
+          });
+        }
       }
-    }
+      return { seats, localSeats };
+    };
+
+    const { seats, localSeats } = seatsFor(rules.players);
 
     return {
+      seatsFor,
       roomId: handoff.room,
       uid,
       peerUids: crew.filter((p) => p.uid !== uid).map((p) => p.uid),
@@ -459,33 +469,39 @@ export default function App() {
 
   function offlineConfig(): MatchConfig {
     const first = seatSkin[0] ?? FREE_PAWNS[0];
-    const seats: Seat[] = [];
-    const localSeats: number[] = [];
 
-    for (let i = 0; i < rules.players; i++) {
-      if (i < seatCount) {
-        localSeats.push(i);
-        seats.push({
-          id: `seat-${i}`,
-          name: seatCount > 1 ? `Player ${i + 1}` : 'You',
-          control: 'local',
-          aiLevel,
-          skin: seatSkin[i] ?? (i === 0 ? first : otherPawn(first)),
-        });
-      } else {
-        seats.push({
-          id: `bot-${i}`,
-          // Numbered only when there is more than one, so a duel still reads
-          // "Runner Bot" rather than "Runner Bot 2".
-          name: rules.players > 2 ? `${TIERS[aiLevel].label} ${i}` : `${TIERS[aiLevel].label} Bot`,
-          control: 'ai',
-          aiLevel,
-          skin: otherPawn(first),
-        });
+    const seatsFor = (count: PlayerCount) => {
+      const seats: Seat[] = [];
+      const localSeats: number[] = [];
+      for (let i = 0; i < count; i++) {
+        if (i < seatCount) {
+          localSeats.push(i);
+          seats.push({
+            id: `seat-${i}`,
+            name: seatCount > 1 ? `Player ${i + 1}` : 'You',
+            control: 'local',
+            aiLevel,
+            skin: seatSkin[i] ?? (i === 0 ? first : otherPawn(first)),
+          });
+        } else {
+          seats.push({
+            id: `bot-${i}`,
+            // Numbered only when there is more than one, so a duel still reads
+            // "Runner Bot" rather than "Runner Bot 2".
+            name: count > 2 ? `${TIERS[aiLevel].label} ${i}` : `${TIERS[aiLevel].label} Bot`,
+            control: 'ai',
+            aiLevel,
+            skin: otherPawn(first),
+          });
+        }
       }
-    }
+      return { seats, localSeats };
+    };
+
+    const { seats, localSeats } = seatsFor(rules.players);
 
     return {
+      seatsFor,
       roomId: null,
       uid: null,
       peerUids: [],
@@ -829,7 +845,7 @@ function Shell({
   children: React.ReactNode;
 }) {
   return (
-    <div className="mx-auto flex h-full w-full max-w-6xl flex-col gap-3 p-3 sm:gap-4 sm:p-6">
+    <div className="mx-auto flex h-full w-full max-w-6xl flex-col overflow-y-auto overscroll-contain gap-3 p-3 sm:gap-4 sm:p-6">
       <div className="flex shrink-0 items-center justify-between gap-2">
         <button onClick={onBack} aria-label="Back" className="panel shrink-0 rounded-2xl p-3">
           <ArrowLeft className="h-5 w-5" />
@@ -968,7 +984,7 @@ function RoomScreen({
   const seatLayout = layoutFor(rules);
 
   return (
-    <div className="mx-auto flex h-full w-full max-w-6xl flex-col gap-3 p-3 sm:gap-4 sm:p-6">
+    <div className="mx-auto flex h-full w-full max-w-6xl flex-col overflow-y-auto overscroll-contain gap-3 p-3 sm:gap-4 sm:p-6">
       <div className="flex shrink-0 items-center justify-between gap-2">
         <div className="min-w-0">
           <h2 className="truncate text-lg font-black tracking-tight sm:text-2xl">Pick your pawn</h2>

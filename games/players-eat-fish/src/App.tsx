@@ -441,7 +441,7 @@ function Shell({
   children: React.ReactNode;
 }) {
   return (
-    <div className="mx-auto flex h-full w-full max-w-6xl flex-col gap-3 p-3 sm:gap-4 sm:p-6">
+    <div className="mx-auto flex h-full w-full max-w-6xl flex-col overflow-y-auto overscroll-contain gap-3 p-3 sm:gap-4 sm:p-6">
       <div className="flex shrink-0 items-center justify-between gap-2">
         <button onClick={onBack} className="glass-dark shrink-0 rounded-2xl p-3">
           <ArrowLeft className="h-5 w-5" />
@@ -659,7 +659,7 @@ function RoomScreen({
   const iAmReady = myFish !== undefined && myFish !== null;
 
   return (
-    <div className="mx-auto flex h-full w-full max-w-6xl flex-col gap-2 p-2 sm:gap-4 sm:p-5">
+    <div className="mx-auto flex h-full w-full max-w-6xl flex-col overflow-y-auto overscroll-contain gap-2 p-2 sm:gap-4 sm:p-5">
       {/* Header */}
       <div className="flex shrink-0 items-center justify-between gap-2 px-1">
         <div className="flex items-center gap-2 min-w-0">

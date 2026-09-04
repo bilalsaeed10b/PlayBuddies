@@ -718,7 +718,7 @@ function rulesSummary(rules: MatchRules): string {
     MOUNTAIN_LABEL[rules.mountain],
     rules.storm ? 'foul weather' : null,
     rules.cards ? 'cards on' : 'round shot only',
-    rules.turnTimer ? '10s turns' : 'no clock',
+    rules.turnTimer ? '12s turns' : 'no clock',
     rules.aimArc ? 'aim arc on' : 'no aim arc',
   ]
     .filter(Boolean)
@@ -1038,7 +1038,7 @@ function Shell({
   children: React.ReactNode;
 }) {
   return (
-    <div className="mx-auto flex h-full w-full max-w-6xl flex-col gap-3 p-3 sm:gap-4 sm:p-6">
+    <div className="mx-auto flex h-full w-full max-w-6xl flex-col overflow-y-auto overscroll-contain gap-3 p-3 sm:gap-4 sm:p-6">
       <div className="flex shrink-0 items-center justify-between gap-2">
         <button onClick={onBack} aria-label="Back" className="panel shrink-0 rounded-2xl p-3">
           <ArrowLeft className="h-5 w-5" />
@@ -1471,7 +1471,7 @@ function RoomScreen({
   // below it rather than splitting a second row with the roster again.
   if (sideBySide) {
     return (
-      <div className="mx-auto flex h-full w-full max-w-6xl flex-col gap-2 p-2.5">
+      <div className="mx-auto flex h-full w-full max-w-6xl flex-col overflow-y-auto overscroll-contain gap-2 p-2.5">
         {header}
         <div className="flex shrink-0 gap-2">
           <div className="panel min-w-0 flex-1 rounded-2xl p-2">{ctaButtons}</div>
@@ -1488,7 +1488,7 @@ function RoomScreen({
   }
 
   return (
-    <div className="mx-auto flex h-full w-full max-w-6xl flex-col gap-2 p-2.5 sm:gap-4 sm:p-6">
+    <div className="mx-auto flex h-full w-full max-w-6xl flex-col overflow-y-auto overscroll-contain gap-2 p-2.5 sm:gap-4 sm:p-6">
       {header}
 
       {/* On a phone the start button would otherwise sit below the fold, which
@@ -1857,7 +1857,7 @@ function RulesPanel({
     {
       key: 'turnTimer',
       label: 'Turn clock',
-      hint: 'The shot goes off on its own after 10 seconds. Off lets a turn take as long as it takes.',
+      hint: 'Twelve seconds to aim, then the turn passes you by -- no shot, no second chance. Off lets a turn take as long as it takes.',
     },
     {
       key: 'aimArc',

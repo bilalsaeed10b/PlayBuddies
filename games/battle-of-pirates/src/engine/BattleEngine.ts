@@ -51,6 +51,7 @@ import type {
   Ship,
   Shot,
   ShotPacket,
+  SyncPacket,
   Team,
 } from '../types/game';
 
@@ -90,8 +91,23 @@ export interface EngineConfig {
    * preview when a shot is fired, and again with the outcome once it lands.
    */
   onLocalShot?: (packet: FirePacket | ShotPacket) => void;
+  /**
+   * "Where is everybody?" -- sent when this client has been sitting on a turn
+   * that will not move. Separate from onLocalShot because it is a question,
+   * not a turn, and must go out even when this client has nothing to report.
+   */
+  onAsk?: (packet: SyncPacket) => void;
   onOver?: (winner: Team) => void;
   onSfx?: (kind: Sfx, power?: number) => void;
+  /**
+   * True on the one client that arbitrates when a captain has gone silent.
+   *
+   * Only the host may skip somebody else's turn. Two clients deciding that
+   * independently could skip the same captain twice and leave the fleet on two
+   * different turns, which is the exact class of bug this whole file is trying
+   * to stop happening.
+   */
+  isHost?: boolean;
 }
 
 /** 0 fire, 1 smoke, 2 spark, 3 splash, 4 splinter. */
@@ -349,8 +365,43 @@ export class BattleEngine {
   private lastFired: Record<Team, number> = { 0: -1, 1: -1 };
   /** The preview of the other side's shot: what was fired, before its outcome is known. */
   private pendingFire: FirePacket | null = null;
-  /** The other side's shot, fully resolved -- HP, drift, the mountain, next turn. */
-  private pendingRemote: ShotPacket | null = null;
+  /**
+   * Resolved turns from other clients, held by turn number rather than by
+   * arrival.
+   *
+   * This used to be a single slot -- `pendingRemote: ShotPacket | null` -- and
+   * that one field was the worst bug this game has had. Two turns arriving in
+   * the same tick meant the second simply overwrote the first, and because the
+   * per-sender counter had already been bumped on arrival, the lost turn could
+   * never be delivered again. That client stayed exactly one turn behind for
+   * the rest of the match: its own screen naming one captain while every other
+   * screen named another, and nothing anywhere able to notice or repair it.
+   *
+   * Keyed on the turn it resolves, a queue cannot lose a turn, cannot apply one
+   * twice, and cannot apply two out of order.
+   */
+  private remoteTurns: ShotPacket[] = [];
+  /** Seconds spent waiting on a turn that is not moving. Reset by any progress. */
+  private stallT = 0;
+  /** Countdown between "where is everybody?" questions, so we ask once, not every frame. */
+  private askT = 0;
+  /** True for the one turn where the clock ran out and nobody fired. */
+  private skipping = false;
+  /** The host's latest word on where the battle is. */
+  private beaconIn: ShotPacket | null = null;
+  /** Countdown to the host's next beacon. */
+  private beaconT = BALANCE.BEACON;
+  /**
+   * How long the host's beacon has been disagreeing with us.
+   *
+   * Being briefly out of step with the host is ordinary -- a turn takes a
+   * moment to cross the wire, and for that moment somebody is always ahead.
+   * Being out of step with it for several beacons running is not ordinary; it
+   * means the two of us have genuinely parted company, and since the host is
+   * the seat that set the seed and the rules, it is the one that gets to say
+   * where the battle actually is.
+   */
+  private offT = 0;
   /**
    * True from the moment a remote shot starts flying until its outcome is
    * known, whichever order the preview and the outcome arrive in.
@@ -831,9 +882,261 @@ export class BattleEngine {
     // A player's update document outlives the match that wrote it, so the
     // first snapshot after subscribing can be last night's final shot.
     if (packet.s !== this.cfg.seed) return;
+
+    // A beacon is not a turn. It never triggers a flight and never advances
+    // anybody by itself -- it is only ever a way back for a client that has
+    // fallen behind, so anything not ahead of us is simply noise.
+    if (packet.st) {
+      if (packet.tn === undefined) return;
+      // Kept whether it is ahead of us or behind. A beacon behind us is the
+      // more interesting of the two: it means this client has run *ahead* of
+      // the host, which is exactly the divergence that used to be invisible.
+      if (!this.beaconIn || packet.n > this.beaconIn.n) this.beaconIn = packet;
+      return;
+    }
+
+    if (packet.tn !== undefined) {
+      // Already lived through this one. Re-sends are normal now -- somebody
+      // behind asked and everyone ahead answered -- so this is a quiet drop,
+      // not an error.
+      if (packet.tn <= this.turnNo) return;
+      const at = this.remoteTurns.findIndex((p) => p.tn === packet.tn);
+      if (at >= 0) this.remoteTurns[at] = packet;
+      else this.remoteTurns.push(packet);
+      // A ceiling, so a peer shouting into a match this client has quietly
+      // stopped advancing cannot grow the queue without bound.
+      if (this.remoteTurns.length > 32) this.remoteTurns.shift();
+      return;
+    }
+
+    // A peer on a build from before turn numbers. Its per-sender counter is all
+    // there is to order by, and its turn can only be taken as the next one.
     if (packet.n <= (this.remoteSeq.get(from) ?? 0)) return;
     this.remoteSeq.set(from, packet.n);
-    this.pendingRemote = packet;
+    this.remoteTurns.push(packet);
+  }
+
+  /**
+   * Somebody has fallen behind and is asking where the match got to.
+   *
+   * Only clients genuinely further along answer, and they answer with the last
+   * turn they broadcast -- which, being a full snapshot of the fleet, is
+   * everything the asker needs to rejoin the present.
+   */
+  applySync(packet: SyncPacket) {
+    if (packet.s !== this.cfg.seed) return;
+    if (packet.tn >= this.turnNo) return;
+    if (!this.cfg.onLocalShot) return;
+    // Where we are *now*, not the last turn we happened to send. Most turns are
+    // broadcast by somebody else, so a client's own last send is usually far
+    // enough back that the asker would have dropped it as stale -- which made
+    // the answer worthless exactly when it was needed.
+    this.cfg.onLocalShot(this.snapshot());
+  }
+
+  /**
+   * Same turn as the host, different numbers. Take the host's.
+   *
+   * Turn ordering was only half the divergence. The other half is quieter and
+   * was never going to fix itself: a bot's turn is simulated by every client
+   * and broadcast by nobody, so the shooter-is-authoritative rule that keeps
+   * human shots identical simply does not apply to it. Two clients replaying
+   * the same bot's flight can part company by a hair of floating point, and
+   * from then on they are running battles with different hull damage -- same
+   * turn number, same captain up next, different ships sinking. Reconciling
+   * against the host's beacon is what closes that.
+   */
+  private reconcile(beacon: ShotPacket) {
+    let moved = false;
+    for (let i = 0; i < this.ships.length; i++) {
+      if (beacon.hp[i] !== undefined) {
+        const want = clamp(beacon.hp[i], 0, this.ships[i].maxHp);
+        if (Math.round(this.ships[i].hp) !== Math.round(want)) moved = true;
+        this.ships[i].hp = want;
+      }
+      if (beacon.f[i] !== undefined) this.ships[i].burn = clamp(Math.round(beacon.f[i]), 0, 4);
+      if (beacon.d[i] !== undefined) this.ships[i].x = this.clampDrift(i, beacon.d[i]);
+    }
+    for (let i = 0; i < this.rocks.length; i++) {
+      if (beacon.rk[i] !== undefined) this.rocks[i].hp = clamp(beacon.rk[i], 0, BALANCE.ROCK_HP);
+    }
+    this.beaconIn = null;
+    this.offT = 0;
+
+    const helm = clamp(Math.round(beacon.o), 0, this.ships.length - 1);
+    if (moved) this.cfg.onHp?.(this.hp);
+    if (this.afloat(0).length === 0 || this.afloat(1).length === 0) {
+      this.finish();
+      return true;
+    }
+    // Same turn but a different captain at the wheel is a real split, and the
+    // hand and the wind belong to the turn rather than to us, so this is a
+    // clean re-entry rather than a patch.
+    if (helm !== this.turn) {
+      this.turn = helm;
+      this.lastFired[this.ships[helm].team] = helm;
+      this.beginTurn();
+      return true;
+    }
+    return false;
+  }
+
+  /** The fleet as it stands, as a beacon rather than a turn. */
+  private snapshot(): ShotPacket {
+    return {
+      t: 'shot',
+      n: ++this.localSeq,
+      s: this.cfg.seed,
+      tn: this.turnNo,
+      st: 1,
+      a: 0,
+      p: 0,
+      c: 'round',
+      hp: this.ships.map((s) => Math.round(s.hp)),
+      f: this.ships.map((s) => s.burn),
+      d: this.ships.map((s) => Math.round(s.x)),
+      rk: this.rocks.map((r) => Math.round(r.hp)),
+      o: this.turn,
+    };
+  }
+
+  /** The resolved turn we are actually waiting for, if it has turned up yet. */
+  private nextRemote(): ShotPacket | null {
+    const due = this.turnNo + 1;
+    return this.remoteTurns.find((p) => (p.tn ?? due) === due) ?? null;
+  }
+
+  /** Takes that turn off the queue. */
+  private takeRemote(): ShotPacket | null {
+    const due = this.turnNo + 1;
+    const at = this.remoteTurns.findIndex((p) => (p.tn ?? due) === due);
+    if (at < 0) return null;
+    return this.remoteTurns.splice(at, 1)[0] ?? null;
+  }
+
+  /** Forgets every queued turn at or before `tn`. */
+  private dropThrough(tn: number) {
+    this.remoteTurns = this.remoteTurns.filter((p) => p.tn === undefined || p.tn > tn);
+  }
+
+  /**
+   * Snap past turns this client never saw.
+   *
+   * A queued turn further ahead than the one we are waiting for is proof we
+   * missed something -- a phone that slept through a shot, a snapshot that
+   * coalesced two writes into one, a packet that simply never landed. There is
+   * nothing to replay, because a turn we never received cannot be animated;
+   * but a ShotPacket is a whole snapshot of the fleet, so the newest one is
+   * enough to rejoin the match exactly where everybody else is.
+   *
+   * Silent divergence is the thing worth avoiding here. Skipping an animation
+   * is a visible, explicable hiccup; two screens disagreeing about whose turn
+   * it is for the rest of the match is not.
+   */
+  private catchUp(): boolean {
+    let ahead: ShotPacket | null = null;
+    for (const p of this.remoteTurns) {
+      if (p.tn === undefined || p.tn <= this.turnNo + 1) continue;
+      if (!ahead || p.tn > (ahead.tn ?? 0)) ahead = p;
+    }
+
+    // A beacon exactly one turn ahead is left alone at first: the turn it is
+    // describing may still be on its way, and snapping to the beacon would
+    // throw away an animation that was about to play perfectly well. Two
+    // things exhaust that patience -- sitting still long enough to have asked
+    // the room where everybody is, or simply disagreeing with the host for
+    // several beacons running, which is no longer lag but a split.
+    const beacon = this.beaconIn;
+    const beaconTn = beacon?.tn ?? -1;
+    const stale = this.offT >= BALANCE.BEACON * 1.5;
+    const beaconDue =
+      beacon !== null &&
+      (beaconTn > this.turnNo + 1 ||
+        (beaconTn > this.turnNo && this.stallT >= BALANCE.STALL_ASK) ||
+        (beaconTn !== this.turnNo && stale));
+    if (beaconDue && (ahead === null || beaconTn > (ahead.tn ?? -1) || stale)) ahead = beacon;
+
+    if (!ahead) return false;
+    if (ahead === this.beaconIn) {
+      this.beaconIn = null;
+      this.offT = 0;
+    }
+
+    for (let i = 0; i < this.ships.length; i++) {
+      if (ahead.hp[i] !== undefined) this.ships[i].hp = clamp(ahead.hp[i], 0, this.ships[i].maxHp);
+      if (ahead.f[i] !== undefined) this.ships[i].burn = clamp(Math.round(ahead.f[i]), 0, 4);
+      if (ahead.d[i] !== undefined) this.ships[i].x = this.clampDrift(i, ahead.d[i]);
+    }
+    for (let i = 0; i < this.rocks.length; i++) {
+      if (ahead.rk[i] !== undefined) this.rocks[i].hp = clamp(ahead.rk[i], 0, BALANCE.ROCK_HP);
+    }
+
+    this.turnNo = ahead.tn ?? this.turnNo + 1;
+    this.turn = clamp(Math.round(ahead.o), 0, this.ships.length - 1);
+    this.lastFired[this.ships[this.turn].team] = this.turn;
+    this.dropThrough(this.turnNo);
+
+    this.pendingFire = null;
+    this.awaitingOutcome = false;
+    this.outcomeWait = 0;
+    this.stallT = 0;
+    this.offT = 0;
+    this.skipping = false;
+
+    this.logLine('caught up with the fleet', 'miss');
+    this.cfg.onHp?.(this.hp);
+    if (this.afloat(0).length === 0 || this.afloat(1).length === 0) {
+      this.finish();
+      return true;
+    }
+    this.beginTurn();
+    return true;
+  }
+
+  /**
+   * The clock ran out and nobody fired. The helm moves on.
+   *
+   * Routed through the impact phase so it ends in `resolve()` like any other
+   * turn: burns still tick, the sea still shifts, and the turn is broadcast on
+   * an ordinary ShotPacket (flagged `sk`) so every client applies it through
+   * the same ordering and catch-up path a real shot goes through.
+   */
+  private skipTurn() {
+    this.shout('out of time');
+    this.logLine(`${this.shipName(this.turn)} let the turn run out`, 'miss');
+    this.lastShot = null;
+    this.skipping = true;
+    this.pendingFire = null;
+    this.awaitingOutcome = false;
+    this.phase = 'impact';
+    this.phaseTimer = 0.35;
+    this.cfg.onPhase?.(this.phase);
+  }
+
+  /**
+   * Nothing has arrived and the helm belongs to somebody else.
+   *
+   * Two escapes, in order of how drastic they are. First, ask: a client cannot
+   * tell "they are still thinking" from "they fired and I never heard it", and
+   * anybody further along will answer with a turn we can snap to. Then, only on
+   * the host and only when the match is running a clock at all, pass the helm
+   * on -- because the turn clock runs on the device whose turn it is, and a
+   * phone with the tab in the background stops running frames, so it will never
+   * skip itself however long everyone waits.
+   */
+  private waitOnRemote(dt: number) {
+    this.stallT += dt;
+    if (this.stallT < BALANCE.STALL_ASK) return;
+
+    this.askT -= dt;
+    if (this.askT <= 0) {
+      this.askT = BALANCE.STALL_ASK;
+      this.cfg.onAsk?.({ t: 'sync', n: ++this.localSeq, s: this.cfg.seed, tn: this.turnNo });
+    }
+
+    if (!this.cfg.isHost || !this.cfg.rules.turnTimer) return;
+    if (this.stallT < BALANCE.TURN_TIME + BALANCE.TURN_GRACE) return;
+    this.skipTurn();
   }
 
   /** A player who left hands their wheel to a bot rather than stranding the match. */
@@ -844,8 +1147,9 @@ export class BattleEngine {
     ship.aiLevel = level;
     ship.name = `${ship.name} (adrift)`;
     this.pendingFire = null;
-    this.pendingRemote = null;
+    this.remoteTurns = [];
     this.awaitingOutcome = false;
+    this.stallT = 0;
     if (this.phase === 'aim' && this.turn === i) this.botTimer = BALANCE.BOT_THINK;
   }
 
@@ -909,19 +1213,57 @@ export class BattleEngine {
     }
 
     if (this.phase === 'aim') {
+      // The host says where it is, on a timer, whoever's turn it is. This is
+      // the only packet in the protocol that goes out when nothing has
+      // happened, and the only one that can rescue a client whose divergence
+      // came from a bot's turn -- which nobody broadcasts and everybody
+      // resolves alone.
+      if (this.cfg.isHost && this.cfg.onLocalShot) {
+        this.beaconT -= dt;
+        if (this.beaconT <= 0) {
+          this.beaconT = BALANCE.BEACON;
+          this.cfg.onLocalShot(this.snapshot());
+        }
+      }
+
+      // The host's word on the turn we are both already on: not a turn to
+      // play, just numbers to agree with.
+      if (this.beaconIn && (this.beaconIn.tn ?? -1) === this.turnNo) {
+        if (this.reconcile(this.beaconIn)) return;
+      }
+
+      // How long the host and this client have been telling different stories.
+      if (this.beaconIn && (this.beaconIn.tn ?? this.turnNo) !== this.turnNo) this.offT += dt;
+      else this.offT = 0;
+
+      // Before anything else: a queued turn further ahead than this one means
+      // we are behind the rest of the fleet, whoever the helm nominally
+      // belongs to. Rejoin the present first and ask questions never.
+      if (this.catchUp()) return;
+
       const ship = this.ships[this.turn];
 
       if (ship.control === 'remote') {
         // Whichever arrived first triggers the flight -- the preview, or,
-        // failing that, the fully resolved packet, which carries the same
-        // aim and doubles as its own trigger. Either way `this.pendingRemote`
-        // is left exactly as it was: still null if only the preview has
-        // shown up, or holding the outcome that resolve() will read once the
-        // flight settles.
-        const trigger = this.pendingFire ?? this.pendingRemote;
-        if (!trigger) return;
+        // failing that, the fully resolved turn, which carries the same aim
+        // and doubles as its own trigger. The resolved turn is left on the
+        // queue either way; resolve() takes it once the flight settles.
+        const due = this.nextRemote();
+        const trigger = this.pendingFire ?? due;
+        if (!trigger) {
+          this.waitOnRemote(dt);
+          return;
+        }
+        this.stallT = 0;
         this.pendingFire = null;
-        this.awaitingOutcome = this.pendingRemote === null;
+        if (due?.sk) {
+          // Their clock ran out. There is no flight to play, so go straight to
+          // the end of the turn.
+          this.shout('out of time');
+          this.resolve();
+          return;
+        }
+        this.awaitingOutcome = due === null;
         this.fire({ angle: trigger.a, power: trigger.p, card: trigger.c });
         return;
       }
@@ -934,10 +1276,7 @@ export class BattleEngine {
 
       if (this.cfg.rules.turnTimer) {
         this.turnClock -= dt;
-        if (this.turnClock <= 0) {
-          this.shout('out of time');
-          this.fire({ angle: this.aimAngle, power: this.aimPower, card: this.selected });
-        }
+        if (this.turnClock <= 0) this.skipTurn();
       }
       return;
     }
@@ -953,7 +1292,7 @@ export class BattleEngine {
         // length of time, so the wait, when it happens at all, is a network
         // round trip, not the multi-second one this replaced. The ceiling
         // below is only for a partner who went quiet mid-turn.
-        if (this.awaitingOutcome && !this.pendingRemote) {
+        if (this.awaitingOutcome && !this.nextRemote()) {
           this.outcomeWait += dt;
           if (this.outcomeWait < BALANCE.OUTCOME_TIMEOUT) return;
           this.awaitingOutcome = false;
@@ -1164,10 +1503,15 @@ export class BattleEngine {
    * whole reason the two clients never have to agree on a float.
    */
   private resolve() {
-    const packet = this.pendingRemote;
-    this.pendingRemote = null;
+    const packet = this.takeRemote();
+    /** Whether this client broadcast the turn itself, rather than only living through it. */
+    let sent = false;
+    const skipped = this.skipping;
+    this.skipping = false;
+    this.pendingFire = null;
     this.awaitingOutcome = false;
     this.outcomeWait = 0;
+    this.stallT = 0;
 
     for (let i = 0; i < this.ships.length; i++) {
       const ship = this.ships[i];
@@ -1216,9 +1560,13 @@ export class BattleEngine {
       for (let i = 0; i < this.rocks.length; i++) {
         if (packet.rk[i] !== undefined) this.rocks[i].hp = clamp(packet.rk[i], 0, BALANCE.ROCK_HP);
       }
-      this.turnNo = next;
+      // The sender's turn number, not our own count. Taking theirs is what
+      // keeps every client numbering the same turn the same way even after one
+      // of them has had to skip forward.
+      this.turnNo = packet.tn ?? next;
       this.turn = clamp(Math.round(packet.o), 0, this.ships.length - 1);
       this.lastFired[this.ships[this.turn].team] = this.turn;
+      this.dropThrough(this.turnNo);
     } else {
       const rnd = this.rngFor(next + 977);
       for (let i = 0; i < this.ships.length; i++) this.ships[i].x = this.drift(i, rnd);
@@ -1234,25 +1582,50 @@ export class BattleEngine {
       // the identical shot on its own and there is nothing to exchange. An
       // offline match has nobody listening either way, and the hook is
       // simply absent.
-      if (this.cfg.onLocalShot && this.lastShot && this.ships[shooter].control === 'local') {
-        this.cfg.onLocalShot({
+      //
+      // A skipped turn is the exception to all of that. Nobody fired, so there
+      // is no shooter whose seat could be local: the client whose own clock ran
+      // out sends it, and so does the host when it is the one passing a silent
+      // captain's turn on. Both may send the same skip; both carry the same
+      // turn number, so the second is dropped rather than applied twice.
+      const mine = this.ships[shooter].control === 'local';
+      const send = skipped ? mine || Boolean(this.cfg.isHost) : mine && Boolean(this.lastShot);
+
+      if (this.cfg.onLocalShot && send) {
+        const out: ShotPacket = {
           t: 'shot',
           // The same number the preview went out under, so the two halves of
           // this shot correlate on the far side -- unless there was no
           // preview to match (see firedPreviewThisShot), in which case this
           // is the first anyone has heard of the shot and needs a fresh one.
-          n: this.firedPreviewThisShot ? this.localSeq : ++this.localSeq,
+          n: !skipped && this.firedPreviewThisShot ? this.localSeq : ++this.localSeq,
           s: this.cfg.seed,
-          a: round3(this.lastShot.angle),
-          p: round3(this.lastShot.power),
-          c: this.lastShot.card,
+          // Which turn this resolves. The receiver orders on this and nothing
+          // else, so a turn can be late, duplicated or missed entirely without
+          // any client quietly ending up on a different one.
+          tn: this.turnNo,
+          a: skipped ? 0 : round3(this.lastShot!.angle),
+          p: skipped ? 0 : round3(this.lastShot!.power),
+          c: skipped ? 'round' : this.lastShot!.card,
           hp: this.ships.map((s) => Math.round(s.hp)),
           f: this.ships.map((s) => s.burn),
           d: this.ships.map((s) => Math.round(s.x)),
           rk: this.rocks.map((r) => Math.round(r.hp)),
           o: this.turn,
-        });
+          ...(skipped ? { sk: 1 as const } : {}),
+        };
+        this.cfg.onLocalShot(out);
+        // Each player's document holds one write, so a beacon sent now would
+        // overwrite the turn we just sent before anybody had read it. Push the
+        // next one out instead.
+        this.beaconT = BALANCE.BEACON;
+        sent = true;
       }
+    }
+
+    if (!sent && this.cfg.isHost && this.cfg.onLocalShot) {
+      this.cfg.onLocalShot(this.snapshot());
+      this.beaconT = BALANCE.BEACON;
     }
 
     this.cfg.onHp?.(this.hp);

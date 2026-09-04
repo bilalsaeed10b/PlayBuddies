@@ -730,7 +730,7 @@ function FacePick({
   };
 
   return (
-    <div className="mx-auto flex h-full w-full max-w-5xl flex-col gap-2 p-2.5 sm:gap-4 sm:p-5">
+    <div className="mx-auto flex h-full w-full max-w-5xl flex-col overflow-y-auto overscroll-contain gap-2 p-2.5 sm:gap-4 sm:p-5">
       <div className="flex shrink-0 items-center justify-between gap-2">
         <button onClick={onBack} aria-label="Back" className="panel shrink-0 rounded-2xl p-3">
           <ArrowLeft className="h-5 w-5" />
@@ -819,7 +819,7 @@ function RoomScreen({
   const canStart = iAmReady && everyonePicked && enoughPlayers;
 
   return (
-    <div className="mx-auto flex h-full w-full max-w-6xl flex-col gap-2 p-2.5 sm:gap-4 sm:p-5">
+    <div className="mx-auto flex h-full w-full max-w-6xl flex-col overflow-y-auto overscroll-contain gap-2 p-2.5 sm:gap-4 sm:p-5">
       <div className="flex shrink-0 items-center justify-between gap-2">
         <div className="min-w-0">
           <h2 className="truncate text-lg font-black uppercase tracking-wide text-slate-100 sm:text-2xl">
@@ -1017,25 +1017,57 @@ function ModeAndTeams({
             </div>
           </div>
 
-          <div className="flex flex-wrap gap-1.5">
-            {Array.from({ length: slots }, (_, seat) => {
-              const person = people[seat];
-              const color = TEAM_COLORS[teamOf(seat) % TEAM_COLORS.length];
+          {/* A column per team rather than one row of everybody.
+              Colour alone was carrying the whole idea of who was on whose side,
+              which meant reading the teams off four dots in a row -- fine once
+              you know the trick, useless at a glance, and no help at all if the
+              two colours are close. Standing each team in its own column says
+              it outright, and the colour goes back to being decoration. */}
+          <div
+            className="grid gap-1.5"
+            style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(108px, 1fr))' }}
+          >
+            {Array.from({ length: rules.teamCount }, (_, t) => {
+              const color = TEAM_COLORS[t % TEAM_COLORS.length];
+              const members = Array.from({ length: slots }, (_, seat) => seat).filter(
+                (seat) => teamOf(seat) === t,
+              );
               return (
-                <button
-                  key={seat}
-                  disabled={!editable}
-                  onClick={() => cycleTeam(seat)}
-                  className="flex items-center gap-1.5 rounded-lg border-2 px-2 py-1 disabled:opacity-90"
-                  style={{ borderColor: `${color.main}70`, background: `${color.main}18` }}
-                  title={editable ? 'Tap to change team' : undefined}
+                <div
+                  key={t}
+                  className="flex min-w-0 flex-col gap-1 rounded-xl border p-1.5"
+                  style={{ borderColor: `${color.main}55`, background: `${color.main}10` }}
                 >
-                  <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: color.main }} />
-                  <span className="flex max-w-[80px] items-center gap-1 truncate text-[10px] font-black text-slate-100">
-                    <span className="truncate">{person.displayName}</span>
-                    {person.uid === hostId && <Crown className="h-2.5 w-2.5 shrink-0 text-amber-400" />}
-                  </span>
-                </button>
+                  <p
+                    className="px-0.5 text-[9px] font-black uppercase tracking-[0.12em]"
+                    style={{ color: color.main }}
+                  >
+                    Team {t + 1}
+                  </p>
+                  {members.length === 0 ? (
+                    <p className="px-0.5 py-1 text-[10px] font-bold text-slate-600">Nobody yet</p>
+                  ) : (
+                    members.map((seat) => {
+                      const person = people[seat];
+                      return (
+                        <button
+                          key={seat}
+                          disabled={!editable}
+                          onClick={() => cycleTeam(seat)}
+                          className="flex min-w-0 items-center gap-1 rounded-lg bg-slate-900/50 px-1.5 py-1 text-left disabled:opacity-90"
+                          title={editable ? 'Tap to change team' : undefined}
+                        >
+                          <span className="min-w-0 flex-1 truncate text-[10px] font-black text-slate-100">
+                            {person.displayName}
+                          </span>
+                          {person.uid === hostId && (
+                            <Crown className="h-2.5 w-2.5 shrink-0 text-amber-400" />
+                          )}
+                        </button>
+                      );
+                    })
+                  )}
+                </div>
               );
             })}
           </div>

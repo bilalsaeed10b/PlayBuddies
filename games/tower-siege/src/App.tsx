@@ -557,7 +557,7 @@ function RoomScreen({
   }
 
   return (
-    <div className="mx-auto flex h-full w-full max-w-3xl flex-col gap-3 p-4 sm:gap-4 sm:p-6">
+    <div className="mx-auto flex h-full w-full max-w-3xl flex-col overflow-y-auto overscroll-contain gap-3 p-4 sm:gap-4 sm:p-6">
       <div className="flex shrink-0 items-center justify-between gap-2">
         <button onClick={onFullscreen} aria-label="Fullscreen" className="panel shrink-0 rounded-2xl p-3">
           <Users className="h-5 w-5" />

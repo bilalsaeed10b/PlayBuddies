@@ -14,7 +14,7 @@ import type { Seat } from '../engine/QuoridorEngine';
 import { TIERS, chooseMove, fallbackMove, newBrain } from '../engine/ai';
 import type { Brain } from '../engine/ai';
 import { HORIZONTAL, TEAMS, VERTICAL, layoutFor, teamOf } from '../game/rules';
-import type { Orientation, SideMeta } from '../game/rules';
+import type { Orientation, PlayerCount, SideMeta } from '../game/rules';
 import { IN_IFRAME, toggleFullscreen } from '../fullscreen';
 import { audioService } from '../services/audio';
 import { TURN_SECONDS, packRules, unpackRules } from '../types/game';
@@ -34,6 +34,20 @@ export interface MatchConfig {
   seats: Seat[];
   /** Seats played from this device: one online, one to four on a couch. */
   localSeats: number[];
+  /**
+   * The roster rebuilt for a player count the host may have chosen and we had
+   * not heard about yet.
+   *
+   * `seats` above is built from *this* device's rules, which for a guest is
+   * whatever it last played with -- the host's real rules only arrive on the
+   * wire, after the config was made. Get that wrong and the seat list is the
+   * wrong length: a guest carrying two-player rules into a host's four-player
+   * game built two seats, so `seats[2]` was undefined, no control was ever
+   * found for it, and the board sat on "Someone is thinking" forever without
+   * handing anybody the turn. The board asks for the roster it actually needs
+   * rather than trusting the one it was handed.
+   */
+  seatsFor: (players: PlayerCount) => { seats: Seat[]; localSeats: number[] };
   /** Difficulty for bots, including one that takes over from somebody who left. */
   aiLevel: number;
   /** Chosen by the host online, locally otherwise. */
@@ -112,9 +126,18 @@ export default function MatchView({
    */
   const layout = layoutFor(session?.rules ?? config.rules);
 
+  // Built for the host's player count, not ours. Everything below reads these
+  // rather than `config.seats` / `config.localSeats`.
+  const roster = useMemo(
+    () => config.seatsFor(layout.players),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [config, layout.players],
+  );
+  const seats = roster.seats;
+
   const [turn, setTurn] = useState(config.first);
-  const [stock, setStock] = useState<number[]>(() => config.seats.map(() => layout.walls));
-  const [dists, setDists] = useState<number[]>(() => config.seats.map(() => -1));
+  const [stock, setStock] = useState<number[]>(() => seats.map(() => layout.walls));
+  const [dists, setDists] = useState<number[]>(() => seats.map(() => -1));
   const [moves, setMoves] = useState(0);
   const [over, setOver] = useState<{ winner: number } | null>(null);
   const [clock, setClock] = useState(TURN_SECONDS);
@@ -159,16 +182,16 @@ export default function MatchView({
    * tells everyone else this player abandoned their pawn, over and over.
    */
   const peerKey = config.peerUids.join(',');
-  const seatIdKey = config.seats.map((s) => s.id).join(',');
-  const localKey = config.localSeats.join(',');
+  const seatIdKey = seats.map((s) => s.id).join(',');
+  const localKey = roster.localSeats.join(',');
   const { aiLevel } = config;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const localSeats = useMemo(() => new Set(config.localSeats), [localKey]);
+  const localSeats = useMemo(() => new Set(roster.localSeats), [localKey]);
   /** Which seat each remote player holds, so a `bye` lands on the right pawn. */
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const seatOfUid = useMemo(() => {
     const map = new Map<string, number>();
-    config.seats.forEach((seat, i) => map.set(seat.id, i));
+    seats.forEach((seat, i) => map.set(seat.id, i));
     return map;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seatIdKey]);
@@ -347,7 +370,7 @@ export default function MatchView({
     const engine = new QuoridorEngine({
       // The engine flips a seat's control to 'ai' when its player leaves, so it
       // gets its own copy rather than mutating the object App rebuilds.
-      seats: config.seats.map((s) => ({ ...s })),
+      seats: seats.map((s) => ({ ...s })),
       layout: layoutFor(session.rules),
       first: session.first,
       seedTag: session.seed,
@@ -366,8 +389,8 @@ export default function MatchView({
         // yourself, because in a pairs game it is the same result.
         const paired = session.rules.teams && session.rules.players === 4;
         const won = paired
-          ? config.localSeats.some((seat) => teamOf(seat) === teamOf(winner))
-          : config.localSeats.includes(winner);
+          ? roster.localSeats.some((seat) => teamOf(seat) === teamOf(winner))
+          : roster.localSeats.includes(winner);
         onResult(won, engine.history.length);
         audioService.playEnd(won);
       },
@@ -597,15 +620,15 @@ export default function MatchView({
   const players = session?.rules.players ?? config.rules.players;
   const myTurn = localSeats.has(turn) && !over;
   const wallsLeft = stock[turn] ?? 0;
-  const mover = config.seats[turn]?.name ?? 'Someone';
-  const mySeat = config.localSeats[0] ?? 0;
+  const mover = seats[turn]?.name ?? 'Someone';
+  const mySeat = roster.localSeats[0] ?? 0;
   /** Pairs, at four players, when the host asked for them. */
   const teams = layout.teams;
 
   const turnLabel = over
     ? ''
     : myTurn
-      ? config.localSeats.length > 1
+      ? roster.localSeats.length > 1
         ? `${mover} to move`
         : 'Your move'
       : `${mover} is thinking`;
@@ -638,7 +661,11 @@ export default function MatchView({
       className="relative flex h-[100dvh] w-full flex-col overflow-hidden bg-[linear-gradient(160deg,#f7f3ea_0%,#e8eef4_55%,#dfe7ef_100%)] text-slate-800"
     >
       {/* ── who is who, and how far they have to go ── */}
-      <div className="pointer-events-none z-30 flex items-start justify-between gap-2 p-2 sm:p-3">
+      {/* Column-reversed on a phone, so the controls sit above the chips rather
+          than beside them. Side by side, four chips and five buttons wanted
+          about twice the width a phone has, and what gave way was the right
+          hand end of the row -- "End Game" reading as "Game". */}
+      <div className="pointer-events-none z-30 flex flex-col-reverse items-stretch gap-2 p-2 sm:flex-row sm:items-start sm:justify-between sm:p-3">
         <div className="flex min-w-0 flex-wrap gap-1.5">
           {/* In a pairs game the chips are grouped by pair, because "who is on
               my side" is the first thing a player needs off this row and
@@ -657,7 +684,7 @@ export default function MatchView({
                   >
                     {TEAMS[t].name}
                   </span>
-                  {config.seats.slice(0, players).map((seat, i) =>
+                  {seats.slice(0, players).map((seat, i) =>
                     teamOf(i) !== t ? null : (
                       <PlayerChip
                         key={seat.id}
@@ -672,7 +699,7 @@ export default function MatchView({
                   )}
                 </div>
               ))
-            : config.seats.slice(0, players).map((seat, i) => (
+            : seats.slice(0, players).map((seat, i) => (
                 <PlayerChip
                   key={seat.id}
                   seat={seat}
@@ -687,7 +714,7 @@ export default function MatchView({
 
         {/* The row is pointer-events-none so taps fall through to the board;
             the tray has to opt back in or none of its buttons are reachable. */}
-        <div className="pointer-events-auto shrink-0">
+        <div className="pointer-events-auto flex shrink-0 justify-end">
           <ControlsTray
             shellRef={shellRef}
             online={online}
@@ -809,7 +836,7 @@ export default function MatchView({
                 {/* "You crossed" only when it really was you. In a pairs game a
                     partner getting there is your win, but it is not your run,
                     and claiming it reads as the game losing track of who moved. */}
-                {config.localSeats.includes(over.winner) && config.localSeats.length === 1
+                {roster.localSeats.includes(over.winner) && roster.localSeats.length === 1
                   ? 'You crossed'
                   : teams
                     ? `${TEAMS[teamOf(over.winner)].name} takes it`
@@ -842,9 +869,13 @@ export default function MatchView({
         </div>
       )}
 
-      {/* ── how it works, pinned for the whole match rather than just this turn ── */}
+      {/* ── how it works, pinned for the whole match rather than just this turn ──
+          Desktop only. On a phone this sat straight on top of the player chips
+          and the left third of the board: a card explaining the rules is worth
+          having, but not at the price of covering the game it explains. The
+          same text is on the menu screen, which is a tap away. */}
       {!over && (
-        <div className="pointer-events-none absolute left-2 top-20 z-10 max-w-[11rem] rounded-2xl border border-black/10 bg-white/70 p-3 text-[10px] leading-relaxed text-slate-500 backdrop-blur-md">
+        <div className="pointer-events-none absolute left-2 top-20 z-10 hidden max-w-[11rem] rounded-2xl border border-black/10 bg-white/70 p-3 text-[10px] leading-relaxed text-slate-500 backdrop-blur-md sm:block">
           <p className="mb-1 font-black uppercase tracking-[0.15em] text-slate-400">How it works</p>
           <p>
             {teams

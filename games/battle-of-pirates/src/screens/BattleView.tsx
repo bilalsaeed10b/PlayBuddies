@@ -302,6 +302,12 @@ export default function BattleView({
         }
         return;
       }
+      // "Where is everybody?" from a client that has fallen behind. Answered
+      // by the engine, and only by clients that are actually further along.
+      if (packet.t === 'sync') {
+        engineRef.current?.applySync(packet);
+        return;
+      }
       if (packet.t !== 'fire' && packet.t !== 'shot') return;
       // A turn doubles as a start packet. The host's document holds exactly one
       // write at a time, so a guest that arrives after the opening shot finds a
@@ -468,6 +474,15 @@ export default function BattleView({
             linkRef.current?.send(packet);
           }
         : undefined,
+      onAsk: online
+        ? (packet) => {
+            log.info('wire:ask', { tn: packet.tn });
+            linkRef.current?.send(packet);
+          }
+        : undefined,
+      // Only the host arbitrates a silent captain's turn -- see the engine's
+      // own note on why two clients must never decide that independently.
+      isHost: config.isHost,
       onOver: (winner) => {
         setOver({ winner });
         // With a fleet, "did I win" is about the side I am sailing on, and the
@@ -1018,13 +1033,17 @@ function HullMeter({
 /** How much of the turn clock is left, as a shrinking bar rather than a number to read. */
 function TurnTimerBar({ clock }: { clock: number }) {
   const frac = clamp(clock / BALANCE.TURN_TIME, 0, 1);
+  // Thresholds as a share of the turn rather than fixed seconds: at a ten
+  // second turn the old fixed cutoffs left the bar amber or red for its whole
+  // life, and every change to the clock silently re-tuned the warning.
+  const colour = frac <= 0.28 ? '#f87171' : frac <= 0.6 ? '#fbbf24' : '#4ade80';
   return (
     <div className="h-1.5 w-40 overflow-hidden rounded-full border border-white/10 bg-slate-950/60">
       <div
         className="h-full rounded-full transition-[width] duration-200 ease-linear"
         style={{
           width: `${frac * 100}%`,
-          background: clock <= 5 ? '#f87171' : clock <= 10 ? '#fbbf24' : '#4ade80',
+          background: colour,
         }}
       />
     </div>

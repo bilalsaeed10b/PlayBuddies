@@ -338,6 +338,40 @@ export interface ShotPacket {
   /** Which ship fires next, by index. Stated, never inferred. */
   o: number;
   /**
+   * Which turn of the match this is, counted from the opening shot.
+   *
+   * The one field that makes a turn orderable rather than merely recent, and
+   * the fix for the worst bug this game has had. Before it, a turn was applied
+   * on arrival and the receiver had no way to notice it had missed one: a
+   * phone that slept through a shot, or two shots landing in the same tick and
+   * the second overwriting the first, left that client a turn behind for the
+   * rest of the match -- every screen showing a different captain's name and
+   * nothing able to put them back together.
+   *
+   * With it, every packet is an orderable snapshot: exactly-next is animated,
+   * anything further ahead is snapped straight to, and anything already seen
+   * is dropped. Absent on packets from an older build, which fall back to the
+   * per-sender counter.
+   */
+  tn?: number;
+  /**
+   * Set when nobody fired -- the turn clock ran out and the helm moved on.
+   *
+   * Carried on a ShotPacket rather than as a packet of its own so a skip goes
+   * through the identical ordering, replay and catch-up path a real shot does.
+   * `a`, `p` and `c` are meaningless here and no flight is animated.
+   */
+  sk?: 1;
+  /**
+   * Set when this is the host saying where it is, rather than a turn.
+   *
+   * A beacon never advances anybody: a client already level with it or ahead
+   * ignores it entirely. It exists for the client that has fallen behind and
+   * has no other way back -- the turn it missed is gone, because each player's
+   * document holds only their latest write.
+   */
+  st?: 1;
+  /**
    * Who fired first in this match, stamped by the host onto every turn it
    * sends.
    *
@@ -389,10 +423,37 @@ export interface HelloPacket {
   n: number;
 }
 
+/**
+ * "I am on turn N and it has stopped moving -- is anybody further along?"
+ *
+ * Sent by a client that has been waiting on somebody else's turn for longer
+ * than a turn can reasonably take. Anyone whose match has gone further re-sends
+ * their last resolved turn, which the asker snaps forward onto.
+ *
+ * This is what breaks a true deadlock. Once two clients disagree about whose
+ * turn it is, each is waiting for a shot the other will never fire, so no new
+ * packet is ever produced and nothing else in the protocol can rescue them.
+ * Asking is the only move left.
+ */
+export interface SyncPacket {
+  t: 'sync';
+  n: number;
+  s: number;
+  /** The asker's turn number, so only clients genuinely ahead bother replying. */
+  tn: number;
+}
+
 /** Written on arrival to clear whatever the last match left in the document. */
 export interface IdlePacket {
   t: 'idle';
   n: number;
 }
 
-export type NetPacket = StartPacket | FirePacket | ShotPacket | ByePacket | HelloPacket | IdlePacket;
+export type NetPacket =
+  | StartPacket
+  | FirePacket
+  | ShotPacket
+  | SyncPacket
+  | ByePacket
+  | HelloPacket
+  | IdlePacket;

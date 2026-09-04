@@ -292,8 +292,39 @@ export const BALANCE = {
    */
   ROCK_MARGIN: 780,
 
-  /** Seconds a player gets to aim before the shot goes off on its own. */
-  TURN_TIME: 10,
+  /** Seconds a captain gets to aim before the turn passes them by. */
+  TURN_TIME: 12,
+  /**
+   * Extra slack before a silent captain's turn is skipped *for* them.
+   *
+   * The turn clock only ever runs on the device whose turn it is, which is
+   * fine right up until that device is a phone with the tab in the
+   * background: its animation frames stop, so its clock stops, so it never
+   * skips itself and every other screen waits on it forever. The host counts
+   * this second, longer clock against a remote captain and passes the helm on
+   * when it runs out. Generous, because being skipped when you were only slow
+   * is worse than waiting a few seconds more.
+   */
+  TURN_GRACE: 9,
+  /**
+   * Seconds between the host's "this is where the battle actually is" beacons.
+   *
+   * Turns alone cannot keep a fleet in step. A bot's turn is resolved by every
+   * client on its own and broadcast by nobody, so once two clients disagree
+   * about anything at all, every bot turn after that widens the gap with no
+   * packet anywhere able to close it. The beacon is the correction: the host
+   * states its position regularly, and anybody behind snaps onto it.
+   */
+  BEACON: 5,
+  /**
+   * How long a client sits on a turn that is not moving before asking the
+   * others where they are.
+   *
+   * The escape hatch for a client that missed a turn: it cannot tell the
+   * difference between "they are thinking" and "they fired and I never heard
+   * it", so past this it simply asks, and anybody further ahead re-sends.
+   */
+  STALL_ASK: 7,
   /** Beat between the explosion settling and the next player getting the helm. */
   IMPACT_HOLD: 1.35,
   /**

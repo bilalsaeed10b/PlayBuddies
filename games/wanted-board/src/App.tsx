@@ -683,7 +683,7 @@ function OutlawPick({
   };
 
   return (
-    <div className="mx-auto flex h-full w-full max-w-5xl flex-col gap-2 p-2.5 sm:gap-4 sm:p-5">
+    <div className="mx-auto flex h-full w-full max-w-5xl flex-col overflow-y-auto overscroll-contain gap-2 p-2.5 sm:gap-4 sm:p-5">
       <div className="flex shrink-0 items-center justify-between gap-2">
         <button onClick={onBack} aria-label="Back" className="panel shrink-0 rounded-2xl p-3">
           <ArrowLeft className="h-5 w-5" />
@@ -769,7 +769,7 @@ function RoomScreen({
   const emptySeats = Math.max(0, rules.players - people.length);
 
   return (
-    <div className="mx-auto flex h-full w-full max-w-6xl flex-col gap-2 p-2.5 sm:gap-4 sm:p-5">
+    <div className="mx-auto flex h-full w-full max-w-6xl flex-col overflow-y-auto overscroll-contain gap-2 p-2.5 sm:gap-4 sm:p-5">
       <div className="flex shrink-0 items-center justify-between gap-2">
         <div className="min-w-0">
           <h2 className="truncate text-lg font-black uppercase tracking-wide text-amber-950 sm:text-2xl">
