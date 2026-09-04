@@ -850,7 +850,7 @@ export default function MatchView({
       {/* ── the clubhouse ── */}
       {over && (
         <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/65 p-6 backdrop-blur-sm">
-          <div className="w-full max-w-sm space-y-5 rounded-[2rem] border border-white/20 bg-slate-900/92 p-7 text-center">
+          <div className="max-h-[88dvh] w-full max-w-sm overflow-y-auto overscroll-contain space-y-5 rounded-[2rem] border border-white/20 bg-slate-900/92 p-7 text-center">
             <Trophy
               className="mx-auto h-14 w-14"
               style={{ color: soleWinner !== null ? SEATS[soleWinner % SEATS.length]?.main : '#cbd5e1' }}

@@ -1044,7 +1044,7 @@ export default function MatchView({
       {/* ── sending ── */}
       {showSends && !spectating && (
         <div className="absolute inset-0 z-40 flex items-end justify-center bg-black/60 p-4 backdrop-blur-sm sm:items-center">
-          <div className="w-full max-w-sm space-y-2 rounded-[1.75rem] border border-white/15 bg-slate-900/95 p-5">
+          <div className="max-h-[88dvh] w-full max-w-sm overflow-y-auto overscroll-contain space-y-2 rounded-[1.75rem] border border-white/15 bg-slate-900/95 p-5">
             <div className="flex items-center justify-between">
               <h3 className="text-lg font-black">Send a horde</h3>
               <button onClick={() => setShowSends(false)} className="rounded-lg p-1.5 hover:bg-white/10">

@@ -736,7 +736,7 @@ export default function MatchView({
       {/* ── the end ── */}
       {engine.phase === 'over' && (
         <div className="absolute inset-0 z-40 flex items-center justify-center bg-slate-950/80 p-5 backdrop-blur-sm">
-          <div className="w-full max-w-sm space-y-4 rounded-[2rem] border-2 border-slate-600/60 bg-slate-900 p-6 text-center">
+          <div className="max-h-[88dvh] w-full max-w-sm overflow-y-auto overscroll-contain space-y-4 rounded-[2rem] border-2 border-slate-600/60 bg-slate-900 p-6 text-center">
             <Trophy className="mx-auto h-11 w-11 text-amber-400" />
             <h2 className="text-3xl font-black leading-none text-slate-50">
               {engine.winner !== null && localSet.has(engine.winner) ? 'You won it' : 'They won it'}

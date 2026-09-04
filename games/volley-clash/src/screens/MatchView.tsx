@@ -806,7 +806,7 @@ export default function MatchView({
       {/* ── result ── */}
       {over && (
         <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/70 p-6 backdrop-blur-sm">
-          <div className="w-full max-w-sm space-y-5 rounded-[2rem] border border-white/20 bg-slate-900/90 p-8 text-center text-white">
+          <div className="max-h-[88dvh] w-full max-w-sm overflow-y-auto overscroll-contain space-y-5 rounded-[2rem] border border-white/20 bg-slate-900/90 p-8 text-center text-white">
             <Trophy
               className="mx-auto h-14 w-14"
               style={{ color: over.winner === myTeam ? '#fbbf24' : '#64748b' }}

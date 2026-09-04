@@ -88,20 +88,38 @@ export default function ControlsTray({
   const cls = THEME[theme];
 
   return (
-    <div className="flex items-center gap-2">
+    // Wraps, and every button refuses to be squashed. Four buttons and a
+    // spelled-out "End Game" want about 260px; a 320px phone has that only if
+    // nothing shares the row, and something always does -- a score chip, a
+    // roster, a turn badge. The end of the row went off the side of the screen,
+    // and because nothing scrolls sideways it could not be reached at all.
+    <div className="flex flex-wrap items-center justify-end gap-2">
       {before}
-      <button onClick={toggle} className={cls.icon} title={isFull ? 'Exit full screen' : 'Full screen'}>
+      <button
+        onClick={toggle}
+        className={`${cls.icon} shrink-0`}
+        title={isFull ? 'Exit full screen' : 'Full screen'}
+        aria-label={isFull ? 'Exit full screen' : 'Full screen'}
+      >
         {isFull ? <Minimize2 className="h-5 w-5" /> : <Maximize2 className="h-5 w-5" />}
       </button>
-      <button onClick={onSettings} className={cls.icon} title="Settings">
+      <button onClick={onSettings} className={`${cls.icon} shrink-0`} title="Settings" aria-label="Settings">
         <SettingsIcon className="h-5 w-5" />
       </button>
-      <button onClick={onExit} className={cls.icon} title="Leave">
+      <button onClick={onExit} className={`${cls.icon} shrink-0`} title="Leave" aria-label="Leave">
         <ArrowLeft className="h-5 w-5" />
       </button>
       {(!online || isHost) && (
-        <button onClick={askHostToEndGame} className={cls.labelled} title="End the match for everyone">
-          <LogOut className="h-4 w-4" /> End Game
+        <button
+          onClick={askHostToEndGame}
+          className={`${cls.labelled} shrink-0`}
+          title="End the match for everyone"
+          aria-label="End Game"
+        >
+          {/* Icon only on a phone. The word is worth keeping wherever it fits,
+              but not at the price of the button leaving the screen. */}
+          <LogOut className="h-4 w-4" />
+          <span className="hidden sm:inline">End Game</span>
         </button>
       )}
     </div>

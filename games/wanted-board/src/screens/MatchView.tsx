@@ -619,9 +619,19 @@ export default function MatchView({
       {sideBySide ? (
         <div className="flex min-h-0 flex-1 gap-2 overflow-hidden px-2 pb-2">
           <div className="flex min-h-0 min-w-0 flex-1">{townBlock}</div>
-          <div className="flex w-[46%] max-w-[330px] shrink-0 flex-col justify-center gap-1.5 overflow-y-auto">
-            <div className="flex flex-col gap-1.5">{rosterBlock}</div>
-            {rackBlock}
+          {/* `min-h-0` is what makes the `overflow-y-auto` mean anything. Without
+              it this column refuses to shrink below its content, grows past the
+              row, and is simply clipped by the row's `overflow-hidden` -- its
+              own scrollbar never engages, because as far as it is concerned
+              nothing is overflowing. On a short screen that put the bottom
+              hideout off the panel with no way to reach it at all.
+              `m-auto` on the inner block keeps the centring when it does fit,
+              without `justify-center` cutting off both ends when it does not. */}
+          <div className="flex min-h-0 w-[46%] max-w-[330px] shrink-0 flex-col overflow-y-auto overscroll-contain">
+            <div className="m-auto flex w-full flex-col gap-1.5">
+              <div className="flex flex-col gap-1.5">{rosterBlock}</div>
+              {rackBlock}
+            </div>
           </div>
         </div>
       ) : (
@@ -645,7 +655,7 @@ export default function MatchView({
       {/* ── the end ── */}
       {phase === 'over' && (
         <div className="absolute inset-0 z-40 flex items-center justify-center bg-amber-950/70 p-5 backdrop-blur-sm">
-          <div className="w-full max-w-sm space-y-4 rounded-[2rem] border-2 border-amber-900/30 bg-[#f7ecd6] p-6 text-center">
+          <div className="max-h-[88dvh] w-full max-w-sm overflow-y-auto overscroll-contain space-y-4 rounded-[2rem] border-2 border-amber-900/30 bg-[#f7ecd6] p-6 text-center">
             <Trophy className="mx-auto h-11 w-11 text-amber-600" />
             <h2 className="text-3xl font-black leading-none text-amber-950">
               {engine.winner !== null && localSet.has(engine.winner) ? 'You walked away with it' : 'They walked away with it'}

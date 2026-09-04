@@ -664,8 +664,11 @@ export default function MatchView({
       {/* Column-reversed on a phone, so the controls sit above the chips rather
           than beside them. Side by side, four chips and five buttons wanted
           about twice the width a phone has, and what gave way was the right
-          hand end of the row -- "End Game" reading as "Game". */}
-      <div className="pointer-events-none z-30 flex flex-col-reverse items-stretch gap-2 p-2 sm:flex-row sm:items-start sm:justify-between sm:p-3">
+          hand end of the row -- "End Game" reading as "Game".
+          Back to a row when the screen is short, though: stacked, this header
+          was taking 170px of a 300px-tall landscape phone and leaving the
+          board 73. Narrow wants a stack; short cannot afford one. */}
+      <div className="pointer-events-none z-30 flex flex-col-reverse items-stretch gap-2 p-2 [@media(max-height:460px)]:flex-row [@media(max-height:460px)]:items-start [@media(max-height:460px)]:justify-between sm:flex-row sm:items-start sm:justify-between sm:p-3">
         <div className="flex min-w-0 flex-wrap gap-1.5">
           {/* In a pairs game the chips are grouped by pair, because "who is on
               my side" is the first thing a player needs off this row and
@@ -827,7 +830,7 @@ export default function MatchView({
       {/* ── result ── */}
       {over && (
         <div className="absolute inset-0 z-40 flex items-center justify-center bg-slate-900/45 p-6 backdrop-blur-sm">
-          <div className="w-full max-w-sm space-y-5 rounded-[2rem] border border-black/10 bg-white/95 p-7 text-center shadow-2xl">
+          <div className="max-h-[88dvh] w-full max-w-sm overflow-y-auto overscroll-contain space-y-5 rounded-[2rem] border border-black/10 bg-white/95 p-7 text-center shadow-2xl">
             <Trophy className="mx-auto h-14 w-14" style={{ color: layout.sides[over.winner]?.main ?? '#f59e0b' }} />
             <div>
               <h2 className="text-3xl font-black tracking-tight">

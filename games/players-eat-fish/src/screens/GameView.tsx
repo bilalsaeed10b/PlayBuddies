@@ -504,7 +504,7 @@ export default function GameView({
 
       {defeat && (
         <div className="absolute inset-0 z-30 flex items-center justify-center bg-sky-950/70 p-6 backdrop-blur-sm">
-          <div className="w-full max-w-sm space-y-6 rounded-[2rem] border border-white/20 bg-white/90 p-8 text-center shadow-2xl">
+          <div className="max-h-[88dvh] w-full max-w-sm overflow-y-auto overscroll-contain space-y-6 rounded-[2rem] border border-white/20 bg-white/90 p-8 text-center shadow-2xl">
             <div>
               <h2 className="text-4xl font-black tracking-tighter text-slate-900">EATEN</h2>
               <p className="mt-1 text-sm font-medium text-slate-500">{defeat.by} got you.</p>

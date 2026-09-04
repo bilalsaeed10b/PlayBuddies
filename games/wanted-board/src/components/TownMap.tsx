@@ -84,7 +84,12 @@ export default function TownMap({
   // ring did — nine places drawn into the same 560px cap the six-place ring
   // used sat cramped, especially the four rim-only places tucked between a
   // spoke and its neighbour.
-  const edge = Math.min(size, 760);
+  // Minus a marker's worth of room. Every place is drawn centred on its point
+  // on the square and then pulled back by half its own size, so a place sitting
+  // on the rim hangs outside the square by half a token -- about 28px. The
+  // square itself always fitted; the pieces standing on its edge did not, and
+  // the row's `overflow-hidden` cut the bottom one off with no way to reach it.
+  const edge = Math.max(0, Math.min(size - 56, 760));
   return (
     <div ref={box} className="flex h-full w-full items-center justify-center">
       {/* shrink-0 is load-bearing: the wrapper is a row flex, so without it the
