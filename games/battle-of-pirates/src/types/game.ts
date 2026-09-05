@@ -114,6 +114,10 @@ export interface Projectile {
   age: number;
   /** Ring buffer of past positions for the smoke trail. */
   trail: number[];
+  /** Chain shot's other ball, so the chain between them can be drawn. Set on both ends. */
+  link?: Projectile;
+  /** True on exactly one end of a linked pair, so the connecting chain is drawn once, not twice. */
+  chainPrimary?: boolean;
 }
 
 export interface Rock {

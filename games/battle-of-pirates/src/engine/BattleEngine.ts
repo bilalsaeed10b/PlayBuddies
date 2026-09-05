@@ -818,6 +818,7 @@ export class BattleEngine {
 
     const speed = (BALANCE.MIN_SPEED + (this.arena.maxSpeed - BALANCE.MIN_SPEED) * power) * card.speed;
     const mouth = this.muzzle(shooter, angle);
+    const volleyStart = this.projectiles.length;
 
     for (let i = 0; i < card.shots; i++) {
       // Fanned symmetrically about the aim, so a single-shot card is dead on
@@ -843,6 +844,17 @@ export class BattleEngine {
         age: 0,
         trail: [],
       });
+    }
+
+    // Chain shot's two balls stay joined by a drawn chain for as long as
+    // both are in the air. `linked` is only ever true at `shots: 2`.
+    if (card.linked) {
+      const [ball1, ball2] = this.projectiles.slice(volleyStart, volleyStart + 2);
+      if (ball1 && ball2) {
+        ball1.link = ball2;
+        ball2.link = ball1;
+        ball1.chainPrimary = true;
+      }
     }
 
     // The hull kicks away from the shot and rights itself.
@@ -2239,8 +2251,49 @@ export class BattleEngine {
     ctx.restore();
   }
 
+  /**
+   * The link between chain shot's two balls. Drawn as a sagging rope rather
+   * than a straight rod -- a taut line reads as a rigid bar joining them, and
+   * the whole point of chain shot is two balls on a chain, not one dumbbell.
+   */
+  private drawChains(ctx: CanvasRenderingContext2D) {
+    for (const p of this.projectiles) {
+      if (!p.alive || !p.chainPrimary || !p.link?.alive) continue;
+      const a = p;
+      const b = p.link;
+      const midX = (a.x + b.x) / 2;
+      // Sags toward the ground, proportional to how far apart the balls have
+      // drifted -- taut just after firing, slack once gravity has spread them.
+      const dist = Math.hypot(b.x - a.x, b.y - a.y);
+      const midY = (a.y + b.y) / 2 + Math.min(24, dist * 0.18);
+
+      ctx.save();
+      ctx.strokeStyle = 'rgba(30, 32, 38, 0.85)';
+      ctx.lineWidth = 2.5;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.quadraticCurveTo(midX, midY, b.x, b.y);
+      ctx.stroke();
+
+      // A few link dots along the curve so it reads as a chain, not a rope.
+      const links = 5;
+      ctx.fillStyle = 'rgba(60, 64, 72, 0.9)';
+      for (let i = 1; i < links; i++) {
+        const t = i / links;
+        const x = (1 - t) * (1 - t) * a.x + 2 * (1 - t) * t * midX + t * t * b.x;
+        const y = (1 - t) * (1 - t) * a.y + 2 * (1 - t) * t * midY + t * t * b.y;
+        ctx.beginPath();
+        ctx.arc(x, y, 2.2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+  }
+
   private drawProjectiles(ctx: CanvasRenderingContext2D, q: Quality) {
     const fx = fxSprites();
+    this.drawChains(ctx);
     for (const p of this.projectiles) {
       if (!p.alive) continue;
 

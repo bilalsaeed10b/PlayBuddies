@@ -242,6 +242,10 @@ function Navbar() {
                 <img
                   src={user.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.uid}`}
                   alt="Avatar"
+                  onError={(e) => {
+                    e.currentTarget.onerror = null;
+                    e.currentTarget.src = `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.uid}`;
+                  }}
                   className="w-10 h-10 rounded-full border-2 border-primary/50"
                 />
               </button>

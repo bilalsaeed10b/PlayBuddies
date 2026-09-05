@@ -528,7 +528,6 @@ function FishGrid({
                     <span className="w-full truncate text-center text-[9px] sm:text-[10px] font-bold uppercase tracking-wide">
                       {fish.name}
                     </span>
-                    <span className="text-[9px] sm:text-[10px] font-bold text-slate-500">size {fish.size}</span>
                     {others.length > 0 && (
                       <span className="w-full truncate text-[8px] sm:text-[9px] font-bold uppercase text-slate-400">
                         Also played by {others.join(', ')}

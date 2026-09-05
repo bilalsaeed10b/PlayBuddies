@@ -202,6 +202,10 @@ export default function DashboardPage() {
               <img
                 src={user?.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user?.uid}`}
                 alt="Profile"
+                onError={(e) => {
+                  e.currentTarget.onerror = null;
+                  e.currentTarget.src = `https://api.dicebear.com/7.x/avataaars/svg?seed=${user?.uid}`;
+                }}
                 className="w-10 h-10 rounded-full border-2 border-primary/50"
               />
             </div>
@@ -352,7 +356,7 @@ export default function DashboardPage() {
                 Available Games
               </h2>
             </div>
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-6">
+            <div className="flex flex-wrap gap-6">
               {PLAYABLE_GAMES.map((game, index) => (
                 <motion.div
                   key={game.id}
@@ -368,7 +372,7 @@ export default function DashboardPage() {
                       background: `linear-gradient(135deg, ${gameAccent(game).from}33, transparent)`,
                     }}
                   />
-                  <div className="relative z-10">
+                  <div className="relative z-10 flex flex-col items-center text-center">
                     <div className="w-20 h-20 sm:w-24 sm:h-24 mb-4 transform group-hover:scale-110 group-hover:-translate-y-1 transition-transform overflow-hidden rounded-2xl flex items-center justify-center shadow-lg">
                       <GameThumb game={game} size={96} className="w-full h-full" />
                     </div>
@@ -377,7 +381,7 @@ export default function DashboardPage() {
                       {game.category} • {playerCountLabel(game)}P
                     </p>
                     <div
-                      className="absolute left-0 top-full pt-3 text-sm opacity-0 group-hover:opacity-100 transition-opacity bg-clip-text text-transparent font-bold flex items-center gap-2"
+                      className="absolute inset-x-0 top-full pt-3 text-sm opacity-0 group-hover:opacity-100 transition-opacity bg-clip-text text-transparent font-bold flex items-center justify-center gap-2"
                       style={{ backgroundImage: `linear-gradient(to right, ${gameAccent(game).from}, ${gameAccent(game).to})` }}
                     >
                       Play Now <ArrowRight size={16} />

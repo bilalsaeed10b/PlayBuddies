@@ -90,6 +90,10 @@ interface LobbyPerson {
    * from this same document before a shot is fired.
    */
   role?: number | null;
+  /** Written by the PlayBuddies lobby, not this game -- see the roster chips in RoomScreen. */
+  photoURL?: string;
+  /** The platform's own ready toggle, opt-out by default. Same doc, same reason `photoURL` is here. */
+  isReady?: boolean;
 }
 
 const randomSeed = () => (Math.random() * 0x7fffffff) | 0;
@@ -314,6 +318,8 @@ export default function App() {
         // the class every number in BALANCE was tuned against.
         hull: typeof p.role === 'number' ? p.role : 0,
         team: (i % 2) as Team,
+        photoURL: p.photoURL,
+        isReady: Boolean(p.isReady),
       }));
   }, [lobby, rules.players]);
 
@@ -1051,7 +1057,7 @@ function Shell({
   children: React.ReactNode;
 }) {
   return (
-    <div className="mx-auto flex h-full w-full max-w-6xl flex-col overflow-y-auto overscroll-contain gap-3 p-3 sm:gap-4 sm:p-6">
+    <div className="mx-auto flex h-full w-full max-w-6xl flex-col overflow-hidden gap-3 p-3 sm:gap-4 sm:p-6">
       <div className="flex shrink-0 items-center justify-between gap-2">
         <button onClick={onBack} aria-label="Back" className="panel shrink-0 rounded-2xl p-3">
           <ArrowLeft className="h-5 w-5" />
@@ -1062,7 +1068,9 @@ function Shell({
         </div>
       </div>
       {/* Explicit min-h-0 is what lets the child actually scroll instead of
-          growing the flex column past the viewport. */}
+          growing the flex column past the viewport. Only this panel scrolls --
+          the outer shell staying `overflow-hidden` is what stops that scroll
+          from also showing up as a second, outer scrollbar. */}
       <div className="panel min-h-0 flex-1 overflow-y-auto overscroll-contain rounded-[2rem] p-3 sm:p-6">
         {children}
       </div>
@@ -1186,7 +1194,15 @@ function RoomScreen({
   ready: boolean;
   error: string | null;
   uid: string | null;
-  people: { uid: string; displayName: string; skin?: number | null; hull: number; team: Team }[];
+  people: {
+    uid: string;
+    displayName: string;
+    skin?: number | null;
+    hull: number;
+    team: Team;
+    photoURL?: string;
+    isReady: boolean;
+  }[];
   hostId: string | null;
   mine: number | null | undefined;
   myHull: number;
@@ -1365,30 +1381,37 @@ function RoomScreen({
     </>
   );
 
-  /** Avatar-only chips in a horizontal strip. Used both by the compact roster panel and, on a landscape phone, next to the CTA. */
+  /**
+   * Who's ready to sail, at a glance -- just the faces. A ship and a name are
+   * what the full roster below is for; this strip exists to answer one
+   * question fast (is everyone set?), so it only shows people who actually
+   * are: ready, and past the picker.
+   */
   const rosterChips = (
     <div className="flex min-h-0 flex-1 gap-2 overflow-x-auto overscroll-contain">
-      {people.map((p) => (
-        <div
-          key={p.uid}
-          className="flex shrink-0 flex-col items-center gap-1 rounded-lg border px-2 py-1"
-          style={{ borderColor: `${TEAM_COLORS[p.team].main}55`, background: `${TEAM_COLORS[p.team].main}18` }}
-        >
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-black/25">
-            {p.skin !== undefined && p.skin !== null ? (
-              <Portrait index={p.skin} size={36} />
-            ) : (
-              <Anchor className="h-4 w-4 text-white/40" />
+      {people
+        .filter((p) => p.isReady && p.skin !== undefined && p.skin !== null)
+        .map((p) => (
+          <div
+            key={p.uid}
+            className="relative h-9 w-9 shrink-0 overflow-hidden rounded-full border-2"
+            style={{ borderColor: TEAM_COLORS[p.team].main }}
+            title={p.displayName}
+          >
+            <img
+              src={p.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${p.uid}`}
+              alt={p.displayName}
+              onError={(e) => {
+                e.currentTarget.onerror = null;
+                e.currentTarget.src = `https://api.dicebear.com/7.x/avataaars/svg?seed=${p.uid}`;
+              }}
+              className="h-full w-full object-cover"
+            />
+            {p.uid === hostId && (
+              <Crown className="absolute -right-0.5 -top-0.5 h-3 w-3 rounded-full bg-slate-950/70 p-0.5 text-amber-300" />
             )}
           </div>
-          <div className="min-w-0 max-w-[64px]">
-            <p className="flex items-center justify-center gap-1 truncate text-[9px] font-bold">
-              {p.displayName}
-              {p.uid === hostId && <Crown className="h-2.5 w-2.5 shrink-0 text-amber-300" />}
-            </p>
-          </div>
-        </div>
-      ))}
+        ))}
     </div>
   );
 

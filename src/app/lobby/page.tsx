@@ -1031,7 +1031,7 @@ function LobbyContent() {
                           initial={{ opacity: 0, x: -20 }}
                           animate={{ opacity: 1, x: 0 }}
                           exit={{ opacity: 0, x: -20 }}
-                          className={`relative flex items-center justify-between p-3 rounded-xl glass border transition-colors duration-300 ${
+                          className={`relative flex items-center justify-between gap-3 p-3 rounded-xl glass border transition-colors duration-300 ${
                             player.isReady ? "border-success/50" : "border-error/60"
                           }`}
                         >
@@ -1092,11 +1092,11 @@ function LobbyContent() {
                   onClick={toggleReady}
                   className={`mt-4 w-full py-3 rounded-xl font-bold text-sm transition-colors duration-300 border ${
                     me.isReady
-                      ? "bg-success/20 text-success border-success/40 shadow-[0_0_18px_-4px_var(--color-success)]"
-                      : "bg-error/20 text-error border-error/40 shadow-[0_0_18px_-4px_var(--color-error)]"
+                      ? "bg-success/20 text-success border-success/40"
+                      : "bg-error/20 text-error border-error/40"
                   }`}
                 >
-                  {me.isReady ? "Ready ✓ — click to un-ready" : "Not ready — click when set"}
+                  {me.isReady ? "Ready, click to un-ready" : "Not ready, click when ready"}
                 </button>
               )}
             </div>

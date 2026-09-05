@@ -551,7 +551,7 @@ function Menu({
   onBack?: () => void;
 }) {
   return (
-    <div className="flex h-full flex-col items-center justify-center gap-5 overflow-y-auto overscroll-contain p-5">
+    <div className="flex h-full flex-col items-center justify-center gap-5 short:gap-2 overflow-y-auto overscroll-contain p-5 short:p-3">
       {onBack && (
         <div className="absolute left-4 top-4">
           <button onClick={onBack} aria-label="Back" className="panel rounded-2xl p-3">
@@ -560,37 +560,37 @@ function Menu({
         </div>
       )}
 
-      <div className="flex items-center gap-4">
-        <Gallows pieces={PIECES} className="h-24 w-auto opacity-80" />
+      <div className="flex items-center gap-4 short:gap-2">
+        <Gallows pieces={PIECES} className="h-24 short:h-10 w-auto opacity-80" />
         <div>
-          <p className="text-[10px] font-black uppercase tracking-[0.4em] text-slate-500">One line left</p>
-          <h1 className="text-5xl font-black leading-none tracking-tighter text-slate-50 sm:text-6xl">
+          <p className="text-[10px] font-black uppercase tracking-[0.4em] text-slate-500 short:hidden">One line left</p>
+          <h1 className="text-5xl font-black leading-none tracking-tighter text-slate-50 sm:text-6xl short:text-2xl">
             HANG
             <br />
             MAN
           </h1>
-          <p className="mt-1 text-xs font-black uppercase tracking-[0.24em] text-lime-400">
+          <p className="mt-1 text-xs font-black uppercase tracking-[0.24em] text-lime-400 short:hidden">
             Don't draw it
           </p>
         </div>
       </div>
 
-      <div className="panel w-full max-w-md space-y-4 rounded-[2rem] p-5">
+      <div className="panel w-full max-w-md space-y-4 short:space-y-1.5 rounded-[2rem] short:rounded-2xl p-5 short:p-3">
         <button
           onClick={onSolo}
-          className="flex w-full items-center justify-center gap-2 rounded-2xl bg-lime-500 py-4 text-lg font-black uppercase tracking-wider text-slate-950 transition-transform active:scale-95"
+          className="flex w-full items-center justify-center gap-2 rounded-2xl bg-lime-500 py-4 short:py-2 text-lg short:text-sm font-black uppercase tracking-wider text-slate-950 transition-transform active:scale-95"
         >
           <Play className="h-5 w-5 fill-current" /> Play solo
         </button>
 
-        <div className="space-y-1.5">
-          <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500">Bot rank</p>
+        <div className="space-y-1.5 short:space-y-1">
+          <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500 short:hidden">Bot rank</p>
           <div className="flex gap-1 rounded-xl bg-slate-800/70 p-1">
             {TIERS.map((tier, i) => (
               <button
                 key={tier.label}
                 onClick={() => onAiLevel(i)}
-                className={`flex-1 rounded-lg py-2 text-[11px] font-black uppercase tracking-wide transition-colors ${
+                className={`flex-1 rounded-lg py-2 short:py-1 text-[11px] font-black uppercase tracking-wide transition-colors ${
                   aiLevel === i ? 'bg-slate-100 text-slate-900' : 'text-slate-400'
                 }`}
               >
@@ -602,38 +602,38 @@ function Menu({
 
         <button
           onClick={onCouch}
-          className="w-full rounded-2xl border-2 border-slate-600/60 bg-slate-800/50 py-3 font-black uppercase tracking-wide text-slate-100"
+          className="w-full rounded-2xl border-2 border-slate-600/60 bg-slate-800/50 py-3 short:py-1.5 font-black uppercase tracking-wide text-slate-100"
         >
           Two on one screen
-          <span className="mt-0.5 block text-[10px] font-bold normal-case tracking-normal text-slate-400">
+          <span className="mt-0.5 block text-[10px] font-bold normal-case tracking-normal text-slate-400 short:hidden">
             Pass it over to set a word, then race for the letters together.
           </span>
         </button>
 
         <button
           onClick={onRules}
-          className="relative flex w-full items-center gap-3 overflow-hidden rounded-2xl border-2 border-lime-400/70 bg-lime-400/10 px-4 py-3 text-left transition-transform active:scale-[0.99]"
+          className="relative flex w-full items-center gap-3 overflow-hidden rounded-2xl border-2 border-lime-400/70 bg-lime-400/10 px-4 py-3 short:py-1.5 text-left transition-transform active:scale-[0.99]"
         >
           <span className="absolute -right-6 -top-6 h-16 w-16 animate-pulse rounded-full bg-lime-400/20" aria-hidden />
-          <ScrollText className="h-6 w-6 shrink-0 text-lime-300" />
+          <ScrollText className="h-6 w-6 short:h-5 short:w-5 shrink-0 text-lime-300" />
           <div className="min-w-0 flex-1">
             <p className="text-sm font-black uppercase tracking-wide text-lime-200">
               First time? Read this
             </p>
-            <p className="text-[11px] font-bold text-lime-300/70">It is not the hangman you know.</p>
+            <p className="text-[11px] font-bold text-lime-300/70 short:hidden">It is not the hangman you know.</p>
           </div>
         </button>
       </div>
 
       <div className="flex items-center gap-2">
-        <div className="panel flex items-center gap-2 rounded-2xl px-4 py-2.5 font-bold text-amber-300">
+        <div className="panel flex items-center gap-2 rounded-2xl px-4 py-2.5 short:py-1.5 font-bold text-amber-300">
           <Coins className="h-4 w-4" /> {coins}
         </div>
-        <button onClick={onSettings} aria-label="Settings" className="panel rounded-2xl p-3">
+        <button onClick={onSettings} aria-label="Settings" className="panel rounded-2xl p-3 short:p-2">
           <SettingsIcon className="h-5 w-5" />
         </button>
       </div>
-      <p className="-mt-2 text-center text-[10px] font-bold text-slate-500">{rulesSummary(rules)}</p>
+      <p className="-mt-2 text-center text-[10px] font-bold text-slate-500 short:hidden">{rulesSummary(rules)}</p>
     </div>
   );
 }

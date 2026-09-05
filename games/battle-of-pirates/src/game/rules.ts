@@ -224,11 +224,11 @@ export const BALANCE = {
   /**
    * Ceiling on any single resolution, used to clamp what a peer claims.
    *
-   * Has to be MAX_HP, not some smaller "plausible single hit" guess. Grape
-   * fires five pellets at the *same* per-pellet damage as a round shot (see
-   * the comment on `grape` below) — that is the entire point of the card,
-   * and landing most or all five on a close target is the card working
-   * exactly as intended, not a fluke. This used to sit at 62: comfortably
+   * Has to be MAX_HP, not some smaller "plausible single hit" guess. A mortar
+   * or firebomb's splash stacked on its own direct hit, or all five grape
+   * pellets landing on a close target, can still add up to a full health bar
+   * in one turn, and that is the card working exactly as intended, not a
+   * fluke. This used to sit at 62: comfortably
    * enough for one or two pellets, short by a wide margin the moment three
    * or more actually connected. When that happened, clampClaim floored the
    * receiver's hp above zero on a shot the sender's own engine had correctly
@@ -403,6 +403,8 @@ export interface CardMeta {
   burn?: number;
   /** Repairs your own hull the moment it is played. */
   heal?: number;
+  /** Its balls are joined by a drawn chain -- only meaningful at `shots: 2`. */
+  linked?: boolean;
 }
 
 /**
@@ -421,13 +423,16 @@ export interface CardMeta {
  * ranges, not one card with a bigger number on it.
  */
 /**
- * Every cannonball hits equally hard -- `damage` is the same number on all
- * seven cards. What tells them apart is everything else here: how many balls
- * leave the barrel, how far they reach, and what they do besides bruise a
- * hull. A five-pellet grapeshot volley is not weaker per pellet than a solid
- * round shot, it is just five separate decisions instead of one.
+ * Every cannonball hits equally hard -- `damage` is the same number on every
+ * card except grape, chain and bore. What tells the rest apart is everything
+ * else here: how many balls leave the barrel, how far they reach, and what
+ * they do besides bruise a hull.
  */
 const POWER = 1.1;
+/** Flat per-pellet damage for grapeshot's five balls -- see the comment on `grape` below. */
+const GRAPE_PELLET = 3 / BALANCE.DIRECT;
+/** Flat per-ball damage for chain shot and bore shot -- see their comments below. */
+const FLAT_7 = 7 / BALANCE.DIRECT;
 
 export const CARDS: Record<CardId, CardMeta> = {
   round: {
@@ -435,23 +440,31 @@ export const CARDS: Record<CardId, CardMeta> = {
     blurb: 'The honest one. Full powder, full range.',
     shots: 1, spread: 0, damage: POWER, blast: 1, gravity: 1, speed: 1,
   },
+  /**
+   * Two flat 7-damage balls rather than one full-power hit -- landing both is
+   * worth more than round shot, landing one is worth less, and which of those
+   * happens is what the chain between them is for.
+   */
   chain: {
     id: 'chain', name: 'Chain Shot', glyph: 'oo', weight: 16,
     blurb: 'Two balls on a chain, same range as round shot. Both can bite.',
-    shots: 2, spread: 0.05, damage: POWER, blast: 0.85, gravity: 1, speed: 1,
+    shots: 2, spread: 0.05, damage: FLAT_7, blast: 0.85, gravity: 1, speed: 1,
+    linked: true,
   },
   /**
-   * A close-range shotgun, not a weaker round shot. At 0.78x speed -- nudged
-   * up when the water itself widened to 1850, so a full-power shot can still
-   * physically reach the far rail when the turn's drift has actually brought
-   * the two hulls close, rather than falling short even then -- it is still
-   * comfortably shorter than a half-power round shot manages. The
-   * five-pellet forgiveness only pays off once the range is genuinely closed.
+   * A close-range shotgun, not a weaker round shot in aggregate -- five
+   * pellets at a flat 3 damage each still out-totals one round shot if most
+   * of them connect. At 0.78x speed -- nudged up when the water itself
+   * widened to 1850, so a full-power shot can still physically reach the far
+   * rail when the turn's drift has actually brought the two hulls close,
+   * rather than falling short even then -- it is still comfortably shorter
+   * than a half-power round shot manages. The five-pellet forgiveness only
+   * pays off once the range is genuinely closed.
    */
   grape: {
     id: 'grape', name: 'Grapeshot', glyph: '::', weight: 15,
     blurb: 'A close-range fan of five. Needs the enemy properly near.',
-    shots: 5, spread: 0.15, damage: POWER, blast: 0.55, gravity: 1, speed: 0.78,
+    shots: 5, spread: 0.15, damage: GRAPE_PELLET, blast: 0.55, gravity: 1, speed: 0.78,
   },
   /**
    * The finisher, and the only card the mountain cannot make flinch. `elevRange`
@@ -480,12 +493,14 @@ export const CARDS: Record<CardId, CardMeta> = {
    * The reef's answer. Every other card either goes over a rock or stops at
    * it; this is the one that does not care it is there. The faster, flatter
    * flight is deliberate too -- a shot that visibly refuses to bend for the
-   * rock reads as a punch, not a lob.
+   * rock reads as a punch, not a lob. Flat 7 damage, not full power: the
+   * pierce is the point of the card, not a free full-power shot that also
+   * pierces.
    */
   bore: {
     id: 'bore', name: 'Bore Shot', glyph: '>', weight: 9,
     blurb: 'Fast, flat, and straight through rock.',
-    shots: 1, spread: 0, damage: POWER, blast: 0.9, gravity: 0.85, speed: 1.3,
+    shots: 1, spread: 0, damage: FLAT_7, blast: 0.9, gravity: 0.85, speed: 1.3,
     pierce: true,
   },
   patch: {
