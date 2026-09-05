@@ -1,5 +1,17 @@
 @import "tailwindcss";
 
+/**
+ * A phone held sideways.
+ *
+ * These games are played in landscape on a phone, which means roughly 320-430
+ * CSS pixels of height for everything: chrome, board and controls. `sm:` and
+ * friends only ever ask how *wide* the screen is, and a landscape phone is
+ * wide -- 740px puts it above `sm` and even `md`, so every "there is room for
+ * this" rule fires exactly when there is least room for it. This asks the
+ * other question. 520px keeps tablets (600px+ in landscape) out of it.
+ */
+@custom-variant short (@media (max-height: 520px));
+
 @theme {
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
 }

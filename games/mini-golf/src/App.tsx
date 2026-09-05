@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { scrimProps, useEscape } from '@shared/ui/dismiss';
+import useShortScreen from '@shared/ui/useShortScreen';
 import {
   ArrowLeft,
   Check,
@@ -750,8 +751,11 @@ function BallGrid({
   pickedBy: Record<number, string[]>;
   onPick: (index: number) => void;
 }) {
+  // 165px a card is nearly half a landscape phone. Sideways, keep the ball and
+  // its name and drop the rest.
+  const short = useShortScreen();
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+    <div className={`grid ${short ? 'grid-cols-5 gap-2' : 'grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4'}`}>
       {BALLS.map((ball, index) => {
         const isOwned = owned.includes(index);
         const others = pickedBy[index] ?? [];
@@ -763,7 +767,9 @@ function BallGrid({
             key={ball.name}
             onClick={() => onPick(index)}
             disabled={!isOwned && !affordable}
-            className={`relative flex flex-col items-center gap-1.5 overflow-hidden rounded-2xl border p-3 text-center transition-colors ${
+            className={`relative flex flex-col items-center overflow-hidden rounded-2xl border text-center transition-colors ${
+              short ? 'gap-0.5 p-1.5' : 'gap-1.5 p-3'
+            } ${
               isSelected
                 ? 'border-emerald-300 bg-emerald-400/20 shadow-[0_0_0_3px_rgba(52,211,153,0.25)]'
                 : isOwned
@@ -778,17 +784,21 @@ function BallGrid({
                 {!affordable && <span className="text-[9px] font-bold text-rose-300">not enough</span>}
               </div>
             )}
-            <Portrait index={index} />
-            <span className="text-sm font-black uppercase tracking-wide">{ball.name}</span>
+            <Portrait index={index} size={short ? 42 : 72} />
+            <span
+              className={`font-black uppercase tracking-wide ${short ? 'text-[10px] leading-tight' : 'text-sm'}`}
+            >
+              {ball.name}
+            </span>
             {/*
               No stat bars, because there are no stats. Three identical full
               bars on every card would imply a choice that does not exist, and
               hinting at one is worse than saying plainly that these are paint.
             */}
-            <span className="rounded-lg bg-black/25 px-2 py-0.5 text-[9px] font-black uppercase tracking-[0.15em] text-white/45">
+            <span className="rounded-lg bg-black/25 px-2 py-0.5 text-[9px] font-black uppercase tracking-[0.15em] text-white/45 short:hidden">
               Paint only
             </span>
-            <span className="text-[10px] leading-tight text-white/50">{ball.blurb}</span>
+            <span className="text-[10px] leading-tight text-white/50 short:hidden">{ball.blurb}</span>
             {others.length > 0 && (
               <span className="text-[9px] font-black uppercase text-white/40">Also played by {others.join(', ')}</span>
             )}

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { scrimProps, useEscape } from '@shared/ui/dismiss';
+import useShortScreen from '@shared/ui/useShortScreen';
 import {
   ArrowLeft,
   Check,
@@ -649,8 +650,10 @@ function CharacterGrid({
   pickedBy: Record<number, string[]>;
   onPick: (index: number) => void;
 }) {
+  // 184px a card, on a 360px screen held sideways. Keep the face and the name.
+  const short = useShortScreen();
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+    <div className={`grid ${short ? 'grid-cols-5 gap-2' : 'grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4'}`}>
       {CHARACTERS.map((ch: Character, index) => {
         const isOwned = owned.includes(index);
         const others = pickedBy[index] ?? [];
@@ -662,7 +665,9 @@ function CharacterGrid({
             key={ch.name}
             onClick={() => onPick(index)}
             disabled={!isOwned && !affordable}
-            className={`relative flex flex-col items-center gap-2 overflow-hidden rounded-2xl border p-3 text-left transition-colors ${
+            className={`relative flex flex-col items-center overflow-hidden rounded-2xl border text-left transition-colors ${
+              short ? 'gap-0.5 p-1.5' : 'gap-2 p-3'
+            } ${
               isSelected
                 ? 'border-amber-400 bg-amber-400/20 shadow-[0_0_0_3px_rgba(251,191,36,0.25)]'
                 : isOwned
@@ -677,12 +682,16 @@ function CharacterGrid({
                 {!affordable && <span className="text-[9px] font-bold text-rose-300">not enough</span>}
               </div>
             )}
-            <Portrait index={index} />
-            <span className="text-sm font-black uppercase tracking-wide">{ch.name}</span>
-            <div className="w-full">
+            <Portrait index={index} size={short ? 42 : 68} />
+            <span
+              className={`font-black uppercase tracking-wide ${short ? 'text-[10px] leading-tight' : 'text-sm'}`}
+            >
+              {ch.name}
+            </span>
+            <div className="w-full short:hidden">
               <SkinNote />
             </div>
-            <span className="text-[10px] leading-tight text-white/50">{ch.blurb}</span>
+            <span className="text-[10px] leading-tight text-white/50 short:hidden">{ch.blurb}</span>
             {others.length > 0 && (
               <span className="text-[9px] font-black uppercase text-white/40">Also played by {others.join(', ')}</span>
             )}

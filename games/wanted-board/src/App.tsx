@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { askHostToEndGame, toggleFullscreen } from './fullscreen';
 import { FREE_OUTLAWS, OUTLAWS } from './game/outlaws';
+import useShortScreen from '@shared/ui/useShortScreen';
 import OutlawToken from './components/OutlawToken';
 import { BALANCE, BANK, CARDS, CARD_GLYPH, CARD_ORDER, PLACES, ROADS, SEAT_COLORS } from './game/rules';
 import { TIERS } from './engine/ai';
@@ -604,8 +605,10 @@ function OutlawGrid({
   pickedBy: Record<number, string[]>;
   onPick: (index: number) => void;
 }) {
+  // Sideways there is 360px of screen; a 133px card spends a third of it.
+  const short = useShortScreen();
   return (
-    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
+    <div className={`grid ${short ? 'grid-cols-6 gap-1.5' : 'grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4'}`}>
       {OUTLAWS.map((outlaw, index) => {
         const isOwned = owned.includes(index);
         const isSelected = selected === index;
@@ -616,7 +619,9 @@ function OutlawGrid({
             key={outlaw.name}
             onClick={() => onPick(index)}
             disabled={!isOwned && !affordable}
-            className={`relative flex flex-col items-center gap-1 overflow-hidden rounded-2xl border-2 p-2.5 text-center transition-colors ${
+            className={`relative flex flex-col items-center overflow-hidden rounded-2xl border-2 text-center transition-colors ${
+              short ? 'gap-0.5 p-1.5' : 'gap-1 p-2.5'
+            } ${
               isSelected
                 ? 'border-rose-700 bg-rose-100'
                 : isOwned
@@ -631,9 +636,11 @@ function OutlawGrid({
                 {!affordable && <span className="text-[9px] font-bold text-rose-300">not enough</span>}
               </div>
             )}
-            <OutlawToken skin={index} size={62} />
-            <span className="text-[11px] font-black uppercase tracking-wide text-amber-950">{outlaw.name}</span>
-            <span className="text-[9px] leading-tight text-amber-900/50">{outlaw.blurb}</span>
+            <OutlawToken skin={index} size={short ? 38 : 62} />
+            <span className="text-[11px] font-black uppercase tracking-wide text-amber-950 short:text-[9px] short:leading-tight">
+              {outlaw.name}
+            </span>
+            <span className="text-[9px] leading-tight text-amber-900/50 short:hidden">{outlaw.blurb}</span>
             {others.length > 0 && (
               <span className="text-[9px] font-black uppercase text-amber-900/40">also {others.join(', ')}</span>
             )}

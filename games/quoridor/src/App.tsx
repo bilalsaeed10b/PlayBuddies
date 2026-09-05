@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { askHostToEndGame, toggleFullscreen } from './fullscreen';
 import { FREE_PAWNS, PAWNS, drawPawn } from './game/pawns';
+import useShortScreen from '@shared/ui/useShortScreen';
 import { DEFAULT_SIDES, layoutFor, wallsFor } from './game/rules';
 import type { SideMeta } from './game/rules';
 import { TIERS } from './engine/ai';
@@ -779,8 +780,12 @@ function PawnGrid({
   pickedBy: Record<number, string[]>;
   onPick: (index: number) => void;
 }) {
+  // A pawn card is 190px tall, which is half a landscape phone. Sideways it
+  // drops the blurb and the badge, shrinks the portrait and packs five to a
+  // row, so the choice is something you scan rather than something you scroll.
+  const short = useShortScreen();
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+    <div className={`grid gap-3 ${short ? 'grid-cols-5 gap-2' : 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-4'}`}>
       {PAWNS.map((pawn, index) => {
         const isOwned = owned.includes(index);
         const others = pickedBy[index] ?? [];
@@ -792,7 +797,9 @@ function PawnGrid({
             key={pawn.name}
             onClick={() => onPick(index)}
             disabled={!isOwned && !affordable}
-            className={`relative flex flex-col items-center gap-1.5 overflow-hidden rounded-2xl border p-3 text-center transition-colors ${
+            className={`relative flex flex-col items-center overflow-hidden rounded-2xl border text-center transition-colors ${
+              short ? 'gap-0.5 p-1.5' : 'gap-1.5 p-3'
+            } ${
               isSelected
                 ? 'border-amber-400 bg-amber-400/20 shadow-[0_0_0_3px_rgba(251,191,36,0.25)]'
                 : isOwned
@@ -807,17 +814,21 @@ function PawnGrid({
                 {!affordable && <span className="text-[9px] font-bold text-rose-200">not enough</span>}
               </div>
             )}
-            <Portrait index={index} />
-            <span className="text-sm font-black uppercase tracking-wide">{pawn.name}</span>
+            <Portrait index={index} size={short ? 44 : 84} />
+            <span
+              className={`font-black uppercase tracking-wide ${short ? 'text-[10px] leading-tight' : 'text-sm'}`}
+            >
+              {pawn.name}
+            </span>
             {/*
               No stat bars, because there are no stats. Three identical full
               bars on every card would imply a choice that does not exist, and
               hinting at one is worse than saying plainly that these are shape.
             */}
-            <span className="rounded-lg bg-slate-900/8 px-2 py-0.5 text-[9px] font-black uppercase tracking-[0.15em] text-slate-400">
+            <span className="rounded-lg bg-slate-900/8 px-2 py-0.5 text-[9px] font-black uppercase tracking-[0.15em] text-slate-400 short:hidden">
               Shape only
             </span>
-            <span className="text-[10px] leading-tight text-slate-500">{pawn.blurb}</span>
+            <span className="text-[10px] leading-tight text-slate-500 short:hidden">{pawn.blurb}</span>
             {others.length > 0 && (
               <span className="text-[9px] font-black uppercase text-slate-400">Also played by {others.join(', ')}</span>
             )}
@@ -987,7 +998,7 @@ function RoomScreen({
     <div className="mx-auto flex h-full w-full max-w-6xl flex-col overflow-y-auto overscroll-contain gap-3 p-3 sm:gap-4 sm:p-6">
       <div className="flex shrink-0 items-center justify-between gap-2">
         <div className="min-w-0">
-          <h2 className="truncate text-lg font-black tracking-tight sm:text-2xl">Pick your pawn</h2>
+          <h2 className="truncate text-lg font-black tracking-tight sm:text-2xl short:text-base">Pick your pawn</h2>
           <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-amber-600/90">
             {rules.players} across a {seatLayout.size}×{seatLayout.size} board · {seatLayout.walls} walls each
             {emptySeats > 0 && ` · ${emptySeats} ${emptySeats === 1 ? 'seat' : 'seats'} to bots`}

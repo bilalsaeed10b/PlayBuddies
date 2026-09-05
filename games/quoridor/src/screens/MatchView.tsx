@@ -668,7 +668,7 @@ export default function MatchView({
           Back to a row when the screen is short, though: stacked, this header
           was taking 170px of a 300px-tall landscape phone and leaving the
           board 73. Narrow wants a stack; short cannot afford one. */}
-      <div className="pointer-events-none z-30 flex flex-col-reverse items-stretch gap-2 p-2 [@media(max-height:460px)]:flex-row [@media(max-height:460px)]:items-start [@media(max-height:460px)]:justify-between sm:flex-row sm:items-start sm:justify-between sm:p-3">
+      <div className="pointer-events-none z-30 flex flex-col-reverse items-stretch gap-2 p-2 short:flex-row short:items-start short:justify-between sm:flex-row sm:items-start sm:justify-between sm:p-3">
         <div className="flex min-w-0 flex-wrap gap-1.5">
           {/* In a pairs game the chips are grouped by pair, because "who is on
               my side" is the first thing a player needs off this row and
@@ -777,7 +777,7 @@ export default function MatchView({
       </div>
 
       {/* ── step, or build ── */}
-      <div className="z-30 flex shrink-0 items-center justify-center gap-2 p-2 sm:p-3">
+      <div className="z-30 flex shrink-0 items-center justify-center gap-2 p-2 sm:p-3 short:p-1">
         <div className="flex items-center gap-1 rounded-2xl border border-black/10 bg-white/85 p-1 shadow-sm backdrop-blur">
           <ModeButton
             active={mode === 'move'}
@@ -878,7 +878,7 @@ export default function MatchView({
           having, but not at the price of covering the game it explains. The
           same text is on the menu screen, which is a tap away. */}
       {!over && (
-        <div className="pointer-events-none absolute left-2 top-20 z-10 hidden max-w-[11rem] rounded-2xl border border-black/10 bg-white/70 p-3 text-[10px] leading-relaxed text-slate-500 backdrop-blur-md sm:block">
+        <div className="pointer-events-none absolute left-2 top-20 z-10 hidden max-w-[11rem] rounded-2xl border border-black/10 bg-white/70 p-3 text-[10px] leading-relaxed text-slate-500 backdrop-blur-md sm:block short:hidden">
           <p className="mb-1 font-black uppercase tracking-[0.15em] text-slate-400">How it works</p>
           <p>
             {teams
@@ -893,8 +893,11 @@ export default function MatchView({
         </div>
       )}
 
-      {/* ── how to play, on a device with keys ── */}
-      <div className="pointer-events-none absolute inset-x-0 bottom-14 z-10 hidden justify-center sm:flex">
+      {/* ── how to play, on a device with keys ──
+          Not on a phone held sideways: it is wide enough to pass the `sm:`
+          test, has no keyboard to speak of, and the strip lands squarely on
+          the bottom rows of the board. */}
+      <div className="pointer-events-none absolute inset-x-0 bottom-14 z-10 hidden justify-center sm:flex short:hidden">
         <div className="rounded-xl border border-black/10 bg-white/70 px-3 py-1 text-[10px] font-semibold text-slate-500 backdrop-blur">
           arrows step · W switches to walls · R pins a direction · Enter drops it
         </div>

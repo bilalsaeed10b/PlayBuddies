@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { scrimProps, useEscape } from '@shared/ui/dismiss';
+import useShortScreen from '@shared/ui/useShortScreen';
 import {
   Anchor,
   ArrowLeft,
@@ -887,8 +888,11 @@ function ShipGrid({
   pickedBy: Record<number, string[]>;
   onPick: (index: number) => void;
 }) {
+  // A paint card is 198px tall -- more than half a landscape phone. Sideways it
+  // keeps the picture and the name and drops everything else.
+  const short = useShortScreen();
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+    <div className={`grid ${short ? 'grid-cols-5 gap-2' : 'grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4'}`}>
       {SHIPS.map((ship, index) => {
         const isOwned = owned.includes(index);
         const others = pickedBy[index] ?? [];
@@ -900,7 +904,9 @@ function ShipGrid({
             key={ship.name}
             onClick={() => onPick(index)}
             disabled={!isOwned && !affordable}
-            className={`relative flex flex-col items-center gap-1.5 overflow-hidden rounded-2xl border p-3 text-center transition-colors ${
+            className={`relative flex flex-col items-center overflow-hidden rounded-2xl border text-center transition-colors ${
+              short ? 'gap-0.5 p-1.5' : 'gap-1.5 p-3'
+            } ${
               isSelected
                 ? 'border-amber-400 bg-amber-400/20 shadow-[0_0_0_3px_rgba(251,191,36,0.25)]'
                 : isOwned
@@ -915,17 +921,21 @@ function ShipGrid({
                 {!affordable && <span className="text-[9px] font-bold text-rose-300">not enough</span>}
               </div>
             )}
-            <Portrait index={index} />
-            <span className="text-sm font-black uppercase tracking-wide">{ship.name}</span>
+            <Portrait index={index} size={short ? 46 : 92} />
+            <span
+              className={`font-black uppercase tracking-wide ${short ? 'text-[10px] leading-tight' : 'text-sm'}`}
+            >
+              {ship.name}
+            </span>
             {/*
               No stat bars, because there are no stats. Three identical full
               bars on every card would imply a choice that does not exist, and
               hinting at one is worse than saying plainly that these are paint.
             */}
-            <span className="rounded-lg bg-black/25 px-2 py-0.5 text-[9px] font-black uppercase tracking-[0.15em] text-white/45">
+            <span className="rounded-lg bg-black/25 px-2 py-0.5 text-[9px] font-black uppercase tracking-[0.15em] text-white/45 short:hidden">
               Paint only
             </span>
-            <span className="text-[10px] leading-tight text-white/50">{ship.blurb}</span>
+            <span className="text-[10px] leading-tight text-white/50 short:hidden">{ship.blurb}</span>
             {others.length > 0 && (
               <span className="text-[9px] font-black uppercase text-white/40">Also flown by {others.join(', ')}</span>
             )}
@@ -962,7 +972,7 @@ function HullGrid({
   pickedBy?: Record<number, string[]>;
 }) {
   return (
-    <div className="grid grid-cols-2 gap-2 sm:gap-3">
+    <div className="grid grid-cols-2 gap-2 sm:gap-3 short:grid-cols-4 short:gap-1.5">
       {HULLS.map((hull, i) => {
         const isSelected = selected === i;
         const others = pickedBy?.[i] ?? [];
@@ -970,7 +980,7 @@ function HullGrid({
           <button
             key={hull.id}
             onClick={() => onPick(i)}
-            className={`flex flex-col gap-2 rounded-2xl border p-3 text-left transition-colors ${
+            className={`flex flex-col gap-2 rounded-2xl border p-3 text-left transition-colors short:gap-1 short:p-2 ${
               isSelected
                 ? 'border-amber-400 bg-amber-400/15'
                 : 'border-white/15 bg-white/5 hover:bg-white/10'
@@ -980,7 +990,10 @@ function HullGrid({
               <span className="truncate text-sm font-black">{hull.name}</span>
               {isSelected && <Check className="h-3.5 w-3.5 shrink-0 text-amber-300" />}
             </div>
-            <p className="text-[10px] leading-snug text-white/55">{hull.blurb}</p>
+            {/* The bars stay -- they are the actual difference between hulls.
+                The prose describing them is the part a sideways phone can do
+                without. */}
+            <p className="text-[10px] leading-snug text-white/55 short:hidden">{hull.blurb}</p>
             <div className="space-y-1">
               <HullBar label="Hull" value={hull.hp} />
               <HullBar label="Guns" value={hull.damage} />

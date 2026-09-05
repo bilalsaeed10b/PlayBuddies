@@ -822,7 +822,7 @@ export default function MatchView({
   return (
     <div ref={shellRef} className="relative flex h-[100dvh] w-full flex-col overflow-hidden bg-[#0b1220] text-white">
       {/* ── top bar: your keep, and the arrows to everyone else's ── */}
-      <div className="z-30 flex shrink-0 items-start justify-between gap-2 p-2 sm:p-3">
+      <div className="z-30 flex shrink-0 items-start justify-between gap-2 p-2 sm:p-3 short:p-1">
         <div className="flex min-w-0 flex-wrap items-center gap-1.5">
           <Stat icon={<Heart className="h-3.5 w-3.5" />} value={hud.lives} tone="rose" label="lives" />
           <Stat icon={<Coins className="h-3.5 w-3.5" />} value={hud.gold} tone="amber" label="gold" />
@@ -859,7 +859,7 @@ export default function MatchView({
 
       {/* ── whose keep is on screen ── */}
       {config.seats.length > 1 && (
-        <div className="z-30 flex shrink-0 items-center justify-center gap-2 px-2 pb-1">
+        <div className="z-30 flex shrink-0 items-center justify-center gap-2 px-2 pb-1 short:pb-0">
           <button
             onClick={() => step(-1)}
             aria-label="Previous keep"
@@ -972,9 +972,12 @@ export default function MatchView({
         )}
       </div>
 
-      {/* ── the build bar ── */}
+      {/* ── the build bar ──
+          Sideways, the three bars of chrome came to 183px against 176px of
+          actual keep -- more furniture than game. Each one gives back what it
+          can: padding here, the tower's role line below. */}
       {!spectating && !over && (
-        <div className="z-30 shrink-0 border-t border-white/10 bg-slate-950/80 p-2 backdrop-blur-md">
+        <div className="z-30 shrink-0 border-t border-white/10 bg-slate-950/80 p-2 backdrop-blur-md short:p-1">
           {pickedTower ? (
             <TowerPanel
               engine={enginesRef.current[mine]}
@@ -996,7 +999,7 @@ export default function MatchView({
                       setSelected(id);
                       setPicked(null);
                     }}
-                    className={`flex min-w-[86px] flex-1 flex-col items-start gap-0.5 rounded-xl border px-2 py-1.5 text-left transition-colors ${
+                    className={`flex min-w-[86px] flex-1 flex-col items-start gap-0.5 rounded-xl border px-2 py-1.5 text-left transition-colors short:min-w-[64px] short:px-1.5 short:py-1 ${
                       selected === id ? 'border-amber-400 bg-amber-400/15' : 'border-white/12 bg-white/5'
                     } ${afford ? '' : 'opacity-45'}`}
                   >
@@ -1004,7 +1007,7 @@ export default function MatchView({
                       <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: meta.trim }} />
                       <span className="truncate text-[11px] font-black">{meta.name}</span>
                     </span>
-                    <span className="text-[9px] font-bold leading-tight text-white/45">{meta.role}</span>
+                    <span className="text-[9px] font-bold leading-tight text-white/45 short:hidden">{meta.role}</span>
                     <span className={`text-[10px] font-black tabular-nums ${afford ? 'text-amber-300' : 'text-rose-300'}`}>
                       {cost}g
                     </span>
