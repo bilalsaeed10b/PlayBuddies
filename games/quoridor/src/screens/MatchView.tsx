@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Blocks, Coins, Flag, Footprints, Loader2, RotateCw, Trophy } from 'lucide-react';
 import ControlsTray from '@shared/controls/ControlsTray';
+import { isStaleChunkError, recoverFromStaleChunk } from '@shared/net/staleChunk';
 import BoardPad from '../components/BoardPad';
 import { QuoridorEngine } from '../engine/QuoridorEngine';
 import type { Seat } from '../engine/QuoridorEngine';
@@ -330,6 +331,16 @@ export default function MatchView({
         document.addEventListener('visibilitychange', onVisible);
       })
       .catch((err) => {
+        // A stale build, not a dead connection: this tab has been open since
+        // before the deploy that just replaced the exact file it's asking for.
+        // Reloading fetches the new `index.html`, which asks for the file that
+        // actually exists -- so this fixes itself rather than leaving the
+        // player on a screen whose only way out is a "Back" that fails the
+        // same way.
+        if (isStaleChunkError(err)) {
+          recoverFromStaleChunk();
+          return;
+        }
         console.error('Could not open the wire', err);
         setNotice('Could not reach the other players.');
         setConnectionLost(true);
