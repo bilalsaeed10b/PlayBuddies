@@ -442,6 +442,11 @@ function LobbyContent() {
    *                 still checks host-ness — a non-host game sending this is
    *                 either a bug or someone poking postMessage by hand, and
    *                 either way it should not end anyone's match.
+   *   leave-lobby   The player pressed the game's own "leave" button on a
+   *                 pre-match screen -- the same exit the nav bar's own Leave
+   *                 lobby button gives, just reachable without leaving the
+   *                 game frame. Not host-gated: it only ever affects the
+   *                 sender's own device.
    *   wallet-request  I have booted, what does this player own?
    *   wallet-save   Their balance changed, please keep it.
    *   result        A match finished, and whether this player won it.
@@ -459,6 +464,12 @@ function LobbyContent() {
 
       if (data.type === "end-game") {
         void endGameRef.current();
+        return;
+      }
+
+      if (data.type === "leave-lobby") {
+        forgetLobby();
+        router.push("/dashboard");
         return;
       }
 

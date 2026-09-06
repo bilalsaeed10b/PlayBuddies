@@ -57,6 +57,20 @@ export function askHostToEndGame() {
   window.parent.postMessage({ source: 'playbuddies-game', type: 'end-game' }, '*');
 }
 
+/**
+ * Leaves the lobby entirely -- the menu-screen equivalent of a match's own
+ * "leave" button, for the pre-match screens that have no match to leave.
+ *
+ * Unlike `askHostToEndGame`, this is not host-gated: it is "this device
+ * navigating away," same as clicking the platform's own Leave lobby button in
+ * the nav bar, just reachable from inside the game frame too. A no-op outside
+ * an iframe, same as every other message here.
+ */
+export function askToLeaveLobby() {
+  if (!IN_IFRAME) return;
+  window.parent.postMessage({ source: 'playbuddies-game', type: 'leave-lobby' }, '*');
+}
+
 const IMMERSIVE = 'position:fixed;inset:0;width:100%;height:100%;z-index:2147483647;';
 
 export function toggleFullscreen(el: HTMLElement, on: boolean) {

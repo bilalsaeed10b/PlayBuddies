@@ -14,7 +14,7 @@ import {
   Settings as SettingsIcon,
   Users,
 } from 'lucide-react';
-import { askHostToEndGame, toggleFullscreen } from './fullscreen';
+import { askHostToEndGame, askToLeaveLobby, toggleFullscreen } from './fullscreen';
 import { FREE_OUTLAWS, OUTLAWS } from './game/outlaws';
 import useShortScreen from '@shared/ui/useShortScreen';
 import OutlawToken from './components/OutlawToken';
@@ -418,6 +418,8 @@ export default function App() {
           onCouch={() => openOffline(2)}
           onSettings={() => setShowSettings(true)}
           onRules={() => setShowRules(true)}
+          onFullscreen={() => toggleFullscreen(document.documentElement, !document.fullscreenElement)}
+          onExit={askToLeaveLobby}
           rules={rules}
           onBack={view === 'offline_menu' ? () => setView('room') : undefined}
         />
@@ -500,6 +502,8 @@ function Menu({
   onCouch,
   onSettings,
   onRules,
+  onFullscreen,
+  onExit,
   rules,
   onBack,
 }: {
@@ -510,19 +514,43 @@ function Menu({
   onCouch: () => void;
   onSettings: () => void;
   onRules: () => void;
+  onFullscreen: () => void;
+  onExit: () => void;
   rules: MatchRules;
   onBack?: () => void;
 }) {
   return (
-    <div className="flex h-full flex-col items-center justify-center gap-5 overflow-y-auto overscroll-contain p-5">
-      {onBack && (
-        <div className="absolute left-4 top-4">
-          <button onClick={onBack} aria-label="Back" className="panel rounded-2xl p-3">
-            <ArrowLeft className="h-5 w-5" />
+    <div className="flex h-full flex-col gap-3 overflow-y-auto overscroll-contain p-5">
+      {/* A real row, not an overlay -- so a long title on a short screen pushes
+          the content down instead of running under these buttons. */}
+      <div className="flex shrink-0 items-start justify-between gap-2">
+        <div>
+          {onBack && (
+            <button onClick={onBack} aria-label="Back" className="panel rounded-2xl p-3">
+              <ArrowLeft className="h-5 w-5" />
+            </button>
+          )}
+        </div>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <div className="panel flex items-center gap-2 rounded-2xl px-3 py-2 font-bold text-amber-800">
+            <Coins className="h-4 w-4" /> {coins}
+          </div>
+          <button onClick={onRules} className="panel flex items-center gap-2 rounded-2xl px-3 py-2 font-bold text-amber-900/70">
+            <ScrollText className="h-4 w-4" /> Rules
+          </button>
+          <button onClick={onFullscreen} aria-label="Full screen" className="panel rounded-2xl p-2.5">
+            <Maximize2 className="h-5 w-5" />
+          </button>
+          <button onClick={onSettings} aria-label="Settings" className="panel rounded-2xl p-2.5">
+            <SettingsIcon className="h-5 w-5" />
+          </button>
+          <button onClick={onExit} aria-label="Leave" className="panel rounded-2xl p-2.5">
+            <LogOut className="h-5 w-5" />
           </button>
         </div>
-      )}
+      </div>
 
+      <div className="flex flex-1 flex-col items-center justify-center gap-5">
       <div className="text-center">
         <p className="text-[10px] font-black uppercase tracking-[0.4em] text-amber-900/50">Reward offered for</p>
         <h1 className="text-5xl font-black leading-none tracking-tighter text-amber-950 sm:text-7xl">
@@ -576,18 +604,8 @@ function Menu({
         </div>
       </div>
 
-      <div className="flex items-center gap-2">
-        <div className="panel flex items-center gap-2 rounded-2xl px-4 py-2.5 font-bold text-amber-800">
-          <Coins className="h-4 w-4" /> {coins}
-        </div>
-        <button onClick={onRules} className="panel flex items-center gap-2 rounded-2xl px-4 py-2.5 font-bold text-amber-900/70">
-          <ScrollText className="h-4 w-4" /> Rules
-        </button>
-        <button onClick={onSettings} aria-label="Settings" className="panel rounded-2xl p-3">
-          <SettingsIcon className="h-5 w-5" />
-        </button>
+      <p className="text-center text-[10px] font-bold text-amber-900/40">{rulesSummary(rules)}</p>
       </div>
-      <p className="-mt-2 text-center text-[10px] font-bold text-amber-900/40">{rulesSummary(rules)}</p>
     </div>
   );
 }

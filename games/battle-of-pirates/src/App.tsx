@@ -18,7 +18,7 @@ import {
   Trophy,
   Users,
 } from 'lucide-react';
-import { askHostToEndGame, toggleFullscreen } from './fullscreen';
+import { askHostToEndGame, askToLeaveLobby, toggleFullscreen } from './fullscreen';
 import { FREE_SHIPS, SHIPS, drawShip } from './game/ships';
 import { HULLS } from './game/hulls';
 import { CARDS, CARD_ORDER, TEAM_COLORS } from './game/rules';
@@ -634,6 +634,8 @@ export default function App() {
           onSettings={() => setShowSettings(true)}
           onRules={() => setShowRules(true)}
           onStats={() => setShowStats(true)}
+          onFullscreen={() => toggleFullscreen(document.documentElement, !document.fullscreenElement)}
+          onExit={askToLeaveLobby}
           rules={rules}
           onBack={view === 'offline_menu' ? () => setView('room') : undefined}
         />
@@ -749,6 +751,8 @@ function Menu({
   onSettings,
   onRules,
   onStats,
+  onFullscreen,
+  onExit,
   rules,
   onBack,
 }: {
@@ -760,19 +764,46 @@ function Menu({
   onSettings: () => void;
   onRules: () => void;
   onStats: () => void;
+  onFullscreen: () => void;
+  onExit: () => void;
   rules: MatchRules;
   onBack?: () => void;
 }) {
   return (
-    <div className="flex h-full flex-col items-center justify-center gap-6 overflow-y-auto overscroll-contain p-6">
-      {onBack && (
-        <div className="absolute left-4 top-4">
-          <button onClick={onBack} aria-label="Back" className="panel rounded-2xl p-3">
-            <ArrowLeft className="h-5 w-5" />
+    <div className="flex h-full flex-col gap-4 overflow-y-auto overscroll-contain p-6">
+      {/* A real row, not an overlay -- so a long title on a short screen pushes
+          the content down instead of running under these buttons. */}
+      <div className="flex shrink-0 items-start justify-between gap-2">
+        <div>
+          {onBack && (
+            <button onClick={onBack} aria-label="Back" className="panel rounded-2xl p-3">
+              <ArrowLeft className="h-5 w-5" />
+            </button>
+          )}
+        </div>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <div className="panel flex items-center gap-2 rounded-2xl px-3 py-2.5 font-bold text-amber-300">
+            <Coins className="h-4 w-4" /> {coins}
+          </div>
+          <button onClick={onRules} className="panel flex items-center gap-2 rounded-2xl px-3 py-2.5 font-bold text-white/70">
+            <ScrollText className="h-4 w-4" /> Rules
+          </button>
+          <button onClick={onStats} aria-label="Captain's log" className="panel rounded-2xl p-2.5 text-white/70">
+            <Trophy className="h-5 w-5" />
+          </button>
+          <button onClick={onFullscreen} aria-label="Full screen" className="panel rounded-2xl p-2.5">
+            <Maximize2 className="h-5 w-5" />
+          </button>
+          <button onClick={onSettings} aria-label="Settings" className="panel rounded-2xl p-2.5">
+            <SettingsIcon className="h-5 w-5" />
+          </button>
+          <button onClick={onExit} aria-label="Leave" className="panel rounded-2xl p-2.5">
+            <LogOut className="h-5 w-5" />
           </button>
         </div>
-      )}
+      </div>
 
+      <div className="flex flex-1 flex-col items-center justify-center gap-6">
       <div className="text-center">
         <div className="mb-4 inline-block rounded-3xl bg-amber-400/20 p-4">
           <Anchor className="h-12 w-12 text-amber-300" />
@@ -828,21 +859,8 @@ function Menu({
         </div>
       </div>
 
-      <div className="flex items-center gap-3">
-        <div className="panel flex items-center gap-2 rounded-2xl px-4 py-3 font-bold text-amber-300">
-          <Coins className="h-5 w-5" /> {coins}
-        </div>
-        <button onClick={onRules} className="panel flex items-center gap-2 rounded-2xl px-4 py-3 font-bold text-white/70">
-          <ScrollText className="h-5 w-5" /> Rules
-        </button>
-        <button onClick={onStats} aria-label="Captain's log" className="panel rounded-2xl p-3 text-white/70">
-          <Trophy className="h-5 w-5" />
-        </button>
-        <button onClick={onSettings} aria-label="Settings" className="panel rounded-2xl p-3">
-          <SettingsIcon className="h-5 w-5" />
-        </button>
+      <p className="text-center text-[11px] font-semibold text-white/35">{rulesSummary(rules)}</p>
       </div>
-      <p className="-mt-3 text-center text-[11px] font-semibold text-white/35">{rulesSummary(rules)}</p>
     </div>
   );
 }

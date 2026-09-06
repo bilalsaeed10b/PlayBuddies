@@ -14,7 +14,7 @@ import {
   Settings as SettingsIcon,
   Users,
 } from 'lucide-react';
-import { askHostToEndGame, toggleFullscreen } from './fullscreen';
+import { askHostToEndGame, askToLeaveLobby, toggleFullscreen } from './fullscreen';
 import {
   FISH_ASSETS,
   FISH_CATEGORIES,
@@ -325,13 +325,38 @@ export default function App() {
       )}
 
       {view === 'menu' && (
-        <div className="flex h-full flex-col items-center justify-center gap-8 overflow-y-auto p-6">
+        <div className="flex h-full flex-col gap-4 overflow-y-auto p-6">
+          {/* A real row, not an overlay -- so a long title on a short screen
+              pushes the content down instead of running under these buttons. */}
+          <div className="flex shrink-0 items-center justify-end gap-2">
+            <div className="glass-dark flex items-center gap-2 rounded-2xl px-3 py-2.5 font-bold text-amber-600">
+              <Coins className="h-4 w-4" /> {coins}
+            </div>
+            <button onClick={() => setView('shop')} className="glass-dark rounded-2xl px-3 py-2.5 font-bold">
+              Shop
+            </button>
+            <button
+              onClick={() => toggleFullscreen(document.documentElement, !document.fullscreenElement)}
+              aria-label="Full screen"
+              className="glass-dark rounded-2xl p-2.5"
+            >
+              <Maximize2 className="h-5 w-5" />
+            </button>
+            <button onClick={() => setShowSettings(true)} aria-label="Settings" className="glass-dark rounded-2xl p-2.5">
+              <SettingsIcon className="h-5 w-5" />
+            </button>
+            <button onClick={askToLeaveLobby} aria-label="Leave" className="glass-dark rounded-2xl p-2.5">
+              <LogOut className="h-5 w-5" />
+            </button>
+          </div>
+
+          <div className="flex flex-1 flex-col items-center justify-center gap-8">
           <div className="text-center">
             <div className="mb-4 inline-block rounded-3xl bg-emerald-500/15 p-4">
               <FishIcon className="h-14 w-14 text-emerald-600" />
             </div>
-            <h1 className="text-6xl font-black tracking-tighter sm:text-7xl">
-              FISH<span className="text-emerald-500">.EAT</span>
+            <h1 className="text-4xl font-black leading-none tracking-tighter sm:text-6xl">
+              GO EAT <span className="text-emerald-500">FISH</span>
             </h1>
             <p className="mt-2 text-xs font-bold uppercase tracking-[0.3em] text-slate-600">
               Grow or get eaten
@@ -371,17 +396,6 @@ export default function App() {
               </button>
             )}
           </div>
-
-          <div className="flex items-center gap-3">
-            <div className="glass-dark flex items-center gap-2 rounded-2xl px-4 py-3 font-bold text-amber-600">
-              <Coins className="h-5 w-5" /> {coins}
-            </div>
-            <button onClick={() => setView('shop')} className="glass-dark rounded-2xl px-4 py-3 font-bold">
-              Shop
-            </button>
-            <button onClick={() => setShowSettings(true)} className="glass-dark rounded-2xl p-3">
-              <SettingsIcon className="h-5 w-5" />
-            </button>
           </div>
         </div>
       )}

@@ -15,7 +15,7 @@ import {
   Users,
   Volleyball,
 } from 'lucide-react';
-import { askHostToEndGame, toggleFullscreen } from './fullscreen';
+import { askHostToEndGame, askToLeaveLobby, toggleFullscreen } from './fullscreen';
 import { CHARACTERS, Character, FREE_CHARACTERS, drawCharacter } from './game/characters';
 import { BALANCE, TEAM_COLORS } from './game/rules';
 import { TIERS } from './engine/ai';
@@ -428,6 +428,8 @@ export default function App() {
             setView('couch');
           }}
           onSettings={() => setShowSettings(true)}
+          onFullscreen={() => toggleFullscreen(document.documentElement, !document.fullscreenElement)}
+          onExit={askToLeaveLobby}
           aiLevel={aiLevel}
           onAiLevel={setAiLevel}
         />
@@ -451,6 +453,8 @@ export default function App() {
             setView('couch');
           }}
           onSettings={() => setShowSettings(true)}
+          onFullscreen={() => toggleFullscreen(document.documentElement, !document.fullscreenElement)}
+          onExit={askToLeaveLobby}
           aiLevel={aiLevel}
           onAiLevel={setAiLevel}
           onBack={online ? () => setView('room') : undefined}
@@ -510,6 +514,8 @@ function Menu({
   onSolo,
   onCouch,
   onSettings,
+  onFullscreen,
+  onExit,
   aiLevel,
   onAiLevel,
   onBack,
@@ -518,19 +524,41 @@ function Menu({
   onSolo: () => void;
   onCouch: () => void;
   onSettings: () => void;
+  onFullscreen: () => void;
+  onExit: () => void;
   aiLevel: number;
   onAiLevel: (n: number) => void;
   onBack?: () => void;
 }) {
   return (
-    <div className="flex h-full flex-col items-center justify-center gap-7 overflow-y-auto p-6">
-      {onBack && (
-        <div className="absolute left-4 top-4">
-          <button onClick={onBack} className="panel rounded-2xl p-3">
-            <ArrowLeft className="h-5 w-5" />
+    <div className="flex h-full flex-col gap-4 overflow-y-auto p-6">
+      {/* A real row, not an overlay -- so a long title on a short screen pushes
+          the content down instead of running under these buttons. */}
+      <div className="flex shrink-0 items-start justify-between gap-2">
+        <div>
+          {onBack && (
+            <button onClick={onBack} className="panel rounded-2xl p-3">
+              <ArrowLeft className="h-5 w-5" />
+            </button>
+          )}
+        </div>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <div className="panel flex items-center gap-2 rounded-2xl px-3 py-2.5 font-bold text-amber-300">
+            <Coins className="h-4 w-4" /> {coins}
+          </div>
+          <button onClick={onFullscreen} className="panel rounded-2xl p-2.5">
+            <Maximize2 className="h-5 w-5" />
+          </button>
+          <button onClick={onSettings} className="panel rounded-2xl p-2.5">
+            <SettingsIcon className="h-5 w-5" />
+          </button>
+          <button onClick={onExit} className="panel rounded-2xl p-2.5">
+            <LogOut className="h-5 w-5" />
           </button>
         </div>
-      )}
+      </div>
+
+      <div className="flex flex-1 flex-col items-center justify-center gap-7">
       <div className="text-center">
         <div className="mb-4 inline-block rounded-3xl bg-amber-400/20 p-4">
           <Volleyball className="h-14 w-14 text-amber-300" />
@@ -586,14 +614,6 @@ function Menu({
           </p>
         </div>
       </div>
-
-      <div className="flex items-center gap-3">
-        <div className="panel flex items-center gap-2 rounded-2xl px-4 py-3 font-bold text-amber-300">
-          <Coins className="h-5 w-5" /> {coins}
-        </div>
-        <button onClick={onSettings} className="panel rounded-2xl p-3">
-          <SettingsIcon className="h-5 w-5" />
-        </button>
       </div>
     </div>
   );
