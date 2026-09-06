@@ -1084,7 +1084,21 @@ function RoomScreen({
         </button>
       </div>
 
-      <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[auto_minmax(0,1fr)] gap-3 sm:gap-4 lg:grid-cols-3 lg:grid-rows-[minmax(0,1fr)]">
+      {/* `min-h-0 flex-1` on this grid used to be unconditional. Both do
+          real work at `lg:` -- they are what lets the picker's own column
+          scroll inside a bounded three-column row -- but on a phone they were
+          the actual bug: with four rows of chrome stacked above (header,
+          rules banner, ready panel, roster), a flex item is allowed to
+          shrink below its own content once `min-h-0` says it may, and
+          `flex-1` just decides how much. It shrank the picker to whatever
+          sliver was left, sometimes slicing a locked card's price clean
+          through with no visible way to tell the panel was scrollable at all
+          rather than simply broken. Neither class runs on a phone now, so
+          this grid can never be smaller than its own content, and the *page*
+          -- already `overflow-y-auto` above -- scrolls the rest, which is the
+          swipe a phone always tries first rather than a small nested
+          scrollport that is easy to miss. */}
+      <div className="grid grid-cols-1 gap-3 sm:gap-4 lg:min-h-0 lg:flex-1 lg:grid-cols-3 lg:grid-rows-[minmax(0,1fr)]">
         <div className="panel order-2 min-h-0 overflow-y-auto overscroll-contain rounded-[2rem] p-3 sm:p-6 lg:order-1 lg:col-span-2">
           <PawnGrid owned={owned} coins={coins} selected={mine ?? null} pickedBy={pickedBy} onPick={onPick} />
         </div>

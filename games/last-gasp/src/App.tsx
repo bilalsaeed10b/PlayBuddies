@@ -950,7 +950,15 @@ function RoomScreen({
         </div>
       </div>
 
-      <div className="panel min-h-0 flex-1 overflow-y-auto overscroll-contain rounded-[2rem] p-3 sm:p-5">
+      {/* Not `flex-1 min-h-0 overflow-y-auto` any more. That squeezed this
+          panel into whatever the four rows above it (header, rules banner,
+          ready panel, roster) left over -- sometimes a sliver just tall
+          enough to slice a locked card's price badge in half, with nothing
+          visible to say the panel itself still scrolled. Sized to its own
+          content instead, so the whole page (already `overflow-y-auto`
+          above) is the one thing that scrolls -- the ordinary swipe a phone
+          always tries first, not a small nested scrollport easy to miss. */}
+      <div className="panel rounded-[2rem] p-3 sm:p-5">
         <FaceGrid owned={owned} coins={coins} selected={mine ?? null} pickedBy={pickedBy} onPick={onPick} />
       </div>
     </div>
