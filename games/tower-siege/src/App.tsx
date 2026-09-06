@@ -622,9 +622,9 @@ function RoomScreen({
         {isHost ? (
           <button
             onClick={onStart}
-            className="flex w-full items-center justify-center gap-2 rounded-2xl bg-amber-400 py-4 text-lg font-black text-slate-900"
+            className="flex w-full items-center justify-center gap-2 rounded-xl bg-amber-400 py-2.5 text-sm font-black text-slate-900"
           >
-            <Play className="h-5 w-5 fill-current" /> RAISE THE GATES
+            <Play className="h-4 w-4 fill-current" /> Raise the gates
           </button>
         ) : (
           <p className="rounded-2xl border border-white/10 bg-white/5 py-3 text-center text-sm font-bold text-white/50">

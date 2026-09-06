@@ -1023,7 +1023,7 @@ function RoomScreen({
           <button
             onClick={onStart}
             disabled={!canStart}
-            className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-400 py-3 text-base font-black text-emerald-950 disabled:opacity-40"
+            className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-400 py-2.5 text-sm font-black text-emerald-950 disabled:opacity-40"
           >
             <Play className="h-5 w-5 fill-current" /> TEE OFF
           </button>

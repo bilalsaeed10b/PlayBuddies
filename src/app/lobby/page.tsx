@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useAuthStore } from "@/store/useAuthStore";
+import { useGameplayStore } from "@/store/useGameplayStore";
 import { PLAYABLE_GAMES, getGame, gameUrl, gameAccent, playerCountLabel } from "@/lib/games";
 import GameThumb from "@/components/GameThumb";
 import AuthGuard from "@/components/AuthGuard";
@@ -142,6 +143,22 @@ function LobbyContent() {
   // it means something.
   const { friends } = useFriends(true);
   const friendUidSet = useMemo(() => new Set(friends.map((f) => f.uid)), [friends]);
+
+  // The global Friends pill only knows its own pathname, which never changes
+  // between "picking a game" and "playing one" -- both are /lobby. This is
+  // the one place that actually knows which of those it is, so it says so;
+  // see useGameplayStore for why anything needs to know at all. Reset on
+  // unmount so leaving the lobby entirely never leaves the pill hidden.
+  useEffect(() => {
+    const playing = lobby?.status === "playing";
+    useGameplayStore.getState().setIsPlaying(playing);
+    // The toggle that opens this on mobile disappears the moment a match
+    // starts (see below) -- closing it here too means a sidebar left open
+    // from picking the game can't sit over the iframe with no way left to
+    // dismiss it.
+    if (playing) setShowSidebar(false);
+    return () => useGameplayStore.getState().setIsPlaying(false);
+  }, [lobby?.status]);
 
   /**
    * Close the crew menu on a click elsewhere, on Escape, or on anything that
@@ -979,13 +996,24 @@ function LobbyContent() {
       </AnimatePresence>
 
       <div className="flex-1 flex flex-row overflow-hidden relative">
-        <button
-          onClick={() => setShowSidebar(!showSidebar)}
-          className="lg:hidden fixed bottom-6 right-6 z-[60] w-14 h-14 bg-primary text-white rounded-full shadow-2xl flex items-center justify-center border-2 border-white/20 active:scale-95 transition-all"
-          aria-label={showSidebar ? "Hide players and chat" : "Show players and chat"}
-        >
-          {showSidebar ? <X size={24} /> : <MessageSquare size={24} />}
-        </button>
+        {
+          /* Hidden once a game is actually on screen, on mobile. The game's
+             own iframe fills nearly the whole viewport there, and this button
+             plus the global Friends pill were two large floating targets
+             stacked on top of whatever the game itself was showing at the
+             bottom of the screen -- its own start button, in Tower Siege's
+             case. Chat and the roster are one tap away again the moment the
+             match ends and this screen goes back to picking a game. */
+        }
+        {lobby.status !== "playing" && (
+          <button
+            onClick={() => setShowSidebar(!showSidebar)}
+            className="lg:hidden fixed bottom-6 right-6 z-[60] w-14 h-14 bg-primary text-white rounded-full shadow-2xl flex items-center justify-center border-2 border-white/20 active:scale-95 transition-all"
+            aria-label={showSidebar ? "Hide players and chat" : "Show players and chat"}
+          >
+            {showSidebar ? <X size={24} /> : <MessageSquare size={24} />}
+          </button>
+        )}
 
         <div
           className={`${

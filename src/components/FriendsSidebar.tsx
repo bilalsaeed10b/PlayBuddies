@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { doc, getDoc, addDoc, collection } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useAuthStore } from "@/store/useAuthStore";
+import { useGameplayStore } from "@/store/useGameplayStore";
 import { useFriends, type FriendProfile } from "@/hooks/useFriends";
 import { useFriendRequests } from "@/hooks/useFriendRequests";
 import { useFriendsOnline } from "@/hooks/usePresence";
@@ -26,7 +27,19 @@ export default function FriendsSidebar() {
   // players/chat panel) in this same corner — nudge ours above it there so
   // the two don't stack on top of each other.
   const isLobby = pathname?.startsWith("/lobby");
+  // A game actually on screen, not just a lobby somebody hasn't started yet.
+  // The pill floats over whatever the game itself is showing in that corner
+  // -- a start button, in the report this came from -- so it disappears
+  // while true rather than merely making room for a second floating button.
+  const isPlaying = useGameplayStore((s) => s.isPlaying);
   const [isOpen, setIsOpen] = useState(false);
+
+  // Closes the panel itself too, for the same reason -- a match starting
+  // while this happened to be open would otherwise leave it sitting over the
+  // game with the one button that closes it now gone.
+  useEffect(() => {
+    if (isPlaying) setIsOpen(false);
+  }, [isPlaying]);
   const [tab, setTab] = useState<"friends" | "requests" | "add">("friends");
 
   const [searchQuery, setSearchQuery] = useState("");
@@ -126,7 +139,7 @@ export default function FriendsSidebar() {
 
   return (
     <>
-      {!isOpen && (
+      {!isOpen && !isPlaying && (
         <motion.button
           initial={{ opacity: 0, x: 20 }}
           animate={{ opacity: 1, x: 0 }}
