@@ -177,7 +177,7 @@ export default function BattleView({
   /** Whether the torpedo picker modal is open. */
   const [torpedoPicker, setTorpedoPicker] = useState(false);
   /** Focused target index chosen by the player, or null for spread mode. */
-  const [torpedoTarget, setTorpedoTarget] = useState<number | null>(null);
+  const [_torpedoTarget, setTorpedoTarget] = useState<number | null>(null);
 
   const settingsRef = useRef(settings);
   settingsRef.current = settings;

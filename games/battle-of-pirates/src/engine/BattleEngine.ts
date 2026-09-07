@@ -161,6 +161,27 @@ interface DamageText {
 const STEP = 1 / 120;
 const PARTICLE_CAP = 420;
 const RING_CAP = 14;
+
+/** An animated torpedo that travels through the water from source to target. */
+interface TorpedoAnim {
+  x: number; y: number;
+  /** Target position. */
+  tx: number; ty: number;
+  /** Direction unit vector. */
+  nx: number; ny: number;
+  /** Speed in world px/s. */
+  speed: number;
+  /** Total distance to travel. */
+  dist: number;
+  /** Distance travelled so far. */
+  travelled: number;
+  /** Ship index that fired. */
+  shooter: number;
+  /** Ship index that is targeted. */
+  target: number;
+  /** Trail positions for the wake. */
+  trail: number[];
+}
 /** Seconds a sunk hull spends sliding under before it becomes just its flag. */
 const WRECK_SETTLE = 1.3;
 /** Barrel length, so the ball leaves the muzzle rather than the deck. */
@@ -300,6 +321,8 @@ export class BattleEngine {
   specialHits: number[] = [];
   /** True while a torpedo is being resolved (so the UI doesn't offer one mid-flight). */
   torpedoInFlight = false;
+  /** The live torpedo projectile travelling across the water. Null when none is active. */
+  private torpedoAnim: TorpedoAnim | null = null;
 
   /** Time left in the acid rain sequence. 0 if inactive. Max 6.0. */
   acidRainTimer = 0;
@@ -1282,6 +1305,88 @@ export class BattleEngine {
 
     this.decay(dt);
 
+    // -- Animated torpedo projectile ------------------------------------------
+    if (this.torpedoAnim) {
+      const tp = this.torpedoAnim;
+      const step = tp.speed * dt;
+      tp.travelled += step;
+      tp.x += tp.nx * step;
+      tp.y += tp.ny * step;
+      tp.trail.push(tp.x, tp.y);
+      // Cap trail to 30 pairs (60 entries).
+      if (tp.trail.length > 60) tp.trail.splice(0, tp.trail.length - 60);
+
+      // Wake bubbles every few pixels.
+      if (Math.random() < dt * 18) {
+        this.burst(2, 3, tp.x - tp.nx * 30, tp.y - tp.ny * 30, tp.y + 20, (p) => {
+          p.vx = -tp.ny * (Math.random() - 0.5) * 80;
+          p.vy = -40 - Math.random() * 60;
+          p.max = 0.35 + Math.random() * 0.2;
+          p.life = p.max;
+          p.size = 10 + Math.random() * 12;
+          p.grow = 1.3;
+          p.color = '#e2f4ff';
+        });
+      }
+      // Small fire sparks on the torpedo.
+      if (Math.random() < dt * 12) {
+        this.burst(1, 0, tp.x, tp.y, tp.y, (p) => {
+          p.vx = (Math.random() - 0.5) * 40;
+          p.vy = -20 - Math.random() * 30;
+          p.max = 0.15 + Math.random() * 0.12;
+          p.life = p.max;
+          p.size = 14 + Math.random() * 16;
+          p.grow = 1.3;
+        });
+      }
+
+      // Arrived at target.
+      if (tp.travelled >= tp.dist) {
+        // Big explosion at impact.
+        this.burst(14, 0, tp.tx, tp.ty, tp.ty, (p) => {
+          const a = Math.random() * Math.PI * 2;
+          const spd = 100 + Math.random() * 250;
+          p.vx = Math.cos(a) * spd;
+          p.vy = Math.sin(a) * spd - 60;
+          p.max = 0.45 + Math.random() * 0.35;
+          p.life = p.max;
+          p.size = 32 + Math.random() * 44;
+          p.grow = 2.0;
+        });
+        // Water splash.
+        this.burst(8, 3, tp.tx, tp.ty, tp.ty + 20, (p) => {
+          p.vx = (Math.random() - 0.5) * 200;
+          p.vy = -100 - Math.random() * 180;
+          p.max = 0.5 + Math.random() * 0.3;
+          p.life = p.max;
+          p.size = 16 + Math.random() * 18;
+          p.grow = 1.4;
+          p.color = '#e2f4ff';
+        });
+        this.pushRing({ x: tp.tx, y: tp.ty, r: 10, max: 100, life: 1, width: 10 });
+        this.shake = Math.min(34, this.shake + 18);
+        this.cfg.onSfx?.('hull', 1);
+
+        // Deal damage.
+        const prevTally = this.tally;
+        this.tally = {
+          shooter: tp.shooter, balls: 0, card: 'round' as CardId,
+          hulls: 0, rigs: 0, damage: 0, sunk: [], burned: false, pierced: false, grazed: false,
+        };
+        const ship = this.ships[tp.shooter];
+        this.damage(tp.target, 25, this.ships[tp.target].x < ship.x ? ship.x - 1 : ship.x + 1);
+        this.logLine(`${this.shipName(tp.shooter)} torpedo → ${this.shipName(tp.target)} −25`, 'big');
+        this.tally = prevTally;
+        this.cfg.onHp?.(this.hp);
+        this.torpedoInFlight = false;
+        this.torpedoAnim = null;
+
+        if (this.afloat(0).length === 0 || this.afloat(1).length === 0) {
+          this.finish();
+        }
+      }
+    }
+
     if (this.acidRainTimer > 0) {
       const prevTimer = this.acidRainTimer;
       this.acidRainTimer = Math.max(0, this.acidRainTimer - dt);
@@ -1664,10 +1769,34 @@ export class BattleEngine {
     if (mode === 'torpedo' && target !== undefined) {
       const tgt = this.ships[target];
       if (tgt && tgt.hp > 0 && tgt.team !== ship.team) {
-        this.spawnTorpedoTrail(ship.x, this.shipY(shooter), tgt.x, this.shipY(target));
-        this.damage(target, 25, tgt.x < ship.x ? ship.x - 1 : ship.x + 1);
+        // Launch an animated torpedo that travels across the water.
+        const x0 = ship.x;
+        const y0 = this.shipY(shooter);
+        const x1 = tgt.x;
+        const y1 = this.shipY(target);
+        const dist = Math.hypot(x1 - x0, y1 - y0);
+        this.torpedoAnim = {
+          x: x0, y: y0, tx: x1, ty: y1,
+          nx: (x1 - x0) / Math.max(1, dist),
+          ny: (y1 - y0) / Math.max(1, dist),
+          speed: 400,
+          dist,
+          travelled: 0,
+          shooter,
+          target,
+          trail: [x0, y0],
+        };
         this.shout('TORPEDO!', 'big');
-        this.logLine(`${this.shipName(shooter)} torpedo → ${this.shipName(target)} −25`, 'big');
+        this.cfg.onSfx?.('fire', 0.6);
+
+        // Hold in impact phase while it travels — damage is dealt in update().
+        this.phase = 'impact';
+        this.phaseTimer = dist / 400 + 1.2;
+        this.skipping = false;
+        this.lastShot = null;
+        this.tally = prevTally;
+        this.cfg.onPhase?.(this.phase);
+        return;
       }
     } else if (mode === 'acidRain') {
       this.acidRainTimer = 6.0;
@@ -1708,116 +1837,75 @@ export class BattleEngine {
     this.cfg.onPhase?.(this.phase);
   }
 
-  // -- special effect helpers -------------------------------------------------
 
   /**
-   * Torpedo trail: a fast horizontal burst of debris + sparks from shooter to target.
-   * Purely cosmetic; no collision or physics.
+   * Acid rain phase 1: spawn clouds at the TOP of the screen, not near ships.
+   *
+   * The clouds form a thick green bank across the sky, spread over the full
+   * arena width. They sit at y 40-160 so they read as weather coming in from
+   * above, not smoke sitting on the hull.
    */
-  private spawnTorpedoTrail(x0: number, y0: number, x1: number, y1: number) {
-    const dist = Math.hypot(x1 - x0, y1 - y0);
-    const nx = (x1 - x0) / Math.max(1, dist);
-    const ny = (y1 - y0) / Math.max(1, dist);
-    const steps = Math.min(12, Math.round(dist / 120));
-    for (let i = 0; i <= steps; i++) {
-      const t = i / Math.max(1, steps);
-      const sx = x0 + (x1 - x0) * t;
-      const sy = y0 + (y1 - y0) * t;
-      // Wake bubbles along the path — kind 3 (splash) so they drown at sea level.
-      this.burst(3, 3, sx, sy, sy + 20, (p) => {
-        p.vx = ny * 80 * (Math.random() - 0.5) * 2;
-        p.vy = -30 - Math.random() * 60;
-        p.max = 0.35 + Math.random() * 0.25;
-        p.life = p.max;
-        p.size = 10 + Math.random() * 14;
-        p.grow = 1.2;
-        p.color = '#e2f4ff';
-      });
-      // Orange fire streaks — kind 0 (fire).
-      this.burst(2, 0, sx, sy, sy, (p) => {
-        p.vx = nx * 200 + (Math.random() - 0.5) * 60;
-        p.vy = ny * 200 + (Math.random() - 0.5) * 60;
-        p.max = 0.2 + Math.random() * 0.2;
-        p.life = p.max;
-        p.size = 22 + Math.random() * 22;
-        p.grow = 1.5;
-      });
-    }
-    // Big explosion at the target.
-    this.burst(10, 0, x1, y1, y1, (p) => {
-      const a = Math.random() * Math.PI * 2;
-      const spd = 80 + Math.random() * 200;
-      p.vx = Math.cos(a) * spd;
-      p.vy = Math.sin(a) * spd - 50;
-      p.max = 0.4 + Math.random() * 0.3;
-      p.life = p.max;
-      p.size = 30 + Math.random() * 40;
-      p.grow = 2.0;
-    });
-    this.pushRing({ x: x1, y: y1, r: 8, max: 80, life: 1, width: 8 });
-    this.shake = Math.min(34, this.shake + 14);
-    this.cfg.onSfx?.('splash', 0.8);
-  }
-
-  /**
-   * Acid rain phase 1: spawn the clouds that drift and persist for 4.5s.
-   */
-  private spawnAcidClouds(targetX: number, targetY: number) {
-    for (let c = 0; c < 8; c++) {
-      const cx = targetX + (Math.random() - 0.5) * 220;
-      const cy = targetY - 260 + Math.random() * 80;
+  private spawnAcidClouds(_targetX: number, _targetY: number) {
+    const w = this.arena.w;
+    for (let c = 0; c < 14; c++) {
+      const cx = Math.random() * w;
+      const cy = 40 + Math.random() * 120;
       this.burst(2, 1, cx, cy, cy, (p) => {
-        p.vx = (Math.random() - 0.5) * 30;
-        p.vy = (Math.random() - 0.5) * 10;
+        p.vx = (Math.random() - 0.5) * 25;
+        p.vy = 4 + Math.random() * 8;
         p.max = 4.5;
         p.life = p.max;
-        p.size = 80 + Math.random() * 70;
-        p.grow = 1.3;
-        // Sickly green dark clouds
-        p.color = `rgba(30,90,40,0.8)`;
+        p.size = 120 + Math.random() * 100;
+        p.grow = 1.4;
+        // Sickly green-grey storm clouds.
+        p.color = `rgba(25,75,35,0.85)`;
       });
     }
   }
 
   /**
-   * Acid rain phase 2: continuous rain drops and splashes during the storm.
+   * Acid rain phase 2: slow, visible green rain streaks from sky to ship.
+   *
+   * Drops start near the top of the world and fall slowly enough that the
+   * player can actually watch them descend. They are larger and brighter
+   * so each one reads as a distinct streak.
    */
   private spawnAcidRainDrop(targetX: number, targetY: number, dt: number) {
-    // Spawn drops scaled by dt so frame rate doesn't change density
-    const drops = Math.round(150 * dt * this.budget);
+    // Fewer but bigger, slower drops — each one should be visible.
+    const drops = Math.round(60 * dt * this.budget);
     for (let d = 0; d < drops; d++) {
-      const dx = targetX + (Math.random() - 0.5) * 260;
+      const dx = targetX + (Math.random() - 0.5) * 300;
       const p = this.take();
       p.kind = 4; // Splinter reused as rain drop
       p.x = dx;
-      p.y = targetY - 250 + Math.random() * 120;
-      p.vx = (Math.random() - 0.5) * 20;
-      p.vy = 500 + Math.random() * 300;
-      p.max = 0.5 + Math.random() * 0.3;
+      p.y = 80 + Math.random() * 100; // Start near the top of the sky
+      p.vx = (Math.random() - 0.5) * 15;
+      p.vy = 180 + Math.random() * 100; // Much slower so you can see them fall
+      p.max = 2.5 + Math.random() * 1.5; // Live longer since they travel further
       p.life = p.max;
-      p.size = 14 + Math.random() * 12;
-      p.grow = 0.7;
+      p.size = 18 + Math.random() * 16; // Bigger
+      p.grow = 0.6;
       p.rot = 0;
       p.spin = 0;
-      p.color = `hsl(${110 + Math.random() * 30}, 80%, 55%)`;
+      p.color = `hsl(${110 + Math.random() * 30}, 85%, 52%)`;
       p.sink = targetY + 40;
     }
-    // Random splashes on the water
-    if (Math.random() < dt * 15) {
-      const sx = targetX + (Math.random() - 0.5) * 220;
+    // Green splashes on the water where rain lands.
+    if (Math.random() < dt * 12) {
+      const sx = targetX + (Math.random() - 0.5) * 260;
       this.burst(3, 3, sx, targetY, targetY + 10, (p) => {
-        p.vx = (Math.random() - 0.5) * 120;
-        p.vy = -80 - Math.random() * 100;
-        p.max = 0.4 + Math.random() * 0.3;
+        p.vx = (Math.random() - 0.5) * 100;
+        p.vy = -60 - Math.random() * 80;
+        p.max = 0.5 + Math.random() * 0.3;
         p.life = p.max;
-        p.size = 12 + Math.random() * 14;
-        p.grow = 1.2;
+        p.size = 14 + Math.random() * 16;
+        p.grow = 1.3;
         p.color = '#6ee7b7';
       });
     }
-    // Random ship shake
-    if (Math.random() < dt * 5) {
-      this.shake = Math.max(this.shake, 6);
+    // Occasional rumble.
+    if (Math.random() < dt * 4) {
+      this.shake = Math.max(this.shake, 5);
     }
   }
 
@@ -2530,7 +2618,7 @@ export class BattleEngine {
     if (this.backdrop) ctx.drawImage(this.backdrop, 0, 0);
     else drawFallbackSea(ctx, this.arena);
 
-    // Dim the sky and sea during Acid Rain.
+    // Night sky during Acid Rain — deep dark-blue, not just black.
     if (this.acidRainTimer > 0) {
       let darkness = 0;
       if (this.acidRainTimer > 4.5) darkness = 1 - (this.acidRainTimer - 4.5) / 1.5;
@@ -2538,8 +2626,9 @@ export class BattleEngine {
       else darkness = this.acidRainTimer / 1.5;
 
       if (darkness > 0) {
-        ctx.fillStyle = `rgba(0, 0, 0, ${darkness * 0.55})`;
-        ctx.fillRect(this.offX - 10000, this.offY - 10000, 20000, 20000);
+        // Deep night-blue overlay that truly darkens to nighttime.
+        ctx.fillStyle = `rgba(4, 8, 28, ${darkness * 0.78})`;
+        ctx.fillRect(0, 0, this.arena.w, this.arena.h);
       }
     }
 
@@ -2559,6 +2648,7 @@ export class BattleEngine {
     for (const i of this.drawOrder) this.drawOneShip(ctx, i, q);
 
     this.drawProjectiles(ctx, q);
+    this.drawTorpedo(ctx);
     this.drawParticles(ctx);
     this.drawDamageTexts(ctx);
     this.drawRings(ctx);
@@ -2780,6 +2870,63 @@ export class BattleEngine {
       }
       ctx.restore();
     }
+  }
+
+  /** Draw the animated torpedo projectile with its wake trail. */
+  private drawTorpedo(ctx: CanvasRenderingContext2D) {
+    const tp = this.torpedoAnim;
+    if (!tp) return;
+
+    ctx.save();
+
+    // Wake trail — white-to-transparent fading line.
+    if (tp.trail.length >= 4) {
+      ctx.lineCap = 'round';
+      for (let i = 2; i < tp.trail.length; i += 2) {
+        const t = i / tp.trail.length;
+        ctx.strokeStyle = `rgba(200, 230, 255, ${t * 0.35})`;
+        ctx.lineWidth = 6 * t;
+        ctx.beginPath();
+        ctx.moveTo(tp.trail[i - 2], tp.trail[i - 1]);
+        ctx.lineTo(tp.trail[i], tp.trail[i + 1]);
+        ctx.stroke();
+      }
+    }
+
+    // Torpedo body — dark metallic cylinder oriented toward its direction.
+    const angle = Math.atan2(tp.ny, tp.nx);
+    ctx.translate(tp.x, tp.y);
+    ctx.rotate(angle);
+
+    // Body (dark cylinder).
+    const bodyLen = 44;
+    const bodyH = 14;
+    ctx.fillStyle = '#2d3748';
+    ctx.beginPath();
+    ctx.ellipse(-bodyLen / 2, 0, bodyLen / 2, bodyH / 2, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Metallic sheen.
+    ctx.fillStyle = 'rgba(255,255,255,0.15)';
+    ctx.beginPath();
+    ctx.ellipse(-bodyLen / 2 + 2, -2, bodyLen / 2 - 4, bodyH / 4, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Red nose cone.
+    ctx.fillStyle = '#e53e3e';
+    ctx.beginPath();
+    ctx.moveTo(bodyLen / 2, 0);
+    ctx.lineTo(bodyLen / 2 - 10, -bodyH / 2);
+    ctx.lineTo(bodyLen / 2 - 10, bodyH / 2);
+    ctx.closePath();
+    ctx.fill();
+
+    // Fins at the back.
+    ctx.fillStyle = '#4a5568';
+    ctx.fillRect(-bodyLen / 2 - 4, -bodyH / 2 - 4, 8, 4);
+    ctx.fillRect(-bodyLen / 2 - 4, bodyH / 2, 8, 4);
+
+    ctx.restore();
   }
 
   private drawProjectiles(ctx: CanvasRenderingContext2D, q: Quality) {
