@@ -67,7 +67,14 @@ export const DEFAULT_RULES: MatchRules = {
 
 export const TURN_SECONDS = 30;
 
-const PLAYER_CODES: PlayerCount[] = [2, 4];
+/**
+ * The counts this game actually seats, low to high.
+ *
+ * Exported (not just used for wire-packing here) so the host's
+ * player-count picker and the lobby's own auto-fit logic read the
+ * same list rather than each keeping their own copy of it.
+ */
+export const PLAYER_CODES: PlayerCount[] = [2, 4];
 
 /**
  * The rules as one integer.

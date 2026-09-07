@@ -26,8 +26,8 @@ import { GameWallet, reportResult } from './platform/wallet';
 import MatchView from './screens/MatchView';
 import type { MatchConfig } from './screens/MatchView';
 import type { Seat } from './engine/GolfEngine';
-import { DEFAULT_RULES } from './types/game';
-import type { GameSettings, HoleCount, MatchRules, PlayerCount } from './types/game';
+import { DEFAULT_RULES, PLAYER_CODES } from './types/game';
+import type { GameSettings, HoleCount, MatchRules } from './types/game';
 import { createLogger } from '@shared/log/logger';
 
 const log = createLogger('mini-golf');
@@ -275,6 +275,25 @@ export default function App() {
 
   const mySkin = uid ? lobby?.players?.[uid]?.fishIndex : undefined;
   const isHost = Boolean(uid && lobby && lobby.hostId === uid);
+
+  /**
+   * The host's chosen player count follows the room, not the other way round.
+   *
+   * `rules.players` used to be whatever this device remembered from its last
+   * round -- often two -- so a host who opened a fresh room with three
+   * friends found the seats already decided one of them would be watching,
+   * with nothing on screen to say so before Start. This raises it to the
+   * smallest count the room actually fits the moment somebody new joins, and
+   * never on its own lowers a count the host (or an earlier run of this same
+   * effect) already set -- so choosing fewer seats than the room on purpose,
+   * bots filling the rest, still works exactly as before for whoever wants it.
+   */
+  useEffect(() => {
+    if (!online || !isHost || !lobby) return;
+    const roomSize = Object.keys(lobby.players ?? {}).length;
+    const fits = PLAYER_CODES.find((n) => n >= roomSize) ?? PLAYER_CODES[PLAYER_CODES.length - 1];
+    if (fits > rules.players) setRules((r) => ({ ...r, players: fits }));
+  }, [online, isHost, lobby, rules.players]);
 
   useEffect(() => {
     // An offline round is the player's own; the room does not get to start or
@@ -1016,6 +1035,27 @@ function RoomScreen({
         </div>
       </div>
 
+      {/* Loud on purpose. "Game rules" further down read as maintenance --
+          the same plain box as "Play offline" beside it -- so nothing said
+          a round only ends when everyone has holed out, or how a wall's
+          bounce actually works, before a first round taught it the slow way. */}
+      <button
+        onClick={onRules}
+        className="relative flex shrink-0 items-center gap-3 overflow-hidden rounded-2xl border-2 border-emerald-400/60 bg-emerald-400/10 px-4 py-3 text-left transition-transform active:scale-[0.99]"
+      >
+        <span className="absolute -right-6 -top-6 h-16 w-16 animate-pulse rounded-full bg-emerald-400/20" aria-hidden />
+        <ScrollText className="h-6 w-6 shrink-0 text-emerald-300" />
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-black uppercase tracking-wide text-emerald-200">
+            {isHost ? 'New here? Read the rules' : 'How par and bounces work'}
+          </p>
+          <p className="text-[11px] font-bold text-emerald-300/70">Worth 30 seconds before the first putt.</p>
+        </div>
+        <span className="shrink-0 rounded-xl bg-emerald-400 px-3 py-1.5 text-[11px] font-black uppercase tracking-wide text-emerald-950">
+          Guide
+        </span>
+      </button>
+
       {/* On a phone the start button would otherwise sit below the fold, which
           is exactly what made it unreachable in the earlier games. */}
       <div className="panel shrink-0 rounded-2xl p-3 lg:hidden">
@@ -1306,7 +1346,7 @@ function RulesPanel({
             </span>
           </p>
           <div className="grid grid-cols-4 gap-2">
-            {([1, 2, 3, 4] as PlayerCount[]).map((option) => (
+            {PLAYER_CODES.map((option) => (
               <button
                 key={option}
                 disabled={!editable}

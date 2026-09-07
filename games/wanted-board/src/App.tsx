@@ -25,7 +25,7 @@ import { GameWallet, reportResult } from './platform/wallet';
 import MatchView from './screens/MatchView';
 import type { MatchConfig } from './screens/MatchView';
 import type { Seat } from './engine/WantedEngine';
-import { DEFAULT_RULES, TARGET_CHOICES, packRules, unpackRules } from './types/game';
+import { DEFAULT_RULES, PLAYER_CODES, TARGET_CHOICES, packRules, unpackRules } from './types/game';
 import { createLogger } from '@shared/log/logger';
 import type { GameSettings, MatchRules, PlayerCount } from './types/game';
 
@@ -223,6 +223,25 @@ export default function App() {
 
   const mySkin = uid ? lobby?.players?.[uid]?.fishIndex : undefined;
   const isHost = Boolean(uid && lobby && lobby.hostId === uid);
+
+  /**
+   * The host's chosen player count follows the room, not the other way round.
+   *
+   * `rules.players` used to be whatever this device remembered from its last
+   * game -- often two -- so a host who opened a fresh room with three friends
+   * found the seats already decided one of them would be watching, with
+   * nothing on screen to say so before Start. This raises it to the smallest
+   * count the room actually fits the moment somebody new joins, and never on
+   * its own lowers a count the host (or an earlier run of this same effect)
+   * already set -- so choosing fewer seats than the room on purpose, bots
+   * filling the rest, still works exactly as before for whoever wants it.
+   */
+  useEffect(() => {
+    if (!online || !isHost || !lobby) return;
+    const roomSize = Object.keys(lobby.players ?? {}).length;
+    const fits = PLAYER_CODES.find((n) => n >= roomSize) ?? PLAYER_CODES[PLAYER_CODES.length - 1];
+    if (fits > rules.players) setRules((r) => ({ ...r, players: fits }));
+  }, [online, isHost, lobby, rules.players]);
 
   useEffect(() => {
     if (!online || offlineMatch) return;
@@ -1086,7 +1105,7 @@ function RulesPanel({
         <div className="space-y-1.5">
           <p className="text-sm font-bold text-amber-950">Outlaws</p>
           <div className="grid grid-cols-5 gap-1.5">
-            {([2, 3, 4, 5, 6] as PlayerCount[]).map((n) => (
+            {PLAYER_CODES.map((n) => (
               <button
                 key={n}
                 disabled={!editable}

@@ -27,7 +27,7 @@ import { GameWallet, reportResult } from './platform/wallet';
 import MatchView from './screens/MatchView';
 import type { MatchConfig } from './screens/MatchView';
 import type { Seat } from './engine/QuoridorEngine';
-import { DEFAULT_RULES } from './types/game';
+import { DEFAULT_RULES, PLAYER_CODES } from './types/game';
 import { createLogger } from '@shared/log/logger';
 import type { GameSettings, MatchRules, PlayerCount } from './types/game';
 
@@ -276,6 +276,26 @@ export default function App() {
 
   const mySkin = uid ? lobby?.players?.[uid]?.fishIndex : undefined;
   const isHost = Boolean(uid && lobby && lobby.hostId === uid);
+
+  /**
+   * The host's chosen player count follows the room, not the other way round.
+   *
+   * `rules.players` used to be whatever this device remembered from its last
+   * match -- often two players, from a duel -- so a host who opened a fresh
+   * room with three friends found the seats already decided one of them
+   * would be watching, with nothing on screen to say so before Start. This
+   * raises it to the smallest count the room actually fits the moment
+   * somebody new joins, and never on its own lowers a count the host (or an
+   * earlier run of this same effect) already set -- so choosing fewer seats
+   * than the room on purpose, bots filling the rest, still works exactly as
+   * before for whoever wants it.
+   */
+  useEffect(() => {
+    if (!online || !isHost || !lobby) return;
+    const roomSize = Object.keys(lobby.players ?? {}).length;
+    const fits = PLAYER_CODES.find((n) => n >= roomSize) ?? PLAYER_CODES[PLAYER_CODES.length - 1];
+    if (fits > rules.players) setRules((r) => ({ ...r, players: fits }));
+  }, [online, isHost, lobby, rules.players]);
 
   useEffect(() => {
     // An offline game is the player's own; the room does not get to start or
@@ -1047,6 +1067,31 @@ function RoomScreen({
         </div>
       </div>
 
+      {/* Loud on purpose. "Game rules" further down read as maintenance --
+          the same plain grey box as "Play offline" right next to it -- so
+          nothing on screen said a wall that seals someone in isn't legal, or
+          that a jump bends sideways when it's blocked, before a first game
+          taught it the slow way. This is the thing actually worth reading,
+          so it looks like it. */}
+      <button
+        onClick={onRules}
+        className="relative flex shrink-0 items-center gap-3 overflow-hidden rounded-2xl border-2 border-amber-400/70 bg-amber-400/10 px-4 py-3 short:py-1.5 text-left transition-transform active:scale-[0.99]"
+      >
+        <span className="absolute -right-6 -top-6 h-16 w-16 animate-pulse rounded-full bg-amber-400/20" aria-hidden />
+        <ScrollText className="h-6 w-6 short:h-5 short:w-5 shrink-0 text-amber-600" />
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-black uppercase tracking-wide text-amber-700">
+            {isHost ? 'New to Quoridor? Read the rules' : 'How walls and jumps work'}
+          </p>
+          <p className="text-[11px] font-bold text-amber-700/70 short:hidden">
+            Worth 30 seconds before the walls start going down.
+          </p>
+        </div>
+        <span className="shrink-0 rounded-xl bg-amber-500 px-3 py-1.5 text-[11px] font-black uppercase tracking-wide text-slate-900 short:hidden">
+          Guide
+        </span>
+      </button>
+
       {/* On a phone the start button would otherwise sit below the fold, which
           is exactly what made it unreachable in the earlier games. */}
       <div className="panel shrink-0 rounded-2xl p-3 lg:hidden">
@@ -1316,7 +1361,7 @@ function RulesPanel({
             </span>
           </p>
           <div className="grid grid-cols-2 gap-2">
-            {([2, 4] as PlayerCount[]).map((option) => (
+            {PLAYER_CODES.map((option) => (
               <button
                 key={option}
                 disabled={!editable}

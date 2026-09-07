@@ -418,6 +418,9 @@ export const DEFAULT_RULES: MatchRules = {
   sends: true,
 };
 
+/** Every count this game seats, low to high -- what the lobby fits a room into. */
+export const PLAYER_COUNTS: PlayerCount[] = [1, 2, 3, 4];
+
 const WAVE_CODES = [10, 20, 30];
 
 /**
