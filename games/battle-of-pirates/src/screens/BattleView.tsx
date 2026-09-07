@@ -559,12 +559,14 @@ export default function BattleView({
     };
 
     let raf = 0;
+    let bgTick = 0;
     let last = performance.now();
     let skip = false;
 
     const frame = (now: number) => {
+      cancelAnimationFrame(raf);
       raf = requestAnimationFrame(frame);
-      const dt = Math.min((now - last) / 1000, 0.25);
+      const dt = Math.min((now - last) / 1000, 2.0);
       last = now;
 
       governor.sample(dt);
@@ -645,8 +647,14 @@ export default function BattleView({
     };
     raf = requestAnimationFrame(frame);
 
+    bgTick = window.setInterval(() => {
+      const now = performance.now();
+      if (now - last > 50) frame(now);
+    }, 50);
+
     return () => {
       cancelAnimationFrame(raf);
+      clearInterval(bgTick);
       window.removeEventListener('resize', fit);
       window.removeEventListener('orientationchange', fit);
       engineRef.current = null;

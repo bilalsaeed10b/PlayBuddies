@@ -301,6 +301,10 @@ export class BattleEngine {
   /** True while a torpedo is being resolved (so the UI doesn't offer one mid-flight). */
   torpedoInFlight = false;
 
+  /** Time left in the acid rain sequence. 0 if inactive. Max 6.0. */
+  acidRainTimer = 0;
+  acidRainShooter = -1;
+
   /**
    * This turn's crosswind, in world px/s². Zero unless the storm rule is on.
    *
@@ -1256,7 +1260,7 @@ export class BattleEngine {
   update(dt: number, decide?: (ship: number) => Shot) {
     this.clock += dt;
     this.settleBob();
-    this.acc += Math.min(dt, 0.25);
+    this.acc += Math.min(dt, 2.0);
 
     // Smoke and splinters are decoration -- nothing in the simulation ever
     // reads them -- so they run at the frame rate rather than inside the
@@ -1268,15 +1272,66 @@ export class BattleEngine {
     this.stepDamageTexts(Math.min(dt, 0.25));
 
     let steps = 0;
-    while (this.acc >= STEP && steps < 10) {
+    while (this.acc >= STEP && steps < 250) {
       this.acc -= STEP;
       steps++;
       this.step(STEP);
     }
     // A tab that was asleep must not spend a minute on catch-up frames.
-    if (this.acc > STEP * 10) this.acc = 0;
+    if (this.acc > STEP * 250) this.acc = 0;
 
     this.decay(dt);
+
+    if (this.acidRainTimer > 0) {
+      const prevTimer = this.acidRainTimer;
+      this.acidRainTimer = Math.max(0, this.acidRainTimer - dt);
+
+      // 6.0: Start of sequence, spawn clouds.
+      if (prevTimer === 6.0) {
+        const ship = this.ships[this.acidRainShooter];
+        for (let i = 0; i < this.ships.length; i++) {
+          if (this.ships[i].team !== ship.team && this.ships[i].hp > 0) {
+            this.spawnAcidClouds(this.ships[i].x, this.shipY(i));
+          }
+        }
+      }
+
+      // 4.5: Rain starts, deal damage.
+      if (prevTimer >= 4.5 && this.acidRainTimer < 4.5) {
+        const ship = this.ships[this.acidRainShooter];
+        let hit = false;
+        const prevTally = this.tally;
+        this.tally = {
+          shooter: this.acidRainShooter, balls: 0, card: 'round',
+          hulls: 0, rigs: 0, damage: 0, sunk: [], burned: false, pierced: false, grazed: false,
+        };
+        for (let i = 0; i < this.ships.length; i++) {
+          if (this.ships[i].team !== ship.team && this.ships[i].hp > 0) {
+            this.damage(i, 10, this.ships[i].x < ship.x ? ship.x - 1 : ship.x + 1);
+            hit = true;
+          }
+        }
+        if (hit) {
+          this.shout('ACID RAIN!', 'kill');
+          this.logLine(`${this.shipName(this.acidRainShooter)} acid rain −10 all`, 'kill');
+        }
+        this.tally = prevTally;
+        this.cfg.onHp?.(this.hp);
+        if (this.afloat(0).length === 0 || this.afloat(1).length === 0) {
+          this.finish();
+        }
+      }
+
+      // 4.5 to 1.5: Spawn continuous rain drops and splashes.
+      if (this.acidRainTimer < 4.5 && this.acidRainTimer > 1.5) {
+        const ship = this.ships[this.acidRainShooter];
+        for (let i = 0; i < this.ships.length; i++) {
+          if (this.ships[i].team !== ship.team && this.ships[i].hp > 0) {
+            this.spawnAcidRainDrop(this.ships[i].x, this.shipY(i), dt);
+          }
+        }
+      }
+    }
 
     if (this.phase === 'over') return;
 
@@ -1615,18 +1670,18 @@ export class BattleEngine {
         this.logLine(`${this.shipName(shooter)} torpedo → ${this.shipName(target)} −25`, 'big');
       }
     } else if (mode === 'acidRain') {
-      let hit = false;
-      for (let i = 0; i < this.ships.length; i++) {
-        if (this.ships[i].team !== ship.team && this.ships[i].hp > 0) {
-          this.spawnAcidRain(this.ships[i].x, this.shipY(i));
-          this.damage(i, 10, this.ships[i].x < ship.x ? ship.x - 1 : ship.x + 1);
-          hit = true;
-        }
-      }
-      if (hit) {
-        this.shout('ACID RAIN!', 'kill');
-        this.logLine(`${this.shipName(shooter)} acid rain −10 all`, 'kill');
-      }
+      this.acidRainTimer = 6.0;
+      this.acidRainShooter = shooter;
+      
+      // Delay everything else; the damage and sequence run in update().
+      this.phase = 'impact';
+      this.phaseTimer = 6.5; // Hold impact phase for the 6s duration
+      this.skipping = false;
+      this.lastShot = null;
+      this.tally = prevTally;
+      this.torpedoInFlight = false;
+      this.cfg.onPhase?.(this.phase);
+      return;
     } else if (mode === 'heal') {
       const before = ship.hp;
       ship.hp = Math.min(ship.maxHp, ship.hp + 25);
@@ -1705,55 +1760,65 @@ export class BattleEngine {
   }
 
   /**
-   * Acid rain: green rain drops falling from the top of the screen onto the target.
-   * Spawned as kind 4 (splinter) with a green colour so they render distinctly.
+   * Acid rain phase 1: spawn the clouds that drift and persist for 4.5s.
    */
-  private spawnAcidRain(targetX: number, targetY: number) {
-    // Cloud puff high above the target.
-    for (let c = 0; c < 5; c++) {
-      const cx = targetX + (Math.random() - 0.5) * 160;
-      const cy = 60 + Math.random() * 80;
-      this.burst(4, 1, cx, cy, cy, (p) => {
-        p.vx = (Math.random() - 0.5) * 40;
-        p.vy = -10 - Math.random() * 20;
-        p.max = 1.8 + Math.random() * 1.0;
+  private spawnAcidClouds(targetX: number, targetY: number) {
+    for (let c = 0; c < 8; c++) {
+      const cx = targetX + (Math.random() - 0.5) * 220;
+      const cy = targetY - 260 + Math.random() * 80;
+      this.burst(2, 1, cx, cy, cy, (p) => {
+        p.vx = (Math.random() - 0.5) * 30;
+        p.vy = (Math.random() - 0.5) * 10;
+        p.max = 4.5;
         p.life = p.max;
-        p.size = 60 + Math.random() * 50;
-        p.grow = 2.0;
-        // Tint towards sickly green by painting them with a greenish color.
-        p.color = `rgba(80,200,80,0.55)`;
+        p.size = 80 + Math.random() * 70;
+        p.grow = 1.3;
+        // Sickly green dark clouds
+        p.color = `rgba(30,90,40,0.8)`;
       });
     }
-    // Rain drops — kind 4 reused as falling pixels, coloured acid green.
-    const drops = Math.round(20 * this.budget);
+  }
+
+  /**
+   * Acid rain phase 2: continuous rain drops and splashes during the storm.
+   */
+  private spawnAcidRainDrop(targetX: number, targetY: number, dt: number) {
+    // Spawn drops scaled by dt so frame rate doesn't change density
+    const drops = Math.round(150 * dt * this.budget);
     for (let d = 0; d < drops; d++) {
-      const dx = targetX + (Math.random() - 0.5) * 220;
+      const dx = targetX + (Math.random() - 0.5) * 260;
       const p = this.take();
-      p.kind = 4;
+      p.kind = 4; // Splinter reused as rain drop
       p.x = dx;
-      p.y = 80 + Math.random() * 120;
+      p.y = targetY - 250 + Math.random() * 120;
       p.vx = (Math.random() - 0.5) * 20;
-      p.vy = 400 + Math.random() * 300;
-      p.max = 0.6 + Math.random() * 0.4;
+      p.vy = 500 + Math.random() * 300;
+      p.max = 0.5 + Math.random() * 0.3;
       p.life = p.max;
-      p.size = 18 + Math.random() * 16;
+      p.size = 14 + Math.random() * 12;
       p.grow = 0.7;
       p.rot = 0;
       p.spin = 0;
       p.color = `hsl(${110 + Math.random() * 30}, 80%, 55%)`;
       p.sink = targetY + 40;
     }
-    // Splash on hit.
-    this.burst(6, 3, targetX, targetY, targetY + 10, (p) => {
-      p.vx = (Math.random() - 0.5) * 180;
-      p.vy = -120 - Math.random() * 160;
-      p.max = 0.5 + Math.random() * 0.4;
-      p.life = p.max;
-      p.size = 14 + Math.random() * 18;
-      p.grow = 1.3;
-      p.color = '#6ee7b7';
-    });
-    this.shake = Math.min(34, this.shake + 6);
+    // Random splashes on the water
+    if (Math.random() < dt * 15) {
+      const sx = targetX + (Math.random() - 0.5) * 220;
+      this.burst(3, 3, sx, targetY, targetY + 10, (p) => {
+        p.vx = (Math.random() - 0.5) * 120;
+        p.vy = -80 - Math.random() * 100;
+        p.max = 0.4 + Math.random() * 0.3;
+        p.life = p.max;
+        p.size = 12 + Math.random() * 14;
+        p.grow = 1.2;
+        p.color = '#6ee7b7';
+      });
+    }
+    // Random ship shake
+    if (Math.random() < dt * 5) {
+      this.shake = Math.max(this.shake, 6);
+    }
   }
 
   /**
@@ -2464,6 +2529,19 @@ export class BattleEngine {
 
     if (this.backdrop) ctx.drawImage(this.backdrop, 0, 0);
     else drawFallbackSea(ctx, this.arena);
+
+    // Dim the sky and sea during Acid Rain.
+    if (this.acidRainTimer > 0) {
+      let darkness = 0;
+      if (this.acidRainTimer > 4.5) darkness = 1 - (this.acidRainTimer - 4.5) / 1.5;
+      else if (this.acidRainTimer > 1.5) darkness = 1;
+      else darkness = this.acidRainTimer / 1.5;
+
+      if (darkness > 0) {
+        ctx.fillStyle = `rgba(0, 0, 0, ${darkness * 0.55})`;
+        ctx.fillRect(this.offX - 10000, this.offY - 10000, 20000, 20000);
+      }
+    }
 
     const storm = this.cfg.rules.storm;
     drawWaves(ctx, this.arena, this.clock, storm ? q.waves + 2 : q.waves, storm ? 1.7 : 1);
