@@ -6,7 +6,7 @@ import { getFirestore, doc, getDoc, setDoc, onSnapshot, updateDoc, serverTimesta
 // lobby it reads.
 //
 // The web config is public by design: it identifies the project, it does not
-// authorise anything — security rules do that.
+// authorise anything , security rules do that.
 const env = import.meta.env;
 
 const firebaseConfig = {

@@ -82,7 +82,7 @@ const randomSeed = () => (Math.random() * 0x7fffffff) | 0;
  * The bot rank for any ball this device fills in automatically online.
  *
  * The tier picker in the Menu is only ever reached offline, so `aiLevel` there
- * is really "how hard should the *practice* bot be" — a preference for solo
+ * is really "how hard should the *practice* bot be" , a preference for solo
  * and couch play. Online it must not leak: picking Pro once to test a round
  * alone and then playing a real one with friends should not quietly make every
  * empty seat merciless. Online bots are always Club.
@@ -113,7 +113,7 @@ export default function App() {
    *
    * Being signed into a lobby is not the same as wanting to play in it, and the
    * offline menu is reachable from *inside* the room. Without this flag the
-   * branch below would rebuild the online config for it anyway — one local
+   * branch below would rebuild the online config for it anyway , one local
    * ball rather than two, so the second player at the keyboard putted nothing,
    * with the whole Firebase path still running underneath a round that has no
    * peers to talk to.
@@ -257,7 +257,7 @@ export default function App() {
    * Who is playing, and in what order.
    *
    * Sorted by uid so every client computes the identical answer from data it
-   * already has — arrival order would give two players different ideas about
+   * already has , arrival order would give two players different ideas about
    * who is the red ball. Anyone past the host's chosen count is in the room
    * but not in the round: four balls is as many as a small green stays
    * readable with.
@@ -297,7 +297,7 @@ export default function App() {
    * one is running: rolling them from an effect keyed on the view fires one
    * render after the green has already mounted, so the engine keeps the course
    * it was built with while the start packet goes out carrying a different
-   * seed — and the guest then plays a hole nobody else can see.
+   * seed , and the guest then plays a hole nobody else can see.
    */
   const [session, setSession] = useState(() => ({
     seed: randomSeed(),
@@ -350,7 +350,7 @@ export default function App() {
   const award = useCallback(
     (won: boolean, strokes: number) => {
       // Something for turning up, more for winning, and a real bonus for a
-      // tidy card — a round in level fours pays about double a scrappy one.
+      // tidy card , a round in level fours pays about double a scrappy one.
       const budget = rules.holes * 4;
       setCoins((c) => c + (won ? 95 : 30) + Math.max(0, budget - strokes) * 7);
       reportResult(won);
@@ -402,8 +402,8 @@ export default function App() {
   /**
    * An empty ball gets a bot.
    *
-   * A lobby with one person in it — the platform's solo mode, or simply being
-   * first into the room — must still be a round. Two of the earlier games
+   * A lobby with one person in it , the platform's solo mode, or simply being
+   * first into the room , must still be a round. Two of the earlier games
    * shipped with a version of this that only filled a *partly* full match, so
    * a room of one started with nobody to play against at all.
    */
@@ -678,7 +678,7 @@ function Menu({
           onClick={onSolo}
           className="flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-400 py-4 text-lg font-black text-emerald-950 transition-transform active:scale-95"
         >
-          <Play className="h-5 w-5 fill-current" /> Solo — you against the bot
+          <Play className="h-5 w-5 fill-current" /> Solo , you against the bot
         </button>
 
         <div className="space-y-2">
@@ -762,7 +762,7 @@ function BallGrid({
   coins: number;
   selected: number | null;
   /**
-   * Everyone else who has also picked this ball. Purely informational — the
+   * Everyone else who has also picked this ball. Purely informational , the
    * pattern is cosmetic and the coloured ring is what tells balls apart, so
    * nothing stops two players choosing the same one.
    */
@@ -896,7 +896,7 @@ function OfflinePick({
     if (Object.keys(next).length >= seatCount) onDone(next);
   };
 
-  const title = seatCount > 1 ? `Player ${seat + 1} — pick a ball` : 'Pick your ball';
+  const title = seatCount > 1 ? `Player ${seat + 1} , pick a ball` : 'Pick your ball';
   return (
     <Shell title={title} coins={coins} onBack={onBack}>
       <BallGrid owned={owned} coins={coins} selected={null} pickedBy={pickedBy} onPick={pick} />
@@ -973,7 +973,7 @@ function RoomScreen({
    *
    * The host used to be able to start the moment its *own* ball was picked,
    * which dropped anyone still choosing onto a green playing a ball the lobby
-   * had never recorded — their opponent saw a colour they had not chosen, and
+   * had never recorded , their opponent saw a colour they had not chosen, and
    * the shop was still open over the top of it.
    */
   const everyonePicked = people.every((p) => p.skin !== undefined && p.skin !== null);
@@ -992,7 +992,7 @@ function RoomScreen({
           </p>
         </div>
         {/* The same tray the green itself carries: purse, fullscreen, settings,
-            and — for the host only — the switch that ends it for everyone. */}
+            and , for the host only , the switch that ends it for everyone. */}
         <div className="flex shrink-0 items-center gap-2">
           <div className="panel flex items-center gap-2 rounded-2xl px-3 py-2 font-bold text-amber-300">
             <Coins className="h-4 w-4" /> {coins}
@@ -1104,7 +1104,7 @@ function RoomScreen({
                       style={{ color: SEATS[i % SEATS.length].light }}
                     >
                       {SEATS[i % SEATS.length].name}
-                      {p.uid === uid ? ' — you' : ''}
+                      {p.uid === uid ? ' , you' : ''}
                     </p>
                   </div>
                 </div>
@@ -1178,7 +1178,7 @@ function SettingsPanel({
    * The hole count, the ball count and the hazards used to live here and no
    * longer do: they change what the round *is*, so everybody has to agree on
    * them. They are Round Rules now, set by the host. What is left is genuinely
-   * local — how loud it is, and whether this player wants to be shouted at.
+   * local , how loud it is, and whether this player wants to be shouted at.
    */
   // Escape closes it too. See @shared/ui/dismiss.
   useEscape(true, onClose);
@@ -1231,8 +1231,8 @@ function SettingsPanel({
 /**
  * The rules of the round, set once by the host and obeyed by everyone.
  *
- * Separate from Settings on purpose. Settings are this device's business —
- * volume, whether the commentary shows — and nobody else is affected. These
+ * Separate from Settings on purpose. Settings are this device's business ,
+ * volume, whether the commentary shows , and nobody else is affected. These
  * change what the round *is*, so everyone has to be playing the same one: they
  * travel to a guest over the wire (see `packRules`) and its greens are built
  * from whatever arrives, not from anything stored locally.

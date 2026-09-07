@@ -567,7 +567,7 @@ export default function App() {
 
     // The fleet-size rule applies offline too, so a solo player can take a
     // wing of bots against a fleet of them. Sides alternate down the list, so
-    // the first two berths are opposite each other — which is what makes a
+    // the first two berths are opposite each other , which is what makes a
     // couch battle two people facing off rather than sharing a side.
     for (let i = 0; i < rules.players; i++) {
       const team = (i % 2) as Team;
@@ -906,7 +906,7 @@ function ShipGrid({
   coins: number;
   selected: number | null;
   /**
-   * Everyone else who has also picked this ship. Purely informational — the
+   * Everyone else who has also picked this ship. Purely informational , the
    * paint is cosmetic, so nothing stops two captains flying the same colours.
    */
   pickedBy: Record<number, string[]>;
@@ -1323,7 +1323,7 @@ function RoomScreen({
    *
    * The host used to be able to weigh anchor the moment its *own* ship was
    * picked, which left anyone still choosing to be dropped into a battle
-   * sailing a hull the lobby had never recorded — their opponent saw a ship
+   * sailing a hull the lobby had never recorded , their opponent saw a ship
    * they had not chosen, and the shop screen was still open over the top of it.
    */
   const everyonePicked = people.every((p) => p.skin !== undefined && p.skin !== null);
@@ -1637,7 +1637,7 @@ function SettingsPanel({
    * The aim guide, the turn clock and the mountain used to live here and no
    * longer do: they change how the battle plays, so both sides have to agree
    * on them. They are Battle Rules now, set by the host in the room. What is
-   * left is genuinely local — how loud it is, and how hard this particular
+   * left is genuinely local , how loud it is, and how hard this particular
    * machine is willing to work.
    */
   const toggles: { key: keyof GameSettings; label: string; hint: string }[] = [
@@ -1700,8 +1700,8 @@ function SettingsPanel({
 /**
  * The rules of the battle, set once by the host and obeyed by everyone.
  *
- * Separate from Settings on purpose. Settings are this device's business —
- * volume, render cost — and nobody else is affected by them. These change what
+ * Separate from Settings on purpose. Settings are this device's business ,
+ * volume, render cost , and nobody else is affected by them. These change what
  * the battle *is*, so both fleets have to be playing the same one: they travel
  * to the guest over the wire (see `packRules`) and its engine is built from
  * whatever arrives, not from anything stored locally.
@@ -1743,7 +1743,7 @@ function StatsPanel({
     { label: 'Shots that landed', value: String(stats.hits) },
     { label: 'Iron on target', value: `${stats.ballsLanded} of ${stats.balls} balls · ${ballAcc}%` },
     { label: 'Damage dealt', value: String(Math.round(stats.damage)) },
-    { label: 'Best run', value: stats.bestStreak > 0 ? `${stats.bestStreak} in a row` : '—' },
+    { label: 'Best run', value: stats.bestStreak > 0 ? `${stats.bestStreak} in a row` : ',' },
   ];
 
   // Escape closes it too. See @shared/ui/dismiss.
@@ -1768,7 +1768,7 @@ function StatsPanel({
             <Anchor className="mx-auto mb-3 h-10 w-10 text-white/25" />
             <p className="text-sm font-bold text-white/60">Nothing logged yet.</p>
             <p className="mt-1 text-[11px] text-white/40">
-              Fight a battle and this fills itself in — every shot you take, and what it did.
+              Fight a battle and this fills itself in , every shot you take, and what it did.
             </p>
           </div>
         ) : (
@@ -1780,7 +1780,7 @@ function StatsPanel({
               <Figure
                 icon={<ScrollText className="h-4 w-4" />}
                 label="Favourite card"
-                value={fav ? CARDS[fav.id].name : '—'}
+                value={fav ? CARDS[fav.id].name : ','}
                 sub={fav ? `${fav.n} fired` : undefined}
                 tone="sky"
               />
@@ -1901,7 +1901,7 @@ function RulesPanel({
     {
       key: 'storm',
       label: 'Foul weather',
-      hint: 'A crosswind that changes every turn and is drawn across the top of the water — read the barbs and lean the shot into it. The sea shoves the hulls about harder between turns too.',
+      hint: 'A crosswind that changes every turn and is drawn across the top of the water , read the barbs and lean the shot into it. The sea shoves the hulls about harder between turns too.',
     },
     {
       key: 'cards',
@@ -1916,7 +1916,7 @@ function RulesPanel({
     {
       key: 'aimArc',
       label: 'Aim arc',
-      hint: 'Draws the opening stretch of the shot while aiming. It makes the game a great deal easier — line the dots up and let go. The aim arrow on the pad stays either way.',
+      hint: 'Draws the opening stretch of the shot while aiming. It makes the game a great deal easier , line the dots up and let go. The aim arrow on the pad stays either way.',
     },
   ];
 
@@ -1941,7 +1941,7 @@ function RulesPanel({
           <p className="text-sm font-bold">
             Ships on the water
             <span className="block text-[11px] font-normal text-white/50">
-              Split evenly into two fleets. Anyone in the room beyond this watches — the two sides have to
+              Split evenly into two fleets. Anyone in the room beyond this watches , the two sides have to
               match. Empty berths are sailed by bots.
             </span>
           </p>

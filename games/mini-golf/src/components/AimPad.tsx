@@ -113,7 +113,7 @@ function Arrow({
   const dx = ox - x;
   const dy = oy - y;
   const len = Math.hypot(dx, dy);
-  // Below this the direction is noise — the finger has barely moved, and an
+  // Below this the direction is noise , the finger has barely moved, and an
   // arrow spinning wildly under a stationary thumb reads as a glitch.
   if (len < 12) return null;
 
@@ -163,7 +163,7 @@ export default function AimPad({
    * Full deflection, in CSS pixels. Scaled so a phone is not asking for a
    * longer pull than it has.
    *
-   * This is also the ring's radius, not a separate visual choice — the ring is
+   * This is also the ring's radius, not a separate visual choice , the ring is
    * a promise about how far a full pull is, and drawing it any other size than
    * the number `measure` actually fires on would make it a promise the pad
    * does not keep.
@@ -230,8 +230,8 @@ export default function AimPad({
     }
     pointer.current = e.pointerId;
     // Capture is what lets a pull continue past the pad's own edges, which is
-    // most of the screen on a phone. It is also allowed to throw — a pointer
-    // already released, a synthetic event — and a throw here would abort the
+    // most of the screen on a phone. It is also allowed to throw , a pointer
+    // already released, a synthetic event , and a throw here would abort the
     // handler halfway through setting the drag up, leaving a pad that looks
     // live and answers to nothing.
     try {

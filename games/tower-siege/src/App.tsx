@@ -13,7 +13,6 @@ import {
   Settings as SettingsIcon,
   Shield,
   Swords,
-  Users,
 } from 'lucide-react';
 import { askHostToEndGame, askToLeaveLobby, toggleFullscreen } from './fullscreen';
 import { GameWallet, reportResult } from './platform/wallet';
@@ -182,7 +181,7 @@ export default function App() {
    * Everyone in the match, sorted by uid.
    *
    * Sorted rather than in arrival order so every client computes the identical
-   * seating from data it already has — otherwise two players would disagree
+   * seating from data it already has , otherwise two players would disagree
    * about which keep is which, and a spectator arrow would land on the wrong
    * one.
    */
@@ -348,10 +347,12 @@ export default function App() {
           hostId={lobby?.hostId ?? null}
           isHost={isHost}
           rules={rules}
+          coins={coins}
           onRules={() => setShowRules(true)}
           onSettings={() => setShowSettings(true)}
           onStart={startMatch}
           onFullscreen={() => toggleFullscreen(document.documentElement, !document.fullscreenElement)}
+          onExit={askToLeaveLobby}
           onPlayOffline={() => {
             audioService.unlock();
             setView('offline_menu');
@@ -393,7 +394,7 @@ export default function App() {
 
 function rulesSummary(r: MatchRules): string {
   return [
-    r.mode === 'siege' ? 'Siege — last keep standing' : 'Alliance — shared lives',
+    r.mode === 'siege' ? 'Siege , last keep standing' : 'Alliance , shared lives',
     `${r.players} keep${r.players === 1 ? '' : 's'}`,
     `${r.waves} waves`,
     r.mode === 'siege' ? (r.sends ? 'sending on' : 'no sending') : null,
@@ -511,7 +512,7 @@ function Menu({
           <p>Pick a tower, tap a plot twice to build it. Tap a standing tower to upgrade or sell it.</p>
           <p className="mt-1">Everyone faces the identical horde. Leak twenty and your keep falls.</p>
           <p className="mt-2 text-white/40">
-            Playing online? Start a lobby on PlayBuddies and pick this game — up to four keeps.
+            Playing online? Start a lobby on PlayBuddies and pick this game , up to four keeps.
           </p>
         </div>
       </div>
@@ -530,10 +531,12 @@ function RoomScreen({
   hostId,
   isHost,
   rules,
+  coins,
   onRules,
   onSettings,
   onStart,
   onFullscreen,
+  onExit,
   onPlayOffline,
 }: {
   ready: boolean;
@@ -543,10 +546,12 @@ function RoomScreen({
   hostId: string | null;
   isHost: boolean;
   rules: MatchRules;
+  coins: number;
   onRules: () => void;
   onSettings: () => void;
   onStart: () => void;
   onFullscreen: () => void;
+  onExit: () => void;
   onPlayOffline: () => void;
 }) {
   if (error) {
@@ -572,15 +577,26 @@ function RoomScreen({
   return (
     <div className="mx-auto flex h-full w-full max-w-3xl flex-col overflow-y-auto overscroll-contain gap-3 p-4 sm:gap-4 sm:p-6">
       <div className="flex shrink-0 items-center justify-between gap-2">
-        <button onClick={onFullscreen} aria-label="Fullscreen" className="panel shrink-0 rounded-2xl p-3">
-          <Users className="h-5 w-5" />
-        </button>
-        <h2 className="min-w-0 truncate text-center text-lg font-black tracking-tight sm:text-2xl">
+        <h2 className="min-w-0 truncate text-lg font-black tracking-tight sm:text-2xl">
           Tower Siege
         </h2>
-        <button onClick={onSettings} aria-label="Settings" className="panel shrink-0 rounded-2xl p-3">
-          <SettingsIcon className="h-5 w-5" />
-        </button>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <div className="panel flex items-center gap-2 rounded-2xl px-3 py-2 font-bold text-amber-300">
+            <Coins className="h-4 w-4" /> {coins}
+          </div>
+          <button onClick={onRules} className="panel flex items-center gap-2 rounded-2xl px-3 py-2 font-bold text-white/70">
+            <ScrollText className="h-4 w-4" /> Rules
+          </button>
+          <button onClick={onFullscreen} aria-label="Full screen" className="panel shrink-0 rounded-2xl p-2.5">
+            <Maximize2 className="h-5 w-5" />
+          </button>
+          <button onClick={onSettings} aria-label="Settings" className="panel shrink-0 rounded-2xl p-2.5">
+            <SettingsIcon className="h-5 w-5" />
+          </button>
+          <button onClick={onExit} aria-label="Leave" className="panel shrink-0 rounded-2xl p-2.5">
+            <LogOut className="h-5 w-5" />
+          </button>
+        </div>
       </div>
 
       <div className="panel min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain rounded-[2rem] p-5">
@@ -603,7 +619,7 @@ function RoomScreen({
                 className="flex items-center gap-2 rounded-xl border border-dashed border-white/12 px-3 py-2 text-white/40"
               >
                 <span className="h-3 w-3 shrink-0 rounded-full bg-white/20" />
-                <span className="text-sm font-bold">Empty berth — a bot holds it</span>
+                <span className="text-sm font-bold">Empty berth , a bot holds it</span>
               </div>
             ))}
           </div>
@@ -801,7 +817,7 @@ function RulesPanel({
           <span className="text-sm font-bold">
             Sending
             <span className="block text-[11px] font-normal text-white/50">
-              Siege only. Spend gold to push extra enemies into every other keep&apos;s next wave — it costs more than
+              Siege only. Spend gold to push extra enemies into every other keep&apos;s next wave , it costs more than
               it pays them, so it is a real bet. Off makes it a pure race.
             </span>
           </span>
@@ -820,7 +836,7 @@ function RulesPanel({
             <div key={id} className="flex gap-2">
               <span className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: TOWERS[id].trim }} />
               <p className="text-[11px] leading-snug text-white/55">
-                <span className="font-black text-white/80">{TOWERS[id].name}</span> — {TOWERS[id].blurb}
+                <span className="font-black text-white/80">{TOWERS[id].name}</span> , {TOWERS[id].blurb}
                 {!TOWERS[id].air && <span className="text-rose-300/80"> Cannot hit flyers.</span>}
               </p>
             </div>

@@ -392,7 +392,7 @@ function HeroSection() {
 
         {/* Main Heading */}
         <motion.h1
-          className="text-6xl sm:text-7xl md:text-8xl lg:text-[7rem] font-black font-[family-name:var(--font-display)] tracking-tighter leading-[0.85] mb-8"
+          className="text-[clamp(1.25rem,9vw,7rem)] font-black font-[family-name:var(--font-display)] tracking-tighter leading-[0.85] mb-8"
         >
           <motion.span
             initial={{ opacity: 0, x: -100, rotateY: -45 }}
@@ -452,7 +452,7 @@ function HeroSection() {
             disabled={isLoggingIn}
             whileHover={{ scale: 1.05, y: -3 }}
             whileTap={{ scale: 0.95 }}
-            className="btn-glow group w-full sm:w-auto px-12 py-6 bg-transparent rounded-3xl text-white font-black text-xl flex items-center justify-center gap-4 shadow-[0_0_50px_rgba(139,92,246,0.2)] hover:shadow-[0_0_80px_rgba(236,72,153,0.4)] transition-shadow duration-500 disabled:opacity-75 relative z-10 uppercase tracking-wide border border-white/10 overflow-visible"
+            className="btn-glow group w-full sm:w-auto px-6 py-4 sm:px-12 sm:py-6 bg-transparent rounded-3xl text-white font-black text-base sm:text-xl flex items-center justify-center gap-2 sm:gap-4 shadow-[0_0_50px_rgba(139,92,246,0.2)] hover:shadow-[0_0_80px_rgba(236,72,153,0.4)] transition-shadow duration-500 disabled:opacity-75 relative z-10 uppercase tracking-wide border border-white/10 overflow-visible"
           >
             {/* The crazy background layer that animates independently */}
             <div className="absolute inset-0 bg-gradient-to-r from-primary via-accent to-secondary rounded-3xl z-[-1] opacity-80 group-hover:opacity-100 transition-opacity animate-gradient-shift blur-[2px] group-hover:blur-[8px]" />

@@ -3,7 +3,7 @@
  *
  * A transparent sheet over the canvas that turns clicks and drags into the two
  * things a Quoridor player can do: step onto a square, or drop a wall in a
- * groove. It owns no game state — it asks the engine what a point means and
+ * groove. It owns no game state , it asks the engine what a point means and
  * hands the answer straight back to it.
  */
 import { useCallback, useRef } from 'react';
@@ -67,8 +67,8 @@ export default function BoardPad({
     pressed.current = true;
     try {
       // Throws InvalidPointerId for a pointer the browser no longer considers
-      // down. Capture is a nicety — it keeps a drag alive past the edge of the
-      // sheet — and losing it must not cost us the move itself.
+      // down. Capture is a nicety , it keeps a drag alive past the edge of the
+      // sheet , and losing it must not cost us the move itself.
       e.currentTarget.setPointerCapture?.(e.pointerId);
     } catch {
       /* not capturable; the drag still tracks */

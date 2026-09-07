@@ -2,14 +2,14 @@
  * Quoridor, as rules rather than as pixels.
  *
  * Nothing in this file touches React, a canvas or the network. It is the whole
- * game — where a pawn may step, where a wall may go, and whether a board is
- * still solvable — expressed over two plain arrays, so the engine, the bot and
+ * game , where a pawn may step, where a wall may go, and whether a board is
+ * still solvable , expressed over two plain arrays, so the engine, the bot and
  * a test can all ask the same questions of the same position.
  *
  * The board is not one fixed size any more. A duel and a four-way free-for-all
  * are played on the classic nine squares; a 2v2 is played on eleven, because
  * two pawns sharing a starting edge need lanes of their own to run in. What
- * makes that bearable is that the *index space* never changes size — see
+ * makes that bearable is that the *index space* never changes size , see
  * STRIDE below.
  */
 
@@ -18,8 +18,8 @@
  *
  * Cell 0 is always the top-left square and `cell(r, c)` is always
  * `r * STRIDE + c`, whether the board underneath measures nine squares or
- * eleven. Indices on a small board are therefore sparse — a 9x9 game never
- * mentions column 9 — and that is the point: `rowOf`, `colOf`, `encodeStep`
+ * eleven. Indices on a small board are therefore sparse , a 9x9 game never
+ * mentions column 9 , and that is the point: `rowOf`, `colOf`, `encodeStep`
  * and `encodeWall` are the same functions for every board size, so a move list
  * means one thing everywhere and the wire format does not fork per mode.
  * `inBoard` is the single place that knows how wide the board actually is.
@@ -58,7 +58,7 @@ export const inBoard = (r: number, c: number, size: number) =>
 /** Where a wall lives in `Position.h` / `Position.v`. Constant stride, like cells. */
 export const wallSlot = (r: number, c: number) => r * WALL_STRIDE + c;
 
-/** Up, down, left, right. Diagonals are never a step — only ever a jump. */
+/** Up, down, left, right. Diagonals are never a step , only ever a jump. */
 export const DIRS: readonly [number, number][] = [
   [-1, 0],
   [1, 0],
@@ -113,9 +113,9 @@ export const TEAMS: readonly { name: string; main: string; light: string; dark: 
 /**
  * Everything about a match that follows from its rules, worked out once.
  *
- * The board size, the seating and the wall allowance all move together — a
+ * The board size, the seating and the wall allowance all move together , a
  * 2v2 is a bigger board *and* a different set of starts *and* a fatter hand of
- * walls — so they travel as one object rather than as three arguments that
+ * walls , so they travel as one object rather than as three arguments that
  * could disagree. Every function below that used to take a `PlayerCount` takes
  * this instead, which is what stopped "how many players" from standing in for
  * "what shape is the board".
@@ -147,7 +147,7 @@ export function boardSize(players: PlayerCount, teams: boolean): number {
  * Twenty walls exist in a classic game either way; a duel splits them two ways
  * and a four-hander splits the same twenty four ways, which keeps the board's
  * total capacity for mischief the same in both. The pairs board has 100 wall
- * slots against the classic board's 64, so it gets seven each — twenty-eight
+ * slots against the classic board's 64, so it gets seven each , twenty-eight
  * walls over a board half again as large is very nearly the same density, and
  * anything less left a bigger board feeling emptier rather than longer.
  */
@@ -181,7 +181,7 @@ function freeForAllSides(size: number): SideMeta[] {
  * Gold (seats 0 and 2) lines up along the south edge and runs north; Blue
  * (1 and 3) lines up along the north edge and runs south. Either partner
  * reaching the far side takes the game for both, so a pair is one race run
- * twice rather than two separate ones — a wall spent slowing one Blue pawn is
+ * twice rather than two separate ones , a wall spent slowing one Blue pawn is
  * wasted if the other is the one that gets home.
  *
  * The two lanes sit a few columns in from each rim rather than side by side in
@@ -207,7 +207,7 @@ function pairsSides(size: number): SideMeta[] {
  *
  * A pawn card in the picker has to be drawn in *some* colour before anybody
  * has settled on a mode. This is that fallback, and nothing that plays a match
- * should reach for it — ask `layoutFor` instead.
+ * should reach for it , ask `layoutFor` instead.
  */
 export const DEFAULT_SIDES: readonly SideMeta[] = freeForAllSides(DUEL_SIZE);
 
@@ -232,7 +232,7 @@ export function layoutFor(rules: { players: PlayerCount; teams: boolean }): Layo
  * `h[wallSlot(r, c)]` is a horizontal wall lying on the groove below row `r`,
  * covering columns `c` and `c + 1`. `v[wallSlot(r, c)]` stands in the groove
  * right of column `c`, covering rows `r` and `r + 1`. Both are 1 for the seat
- * that owns the wall plus one, 0 for empty — the owner is only ever used to
+ * that owns the wall plus one, 0 for empty , the owner is only ever used to
  * colour it, but storing it here is free and saves a parallel array.
  *
  * Both arrays are cut to the largest board rather than to this one, for the
@@ -270,7 +270,7 @@ export function clonePosition(p: Position): Position {
  * Is the step from (r,c) by (dr,dc) walled off?
  *
  * A wall covers two squares' worth of groove, so a step is blocked by either
- * of the two slots that can reach it — which is the whole reason the check
+ * of the two slots that can reach it , which is the whole reason the check
  * cannot be a single array lookup.
  */
 export function walled(
@@ -306,11 +306,11 @@ const pawnAt = (pos: Position, target: number) => pos.pawns.indexOf(target);
 /**
  * Every square this seat may step to, jumps included.
  *
- * The plain move is one square up, down, left or right — never diagonally.
+ * The plain move is one square up, down, left or right , never diagonally.
  * Facing another pawn with no wall between turns that step into a jump:
  * straight over them and onto the square behind. When that square is off the
  * board, walled off, or already has somebody standing on it, the jump bends
- * instead and lands to either side of the pawn being jumped — which is the
+ * instead and lands to either side of the pawn being jumped , which is the
  * only way a diagonal is ever legal.
  */
 export function pawnMoves(pos: Position, seat: number, layout: Layout): number[] {
@@ -414,7 +414,7 @@ const stamps = new Int32Array(MAX_CELLS);
 /**
  * Steps from this pawn to its nearest goal square, or -1 when there are none.
  *
- * The bot leans on this hard — a few hundred calls per turn — so the visited
+ * The bot leans on this hard , a few hundred calls per turn , so the visited
  * set is a stamped array reused between calls rather than a fresh Set each
  * time. Not reentrant, which is fine: nothing here is async.
  */
@@ -528,7 +528,7 @@ export function routeToGoal(pos: Position, seat: number, layout: Layout): number
 }
 
 /**
- * Is this wall legal — fits, affordable, and leaves everybody a way home?
+ * Is this wall legal , fits, affordable, and leaves everybody a way home?
  *
  * The last clause is the rule that makes Quoridor a race rather than a siege.
  * A wall that seals any pawn away from its goal is simply not a legal move,
@@ -585,7 +585,7 @@ export function legalWalls(pos: Position, seat: number, layout: Layout): number[
  * Below STEP_CODES is "step onto that square"; at or above it is a wall,
  * unpacked by `decodeWall`. Both halves are cut to the largest board, so the
  * same number means the same move on a nine-square board and an eleven-square
- * one — a move list reads the same whichever mode produced it, and adding a
+ * one , a move list reads the same whichever mode produced it, and adding a
  * board size never silently reinterprets a history.
  */
 export const STEP_CODES = MAX_CELLS;

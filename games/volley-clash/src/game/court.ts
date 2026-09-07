@@ -172,7 +172,7 @@ function paint(ctx: CanvasRenderingContext2D, arena: Arena) {
 }
 
 /**
- * The net. Exported because the fallback path needs it too — a court without a
+ * The net. Exported because the fallback path needs it too , a court without a
  * visible net is unplayable even if the collision is still there.
  */
 function drawNet(ctx: CanvasRenderingContext2D, arena: Arena) {
@@ -193,7 +193,7 @@ function drawNet(ctx: CanvasRenderingContext2D, arena: Arena) {
   ctx.fillStyle = post;
   ctx.fillRect(left, netTop, netW, floor - netTop);
 
-  // Mesh. Diagonals rather than a grid — it reads as fabric at a glance and is
+  // Mesh. Diagonals rather than a grid , it reads as fabric at a glance and is
   // half the strokes.
   ctx.save();
   ctx.beginPath();

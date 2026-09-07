@@ -27,16 +27,16 @@ const ENEMY_HZ = 6;
  * Peer-to-peer is not guaranteed. Signalling can be blocked, and a symmetric
  * NAT or a corporate proxy will defeat STUN with no TURN server to fall back
  * on. When that happens the mesh simply never opens a channel, and the first
- * version of this screen had nothing else — so a guest sat in an empty ocean
+ * version of this screen had nothing else , so a guest sat in an empty ocean
  * with no other players, which is exactly what got reported.
  *
  * So there is a slow, billed path underneath: positions through Firestore for
- * any peer we cannot reach directly. 5Hz is deliberately stingy — it is enough
+ * any peer we cannot reach directly. 5Hz is deliberately stingy , it is enough
  * to see each other and be eaten, and it costs a fraction of what running the
  * whole game through Firestore would.
  */
 const FALLBACK_HZ = 5;
-/** No AI snapshot for this long means the host is unreachable — grow our own reef. */
+/** No AI snapshot for this long means the host is unreachable , grow our own reef. */
 const HOST_TIMEOUT_MS = 4000;
 
 export interface LobbyPerson {
@@ -150,7 +150,7 @@ export default function GameView({
         const fish = engineRef.current?.localFish(id);
         onRunEnded(fish?.score ?? 0);
         // With two or three players sharing a keyboard, one being eaten must
-        // not freeze the others — the screen only comes up once nobody is left.
+        // not freeze the others , the screen only comes up once nobody is left.
         if (engineRef.current?.allLocalsDead()) {
           setDefeat({ by: killedBy, score: fish?.score ?? 0, best: fish?.bestScore ?? 0 });
           onMatchOver(engineRef.current.leaderboard()[0]?.local === true);
@@ -158,7 +158,7 @@ export default function GameView({
 
         if (!eaterId || !size) return;
         // Hand the growth to whoever ate us. A local seat can be credited
-        // directly; a remote one is told, and takes our word for it — we are
+        // directly; a remote one is told, and takes our word for it , we are
         // the only client that can be certain the bite landed.
         if (engineRef.current?.localFish(eaterId)) {
           engineRef.current.creditKill(eaterId, size);
@@ -187,7 +187,7 @@ export default function GameView({
     let fallbackTimer = 0;
     /**
      * Set by the cleanup below. The whole networking half of this effect is
-     * loaded asynchronously now (see the import comment in App.tsx — the
+     * loaded asynchronously now (see the import comment in App.tsx , the
      * Firebase SDK and the mesh that depends on it are only worth fetching for
      * an online match), so the component can perfectly well unmount while that
      * import is still in flight. Without this flag, a match the player has
@@ -313,7 +313,7 @@ export default function GameView({
 
         // A guest with no word from the host grows its own reef rather than
         // swimming in a void. Not the same ocean as everyone else's, but a
-        // playable one — and it stands down the instant the host is heard from.
+        // playable one , and it stands down the instant the host is heard from.
         if (!live.current.isHost) {
           const stale = Date.now() - lastHostSnapshot.current > HOST_TIMEOUT_MS;
           if (stale && !e.runningAI) e.setSimulateAI(true);
@@ -388,7 +388,7 @@ export default function GameView({
     if (!online || !uid) return;
     meshRef.current?.setPeers(people.map((p) => p.uid));
     // Only ever switched *on* here. Turning it off is the job of the host's
-    // first snapshot arriving — otherwise every roster change would yank the
+    // first snapshot arriving , otherwise every roster change would yank the
     // reef out from under a guest that is running its own because it cannot
     // reach the host.
     if (hostId === uid) engineRef.current?.setSimulateAI(true);

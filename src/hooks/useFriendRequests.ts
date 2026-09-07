@@ -7,7 +7,7 @@ import { useAuthStore } from "@/store/useAuthStore";
 import type { FriendProfile } from "@/hooks/useFriends";
 
 /**
- * Incoming (not yet accepted) friend requests, live, for the whole app —
+ * Incoming (not yet accepted) friend requests, live, for the whole app ,
  * not just while the friends panel happens to be open.
  *
  * `useFriends` deliberately keeps its listener closed unless a page asks for

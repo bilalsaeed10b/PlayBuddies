@@ -1,7 +1,7 @@
 /**
  * Every sound in the game, synthesised.
  *
- * Six short noises made of oscillators and one burst of shaped noise — no
+ * Six short noises made of oscillators and one burst of shaped noise , no
  * audio files, so there is nothing to download, nothing to decode on a cold
  * start, and nothing to keep in sync with the bundle. The whole board is
  * quiet wood and clacking pieces; that is a cheaper palette to fake than a
@@ -56,7 +56,7 @@ class AudioService {
     osc.stop(t + len + 0.02);
   }
 
-  /** Shaped noise — the wood in "a wall going into a groove". */
+  /** Shaped noise , the wood in "a wall going into a groove". */
   private knock(at: number, len: number, gain: number, cutoff: number) {
     const ctx = this.ctx;
     if (!ctx || !this.master || this.volume <= 0) return;
@@ -86,14 +86,14 @@ class AudioService {
     this.tone(320, 0, 0.09, 0.1, 'triangle');
   }
 
-  /** A wall dropped into its groove — heavier, and it lands twice. */
+  /** A wall dropped into its groove , heavier, and it lands twice. */
   playWall() {
     this.knock(0, 0.16, 0.75, 1500);
     this.tone(150, 0, 0.16, 0.16, 'square');
     this.knock(0.05, 0.1, 0.35, 1100);
   }
 
-  /** A tap that did nothing — an illegal square, or a wall that would trap someone. */
+  /** A tap that did nothing , an illegal square, or a wall that would trap someone. */
   playDeny() {
     this.tone(180, 0, 0.13, 0.13, 'sawtooth');
     this.tone(120, 0.05, 0.13, 0.1, 'sawtooth');

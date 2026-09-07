@@ -97,7 +97,7 @@ export interface SendPacket {
  * How a keep stood at the end of a wave. The owner is authoritative for this.
  *
  * Every client simulates every keep, and two simulations of the same wave can
- * drift by a hair — a shot that connected on one and grazed on the other. This
+ * drift by a hair , a shot that connected on one and grazed on the other. This
  * is the correction, and it arrives at the only moment the picture is quiet
  * enough for a correction not to be visible.
  */

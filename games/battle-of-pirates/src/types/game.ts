@@ -135,7 +135,7 @@ export interface Rock {
  * Anything that changes how the battle actually plays out lives in MatchRules
  * below instead. The split matters: both clients simulate the same shot from
  * the same seed, so a rule one of them disagreed about is a desync, not a
- * preference — which is exactly what `obstacles` used to be when it lived
+ * preference , which is exactly what `obstacles` used to be when it lived
  * here. A host with rocks on and a guest with rocks off built two different
  * seas and every shot after the first landed somewhere else on each screen.
  */
@@ -168,7 +168,7 @@ export interface MatchRules {
   /**
    * The dotted trajectory arc while aiming.
    *
-   * On by default. With it on the shot solves itself — you drag until the
+   * On by default. With it on the shot solves itself , you drag until the
    * dots point at the enemy and let go. The aim arrow on the pad is always
    * there regardless; that shows direction and power, not where the ball
    * lands.
@@ -417,7 +417,7 @@ export interface ByePacket {
  * reconnect apart from the connection simply settling for the first time.
  *
  * `bye` hands a ship to a bot; nothing used to hand it back. A captain who
- * came back — reloaded, reopened the tab, whatever the drop actually was —
+ * came back , reloaded, reopened the tab, whatever the drop actually was ,
  * stayed a spectator on their own ship for the rest of the match, watching a
  * bot fight in their place with no way to take the wheel back. This is that
  * "I'm here" the host was missing.

@@ -3,7 +3,7 @@
  *
  * Every one of them is painted in its seat's colour rather than its own, so
  * the shop can never take the one thing the board has to communicate at a
- * glance — whose pawn that is — and trade it for a nicer silhouette. What a
+ * glance , whose pawn that is , and trade it for a nicer silhouette. What a
  * skin changes is the shape, and only the shape.
  */
 
@@ -32,7 +32,7 @@ export interface PawnPaint {
   x: number;
   /** The centre of the square. The pawn sits on it, drawing upward. */
   y: number;
-  /** Half the square, roughly — every shape scales off this. */
+  /** Half the square, roughly , every shape scales off this. */
   r: number;
   main: string;
   light: string;
@@ -97,7 +97,7 @@ export function drawPawn(ctx: CanvasRenderingContext2D, p: PawnPaint) {
 
   switch (p.skin) {
     case 1: {
-      // Cap — a dome with a brim.
+      // Cap , a dome with a brim.
       body(ctx, p, cy, r);
       ctx.beginPath();
       ctx.ellipse(p.x, cy + r * 0.32, r * 0.92, r * 0.24, 0, 0, Math.PI * 2);
@@ -112,7 +112,7 @@ export function drawPawn(ctx: CanvasRenderingContext2D, p: PawnPaint) {
       break;
     }
     case 2: {
-      // Pillar — a tapered column with a collar.
+      // Pillar , a tapered column with a collar.
       body(ctx, p, cy, r);
       ctx.beginPath();
       ctx.moveTo(p.x - r * 0.52, cy + r * 0.6);
@@ -129,7 +129,7 @@ export function drawPawn(ctx: CanvasRenderingContext2D, p: PawnPaint) {
       break;
     }
     case 3: {
-      // Crown — a disc under three points.
+      // Crown , a disc under three points.
       body(ctx, p, cy, r);
       ctx.beginPath();
       ctx.arc(p.x, cy + r * 0.14, r * 0.7, 0, Math.PI * 2);
@@ -150,7 +150,7 @@ export function drawPawn(ctx: CanvasRenderingContext2D, p: PawnPaint) {
       break;
     }
     case 4: {
-      // Lantern — a dome with a lit core.
+      // Lantern , a dome with a lit core.
       body(ctx, p, cy, r);
       ctx.beginPath();
       ctx.roundRect(p.x - r * 0.56, cy - r * 0.72, r * 1.12, r * 1.42, r * 0.34);
@@ -169,7 +169,7 @@ export function drawPawn(ctx: CanvasRenderingContext2D, p: PawnPaint) {
       break;
     }
     case 5: {
-      // Fox — a rounded body and two ears.
+      // Fox , a rounded body and two ears.
       body(ctx, p, cy, r);
       ctx.beginPath();
       ctx.moveTo(p.x - r * 0.62, cy - r * 0.18);
@@ -190,7 +190,7 @@ export function drawPawn(ctx: CanvasRenderingContext2D, p: PawnPaint) {
       break;
     }
     case 6: {
-      // Obelisk — a faceted spike, with the near face lighter.
+      // Obelisk , a faceted spike, with the near face lighter.
       ctx.fillStyle = p.dark;
       ctx.beginPath();
       ctx.moveTo(p.x, cy - r * 1.05);
@@ -209,7 +209,7 @@ export function drawPawn(ctx: CanvasRenderingContext2D, p: PawnPaint) {
       break;
     }
     case 7: {
-      // Orb — a sphere sitting above its own ring.
+      // Orb , a sphere sitting above its own ring.
       ctx.save();
       ctx.globalAlpha = 0.5;
       ctx.strokeStyle = p.dark;
@@ -227,7 +227,7 @@ export function drawPawn(ctx: CanvasRenderingContext2D, p: PawnPaint) {
       break;
     }
     default: {
-      // Pebble — a plain domed disc.
+      // Pebble , a plain domed disc.
       body(ctx, p, cy, r);
       ctx.beginPath();
       ctx.arc(p.x, cy, r * 0.78, 0, Math.PI * 2);

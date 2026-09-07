@@ -19,7 +19,7 @@ export type Phase = 'play' | 'moving' | 'over';
  *
  * Anything that changes how the game actually plays lives in MatchRules
  * instead. The split matters online: both clients replay the same move list,
- * so a rule one of them disagreed about is two different boards — while the
+ * so a rule one of them disagreed about is two different boards , while the
  * volume, or whether this player wants the legal squares lit up, is nobody
  * else's business.
  */
@@ -108,7 +108,7 @@ export interface StartPacket {
   /**
    * Identifies the game, not the layout.
    *
-   * Quoridor sets up the same way every time — there is nothing to randomise
+   * Quoridor sets up the same way every time , there is nothing to randomise
    * but who goes first. The number is here so a document left behind by last
    * night's game is obviously stale rather than replayable, and so a rematch
    * is a different game rather than a longer one.

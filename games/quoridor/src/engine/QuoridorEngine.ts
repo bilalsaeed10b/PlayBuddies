@@ -3,7 +3,7 @@
  *
  * It knows nothing about React, the network or the shop. It is handed seats
  * and a first player, it is fed moves as plain integers, and it hands back a
- * move list — which is exactly what travels on the wire, so the same code path
+ * move list , which is exactly what travels on the wire, so the same code path
  * serves a game against a bot and a game against three strangers.
  */
 import {
@@ -375,7 +375,7 @@ export class QuoridorEngine {
    * A wall covers two squares, so it is centred on the crossing between four
    * of them: the same (r, c) names both the horizontal and the vertical
    * candidate, and only the orientation is in question. That is settled by
-   * which of the two grooves the point is actually nearer — press along a row
+   * which of the two grooves the point is actually nearer , press along a row
    * and you get a wall along that row.
    */
   pickSlot(px: number, py: number, forced?: Orientation): { o: Orientation; r: number; c: number } | null {
@@ -487,7 +487,7 @@ export class QuoridorEngine {
 
     // In a 2v2 both partners are running for the same edge, so seat-by-seat
     // painting would lay two bands in exactly the same place and double the
-    // alpha of each — the strip came out muddy and neither colour read as
+    // alpha of each , the strip came out muddy and neither colour read as
     // anybody's. One band per edge, in the pair's colour, is what the players
     // actually need to know: that side of the board is Gold's finish line.
     const drawn = new Set<string>();

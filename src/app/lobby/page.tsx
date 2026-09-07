@@ -58,7 +58,7 @@ const CHAT_COOLDOWN_MS = 1000;
  * the room.
  *
  * Presence comes from RTDB `onDisconnect`, which fires on the server the
- * instant a socket closes — including the brief, ordinary reconnect a phone
+ * instant a socket closes , including the brief, ordinary reconnect a phone
  * does on a cell handoff or a wifi-to-data switch, exactly the kind of network
  * a player without a stable connection has. Without a grace period, that one
  * dropped frame was enough to hand the room to someone else *and delete the
@@ -78,7 +78,7 @@ function LobbyContent() {
   const [messages, setMessages] = useState<LobbyMessage[]>([]);
   const [lookupFailed, setLookupFailed] = useState(false);
   const [wasKicked, setWasKicked] = useState(false);
-  // A malformed code is knowable during render — no need to round-trip it.
+  // A malformed code is knowable during render , no need to round-trip it.
   const notFound = lookupFailed || (Boolean(roomId) && !isValidRoomCode(roomId));
   const [copied, setCopied] = useState(false);
   const [chatMessage, setChatMessage] = useState("");
@@ -86,7 +86,7 @@ function LobbyContent() {
   const [isPseudoFull, setIsPseudoFull] = useState(false);
   const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
   const [inviteSent, setInviteSent] = useState<string | null>(null);
-  /** "Add a friend by code" inside the invite modal — separate from the invite list below it. */
+  /** "Add a friend by code" inside the invite modal , separate from the invite list below it. */
   const [addCode, setAddCode] = useState("");
   const [addBusy, setAddBusy] = useState(false);
   const [addNotice, setAddNotice] = useState("");
@@ -116,12 +116,12 @@ function LobbyContent() {
    *
    * Crew and chat used to both be on screen at once, so a new message was
    * always visible. Now that chat is a tab, a message arriving while Crew is
-   * open would otherwise go completely unnoticed — this is what the dot on
+   * open would otherwise go completely unnoticed , this is what the dot on
    * the Chat tab is tracking against.
    */
   const seenChatCount = useRef(0);
   const gameFrameRef = useRef<HTMLIFrameElement>(null);
-  /** The wrapper that goes fullscreen — the frame plus its floating controls. */
+  /** The wrapper that goes fullscreen , the frame plus its floating controls. */
   const gameShellRef = useRef<HTMLDivElement>(null);
   /** Always the latest `endGame`, for the message handler below to call without needing it as a dependency. */
   const endGameRef = useRef<() => Promise<void>>(async () => {});
@@ -138,7 +138,7 @@ function LobbyContent() {
   const walletLoaded = useRef(false);
 
   const presentUids = useLobbyPresence(roomId);
-  // Always on, not just while the invite modal is open — the crew list also
+  // Always on, not just while the invite modal is open , the crew list also
   // needs to know who is already a friend, to offer "Add Friend" only where
   // it means something.
   const { friends } = useFriends(true);
@@ -218,14 +218,14 @@ function LobbyContent() {
   const me = players.find((p) => p.uid === user?.uid);
 
   // Ready is opt-out, not opt-in: players join ready and can un-ready if they
-  // need a moment. Nothing blocks on player count — a host alone can start and
+  // need a moment. Nothing blocks on player count , a host alone can start and
   // play solo, which is how you test a room or warm up while friends arrive.
   const everyoneReady = players.every((p) => p.isReady);
   const isSolo = players.length < (selectedGame?.minPlayers ?? 2);
 
   /**
    * Invite list: whoever can actually be invited, most useful first. Friends
-   * already sitting in the room are kept visible but disabled — sending them a
+   * already sitting in the room are kept visible but disabled , sending them a
    * second invite did nothing except cost a write and confuse them.
    */
   const invitees = useMemo(() => {
@@ -249,7 +249,7 @@ function LobbyContent() {
   // ── Join the room, and subscribe to it ────────────────────────────────────
   //
   // Deliberately keyed on [user.uid, roomId] only. The previous version also
-  // depended on `lobby?.hostId`, so the first snapshot re-ran the effect — and
+  // depended on `lobby?.hostId`, so the first snapshot re-ran the effect , and
   // its cleanup removes you from the room. The resulting leave/rejoin race
   // could delete a player who had just joined.
   useEffect(() => {
@@ -259,7 +259,7 @@ function LobbyContent() {
     let cancelled = false;
     // Flips true the first time a snapshot actually shows us as a member.
     // `join()` writes asynchronously, so the very first snapshot or two can
-    // legitimately arrive before it lands — without this guard, that window
+    // legitimately arrive before it lands , without this guard, that window
     // would read identically to being kicked and bounce a player who is
     // mid-join right back out.
     let wasMember = false;
@@ -328,7 +328,7 @@ function LobbyContent() {
         } else if (wasMember) {
           // Was here a moment ago, isn't now, and the room itself is still
           // there: the host removed us. A missing room entirely is handled
-          // above, by `!snapshot.exists()` — this is specifically the
+          // above, by `!snapshot.exists()` , this is specifically the
           // "still a room, just not one with me in it anymore" case.
           setWasKicked(true);
           forgetLobby();
@@ -367,7 +367,7 @@ function LobbyContent() {
   // If the host's presence drops and *stays* dropped, the longest-present
   // remaining player claims the room. Without this a host leaving stranded
   // everyone permanently. With no grace period, it also fired on a presence
-  // blip that recovered on its own a moment later — see HOST_MIGRATION_GRACE_MS.
+  // blip that recovered on its own a moment later , see HOST_MIGRATION_GRACE_MS.
   useEffect(() => {
     if (!lobby || !user || presentUids.size === 0) return;
     if (lobby.hostId === user.uid) return;
@@ -380,7 +380,7 @@ function LobbyContent() {
     if (candidates[0]?.uid !== user.uid) return;
 
     // Cancelled by this effect's own cleanup the moment `presentUids` changes
-    // again — including the moment it changes because the host came back.
+    // again , including the moment it changes because the host came back.
     const timer = setTimeout(() => {
       updateDoc(doc(db, "lobbies", roomId), {
         hostId: user.uid,
@@ -456,7 +456,7 @@ function LobbyContent() {
    *                 game now carries this in its own control bar rather than
    *                 this page floating a duplicate one over the iframe, so
    *                 this is the only way it hears about it. `endGame` itself
-   *                 still checks host-ness — a non-host game sending this is
+   *                 still checks host-ness , a non-host game sending this is
    *                 either a bug or someone poking postMessage by hand, and
    *                 either way it should not end anyone's match.
    *   leave-lobby   The player pressed the game's own "leave" button on a
@@ -515,7 +515,7 @@ function LobbyContent() {
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
     // endGame is read through endGameRef (assigned below, after it's defined)
-    // rather than listed here — it isn't memoized, and this listener has no
+    // rather than listed here , it isn't memoized, and this listener has no
     // reason to be torn down and rebuilt on every render just because that
     // function identity changed.
   }, [user, sendWallet, clearStats]);
@@ -576,8 +576,8 @@ function LobbyContent() {
         status: "playing",
         matchStarted: false,
         collectedGems: {},
-        // Frozen at start. Deriving it live would remount the iframe — and
-        // discard the run in progress — the moment a friend joined.
+        // Frozen at start. Deriving it live would remount the iframe , and
+        // discard the run in progress , the moment a friend joined.
         soloMode: isSolo,
       });
     } catch (e) {
@@ -645,7 +645,7 @@ function LobbyContent() {
   /**
    * "Add a friend by code", inline in the invite modal.
    *
-   * Sends a friend request rather than an invite — friendship is required
+   * Sends a friend request rather than an invite , friendship is required
    * before an invite can even be sent (the platform's own rule, so a stranger
    * can't be spammed into a room), so this is the step that has to happen
    * first for someone who isn't a friend yet.
@@ -702,7 +702,7 @@ function LobbyContent() {
   /**
    * Host only: hand the crown to someone else already in the room.
    *
-   * Permitted by the existing rules with no changes needed — the host branch
+   * Permitted by the existing rules with no changes needed , the host branch
    * in firestore.rules has no restriction on which fields it can touch, only
    * on who is allowed to write (`isLobbyHost()`), so this is exactly as
    * legitimate a host write as picking the game already was. The mover loses
@@ -724,7 +724,7 @@ function LobbyContent() {
   /**
    * Host only: remove someone from the room outright.
    *
-   * Same write shape as a normal self-leave (`players.{uid}` deleted) — the
+   * Same write shape as a normal self-leave (`players.{uid}` deleted) , the
    * kicked player's own listener notices they've disappeared from a room that
    * still exists and treats it as being kicked. See the `wasKicked` branch in
    * the room snapshot handler above.
@@ -909,8 +909,8 @@ function LobbyContent() {
 
               {/*
                 Not everyone worth inviting is a friend yet. Sending a friend
-                request here — rather than only from the separate friends
-                panel — is what makes this modal a real substitute for it
+                request here , rather than only from the separate friends
+                panel , is what makes this modal a real substitute for it
                 mid-invite, instead of a dead end that sends the host looking
                 for a different button.
               */}
@@ -1022,7 +1022,7 @@ function LobbyContent() {
         >
           {/* ── crew / chat tabs ──
               Each pane gets the sidebar's full height now, rather than a fixed
-              45/55 split — Crew stops truncating a full room, and Chat stops
+              45/55 split , Crew stops truncating a full room, and Chat stops
               being a cramped strip under it. */}
           <div className="flex border-b border-white/5 shrink-0">
             <button

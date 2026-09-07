@@ -7,7 +7,7 @@
  *
  * The interesting part is the last step. Scattering ponds and blocks across a
  * green will, sooner or later, ring the flag in water or seal it behind a
- * wall, and a hole nobody can finish is not a hard hole — it is a broken
+ * wall, and a hole nobody can finish is not a hard hole , it is a broken
  * build. So the generator does not trust itself: it flood-fills a grid from
  * the tee and refuses to hand back any course whose cup it cannot actually
  * reach, retrying with less scenery each time and, in the last resort,
@@ -48,7 +48,7 @@ interface RectShape {
 /**
  * A half-round green.
  *
- * `n` is the inward normal of the flat cut, which passes through the centre —
+ * `n` is the inward normal of the flat cut, which passes through the centre ,
  * so the green is exactly the half of the disc lying on `n`'s side. Four
  * orientations are used rather than a free angle, purely so the bounding box
  * stays axis-aligned and the whole course still fits the canvas without a
@@ -127,7 +127,7 @@ export function toBlockLocal(b: Extract<Block, { kind: 'rect' }>, x: number, y: 
  * Distance from a point to a block's surface. Negative inside it.
  *
  * The rect case is the standard box signed-distance field, evaluated in the
- * block's own frame — which is what lets one function serve a barrier at any
+ * block's own frame , which is what lets one function serve a barrier at any
  * angle without the physics, the reachability check or the bot knowing that
  * rotation exists at all.
  */
@@ -147,7 +147,7 @@ export const inPatch = (p: Patch, x: number, y: number) => Math.hypot(x - p.x, y
 
 /**
  * The route distance from one point to every reachable point on a course, in
- * world units — the ball's-eye view of the green rather than the ruler's.
+ * world units , the ball's-eye view of the green rather than the ruler's.
  *
  * Water counts as a wall: a rolling ball cannot cross a pond, so a flag ringed
  * by one is unreachable even though nothing solid is in the way. Blocks are
@@ -158,7 +158,7 @@ export const inPatch = (p: Patch, x: number, y: number) => Math.hypot(x - p.x, y
  * because both of its callers want to ask it many times over: par comes from
  * one lookup against the tee, and the bot scores every candidate landing spot
  * of a search against the hole. Eight-connected, so a diagonal run is not
- * measured as a staircase — a four-connected walk reports a straight diagonal
+ * measured as a staircase , a four-connected walk reports a straight diagonal
  * as 40% longer than it is, which would push every angled hole up a stroke for
  * no reason.
  */
@@ -244,7 +244,7 @@ export function routeField(course: Course, source: Vec): RouteField {
  *
  * It returns a length rather than a yes/no because par is worked out from the
  * same walk. Judging par on the straight line from tee to cup stopped meaning
- * anything once barriers were deliberately laid across that line — every hole
+ * anything once barriers were deliberately laid across that line , every hole
  * came back "blocked, add a stroke" and nine in ten were par 4. What a hole is
  * worth is how far the ball has to go *round* things, which is exactly what
  * this already knows.
@@ -258,7 +258,7 @@ function routeCost(course: Course): number {
 /**
  * One hole, built from a seed and its number in the round.
  *
- * `players` only widens the green a little for a crowd — four balls on a green
+ * `players` only widens the green a little for a crowd , four balls on a green
  * built for one is a scrum around the tee.
  */
 export function buildCourse(seed: number, holeIndex: number, players: PlayerCount): Course {
@@ -309,8 +309,8 @@ function layout(
 
   if (semi) {
     const r = range(58, 92) * roomy;
-    // The four cardinal facings keep a tight bounding box — half a disc is
-    // exactly r by 2r along its own axis — so they stay first-class. The
+    // The four cardinal facings keep a tight bounding box , half a disc is
+    // exactly r by 2r along its own axis , so they stay first-class. The
     // in-between facings cannot: the tight box of a diagonal cut depends on
     // the angle, and working that out case by case is a lot of geometry for
     // what is only ever a little extra canvas padding around the green. They
@@ -359,14 +359,14 @@ function layout(
   /**
    * Tee and cup, placed as far apart as this particular green allows.
    *
-   * The obvious version — resample the cup until it is at least some fraction
-   * of the bounding box's diagonal from the tee — is subtly wrong for a
+   * The obvious version , resample the cup until it is at least some fraction
+   * of the bounding box's diagonal from the tee , is subtly wrong for a
    * half-round, and wrong in a way that only shows up as bad holes. A semi's
    * box is r by 2r, so its diagonal is about 2.24r, but the longest line you
    * can actually draw between two points *inside* it is the chord, around 2r,
    * and less again once both ends have to keep clear of the boards. So the
    * demand was unsatisfiable on those greens: every retry failed, the loop ran
-   * out, and the leftover candidate — often a couple of units from the tee —
+   * out, and the leftover candidate , often a couple of units from the tee ,
    * was used. One hole in twenty was a tap-in.
    *
    * Measuring what the shape can actually do removes the guess entirely. Draw
@@ -382,7 +382,7 @@ function layout(
     for (let j = i + 1; j < pool.length; j++) widest = Math.max(widest, dist(pool[i], pool[j]));
   }
 
-  // Not the widest pair itself — that would put the flag in the far corner of
+  // Not the widest pair itself , that would put the flag in the far corner of
   // every green in the round. Anything most of the way there will do, chosen
   // at random from all the pairs that qualify.
   const target = widest * 0.72;
@@ -429,7 +429,7 @@ function layout(
    *
    * Barrier sizes are worked out from this rather than from the bounding box,
    * so a barrier on a half-round is sized to the room that actually exists
-   * where it sits — which is what lets the gap beside it be a promise rather
+   * where it sits , which is what lets the gap beside it be a promise rather
    * than a hope.
    */
   const spanAcross = (x: number, y: number) => {
@@ -461,7 +461,7 @@ function layout(
    *
    * A bounding circle will not do here. A barrier sixty units long has a
    * bounding radius of thirty, so testing it as a disc demanded it stay thirty
-   * units clear of everything — and since it lies across the very line the tee
+   * units clear of everything , and since it lies across the very line the tee
    * and the cup sit on, that rejected almost every one of them. Sampling along
    * its length instead asks the question that was actually meant: is any part
    * of this thing too close to anything else?
@@ -494,7 +494,7 @@ function layout(
    * The barriers, and the whole reason a hole is worth playing.
    *
    * Each one is sized to reach from the wall on one side, across the line, and
-   * stop short of the far wall — so the straight shot is dead and a gap is
+   * stop short of the far wall , so the straight shot is dead and a gap is
    * left, by construction rather than by luck. Consecutive barriers take
    * alternate sides, which turns a corridor into an S-bend: the ball has to be
    * worked round one and then back round the next.
@@ -573,11 +573,11 @@ function layout(
   for (let i = 0; i < sandCount * 8 && course.sand.length < sandCount; i++) {
     const r = range(10, 20);
     const c = nearLine(r, 42);
-    // Sand may hug the cup — a greenside bunker is the good version of this —
+    // Sand may hug the cup , a greenside bunker is the good version of this ,
     // so it only has to clear the tee.
     if (dist(c, tee) < r + 16) continue;
     if (!insideShape(shape, w, h, c.x, c.y, r * 0.5)) continue;
-    // Sand may hug the cup, so it is only held off the tee — but it still has
+    // Sand may hug the cup, so it is only held off the tee , but it still has
     // to keep out of everything else.
     if (!fits(c, 3, 16, 0)) continue;
     course.sand.push(c);
@@ -601,14 +601,14 @@ function layout(
  * Par, from how far the ball actually has to travel.
  *
  * `route` is the length of the real path round the scenery, not the straight
- * line to the flag — so a dogleg is worth a stroke because it *is* longer,
+ * line to the flag , so a dogleg is worth a stroke because it *is* longer,
  * rather than because a flag was set on it.
  *
  * A full swing carries roughly 140 units on the green, but reaching the cup
  * and *stopping* at it are different problems: a ball still travelling when it
  * arrives rides over the top. The bands are calibrated against what the bots
  * actually shoot over a thousand generated holes rather than guessed from
- * carry — set them by feel and every card comes back three under, which makes
+ * carry , set them by feel and every card comes back three under, which makes
  * BIRDIE meaningless and PAR a thing nobody ever sees.
  */
 function parFor(route: number): number {

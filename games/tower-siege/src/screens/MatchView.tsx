@@ -141,7 +141,7 @@ export default function MatchView({
   /**
    * Every keep, simulated.
    *
-   * Rebuilt only when the *match* changes — a new seed or new rules. Listing
+   * Rebuilt only when the *match* changes , a new seed or new rules. Listing
    * anything the lobby can touch here would reset a siege in progress the
    * moment somebody's name changed.
    */
@@ -459,7 +459,7 @@ export default function MatchView({
       const engines = enginesRef.current;
       if (engines.length === 0) return;
 
-      // Every keep advances, not only the one being watched — that is what
+      // Every keep advances, not only the one being watched , that is what
       // makes the spectator view live rather than a snapshot, and what lets a
       // bot lose a match while you are looking the other way.
       for (const e of engines) e.update(dt);
@@ -627,7 +627,7 @@ export default function MatchView({
         ctx.globalAlpha = 1;
       }
 
-      // Health bar, only once it has actually been hurt — a full bar over
+      // Health bar, only once it has actually been hurt , a full bar over
       // every walker turns the board into a bar chart.
       if (e.hp < e.maxHp) {
         const w = meta.size * 2.1;
@@ -1051,7 +1051,7 @@ export default function MatchView({
 
       {spectating && (
         <div className="z-30 shrink-0 border-t border-white/10 bg-slate-950/80 p-3 text-center text-[11px] font-bold text-white/50 backdrop-blur-md">
-          Watching {engine?.name ?? 'another keep'} — your own towers are on your own board.
+          Watching {engine?.name ?? 'another keep'} , your own towers are on your own board.
         </div>
       )}
 

@@ -17,7 +17,7 @@ const syncKey = (uid: string) => `pb_profile_sync_v1_${uid}`;
  *
  * The cached fingerprint includes name and photo, so a Google profile change
  * still triggers a resync. Worst case the cache is wrong and the profile is a
- * day stale — cheap, and self-correcting.
+ * day stale , cheap, and self-correcting.
  */
 function isSyncFresh(uid: string, fingerprint: string): boolean {
   try {
@@ -34,14 +34,14 @@ function markSynced(uid: string, fingerprint: string) {
   try {
     localStorage.setItem(syncKey(uid), JSON.stringify({ at: Date.now(), fp: fingerprint }));
   } catch {
-    /* private mode — we just resync next load */
+    /* private mode , we just resync next load */
   }
 }
 
 /**
  * Reconciles the two documents backing a user:
- *   users/{uid}    private — email, stats. Readable only by its owner.
- *   profiles/{uid} public  — name, photo, friend code. Readable by everyone.
+ *   users/{uid}    private , email, stats. Readable only by its owner.
+ *   profiles/{uid} public  , name, photo, friend code. Readable by everyone.
  *
  * They are split because `allow read` in Firestore also grants `list`: with the
  * email sitting on a broadly-readable document, one query would have returned

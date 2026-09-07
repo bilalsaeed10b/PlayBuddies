@@ -542,7 +542,7 @@ export class BattleEngine {
     const other = (1 - this.ships[from].team) as Team;
     const theirs = this.afloat(other);
     if (theirs.length > 0) {
-      // Whoever on that side has waited longest — the first one past the last
+      // Whoever on that side has waited longest , the first one past the last
       // of theirs to fire, wrapping around.
       const after = theirs.find((i) => i > (this.lastFired[other] ?? -1));
       return after ?? theirs[0];
@@ -720,7 +720,7 @@ export class BattleEngine {
     // Cards off is a real mode, not a hidden hand: everyone fires the plain
     // round shot every turn, so the battle is aim and range and nothing else.
     // Skipping the deal leaves this turn's generator untouched, which costs
-    // nothing — drift rolls from its own stream (see resolve), and both
+    // nothing , drift rolls from its own stream (see resolve), and both
     // clients are on the same rule either way.
     this.hand = this.cfg.rules.cards ? dealHand(rnd) : ['round'];
     this.selected = this.hand[0];
@@ -1170,7 +1170,7 @@ export class BattleEngine {
    * back, even mid-match.
    *
    * Deliberately does not check whose turn it is. A bot may already be
-   * mid-think for this ship when the real captain returns — the check inside
+   * mid-think for this ship when the real captain returns , the check inside
    * `update()`'s bot-decision branch is against `ship.control`, so flipping
    * it here is enough to stop the bot from acting again; there is nothing
    * further to unwind because nothing has been decided yet, only queued.
@@ -1454,7 +1454,7 @@ export class BattleEngine {
     }
 
     if (kind === 'rock' && struck) {
-      // A solid mountain still takes the shot and still stops the ball — it
+      // A solid mountain still takes the shot and still stops the ball , it
       // just never wears through, so `drawRock` keeps drawing it whole.
       if (this.cfg.rules.mountain !== 'solid') struck.hp -= 1;
       // The mountain sits at row 0 always, whichever ship fired at it.
@@ -1643,7 +1643,7 @@ export class BattleEngine {
     this.cfg.onHp?.(this.hp);
 
     // A side is beaten when every one of its hulls is under, not when any one
-    // of them is — which is the whole difference between a duel and a fleet.
+    // of them is , which is the whole difference between a duel and a fleet.
     if (this.afloat(0).length === 0 || this.afloat(1).length === 0) {
       this.finish();
       return;
@@ -1915,7 +1915,7 @@ export class BattleEngine {
 
     if (landed === 0) {
       this.shout(t.grazed ? 'close!' : 'miss', t.grazed ? 'graze' : 'miss');
-      this.logLine(t.grazed ? `${who} — near miss` : `${who} missed`, t.grazed ? 'graze' : 'miss');
+      this.logLine(t.grazed ? `${who} , near miss` : `${who} missed`, t.grazed ? 'graze' : 'miss');
       return;
     }
 
@@ -1936,7 +1936,7 @@ export class BattleEngine {
     // Said after the hit, not instead of it, so the shout stays about the
     // shot and the streak is the footnote it should be.
     const run = this.streak[t.shooter] ?? 0;
-    if (run >= 3) this.logLine(`${who} — ${run} in a row`, 'big');
+    if (run >= 3) this.logLine(`${who} , ${run} in a row`, 'big');
   }
 
   /** One shot, into this battle's running log. Local hulls only -- see `record`. */

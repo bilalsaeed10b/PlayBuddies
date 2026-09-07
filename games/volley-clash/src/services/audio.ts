@@ -2,7 +2,7 @@
  * Every sound in the game, synthesised.
  *
  * Not a single audio file ships with this bundle. A volleyball needs four
- * noises — a bump, a spike, a whistle and a fanfare — and four oscillators
+ * noises , a bump, a spike, a whistle and a fanfare , and four oscillators
  * weigh nothing next to four MP3s, load instantly, and never 404.
  *
  * The context is created lazily because browsers refuse to start one before a
@@ -75,7 +75,7 @@ class AudioService {
    * Contact. `power` is the charge that went into it, 0–1.
    *
    * A soft bump and a full spike are the same synth with a different pitch and
-   * a different wave — which is exactly how they sound in real life, and it
+   * a different wave , which is exactly how they sound in real life, and it
    * means a player can hear how hard the other side hit it without looking.
    */
   playHit(power: number) {

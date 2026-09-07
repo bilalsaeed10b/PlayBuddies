@@ -24,7 +24,7 @@ export default function FriendsSidebar() {
   const user = useAuthStore((s) => s.user);
   const pathname = usePathname();
   // The lobby has its own fixed bottom-right button (mobile only, for the
-  // players/chat panel) in this same corner — nudge ours above it there so
+  // players/chat panel) in this same corner , nudge ours above it there so
   // the two don't stack on top of each other.
   const isLobby = pathname?.startsWith("/lobby");
   // A game actually on screen, not just a lobby somebody hasn't started yet.
@@ -49,7 +49,7 @@ export default function FriendsSidebar() {
   const [sentTo, setSentTo] = useState<string | null>(null);
   const [notice, setNotice] = useState<string>("");
 
-  // The friends-list listener only runs while the panel is open — it used to
+  // The friends-list listener only runs while the panel is open , it used to
   // stay open on every page for every signed-in user, including during
   // gameplay. Requests are different: a badge that only updates once the
   // panel is already open can never announce that a request just arrived, so
