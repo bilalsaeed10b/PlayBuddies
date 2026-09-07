@@ -515,9 +515,11 @@ function LobbyContent() {
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
     // endGame is read through endGameRef (assigned below, after it's defined)
-    // rather than listed here , it isn't memoized, and this listener has no
+    // rather than listed here — it isn't memoized, and this listener has no
     // reason to be torn down and rebuilt on every render just because that
     // function identity changed.
+    // router is intentionally omitted — Next.js router identity is stable.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, sendWallet, clearStats]);
 
   const copyLink = () => {
@@ -1062,7 +1064,6 @@ function LobbyContent() {
                   <AnimatePresence initial={false}>
                     {players.map((player) => {
                       const isSelf = player.uid === user?.uid;
-                      const isFriend = friendUidSet.has(player.uid);
                       return (
                         <motion.div
                           key={player.uid}
@@ -1383,6 +1384,7 @@ function Avatar({ uid, src, name }: { uid: string; src?: string; name: string })
   const [failed, setFailed] = useState(false);
   const fallback = `https://api.dicebear.com/7.x/avataaars/svg?seed=${uid}`;
   return (
+    // eslint-disable-next-line @next/next/no-img-element
     <img
       src={!src || failed ? fallback : src}
       onError={() => setFailed(true)}
