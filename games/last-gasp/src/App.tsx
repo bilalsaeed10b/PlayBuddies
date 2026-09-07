@@ -322,10 +322,19 @@ export default function App() {
       .catch((e) => console.error('Could not reset the match flag', e));
   }, [online, isHost, handoff.room, rollSession]);
 
+  const matchConfig = useMemo(
+    () => (online && uid && !offlineMatch ? onlineConfig() : offlineConfig()),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [session.seed, offlineMatch, uid],
+  );
+
   // -- into the game ----------------------------------------------------------
 
   if (view === 'game') {
-    const config = online && uid && !offlineMatch ? onlineConfig() : offlineConfig();
+    // Frozen to match identity, not recomputed live: MatchView reads config
+    // fields like seat team every frame, and a live roster reorder mid-round
+    // (reconnect, late write) would otherwise flip them under a running game.
+    const config = matchConfig;
     return (
       <>
         <MatchView
