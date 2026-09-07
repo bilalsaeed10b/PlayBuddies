@@ -303,10 +303,7 @@ export class BattleEngine {
 
   /** Time left in the acid rain sequence. 0 if inactive. Max 6.0. */
   acidRainTimer = 0;
-  acidRainShooter = 0;
-  torpedoTimer = 0;
-  torpedoShooter = -1;
-  torpedoTarget = -1;
+  acidRainShooter = -1;
 
   /**
    * This turn's crosswind, in world px/s². Zero unless the storm rule is on.
@@ -1289,9 +1286,14 @@ export class BattleEngine {
       const prevTimer = this.acidRainTimer;
       this.acidRainTimer = Math.max(0, this.acidRainTimer - dt);
 
-      // 6.0: Start of sequence, set sky to night mode
+      // 6.0: Start of sequence, spawn clouds.
       if (prevTimer === 6.0) {
-        this.bg = null; // force sky rebuild
+        const ship = this.ships[this.acidRainShooter];
+        for (let i = 0; i < this.ships.length; i++) {
+          if (this.ships[i].team !== ship.team && this.ships[i].hp > 0) {
+            this.spawnAcidClouds(this.ships[i].x, this.shipY(i));
+          }
+        }
       }
 
       // 4.5: Rain starts, deal damage.
@@ -1326,69 +1328,6 @@ export class BattleEngine {
         for (let i = 0; i < this.ships.length; i++) {
           if (this.ships[i].team !== ship.team && this.ships[i].hp > 0) {
             this.spawnAcidRainDrop(this.ships[i].x, this.shipY(i), dt);
-          }
-        }
-      }
-      
-      // End of sequence, restore sky
-      if (prevTimer > 0 && this.acidRainTimer === 0) {
-        this.bg = null;
-      }
-    }
-
-    if (this.torpedoTimer > 0) {
-      const prevTimer = this.torpedoTimer;
-      this.torpedoTimer = Math.max(0, this.torpedoTimer - dt);
-      
-      const ship = this.ships[this.torpedoShooter];
-      const tgt = this.ships[this.torpedoTarget];
-      
-      if (ship && tgt) {
-        const startX = ship.x;
-        const startY = this.shipY(this.torpedoShooter);
-        const endX = tgt.x;
-        const endY = this.shipY(this.torpedoTarget);
-        
-        const p1 = 1 - (this.torpedoTimer / 1.0);
-        const curX = startX + (endX - startX) * p1;
-        const curY = startY + (endY - startY) * p1;
-        
-        const nx = (endX - startX) / Math.max(1, Math.hypot(endX - startX, endY - startY));
-        const ny = (endY - startY) / Math.max(1, Math.hypot(endX - startX, endY - startY));
-        
-        this.burst(3, 3, curX, curY, curY + 20, (p) => {
-          p.vx = ny * 80 * (Math.random() - 0.5) * 2;
-          p.vy = -30 - Math.random() * 60;
-          p.max = 0.35 + Math.random() * 0.25;
-          p.life = p.max;
-          p.size = 10 + Math.random() * 14;
-          p.grow = 1.2;
-          p.color = '#e2f4ff';
-        });
-        this.burst(1, 0, curX, curY, curY, (p) => {
-          p.vx = -nx * 100 + (Math.random() - 0.5) * 60;
-          p.vy = -ny * 100 + (Math.random() - 0.5) * 60;
-          p.max = 0.2 + Math.random() * 0.2;
-          p.life = p.max;
-          p.size = 20 + Math.random() * 30;
-          p.grow = 0.5;
-          p.color = '#f97316';
-        });
-        
-        if (prevTimer > 0 && this.torpedoTimer === 0) {
-          const prevTally = this.tally;
-          this.tally = {
-            shooter: this.torpedoShooter, balls: 0, card: 'round',
-            hulls: 0, rigs: 0, damage: 0, sunk: [], burned: false, pierced: false, grazed: false,
-          };
-          this.damage(this.torpedoTarget, 25, tgt.x < ship.x ? ship.x - 1 : ship.x + 1);
-          this.shout('TORPEDO!', 'big');
-          this.logLine(`${this.shipName(this.torpedoShooter)} torpedo → ${this.shipName(this.torpedoTarget)} −25`, 'big');
-          this.tally = prevTally;
-          this.torpedoInFlight = false;
-          this.cfg.onHp?.(this.hp);
-          if (this.afloat(0).length === 0 || this.afloat(1).length === 0) {
-            this.finish();
           }
         }
       }
@@ -1725,17 +1664,10 @@ export class BattleEngine {
     if (mode === 'torpedo' && target !== undefined) {
       const tgt = this.ships[target];
       if (tgt && tgt.hp > 0 && tgt.team !== ship.team) {
-        this.torpedoTimer = 1.0;
-        this.torpedoShooter = shooter;
-        this.torpedoTarget = target;
-        
-        this.phase = 'impact';
-        this.phaseTimer = 1.5;
-        this.skipping = false;
-        this.lastShot = null;
-        this.tally = prevTally;
-        this.cfg.onPhase?.(this.phase);
-        return;
+        this.spawnTorpedoTrail(ship.x, this.shipY(shooter), tgt.x, this.shipY(target));
+        this.damage(target, 25, tgt.x < ship.x ? ship.x - 1 : ship.x + 1);
+        this.shout('TORPEDO!', 'big');
+        this.logLine(`${this.shipName(shooter)} torpedo → ${this.shipName(target)} −25`, 'big');
       }
     } else if (mode === 'acidRain') {
       this.acidRainTimer = 6.0;
@@ -2580,19 +2512,11 @@ export class BattleEngine {
       // `bgH` is belt and braces; `resize` above is what actually clears it.
       const horizon = clamp((this.offY + this.arena.seaY * this.scale) / canvas.height, 0.04, 0.96);
       const bg = ctx.createLinearGradient(0, 0, 0, canvas.height);
-      if (this.acidRainTimer > 0) {
-        bg.addColorStop(0, '#020617');
-        bg.addColorStop(Math.max(0, horizon - 0.08), '#0f172a');
-        bg.addColorStop(horizon, '#1e293b');
-        bg.addColorStop(Math.min(1, horizon + 0.001), '#0f172a');
-        bg.addColorStop(1, '#020617');
-      } else {
-        bg.addColorStop(0, '#071b33');
-        bg.addColorStop(Math.max(0, horizon - 0.08), '#14507f');
-        bg.addColorStop(horizon, '#2f8fb8');
-        bg.addColorStop(Math.min(1, horizon + 0.001), '#1a6a96');
-        bg.addColorStop(1, '#062744');
-      }
+      bg.addColorStop(0, '#071b33');
+      bg.addColorStop(Math.max(0, horizon - 0.08), '#14507f');
+      bg.addColorStop(horizon, '#2f8fb8');
+      bg.addColorStop(Math.min(1, horizon + 0.001), '#1a6a96');
+      bg.addColorStop(1, '#062744');
       this.bg = bg;
       this.bgH = canvas.height;
     }
@@ -2614,17 +2538,8 @@ export class BattleEngine {
       else darkness = this.acidRainTimer / 1.5;
 
       if (darkness > 0) {
-        ctx.fillStyle = `rgba(0, 0, 0, ${darkness * 0.35})`;
+        ctx.fillStyle = `rgba(0, 0, 0, ${darkness * 0.55})`;
         ctx.fillRect(this.offX - 10000, this.offY - 10000, 20000, 20000);
-      }
-      
-      const topY = this.offY + 70;
-      ctx.font = '70px Arial';
-      ctx.textAlign = 'center';
-      for (let i = 0; i < 7; i++) {
-        const cx = this.offX + (this.arena.w * this.scale * (i / 6));
-        const cy = topY + Math.sin(this.clock * 2 + i) * 10;
-        ctx.fillText('☁️', cx, cy);
       }
     }
 
