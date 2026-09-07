@@ -1579,62 +1579,202 @@ export class BattleEngine {
   }
 
   /**
-   * Launch a torpedo special attack.
+   * Fire a special attack, consuming the current player's turn.
    *
-   * Two modes:
-   *   'focused'  — 25 damage to one enemy target (ship index `target`).
-   *   'spread'   — 13 damage to every living enemy hull.
+   * Modes:
+   *   'torpedo'   — 25 damage to one chosen enemy (animated torpedo trail).
+   *   'acidRain'  — 10 damage to every living enemy (cloud + green rain).
+   *   'heal'      — Restore 25 HP on the shooter's own hull (green sparkles).
    *
-   * Resets the launcher's special-hit counter to 0 and marks that a torpedo
-   * is now in flight (no second torpedo until the turn advances).
+   * Always advances the turn at the end, so the player cannot fire AND
+   * launch a special in the same turn.
    */
-  torpedo(mode: 'focused' | 'spread', shooter: number, target?: number) {
+  special(mode: 'torpedo' | 'acidRain' | 'heal', shooter: number, target?: number) {
     if ((this.specialHits[shooter] ?? 0) < 3) return;
     if (this.torpedoInFlight) return;
+    if (this.phase !== 'aim' && this.phase !== 'deal') return;
     const ship = this.ships[shooter];
     if (!ship || ship.hp <= 0) return;
 
     this.specialHits[shooter] = 0;
     this.torpedoInFlight = true;
 
-    // Temporarily open a tally so damage() accounting works.
+    // Temporarily open a tally so damage() accounting works correctly.
     const prevTally = this.tally;
     this.tally = {
       shooter, balls: 0, card: 'round',
       hulls: 0, rigs: 0, damage: 0, sunk: [], burned: false, pierced: false, grazed: false,
     };
 
-    if (mode === 'focused' && target !== undefined) {
+    if (mode === 'torpedo' && target !== undefined) {
       const tgt = this.ships[target];
       if (tgt && tgt.hp > 0 && tgt.team !== ship.team) {
+        this.spawnTorpedoTrail(ship.x, this.shipY(shooter), tgt.x, this.shipY(target));
         this.damage(target, 25, tgt.x < ship.x ? ship.x - 1 : ship.x + 1);
         this.shout('TORPEDO!', 'big');
-        this.logLine(`${this.shipName(shooter)} torpedo → ${this.shipName(target)} -25`, 'big');
+        this.logLine(`${this.shipName(shooter)} torpedo → ${this.shipName(target)} −25`, 'big');
       }
-    } else if (mode === 'spread') {
+    } else if (mode === 'acidRain') {
       let hit = false;
       for (let i = 0; i < this.ships.length; i++) {
         if (this.ships[i].team !== ship.team && this.ships[i].hp > 0) {
-          this.damage(i, 13, this.ships[i].x < ship.x ? ship.x - 1 : ship.x + 1);
+          this.spawnAcidRain(this.ships[i].x, this.shipY(i));
+          this.damage(i, 10, this.ships[i].x < ship.x ? ship.x - 1 : ship.x + 1);
           hit = true;
         }
       }
       if (hit) {
-        this.shout('BROADSIDE TORPEDO!', 'kill');
-        this.logLine(`${this.shipName(shooter)} torpedo spread -13 all`, 'kill');
+        this.shout('ACID RAIN!', 'kill');
+        this.logLine(`${this.shipName(shooter)} acid rain −10 all`, 'kill');
       }
+    } else if (mode === 'heal') {
+      const before = ship.hp;
+      ship.hp = Math.min(ship.maxHp, ship.hp + 25);
+      this.spawnHealEffect(ship.x, this.shipY(shooter));
+      this.shout('REPAIRED!', 'hit');
+      this.logLine(`${this.shipName(shooter)} repaired +${Math.round(ship.hp - before)}`, 'hit');
+      this.cfg.onHp?.(this.hp);
     }
 
-    // Resolve the tally.
-    this.callShot();
     this.tally = prevTally;
     this.torpedoInFlight = false;
-    this.cfg.onHp?.(this.hp);
 
-    // Check for game over.
+    // Check for game over before advancing.
     if (this.afloat(0).length === 0 || this.afloat(1).length === 0) {
       this.finish();
+      return;
     }
+
+    // Consume the turn — treat it exactly like a shot that just landed.
+    this.lastShot = null;
+    this.skipping = false;
+    this.phase = 'impact';
+    this.phaseTimer = BALANCE.IMPACT_HOLD * 0.7;
+    this.cfg.onPhase?.(this.phase);
+  }
+
+  // -- special effect helpers -------------------------------------------------
+
+  /**
+   * Torpedo trail: a fast horizontal burst of debris + sparks from shooter to target.
+   * Purely cosmetic; no collision or physics.
+   */
+  private spawnTorpedoTrail(x0: number, y0: number, x1: number, y1: number) {
+    const dist = Math.hypot(x1 - x0, y1 - y0);
+    const nx = (x1 - x0) / Math.max(1, dist);
+    const ny = (y1 - y0) / Math.max(1, dist);
+    const steps = Math.min(12, Math.round(dist / 120));
+    for (let i = 0; i <= steps; i++) {
+      const t = i / Math.max(1, steps);
+      const sx = x0 + (x1 - x0) * t;
+      const sy = y0 + (y1 - y0) * t;
+      // Wake bubbles along the path — kind 3 (splash) so they drown at sea level.
+      this.burst(3, 3, sx, sy, sy + 20, (p) => {
+        p.vx = ny * 80 * (Math.random() - 0.5) * 2;
+        p.vy = -30 - Math.random() * 60;
+        p.max = 0.35 + Math.random() * 0.25;
+        p.life = p.max;
+        p.size = 10 + Math.random() * 14;
+        p.grow = 1.2;
+        p.color = '#e2f4ff';
+      });
+      // Orange fire streaks — kind 0 (fire).
+      this.burst(2, 0, sx, sy, sy, (p) => {
+        p.vx = nx * 200 + (Math.random() - 0.5) * 60;
+        p.vy = ny * 200 + (Math.random() - 0.5) * 60;
+        p.max = 0.2 + Math.random() * 0.2;
+        p.life = p.max;
+        p.size = 22 + Math.random() * 22;
+        p.grow = 1.5;
+      });
+    }
+    // Big explosion at the target.
+    this.burst(10, 0, x1, y1, y1, (p) => {
+      const a = Math.random() * Math.PI * 2;
+      const spd = 80 + Math.random() * 200;
+      p.vx = Math.cos(a) * spd;
+      p.vy = Math.sin(a) * spd - 50;
+      p.max = 0.4 + Math.random() * 0.3;
+      p.life = p.max;
+      p.size = 30 + Math.random() * 40;
+      p.grow = 2.0;
+    });
+    this.pushRing({ x: x1, y: y1, r: 8, max: 80, life: 1, width: 8 });
+    this.shake = Math.min(34, this.shake + 14);
+    this.cfg.onSfx?.('splash', 0.8);
+  }
+
+  /**
+   * Acid rain: green rain drops falling from the top of the screen onto the target.
+   * Spawned as kind 4 (splinter) with a green colour so they render distinctly.
+   */
+  private spawnAcidRain(targetX: number, targetY: number) {
+    // Cloud puff high above the target.
+    for (let c = 0; c < 5; c++) {
+      const cx = targetX + (Math.random() - 0.5) * 160;
+      const cy = 60 + Math.random() * 80;
+      this.burst(4, 1, cx, cy, cy, (p) => {
+        p.vx = (Math.random() - 0.5) * 40;
+        p.vy = -10 - Math.random() * 20;
+        p.max = 1.8 + Math.random() * 1.0;
+        p.life = p.max;
+        p.size = 60 + Math.random() * 50;
+        p.grow = 2.0;
+        // Tint towards sickly green by painting them with a greenish color.
+        p.color = `rgba(80,200,80,0.55)`;
+      });
+    }
+    // Rain drops — kind 4 reused as falling pixels, coloured acid green.
+    const drops = Math.round(20 * this.budget);
+    for (let d = 0; d < drops; d++) {
+      const dx = targetX + (Math.random() - 0.5) * 220;
+      const p = this.take();
+      p.kind = 4;
+      p.x = dx;
+      p.y = 80 + Math.random() * 120;
+      p.vx = (Math.random() - 0.5) * 20;
+      p.vy = 400 + Math.random() * 300;
+      p.max = 0.6 + Math.random() * 0.4;
+      p.life = p.max;
+      p.size = 18 + Math.random() * 16;
+      p.grow = 0.7;
+      p.rot = 0;
+      p.spin = 0;
+      p.color = `hsl(${110 + Math.random() * 30}, 80%, 55%)`;
+      p.sink = targetY + 40;
+    }
+    // Splash on hit.
+    this.burst(6, 3, targetX, targetY, targetY + 10, (p) => {
+      p.vx = (Math.random() - 0.5) * 180;
+      p.vy = -120 - Math.random() * 160;
+      p.max = 0.5 + Math.random() * 0.4;
+      p.life = p.max;
+      p.size = 14 + Math.random() * 18;
+      p.grow = 1.3;
+      p.color = '#6ee7b7';
+    });
+    this.shake = Math.min(34, this.shake + 6);
+  }
+
+  /**
+   * Heal effect: a burst of rising green sparks around the healed hull.
+   */
+  private spawnHealEffect(x: number, y: number) {
+    // Green sparkles rising upward.
+    this.burst(18, 2, x, y, y - 300, (p) => {
+      const a = -Math.PI / 2 + (Math.random() - 0.5) * Math.PI * 1.4;
+      const spd = 80 + Math.random() * 200;
+      p.vx = Math.cos(a) * spd;
+      p.vy = Math.sin(a) * spd;
+      p.max = 0.7 + Math.random() * 0.6;
+      p.life = p.max;
+      p.size = 12 + Math.random() * 14;
+      p.grow = 0.5;
+      p.color = `hsl(${130 + Math.random() * 30}, 80%, 60%)`;
+    });
+    // Soft green glow ring.
+    this.pushRing({ x, y: y - 40, r: 10, max: 120, life: 1, width: 6 });
+    this.spawnDamageText(x, y - 70, 25, '#4ade80');
   }
 
   /**
@@ -2622,8 +2762,18 @@ export class BattleEngine {
 
       const sprite = p.kind === 0 ? fx.fire : p.kind === 1 ? fx.smoke : p.kind === 2 ? fx.spark : fx.splash;
       if (!sprite) continue;
-      ctx.globalAlpha = p.kind === 1 ? Math.min(0.5, t * 0.7) : Math.min(1, t * 1.5);
+      const alpha = p.kind === 1 ? Math.min(0.5, t * 0.7) : Math.min(1, t * 1.5);
+      ctx.globalAlpha = alpha;
       ctx.drawImage(sprite, p.x - size / 2, p.y - size / 2, size, size);
+
+      // Tint smoke particles that have a custom color (e.g. acid rain clouds).
+      if (p.kind === 1 && p.color !== '#fff') {
+        ctx.globalCompositeOperation = 'source-atop';
+        ctx.globalAlpha = alpha * 0.55;
+        ctx.fillStyle = p.color;
+        ctx.fillRect(p.x - size / 2, p.y - size / 2, size, size);
+        ctx.globalCompositeOperation = 'source-over';
+      }
     }
     ctx.globalAlpha = 1;
   }

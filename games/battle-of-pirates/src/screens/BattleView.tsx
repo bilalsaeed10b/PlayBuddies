@@ -729,14 +729,14 @@ export default function BattleView({
     setRematch((n) => n + 1);
   }, []);
 
-  /** Fire torpedo from the local ship currently at the wheel. */
-  const fireTorpedo = useCallback((mode: 'focused' | 'spread', target?: number) => {
+  /** Fire a special attack from the local ship that has the bar charged. */
+  const fireSpecial = useCallback((mode: 'torpedo' | 'acidRain' | 'heal', target?: number) => {
     const engine = engineRef.current;
     if (!engine) return;
     // Find which local ship has the bar full.
     const shooter = config.localShips.find((i) => (engine.specialHits[i] ?? 0) >= 3) ?? -1;
     if (shooter < 0) return;
-    engine.torpedo(mode, shooter, target);
+    engine.special(mode, shooter, target);
     setTorpedoPicker(false);
     setTorpedoTarget(null);
   }, [config.localShips]);
@@ -957,50 +957,61 @@ export default function BattleView({
         </div>
       )}
 
-      {/* -- torpedo picker modal -- */}
+      {/* -- special attack picker modal -- */}
       {torpedoPicker && (
         <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/60 backdrop-blur-sm">
           <div className="w-full max-w-xs rounded-2xl border border-amber-400/30 bg-slate-900/95 p-5 shadow-2xl">
             <div className="mb-4 flex items-center gap-2">
               <Zap className="h-5 w-5 text-amber-300" />
-              <h3 className="text-base font-black text-amber-300">Torpedo Strike</h3>
+              <h3 className="text-base font-black text-amber-300">Special Attack</h3>
+              <span className="ml-auto text-[10px] font-bold text-white/30 uppercase tracking-wider">Uses your turn</span>
             </div>
 
-            {torpedoTarget === null ? (
-              <>
-                <p className="mb-4 text-xs text-white/60">Choose your attack mode:</p>
-                <div className="flex flex-col gap-3">
-                  {/* Focused — pick a target */}
-                  {aliveEnemies.length > 0 && (
-                    <div>
-                      <p className="mb-2 text-[11px] font-bold uppercase tracking-wider text-white/40">Focused — pick target</p>
-                      <div className="flex flex-col gap-1.5">
-                        {aliveEnemies.map(({ seat, i }) => (
-                          <button
-                            key={i}
-                            onClick={() => fireTorpedo('focused', i)}
-                            className="flex items-center justify-between rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-left text-sm font-bold text-amber-200 transition-all active:scale-95 hover:bg-amber-500/20"
-                          >
-                            <span>{seat.name}</span>
-                            <span className="text-xs text-amber-400 font-black">−25 HP</span>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  {/* Spread */}
-                  <div className="mt-1 border-t border-white/10 pt-3">
-                    <button
-                      onClick={() => fireTorpedo('spread')}
-                      className="w-full rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2.5 text-sm font-black text-red-300 transition-all active:scale-95 hover:bg-red-500/20"
-                    >
-                      <span className="block">Broadside Spread</span>
-                      <span className="block text-[11px] font-bold text-red-400/70">−13 HP to all enemies</span>
-                    </button>
+            <p className="mb-3 text-xs text-white/50">Choose an ability:</p>
+            <div className="flex flex-col gap-3">
+
+              {/* Torpedo — pick a target */}
+              {aliveEnemies.length > 0 && (
+                <div>
+                  <p className="mb-1.5 text-[11px] font-bold uppercase tracking-wider text-white/35">🚀 Torpedo — pick target</p>
+                  <div className="flex flex-col gap-1.5">
+                    {aliveEnemies.map(({ seat, i }) => (
+                      <button
+                        key={i}
+                        onClick={() => fireSpecial('torpedo', i)}
+                        className="flex items-center justify-between rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-left text-sm font-bold text-amber-200 transition-all active:scale-95 hover:bg-amber-500/20"
+                      >
+                        <span>{seat.name}</span>
+                        <span className="text-xs text-amber-400 font-black">−25 HP</span>
+                      </button>
+                    ))}
                   </div>
                 </div>
-              </>
-            ) : null}
+              )}
+
+              {/* Acid Rain */}
+              <div className={aliveEnemies.length > 0 ? 'border-t border-white/10 pt-3' : ''}>
+                <button
+                  onClick={() => fireSpecial('acidRain')}
+                  className="w-full rounded-xl border border-green-600/30 bg-green-600/10 px-3 py-2.5 text-sm font-black text-green-300 transition-all active:scale-95 hover:bg-green-600/20"
+                >
+                  <span className="block">☁️ Acid Rain</span>
+                  <span className="block text-[11px] font-bold text-green-400/70">−10 HP to all enemies</span>
+                </button>
+              </div>
+
+              {/* Heal */}
+              <div className="border-t border-white/10 pt-3">
+                <button
+                  onClick={() => fireSpecial('heal')}
+                  className="w-full rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2.5 text-sm font-black text-emerald-300 transition-all active:scale-95 hover:bg-emerald-500/20"
+                >
+                  <span className="block">💚 Repair Crew</span>
+                  <span className="block text-[11px] font-bold text-emerald-400/70">+25 HP to your ship</span>
+                </button>
+              </div>
+
+            </div>
 
             <button
               onClick={() => { setTorpedoPicker(false); setTorpedoTarget(null); }}
