@@ -291,6 +291,17 @@ export class BattleEngine {
   streak: number[] = [];
 
   /**
+   * Hits this hull has landed since its last torpedo was fired.
+   *
+   * Every direct hit (hull or rig) on an enemy increments this. At 3 the bar
+   * is full and the player may fire a torpedo instead of a normal shot. It
+   * resets to 0 after a torpedo is launched.
+   */
+  specialHits: number[] = [];
+  /** True while a torpedo is being resolved (so the UI doesn't offer one mid-flight). */
+  torpedoInFlight = false;
+
+  /**
    * This turn's crosswind, in world px/s². Zero unless the storm rule is on.
    *
    * Drawn from the turn's own seeded stream rather than rolled live, so the
@@ -496,6 +507,7 @@ export class BattleEngine {
     this.ships = cfg.seats.map((seat, i) => this.makeShip(seat, filled[seat.team]++, i * 2.1));
     this.lastShotHit = this.ships.map(() => null);
     this.streak = this.ships.map(() => 0);
+    this.specialHits = this.ships.map(() => 0);
     this.burnBefore = this.ships.map(() => 0);
     this.burnFrom = this.ships.map(() => -1);
 
@@ -1497,7 +1509,7 @@ export class BattleEngine {
         // hull is the one shot in the deck worth calling by name.
         if (p.through) this.tally.pierced = true;
       }
-      this.damage(struckShip, p.damage * mult, ix);
+      this.damage(struckShip, p.damage * mult, ix, p.from);
       if (p.burn > 0) {
         this.ships[struckShip].burn = p.burn + 1;
         this.burnFrom[struckShip] = p.from;
@@ -1543,7 +1555,7 @@ export class BattleEngine {
     if (closest < p.blast && this.tally) this.tally.grazed = true;
   }
 
-  private damage(i: number, amount: number, fromX: number) {
+  private damage(i: number, amount: number, fromX: number, fromShip?: number) {
     const ship = this.ships[i];
     if (ship.hp <= 0 || amount <= 0) return;
     ship.hp = Math.max(0, ship.hp - amount);
@@ -1554,12 +1566,75 @@ export class BattleEngine {
       // rather than having already been under before it was fired.
       if (ship.hp <= 0) this.tally.sunk.push(i);
     }
+    // Charge the special bar for the shooter on a direct damage.
+    if (fromShip !== undefined && fromShip >= 0) {
+      this.specialHits[fromShip] = Math.min(3, (this.specialHits[fromShip] ?? 0) + 1);
+    }
     ship.flash = Math.min(1, ship.flash + amount / 30);
     ship.lean += (fromX < ship.x ? 1 : -1) * Math.min(0.12, amount / 260);
     this.shake = Math.min(34, this.shake + amount * 0.4);
     this.cfg.onSfx?.('hull', clamp(amount / BALANCE.DIRECT, 0.2, 1));
     this.spawnDamageText(ship.x, this.shipY(i) - 60, amount);
     this.cfg.onHp?.(this.hp);
+  }
+
+  /**
+   * Launch a torpedo special attack.
+   *
+   * Two modes:
+   *   'focused'  — 25 damage to one enemy target (ship index `target`).
+   *   'spread'   — 13 damage to every living enemy hull.
+   *
+   * Resets the launcher's special-hit counter to 0 and marks that a torpedo
+   * is now in flight (no second torpedo until the turn advances).
+   */
+  torpedo(mode: 'focused' | 'spread', shooter: number, target?: number) {
+    if ((this.specialHits[shooter] ?? 0) < 3) return;
+    if (this.torpedoInFlight) return;
+    const ship = this.ships[shooter];
+    if (!ship || ship.hp <= 0) return;
+
+    this.specialHits[shooter] = 0;
+    this.torpedoInFlight = true;
+
+    // Temporarily open a tally so damage() accounting works.
+    const prevTally = this.tally;
+    this.tally = {
+      shooter, balls: 0, card: 'round',
+      hulls: 0, rigs: 0, damage: 0, sunk: [], burned: false, pierced: false, grazed: false,
+    };
+
+    if (mode === 'focused' && target !== undefined) {
+      const tgt = this.ships[target];
+      if (tgt && tgt.hp > 0 && tgt.team !== ship.team) {
+        this.damage(target, 25, tgt.x < ship.x ? ship.x - 1 : ship.x + 1);
+        this.shout('TORPEDO!', 'big');
+        this.logLine(`${this.shipName(shooter)} torpedo → ${this.shipName(target)} -25`, 'big');
+      }
+    } else if (mode === 'spread') {
+      let hit = false;
+      for (let i = 0; i < this.ships.length; i++) {
+        if (this.ships[i].team !== ship.team && this.ships[i].hp > 0) {
+          this.damage(i, 13, this.ships[i].x < ship.x ? ship.x - 1 : ship.x + 1);
+          hit = true;
+        }
+      }
+      if (hit) {
+        this.shout('BROADSIDE TORPEDO!', 'kill');
+        this.logLine(`${this.shipName(shooter)} torpedo spread -13 all`, 'kill');
+      }
+    }
+
+    // Resolve the tally.
+    this.callShot();
+    this.tally = prevTally;
+    this.torpedoInFlight = false;
+    this.cfg.onHp?.(this.hp);
+
+    // Check for game over.
+    if (this.afloat(0).length === 0 || this.afloat(1).length === 0) {
+      this.finish();
+    }
   }
 
   /**
@@ -2415,6 +2490,37 @@ export class BattleEngine {
       ctx.font = '700 13px system-ui, sans-serif';
       ctx.fillText(`on fire (${ship.burn})`, ship.x, y + h + 14);
     }
+
+    // Special attack charge bar — shown below the HP bar.
+    // Three segments; each lights up when a hit is banked.
+    const specialH = 8;
+    const specialY = y + h + (ship.burn > 0 ? 30 : 8);
+    const charges = this.specialHits[i] ?? 0;
+    const segW = (w - 4) / 3;
+    ctx.fillStyle = 'rgba(4, 16, 28, 0.55)';
+    roundRect(ctx, x - 3, specialY - 2, w + 6, specialH + 4, 5);
+    ctx.fill();
+    for (let s = 0; s < 3; s++) {
+      const filled = s < charges;
+      ctx.fillStyle = filled ? '#f59e0b' : 'rgba(255,255,255,0.1)';
+      roundRect(ctx, x + s * (segW + 2), specialY, segW, specialH, 3);
+      ctx.fill();
+      if (filled) {
+        // Inner glow on filled segments.
+        ctx.fillStyle = 'rgba(255,220,80,0.35)';
+        roundRect(ctx, x + s * (segW + 2), specialY, segW, specialH, 3);
+        ctx.fill();
+      }
+    }
+    if (charges >= 3) {
+      ctx.globalAlpha = 0.95;
+      ctx.fillStyle = '#fbbf24';
+      ctx.font = '700 11px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('⚡ READY', ship.x, specialY + specialH + 11);
+      ctx.globalAlpha = 1;
+    }
     ctx.restore();
   }
 
@@ -2535,9 +2641,12 @@ export class BattleEngine {
       // reads as part of the hull, not as something that just happened to it.
       const pop = t.life > t.max - 0.1 ? 1 + (1 - (t.max - t.life) / 0.1) * 0.4 : 1;
       ctx.globalAlpha = Math.min(1, k * 2.2);
-      ctx.font = `900 ${Math.round(t.size * pop)}px system-ui, sans-serif`;
-      ctx.lineWidth = 5;
-      ctx.strokeStyle = 'rgba(4, 16, 28, 0.75)';
+      // Bumped from the original sizes: damage numbers are the one piece of
+      // feedback that must read instantly at arm's length on a phone screen.
+      const displaySize = t.size * 1.35 * pop;
+      ctx.font = `900 ${Math.round(displaySize)}px system-ui, sans-serif`;
+      ctx.lineWidth = 7;
+      ctx.strokeStyle = 'rgba(4, 16, 28, 0.85)';
       ctx.fillStyle = t.color;
       ctx.strokeText(t.text, t.x, t.y);
       ctx.fillText(t.text, t.x, t.y);
@@ -2674,33 +2783,34 @@ export class BattleEngine {
    */
   private drawFeed(ctx: CanvasRenderingContext2D) {
     if (this.feed.length === 0) return;
-    const size = Math.round(this.arena.w * 0.0125);
-    const pad = size * 0.7;
-    const lineH = size * 2.05;
-    const right = this.arena.w - size * 1.6;
+    const size = Math.round(this.arena.w * 0.013);
+    const pad = size * 0.8;
+    const lineH = size * 2.2;
+    // Centre the feed horizontally under the call banner.
+    const cx = this.arena.w / 2;
 
     ctx.save();
-    ctx.textAlign = 'right';
+    ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.font = `800 ${size}px system-ui, sans-serif`;
 
     for (let i = 0; i < this.feed.length; i++) {
       const entry = this.feed[i];
-      // Full strength until the last second, then out. A line that starts
-      // fading the moment it appears is unreadable exactly when it matters.
+      // Full strength until the last second, then out.
       const fade = Math.min(1, entry.life / 1);
-      const y = size * 2.6 + i * lineH;
+      // Stack downward from just below the call banner area (y ≈ 210).
+      const y = 220 + i * lineH;
       if (entry.w === undefined) entry.w = ctx.measureText(entry.text).width;
       const w = entry.w;
 
-      ctx.globalAlpha = fade * 0.55;
+      ctx.globalAlpha = fade * 0.6;
       ctx.fillStyle = '#04101c';
-      roundRect(ctx, right - w - pad * 1.4, y - lineH * 0.38, w + pad * 2, lineH * 0.76, size * 0.5);
+      roundRect(ctx, cx - w / 2 - pad, y - lineH * 0.42, w + pad * 2, lineH * 0.84, size * 0.55);
       ctx.fill();
 
       ctx.globalAlpha = fade;
       ctx.fillStyle = TONE_COLOR[entry.tone];
-      ctx.fillText(entry.text, right, y);
+      ctx.fillText(entry.text, cx, y);
     }
     ctx.restore();
   }

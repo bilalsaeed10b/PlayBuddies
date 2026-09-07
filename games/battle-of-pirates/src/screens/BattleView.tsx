@@ -6,7 +6,7 @@
  * keeps the simulation testable and the transport swappable.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronLeft, ChevronRight, Loader2, Ship as ShipIcon } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Loader2, Ship as ShipIcon, Zap } from 'lucide-react';
 import AimPad, { Aim } from '../components/AimPad';
 import CardHand, { HAND_HEIGHT, HAND_HEIGHT_COMPACT } from '../components/CardHand';
 import { BattleEngine, Seat } from '../engine/BattleEngine';
@@ -172,6 +172,12 @@ export default function BattleView({
   const [portrait, setPortrait] = useState(false);
   const [rotateHint, setRotateHint] = useState(true);
   const [rematch, setRematch] = useState(0);
+  /** Torpedo charges per ship, mirrored from the engine each frame. */
+  const [specialHits, setSpecialHits] = useState<number[]>([]);
+  /** Whether the torpedo picker modal is open. */
+  const [torpedoPicker, setTorpedoPicker] = useState(false);
+  /** Focused target index chosen by the player, or null for spread mode. */
+  const [torpedoTarget, setTorpedoTarget] = useState<number | null>(null);
 
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
@@ -549,6 +555,7 @@ export default function BattleView({
       selected: '' as string,
       clock: -1,
       hand: '',
+      special: '' as string,
     };
 
     let raf = 0;
@@ -629,6 +636,12 @@ export default function BattleView({
         shown.clock = nextClock;
         setClock(nextClock);
       }
+      // Mirror torpedo charges — cheap string compare avoids extra renders.
+      const specialKey = engine.specialHits.join(',');
+      if (specialKey !== shown.special) {
+        shown.special = specialKey;
+        setSpecialHits([...engine.specialHits]);
+      }
     };
     raf = requestAnimationFrame(frame);
 
@@ -705,6 +718,7 @@ export default function BattleView({
   const playAgain = useCallback(() => {
     setOver(null);
     setNotice(null);
+    setTorpedoPicker(false);
     // A rematch is a fresh seed and a fresh toss, played under the rules the
     // battle that just finished was played under.
     setSession((current) => ({
@@ -715,18 +729,35 @@ export default function BattleView({
     setRematch((n) => n + 1);
   }, []);
 
+  /** Fire torpedo from the local ship currently at the wheel. */
+  const fireTorpedo = useCallback((mode: 'focused' | 'spread', target?: number) => {
+    const engine = engineRef.current;
+    if (!engine) return;
+    // Find which local ship has the bar full.
+    const shooter = config.localShips.find((i) => (engine.specialHits[i] ?? 0) >= 3) ?? -1;
+    if (shooter < 0) return;
+    engine.torpedo(mode, shooter, target);
+    setTorpedoPicker(false);
+    setTorpedoTarget(null);
+  }, [config.localShips]);
+
   // -- render -----------------------------------------------------------------
 
   const myTurn = localShips.has(turn) && (phase === 'aim' || phase === 'deal');
   const canAim = phase === 'aim' && myTurn && !over;
-  /** My side, for colouring the HUD , the first hull this device sails. */
+  /** My side, for colouring the HUD — the first hull this device sails. */
   const myTeam: Team = config.seats[config.localShips[0] ?? 0]?.team ?? 0;
   const turnTeam: Team = config.seats[turn]?.team ?? 0;
   const facing: 1 | -1 = turnTeam === 0 ? 1 : -1;
   const handHeight = compact ? HAND_HEIGHT_COMPACT : HAND_HEIGHT;
-  // With cards off there is only ever the plain round shot, so a one-card hand
-  // is a strip of screen showing the player a choice they do not have. The pad
-  // takes the space back instead.
+  
+  // Whether ANY local ship has its special bar full.
+  const torpedoReady = !over && myTurn && config.localShips.some((i) => (specialHits[i] ?? 0) >= 3);
+  // Enemies alive, for the target picker.
+  const aliveEnemies = config.seats
+    .map((seat, i) => ({ seat, i }))
+    .filter(({ seat, i }) => seat.team !== myTeam && (hp[i] ?? 0) > 0);
+  
   const showHand = myTurn && !over && (session?.rules.cards ?? true);
 
   // A seat handed to a bot keeps its owner's name, so this line has to read
@@ -906,6 +937,79 @@ export default function BattleView({
           compact={compact}
           onSelect={pickCard}
         />
+      )}
+
+      {/* -- torpedo special attack button -- */}
+      {torpedoReady && !torpedoPicker && (
+        <div
+          className="pointer-events-none absolute inset-x-0 z-30 flex justify-center"
+          style={{ bottom: showHand ? handHeight + 52 : 60 }}
+        >
+          <button
+            id="torpedo-btn"
+            onClick={() => setTorpedoPicker(true)}
+            className="pointer-events-auto flex items-center gap-2 rounded-2xl border border-amber-400/50 bg-amber-400/20 px-5 py-2.5 text-sm font-black text-amber-300 backdrop-blur-md transition-all active:scale-95 hover:bg-amber-400/30"
+            style={{ boxShadow: '0 0 18px rgba(251,191,36,0.35)' }}
+          >
+            <Zap className="h-4 w-4 fill-amber-300" />
+            ⚡ Special Attack
+          </button>
+        </div>
+      )}
+
+      {/* -- torpedo picker modal -- */}
+      {torpedoPicker && (
+        <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="w-full max-w-xs rounded-2xl border border-amber-400/30 bg-slate-900/95 p-5 shadow-2xl">
+            <div className="mb-4 flex items-center gap-2">
+              <Zap className="h-5 w-5 text-amber-300" />
+              <h3 className="text-base font-black text-amber-300">Torpedo Strike</h3>
+            </div>
+
+            {torpedoTarget === null ? (
+              <>
+                <p className="mb-4 text-xs text-white/60">Choose your attack mode:</p>
+                <div className="flex flex-col gap-3">
+                  {/* Focused — pick a target */}
+                  {aliveEnemies.length > 0 && (
+                    <div>
+                      <p className="mb-2 text-[11px] font-bold uppercase tracking-wider text-white/40">Focused — pick target</p>
+                      <div className="flex flex-col gap-1.5">
+                        {aliveEnemies.map(({ seat, i }) => (
+                          <button
+                            key={i}
+                            onClick={() => fireTorpedo('focused', i)}
+                            className="flex items-center justify-between rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-left text-sm font-bold text-amber-200 transition-all active:scale-95 hover:bg-amber-500/20"
+                          >
+                            <span>{seat.name}</span>
+                            <span className="text-xs text-amber-400 font-black">−25 HP</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {/* Spread */}
+                  <div className="mt-1 border-t border-white/10 pt-3">
+                    <button
+                      onClick={() => fireTorpedo('spread')}
+                      className="w-full rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2.5 text-sm font-black text-red-300 transition-all active:scale-95 hover:bg-red-500/20"
+                    >
+                      <span className="block">Broadside Spread</span>
+                      <span className="block text-[11px] font-bold text-red-400/70">−13 HP to all enemies</span>
+                    </button>
+                  </div>
+                </div>
+              </>
+            ) : null}
+
+            <button
+              onClick={() => { setTorpedoPicker(false); setTorpedoTarget(null); }}
+              className="mt-4 w-full rounded-xl border border-white/10 bg-white/5 py-2 text-xs font-bold text-white/50"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
       )}
 
       {/* -- how to play, on a device with keys --
