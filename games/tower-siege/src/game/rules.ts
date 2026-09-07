@@ -331,7 +331,16 @@ export function buildWaves(seed: number, count: number, players: number, coop: b
     let t = 0;
 
     if (boss) {
-      spawns.push({ kind: 'boss', at: 0.5, hpScale: hpScale * 0.85 });
+      // Bosses ramp in rather than landing at full strength on the first one:
+      // wave 5's Siege Beast gets the softest cut, and the cut shrinks toward
+      // the old flat 0.85 by the sixth boss (wave 30), which is where that
+      // figure was originally measured against. Without this, wave 5 asked a
+      // build that has had one clean wave to fund it to answer full armour on
+      // nearly a thousand health, which is a wall this early rather than a
+      // fight.
+      const bossN = n / 5;
+      const bossFactor = clamp(0.55 + (bossN - 1) * 0.06, 0.55, 0.85);
+      spawns.push({ kind: 'boss', at: 0.5, hpScale: hpScale * bossFactor });
       tally.set('boss', 1);
       t = 2.4;
     }

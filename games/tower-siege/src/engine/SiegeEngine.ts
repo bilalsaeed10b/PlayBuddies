@@ -563,7 +563,11 @@ export class SiegeEngine {
         if (!from || hit.has(from.id)) break;
         hit.add(from.id);
         chainPts.push({ x: from.x, y: from.y });
-        this.hurt(from, meta.levels[t.level].damage, t);
+        // The bolt loses a third of its charge at every hop, so a coil
+        // ringed by a crowd is a reason to build it and not a reason for
+        // every other tower to feel pointless.
+        const falloff = Math.pow(0.7, j);
+        this.hurt(from, meta.levels[t.level].damage * falloff, t);
         from = this.nearestUnhit(from, meta.chainRange, hit) as Enemy;
       }
       this.shots.push({
