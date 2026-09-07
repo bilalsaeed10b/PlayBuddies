@@ -310,6 +310,26 @@ export class QuoridorEngine {
     s.control = 'remote';
   }
 
+  /**
+   * This was never really a bot's seat -- the roster just hadn't landed yet
+   * the moment the board was built, so it was seated as one from the start.
+   *
+   * Different from `reclaimControl`: that one takes a pawn back off a bot
+   * that a real disconnect handed it to, and leaves its id and name alone
+   * because they were always the departed player's own. This seat's id was
+   * never a player's at all -- `bot-N`, made up on the spot -- so the wire
+   * would have no uid to route a `bye` or `hello` to it by. Both have to be
+   * corrected together, or the seat is still nobody's as far as the network
+   * is concerned even once it stops looking like a bot on screen.
+   */
+  correctSeat(seat: number, id: string, name: string) {
+    const s = this.seats[seat];
+    if (!s) return;
+    s.id = id;
+    s.name = name;
+    s.control = 'remote';
+  }
+
   // -- geometry ---------------------------------------------------------------
 
   resize(canvas: HTMLCanvasElement, cssW: number, cssH: number) {
