@@ -312,9 +312,17 @@ export default function App() {
     setView(online ? 'room' : 'menu');
     if (!online || !isHost) return;
     void import('./firebase')
-      .then(({ db, doc, updateDoc }) => updateDoc(doc(db, 'lobbies', handoff.room), { matchStarted: false }))
+      .then(({ db, doc, updateDoc, deleteField }) => {
+        const reset: any = { matchStarted: false };
+        if (lobby?.players) {
+          for (const u of Object.keys(lobby.players)) {
+            reset[`players.${u}.character`] = deleteField();
+          }
+        }
+        return updateDoc(doc(db, 'lobbies', handoff.room), reset);
+      })
       .catch((e) => console.error('Could not reset the match flag', e));
-  }, [online, isHost, handoff.room]);
+  }, [online, isHost, handoff.room, lobby?.players]);
 
   // ── in the match ───────────────────────────────────────────────────────────
   if (view === 'game') {

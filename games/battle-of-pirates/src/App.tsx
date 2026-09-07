@@ -464,9 +464,18 @@ export default function App() {
     rollSession();
     if (!online || !isHost) return;
     void import('./firebase')
-      .then(({ db, doc, updateDoc }) => updateDoc(doc(db, 'lobbies', handoff.room), { matchStarted: false }))
+      .then(({ db, doc, updateDoc, deleteField }) => {
+        const reset: any = { matchStarted: false };
+        if (lobby?.players) {
+          for (const u of Object.keys(lobby.players)) {
+            reset[`players.${u}.fishIndex`] = deleteField();
+            reset[`players.${u}.role`] = deleteField();
+          }
+        }
+        return updateDoc(doc(db, 'lobbies', handoff.room), reset);
+      })
       .catch((e) => console.error('Could not reset the match flag', e));
-  }, [online, isHost, handoff.room, rollSession]);
+  }, [online, isHost, handoff.room, rollSession, lobby?.players]);
 
   // -- into the battle --------------------------------------------------------
 
