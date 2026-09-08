@@ -470,33 +470,12 @@ export default function App() {
 
   // -- into the battle --------------------------------------------------------
 
-  /**
-   * Frozen for the whole battle, not recomputed on every render.
-   *
-   * `onlineConfig()` reads the live lobby roster and assigns `team: i % 2`
-   * from its current sorted position -- which is fine the moment a match
-   * starts, and wrong to keep doing afterward. `config` used to be a plain
-   * `const` built fresh on every render, and BattleView's own `myTeam` /
-   * `turnTeam` read `config.seats[i].team` directly every frame, not the
-   * frozen ships the battle engine actually simulates with. A reconnect, a
-   * late spectator, even an unrelated field changing on the lobby doc, was
-   * enough to re-sort that roster and flip a captain's array index -- the
-   * engine kept fighting the identical battle it started, but the HUD would
-   * occasionally announce a different captain as your teammate mid-fight.
-   * Keyed on the match's own seed rather than on `lobby`, so it only rebuilds
-   * when a genuinely new battle actually starts.
-   */
-  const battleConfig = useMemo(
-    () => (online && uid && !offlineMatch ? onlineConfig() : offlineConfig()),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [session.seed, offlineMatch, uid],
-  );
-
   if (view === 'game') {
+    const config = online && uid && !offlineMatch ? onlineConfig() : offlineConfig();
     return (
       <>
         <BattleView
-          config={battleConfig}
+          config={config}
           settings={settings}
           onOpenSettings={() => setShowSettings(true)}
           onExit={leaveBattle}

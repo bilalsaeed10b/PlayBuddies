@@ -67,16 +67,6 @@ export interface Ship {
   lean: number;
   /** Last shot this ship took, so the aim UI can open where it left off. */
   lastAim: { angle: number; power: number };
-  /**
-   * Seconds since this hull's `hp` first reached 0, or -1 while it is still
-   * afloat.
-   *
-   * Its own clock rather than one shared across the fleet: a ship that sinks
-   * in the middle of a battle the match is still deciding needs to slip
-   * under and become a wreck marker right then, not wait for a whole-fleet
-   * clock that used to only ever run once, at the very end of the match.
-   */
-  sinkAge: number;
 }
 
 export interface Projectile {
