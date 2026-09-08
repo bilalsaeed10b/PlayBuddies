@@ -171,9 +171,15 @@ export default function App() {
    * arrive on the wire.
    */
   const [rules, setRules] = useState<MatchRules>(() => {
-    // Key bumped to v3 to reset the mountain default to "breakable" for
-    // returning players who had an old setting stored.
-    const saved = localStorage.getItem('pirates_rules_v3');
+    // Key bumped once, deliberately. Aim arc is meant to be on for a fresh
+    // player and only off if someone actually chose that -- but a device that
+    // had ever toggled it off under the old key kept getting that `false`
+    // forever, merged straight over the true default on every load, with
+    // nothing on screen suggesting a stale preference was the reason a
+    // beginner-friendly game suddenly stopped being one. A new key means
+    // every device starts clean on the documented default again; the very
+    // next toggle here writes to `_v2` and persists exactly as before.
+    const saved = localStorage.getItem('pirates_rules_v2');
     return saved ? { ...DEFAULT_RULES, ...JSON.parse(saved) } : DEFAULT_RULES;
   });
   const [showRules, setShowRules] = useState(false);
@@ -181,7 +187,7 @@ export default function App() {
   const [stats, setStats] = useState<Stats>(readStats);
   const [showStats, setShowStats] = useState(false);
   useEffect(() => {
-    localStorage.setItem('pirates_rules_v3', JSON.stringify(rules));
+    localStorage.setItem('pirates_rules_v2', JSON.stringify(rules));
   }, [rules]);
 
   // The coin balance is shared with the rest of PlayBuddies on purpose. Coins
@@ -458,18 +464,9 @@ export default function App() {
     rollSession();
     if (!online || !isHost) return;
     void import('./firebase')
-      .then(({ db, doc, updateDoc, deleteField }) => {
-        const reset: any = { matchStarted: false };
-        if (lobby?.players) {
-          for (const u of Object.keys(lobby.players)) {
-            reset[`players.${u}.fishIndex`] = deleteField();
-            reset[`players.${u}.role`] = deleteField();
-          }
-        }
-        return updateDoc(doc(db, 'lobbies', handoff.room), reset);
-      })
+      .then(({ db, doc, updateDoc }) => updateDoc(doc(db, 'lobbies', handoff.room), { matchStarted: false }))
       .catch((e) => console.error('Could not reset the match flag', e));
-  }, [online, isHost, handoff.room, rollSession, lobby?.players]);
+  }, [online, isHost, handoff.room, rollSession]);
 
   // -- into the battle --------------------------------------------------------
 
@@ -486,18 +483,13 @@ export default function App() {
    * enough to re-sort that roster and flip a captain's array index -- the
    * engine kept fighting the identical battle it started, but the HUD would
    * occasionally announce a different captain as your teammate mid-fight.
-   *
-   * Keyed on the match's own seed AND `matchStarted`, so the config is
-   * recomputed at the moment the host fires the go-signal -- when every
-   * client's `people` array is fully populated. Once `matchStarted` is true
-   * it stays true for the entire battle, so this only rebuilds once per
-   * match (when the snapshot carries the start signal) and then stays frozen
-   * until `leaveBattle` resets `matchStarted` to false.
+   * Keyed on the match's own seed rather than on `lobby`, so it only rebuilds
+   * when a genuinely new battle actually starts.
    */
   const battleConfig = useMemo(
     () => (online && uid && !offlineMatch ? onlineConfig() : offlineConfig()),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [session.seed, offlineMatch, uid, lobby?.matchStarted],
+    [session.seed, offlineMatch, uid],
   );
 
   if (view === 'game') {
@@ -1490,21 +1482,7 @@ function RoomScreen({
    * neither of them readable; a tab costs one row.
    */
   const shipGridPanel = (extra: string) => (
-    <div className={`panel relative flex min-h-0 flex-col rounded-[2rem] p-3 sm:p-6 ${extra}`}>
-      {!iAmReady && (
-        <svg
-          className="pointer-events-none absolute -left-4 -top-12 z-50 h-28 w-28 animate-bounce text-white drop-shadow-[0_0_15px_rgba(255,255,255,0.6)] sm:-left-12 sm:-top-16 sm:h-40 sm:w-40"
-          viewBox="0 0 100 100"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="8"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          <path d="M 15 20 Q 50 25 75 70" />
-          <path d="M 45 70 L 75 70 L 65 40" />
-        </svg>
-      )}
+    <div className={`panel flex min-h-0 flex-col rounded-[2rem] p-3 sm:p-6 ${extra}`}>
       <div className="mb-3 flex shrink-0 gap-1 rounded-xl bg-black/30 p-1">
         {(['ship', 'hull'] as const).map((t) => (
           <button
@@ -1606,6 +1584,28 @@ function RoomScreen({
   return (
     <div className="mx-auto flex h-full w-full max-w-6xl flex-col overflow-y-auto overscroll-contain gap-2 p-2.5 sm:gap-4 sm:p-6">
       {header}
+
+      {/* Loud on purpose, and the one thing this whole screen fights for
+          height on that skips `short:` -- see `sideBySide` above for what
+          happens instead when there truly is none to spare. "Rules" further
+          down among the CTA buttons read as maintenance, not as the wind and
+          the mountain and the reload that decide most battles. */}
+      <button
+        onClick={onRules}
+        className="relative flex shrink-0 items-center gap-3 overflow-hidden rounded-2xl border-2 border-amber-400/60 bg-amber-400/10 px-4 py-3 text-left transition-transform active:scale-[0.99] short:hidden"
+      >
+        <span className="absolute -right-6 -top-6 h-16 w-16 animate-pulse rounded-full bg-amber-400/20" aria-hidden />
+        <ScrollText className="h-6 w-6 shrink-0 text-amber-300" />
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-black uppercase tracking-wide text-amber-200">
+            {isHost ? 'New here? Read the rules' : 'How wind and cards work'}
+          </p>
+          <p className="text-[11px] font-bold text-amber-300/70">Worth 30 seconds before the first shot.</p>
+        </div>
+        <span className="shrink-0 rounded-xl bg-amber-400 px-3 py-1.5 text-[11px] font-black uppercase tracking-wide text-slate-900">
+          Guide
+        </span>
+      </button>
 
       {/* On a phone the start button would otherwise sit below the fold, which
           is exactly what made it unreachable in the other games. Kept to two

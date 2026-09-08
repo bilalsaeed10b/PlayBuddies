@@ -6,7 +6,7 @@
  * keeps the simulation testable and the transport swappable.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronLeft, ChevronRight, Loader2, Ship as ShipIcon, Zap } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Loader2, Ship as ShipIcon } from 'lucide-react';
 import AimPad, { Aim } from '../components/AimPad';
 import CardHand, { HAND_HEIGHT, HAND_HEIGHT_COMPACT } from '../components/CardHand';
 import { BattleEngine, Seat } from '../engine/BattleEngine';
@@ -172,12 +172,6 @@ export default function BattleView({
   const [portrait, setPortrait] = useState(false);
   const [rotateHint, setRotateHint] = useState(true);
   const [rematch, setRematch] = useState(0);
-  /** Torpedo charges per ship, mirrored from the engine each frame. */
-  const [specialHits, setSpecialHits] = useState<number[]>([]);
-  /** Whether the torpedo picker modal is open. */
-  const [torpedoPicker, setTorpedoPicker] = useState(false);
-  /** Focused target index chosen by the player, or null for spread mode. */
-  const [_torpedoTarget, setTorpedoTarget] = useState<number | null>(null);
 
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
@@ -555,18 +549,15 @@ export default function BattleView({
       selected: '' as string,
       clock: -1,
       hand: '',
-      special: '' as string,
     };
 
     let raf = 0;
-    let bgTick = 0;
     let last = performance.now();
     let skip = false;
 
     const frame = (now: number) => {
-      cancelAnimationFrame(raf);
       raf = requestAnimationFrame(frame);
-      const dt = Math.min((now - last) / 1000, 2.0);
+      const dt = Math.min((now - last) / 1000, 0.25);
       last = now;
 
       governor.sample(dt);
@@ -638,23 +629,11 @@ export default function BattleView({
         shown.clock = nextClock;
         setClock(nextClock);
       }
-      // Mirror torpedo charges — cheap string compare avoids extra renders.
-      const specialKey = engine.specialHits.join(',');
-      if (specialKey !== shown.special) {
-        shown.special = specialKey;
-        setSpecialHits([...engine.specialHits]);
-      }
     };
     raf = requestAnimationFrame(frame);
 
-    bgTick = window.setInterval(() => {
-      const now = performance.now();
-      if (now - last > 50) frame(now);
-    }, 50);
-
     return () => {
       cancelAnimationFrame(raf);
-      clearInterval(bgTick);
       window.removeEventListener('resize', fit);
       window.removeEventListener('orientationchange', fit);
       engineRef.current = null;
@@ -726,7 +705,6 @@ export default function BattleView({
   const playAgain = useCallback(() => {
     setOver(null);
     setNotice(null);
-    setTorpedoPicker(false);
     // A rematch is a fresh seed and a fresh toss, played under the rules the
     // battle that just finished was played under.
     setSession((current) => ({
@@ -737,35 +715,18 @@ export default function BattleView({
     setRematch((n) => n + 1);
   }, []);
 
-  /** Fire a special attack from the local ship that has the bar charged. */
-  const fireSpecial = useCallback((mode: 'torpedo' | 'acidRain' | 'heal', target?: number) => {
-    const engine = engineRef.current;
-    if (!engine) return;
-    // Find which local ship has the bar full.
-    const shooter = config.localShips.find((i) => (engine.specialHits[i] ?? 0) >= 3) ?? -1;
-    if (shooter < 0) return;
-    engine.special(mode, shooter, target);
-    setTorpedoPicker(false);
-    setTorpedoTarget(null);
-  }, [config.localShips]);
-
   // -- render -----------------------------------------------------------------
 
   const myTurn = localShips.has(turn) && (phase === 'aim' || phase === 'deal');
   const canAim = phase === 'aim' && myTurn && !over;
-  /** My side, for colouring the HUD — the first hull this device sails. */
+  /** My side, for colouring the HUD , the first hull this device sails. */
   const myTeam: Team = config.seats[config.localShips[0] ?? 0]?.team ?? 0;
   const turnTeam: Team = config.seats[turn]?.team ?? 0;
   const facing: 1 | -1 = turnTeam === 0 ? 1 : -1;
   const handHeight = compact ? HAND_HEIGHT_COMPACT : HAND_HEIGHT;
-  
-  // Whether ANY local ship has its special bar full.
-  const torpedoReady = !over && myTurn && config.localShips.some((i) => (specialHits[i] ?? 0) >= 3);
-  // Enemies alive, for the target picker.
-  const aliveEnemies = config.seats
-    .map((seat, i) => ({ seat, i }))
-    .filter(({ seat, i }) => seat.team !== myTeam && (hp[i] ?? 0) > 0);
-  
+  // With cards off there is only ever the plain round shot, so a one-card hand
+  // is a strip of screen showing the player a choice they do not have. The pad
+  // takes the space back instead.
   const showHand = myTurn && !over && (session?.rules.cards ?? true);
 
   // A seat handed to a bot keeps its owner's name, so this line has to read
@@ -945,90 +906,6 @@ export default function BattleView({
           compact={compact}
           onSelect={pickCard}
         />
-      )}
-
-      {/* -- torpedo special attack button -- */}
-      {torpedoReady && !torpedoPicker && (
-        <div
-          className="pointer-events-none absolute inset-x-0 z-30 flex justify-center"
-          style={{ bottom: showHand ? handHeight + 52 : 60 }}
-        >
-          <button
-            id="torpedo-btn"
-            onClick={() => setTorpedoPicker(true)}
-            className="pointer-events-auto flex items-center gap-2 rounded-2xl border border-amber-400/50 bg-amber-400/20 px-5 py-2.5 text-sm font-black text-amber-300 backdrop-blur-md transition-all active:scale-95 hover:bg-amber-400/30"
-            style={{ boxShadow: '0 0 18px rgba(251,191,36,0.35)' }}
-          >
-            <Zap className="h-4 w-4 fill-amber-300" />
-            ⚡ Special Attack
-          </button>
-        </div>
-      )}
-
-      {/* -- special attack picker modal -- */}
-      {torpedoPicker && (
-        <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="w-full max-w-xs rounded-2xl border border-amber-400/30 bg-slate-900/95 p-5 shadow-2xl">
-            <div className="mb-4 flex items-center gap-2">
-              <Zap className="h-5 w-5 text-amber-300" />
-              <h3 className="text-base font-black text-amber-300">Special Attack</h3>
-              <span className="ml-auto text-[10px] font-bold text-white/30 uppercase tracking-wider">Uses your turn</span>
-            </div>
-
-            <p className="mb-3 text-xs text-white/50">Choose an ability:</p>
-            <div className="flex flex-col gap-3">
-
-              {/* Torpedo — pick a target */}
-              {aliveEnemies.length > 0 && (
-                <div>
-                  <p className="mb-1.5 text-[11px] font-bold uppercase tracking-wider text-white/35">🚀 Torpedo — pick target</p>
-                  <div className="flex flex-col gap-1.5">
-                    {aliveEnemies.map(({ seat, i }) => (
-                      <button
-                        key={i}
-                        onClick={() => fireSpecial('torpedo', i)}
-                        className="flex items-center justify-between rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-left text-sm font-bold text-amber-200 transition-all active:scale-95 hover:bg-amber-500/20"
-                      >
-                        <span>{seat.name}</span>
-                        <span className="text-xs text-amber-400 font-black">−25 HP</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Acid Rain */}
-              <div className={aliveEnemies.length > 0 ? 'border-t border-white/10 pt-3' : ''}>
-                <button
-                  onClick={() => fireSpecial('acidRain')}
-                  className="w-full rounded-xl border border-green-600/30 bg-green-600/10 px-3 py-2.5 text-sm font-black text-green-300 transition-all active:scale-95 hover:bg-green-600/20"
-                >
-                  <span className="block">☁️ Acid Rain</span>
-                  <span className="block text-[11px] font-bold text-green-400/70">−10 HP to all enemies</span>
-                </button>
-              </div>
-
-              {/* Heal */}
-              <div className="border-t border-white/10 pt-3">
-                <button
-                  onClick={() => fireSpecial('heal')}
-                  className="w-full rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2.5 text-sm font-black text-emerald-300 transition-all active:scale-95 hover:bg-emerald-500/20"
-                >
-                  <span className="block">💚 Repair Crew</span>
-                  <span className="block text-[11px] font-bold text-emerald-400/70">+25 HP to your ship</span>
-                </button>
-              </div>
-
-            </div>
-
-            <button
-              onClick={() => { setTorpedoPicker(false); setTorpedoTarget(null); }}
-              className="mt-4 w-full rounded-xl border border-white/10 bg-white/5 py-2 text-xs font-bold text-white/50"
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
       )}
 
       {/* -- how to play, on a device with keys --

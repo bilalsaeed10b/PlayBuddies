@@ -204,7 +204,7 @@ export interface MatchRules {
 export const DEFAULT_RULES: MatchRules = {
   aimArc: true,
   turnTimer: true,
-  mountain: 'breakable',
+  mountain: 'solid',
   cards: true,
   players: 2,
   storm: false,
