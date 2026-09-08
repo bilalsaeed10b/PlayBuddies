@@ -337,6 +337,15 @@ export default function App() {
     setView('game');
   };
 
+  // Frozen to match identity, not recomputed live: MatchView reads config
+  // fields like seat team every frame, and a live roster reorder mid-round
+  // (reconnect, late write) would otherwise flip them under a running game.
+  const matchConfig = useMemo(
+    () => (offlineMatch || !online ? offlineConfig() : onlineConfig()),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [session.seed, offlineMatch, online],
+  );
+
   // -- render -----------------------------------------------------------------
 
   return (
@@ -381,7 +390,7 @@ export default function App() {
 
       {view === 'game' && (
         <MatchView
-          config={offlineMatch || !online ? offlineConfig() : onlineConfig()}
+          config={matchConfig}
           settings={settings}
           coins={coins}
           onOpenSettings={() => setShowSettings(true)}
