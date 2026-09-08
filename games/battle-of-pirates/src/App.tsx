@@ -1594,27 +1594,14 @@ function RoomScreen({
     <div className="mx-auto flex h-full w-full max-w-6xl flex-col overflow-y-auto overscroll-contain gap-2 p-2.5 sm:gap-4 sm:p-6">
       {header}
 
-      {/* Loud on purpose, and the one thing this whole screen fights for
-          height on that skips `short:` -- see `sideBySide` above for what
-          happens instead when there truly is none to spare. "Rules" further
-          down among the CTA buttons read as maintenance, not as the wind and
-          the mountain and the reload that decide most battles. */}
-      <button
-        onClick={onRules}
-        className="relative flex shrink-0 items-center gap-3 overflow-hidden rounded-2xl border-2 border-amber-400/60 bg-amber-400/10 px-4 py-3 text-left transition-transform active:scale-[0.99] short:hidden"
-      >
-        <span className="absolute -right-6 -top-6 h-16 w-16 animate-pulse rounded-full bg-amber-400/20" aria-hidden />
-        <ScrollText className="h-6 w-6 shrink-0 text-amber-300" />
-        <div className="min-w-0 flex-1">
-          <p className="text-sm font-black uppercase tracking-wide text-amber-200">
-            {isHost ? 'New here? Read the rules' : 'How wind and cards work'}
+      {!iAmReady && (
+        <div className="relative flex shrink-0 items-center justify-center gap-3 overflow-hidden rounded-2xl border-2 border-amber-400/60 bg-amber-400/10 px-4 py-4 text-center shadow-[0_0_20px_rgba(251,191,36,0.15)] short:hidden">
+          <span className="absolute -inset-4 animate-pulse bg-amber-400/10" aria-hidden />
+          <p className="relative text-base font-black uppercase tracking-widest text-amber-300">
+            Select Your Ship Below
           </p>
-          <p className="text-[11px] font-bold text-amber-300/70">Worth 30 seconds before the first shot.</p>
         </div>
-        <span className="shrink-0 rounded-xl bg-amber-400 px-3 py-1.5 text-[11px] font-black uppercase tracking-wide text-slate-900">
-          Guide
-        </span>
-      </button>
+      )}
 
       {/* On a phone the start button would otherwise sit below the fold, which
           is exactly what made it unreachable in the other games. Kept to two
