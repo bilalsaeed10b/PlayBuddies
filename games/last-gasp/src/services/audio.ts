@@ -2,7 +2,7 @@
  * Every sound in the game, synthesised.
  *
  * A handful of short noises made of oscillators and one burst of shaped
- * noise — no audio files, so there is nothing to download, nothing to decode
+ * noise , no audio files, so there is nothing to download, nothing to decode
  * on a cold start and nothing to keep in sync with the bundle. The palette
  * here is chalk on slate: dry taps and scrapes rather than anything warm.
  */
@@ -57,7 +57,7 @@ class AudioService {
     osc.stop(t + len + 0.02);
   }
 
-  /** Shaped noise — the chalk in "a line going onto a board". */
+  /** Shaped noise , the chalk in "a line going onto a board". */
   private scrape(at: number, len: number, gain: number, cutoff: number) {
     const ctx = this.ctx;
     if (!ctx || !this.master || this.volume <= 0) return;

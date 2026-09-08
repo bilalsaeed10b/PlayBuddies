@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 
 /**
- * The whole screen is the controller — the same scheme Neon Elements uses, so
+ * The whole screen is the controller , the same scheme Neon Elements uses, so
  * one PlayBuddies game teaches you how to hold the next one.
  *
  * Left half: touch anywhere and drag; the stick appears under your thumb and

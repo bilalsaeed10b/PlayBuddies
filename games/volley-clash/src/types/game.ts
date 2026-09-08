@@ -52,7 +52,7 @@ export function unpackInput(b: number): Input {
   };
 }
 
-/** One character on the court. Flat numbers — this is stepped 120 times a second. */
+/** One character on the court. Flat numbers , this is stepped 120 times a second. */
 export interface Player {
   id: string;
   team: Team;
@@ -143,7 +143,7 @@ export interface GameSettings {
    * Require a two-point lead to take the match.
    *
    * Off by default: "First to 7" should mean first to 7. With this on, 7-6 is
-   * not a win and play continues until someone is two clear — the volleyball
+   * not a win and play continues until someone is two clear , the volleyball
    * rule, kept as an option for anyone who wants it.
    */
   winByTwo: boolean;
@@ -155,7 +155,7 @@ export interface GameSettings {
   powerRate: number;
 }
 
-/** One character's state on the wire. Order matters — see MatchEngine.snapshot. */
+/** One character's state on the wire. Order matters , see MatchEngine.snapshot. */
 export type PlayerPacket = [
   x: number,
   y: number,
@@ -202,7 +202,7 @@ export interface Snapshot {
    *
    * This *is* used as a clock now. The receiver knows its offset to the host
    * from the probe exchange, so it converts this stamp onto its own timebase
-   * and subtracts — measuring how old the packet is rather than inferring it
+   * and subtracts , measuring how old the packet is rather than inferring it
    * from half a round trip, which was only ever correct on a path whose two
    * directions cost the same.
    */
@@ -263,8 +263,8 @@ export type NetMessage =
    * against `id` locally (see PeerClocks.openProbe), so no peer can influence
    * this machine's idea of when it spoke.
    *
-   * The echo carries the responder's clock twice — when the probe arrived and
-   * when the reply left — and the gap between them is what lets the prober
+   * The echo carries the responder's clock twice , when the probe arrived and
+   * when the reply left , and the gap between them is what lets the prober
    * subtract the responder's own queueing out of the round trip instead of
    * charging it to the network. On the Firestore relay that gap is most of
    * the measurement.

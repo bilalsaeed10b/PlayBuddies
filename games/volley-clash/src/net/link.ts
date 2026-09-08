@@ -3,26 +3,26 @@
  *
  * The mesh is the wire this game wants: peer-to-peer, sub-50ms, free. What it
  * is not is *reliable to establish*. PlayBuddies ships no TURN server, so two
- * players behind unhelpful NATs — a phone on mobile data and a laptop on office
- * wifi is the usual pair — can hold a perfectly good signalling conversation
+ * players behind unhelpful NATs , a phone on mobile data and a laptop on office
+ * wifi is the usual pair , can hold a perfectly good signalling conversation
  * and still never open a data channel.
  *
  * So there is a second path, over the one Firestore document each player is
- * already allowed to write — `lobbies/{room}/updates/{uid}`, the same slot
+ * already allowed to write , `lobbies/{room}/updates/{uid}`, the same slot
  * Fish Eat Fish and Fireboy & Watergirl use. That second game is the reason
- * this file looks the way it does: this used to be a three-tier chain — a
+ * this file looks the way it does: this used to be a three-tier chain , a
  * dedicated Realtime Database relay node, then a piggyback on the signalling
- * schema, then Firestore — opened only *after* the mesh's own startup write
+ * schema, then Firestore , opened only *after* the mesh's own startup write
  * had settled, and only once each earlier tier had been probed and found
  * wanting. Every one of those steps was a promise that could, on a network
- * where Realtime Database is not reachable at all, simply never settle —
+ * where Realtime Database is not reachable at all, simply never settle ,
  * and the SDK does not time those out on its own. One flaky signal and the
  * entire chain hung forever, including the Firestore leg that was supposed
  * to be the one path that always works. Fireboy & Watergirl never had that
  * problem, because it never had that chain: it writes to Firestore
  * unconditionally, from the first frame, in parallel with the mesh, and
  * simply paces the writes slower once the mesh is confirmed carrying
- * traffic. Copied here for the same reason — it works.
+ * traffic. Copied here for the same reason , it works.
  *
  * Everything above this file talks to `Link` and never learns which path a
  * packet took.
@@ -44,7 +44,7 @@ const RELAY_ACTIVE_MS = 33;
  * How often it writes once every peer is reachable directly.
  *
  * Not zero: a heartbeat this slow costs almost nothing, and it is what lets
- * the relay take over instantly if the mesh drops mid-match — a fresh
+ * the relay take over instantly if the mesh drops mid-match , a fresh
  * connection with no warm-up, rather than a cold start that has to open a
  * listener and wait for it to catch up before the first packet.
  */
@@ -108,7 +108,7 @@ export class Link {
 
     this.pingTimer = window.setInterval(() => this.ping(), 1000 / BALANCE.PING_HZ);
 
-    // Opened immediately, not after the mesh's own signalling has settled —
+    // Opened immediately, not after the mesh's own signalling has settled ,
     // there is nothing left to wait for. The old chain waited on that because
     // an earlier relay design shared the mesh's own signalling node and could
     // collide with its startup wipe; this one writes to a completely
@@ -119,7 +119,7 @@ export class Link {
   setPeers(uids: string[]) {
     this.peers = uids.filter((u) => u && u !== this.selfId);
     this.mesh.setPeers(this.peers);
-    // Stop reporting a departed player's connection, and drop their clock —
+    // Stop reporting a departed player's connection, and drop their clock ,
     // a uid that returns is a fresh page with a fresh timebase, so keeping the
     // old offset would be worse than having none.
     this.clocks.retain(this.peers);
@@ -130,10 +130,10 @@ export class Link {
   /**
    * Sends to everyone.
    *
-   * `live` marks a packet whose only value is being the newest one — a snapshot
+   * `live` marks a packet whose only value is being the newest one , a snapshot
    * or a body update. The relay keeps just the last of those; anything else is
    * queued and delivered. Always captured for the relay too, regardless of
-   * whether the mesh currently needs the help — see RELAY_IDLE_MS.
+   * whether the mesh currently needs the help , see RELAY_IDLE_MS.
    */
   send(msg: NetMessage, live = false) {
     this.mesh.broadcast(msg);
@@ -143,7 +143,7 @@ export class Link {
 
   sendTo(id: string, msg: NetMessage, live = false) {
     if (this.mesh.sendTo(id, msg)) return;
-    // The relay is a broadcast medium — everything written to our slot is read
+    // The relay is a broadcast medium , everything written to our slot is read
     // by the whole room. Addressing is the receiver's job, and every message
     // this game sends is either idempotent or already addressed by content.
     if (live) this.pendingState = msg;
@@ -164,7 +164,7 @@ export class Link {
   }
 
   /**
-   * How old a packet from `from` is, in seconds — measured, not inferred.
+   * How old a packet from `from` is, in seconds , measured, not inferred.
    *
    * `sentAt` is the stamp the sender put on it with `stamp()`. Capped by the
    * caller, because how far it is worth extrapolating is a game decision and
@@ -203,8 +203,8 @@ export class Link {
       if (msg.to !== this.selfId) return;
       const t1 = localNow();
       // t1 and t2 are read separately on purpose. The gap between them is
-      // whatever this machine spends holding the reply — most of it the relay
-      // write batch below — and sending both is what lets the prober subtract
+      // whatever this machine spends holding the reply , most of it the relay
+      // write batch below , and sending both is what lets the prober subtract
       // that out instead of charging it to the network.
       this.replyTo(from, { t: 'a', id: msg.id, to: from, t1, t2: localNow() });
       return;
@@ -229,7 +229,7 @@ export class Link {
    *
    * Addressed rather than broadcast because each peer now needs its own `id`
    * to pair an echo against, and because a shared probe measured whichever
-   * path happened to answer first — on a peer reachable both ways, the slower
+   * path happened to answer first , on a peer reachable both ways, the slower
    * relayed echo would arrive second and overwrite a perfectly good direct
    * measurement.
    */
@@ -263,7 +263,7 @@ export class Link {
     const direct = this.mesh.connectedPeers;
     const directSet = new Set(direct);
     // A peer counts as relayed the moment anything at all has arrived from
-    // them over it — not only once a round-trip probe happens to have landed.
+    // them over it , not only once a round-trip probe happens to have landed.
     // Gameplay itself proves the relay works; a slow first ping should not
     // leave the badge claiming there is no connection while a rally is
     // already in progress.
@@ -393,7 +393,7 @@ export class Link {
    * Whether a sequence number has already been acted on.
    *
    * A big jump *backwards* is a peer that reloaded and started counting again,
-   * not a replayed message — treating that as stale would silence them for the
+   * not a replayed message , treating that as stale would silence them for the
    * rest of the match.
    */
   private isReplay(from: string, n: number): boolean {
@@ -402,8 +402,8 @@ export class Link {
   }
 
   /**
-   * Records that a peer has been heard from over the relay, and — the first
-   * time, for this peer — tells the badge immediately.
+   * Records that a peer has been heard from over the relay, and , the first
+   * time, for this peer , tells the badge immediately.
    */
   private markSeen(id: string, n: number) {
     const first = !this.seen.has(id);
@@ -414,7 +414,7 @@ export class Link {
   private async flushRelay() {
     if (this.closed || !this.relayWrite) return;
     // Fast while somebody still needs the help; a slow heartbeat once nobody
-    // does, so the relay stays warm without costing much. Never off outright —
+    // does, so the relay stays warm without costing much. Never off outright ,
     // that is exactly the gap the old gated version fell into.
     const interval = this.needsRelay() ? RELAY_ACTIVE_MS : RELAY_IDLE_MS;
     const now = Date.now();
@@ -431,7 +431,7 @@ export class Link {
     // actually leave, rather than when they were queued. Everything above this
     // line may have waited up to a full batch interval, and a probe that
     // counted its own time in this queue as time on the wire would report the
-    // relay as roughly twice as slow as it is — which then becomes twice as
+    // relay as roughly twice as slow as it is , which then becomes twice as
     // much extrapolation, on every body and the ball.
     const leaving = localNow();
     for (const msg of batch) {

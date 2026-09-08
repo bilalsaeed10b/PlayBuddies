@@ -24,7 +24,7 @@ export default function CardRack({
   selected: CardId | null;
   /** The chosen destination, once a targeting card needs one. */
   target: number | null;
-  /** Already committed for this round — the rack goes read-only until the reveal. */
+  /** Already committed for this round , the rack goes read-only until the reveal. */
   locked: boolean;
   hints: boolean;
   onSelect: (card: CardId) => void;
@@ -100,7 +100,7 @@ export default function CardRack({
               : 'bg-amber-900/15 text-amber-900/40'
         }`}
       >
-        {locked ? 'Locked in — waiting' : 'Lock it in'}
+        {locked ? 'Locked in , waiting' : 'Lock it in'}
       </button>
     </div>
   );

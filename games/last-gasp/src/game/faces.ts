@@ -2,12 +2,12 @@
  * The faces: eight chalk heads for the board, three free.
  *
  * They are skins and nothing else. Not one of them guesses better, scores
- * more or takes fewer lines, and none ever will — this is a game played
+ * more or takes fewer lines, and none ever will , this is a game played
  * against other people, and a shop that sells an advantage in one is worse
  * than no shop at all. Every other game on the platform holds the same line.
  *
  * Drawn as a few SVG primitives rather than shipped as art. At the size these
- * actually appear — a 26px chip in a roster and a thumbnail in a shop — a
+ * actually appear , a 26px chip in a roster and a thumbnail in a shop , a
  * silhouette with a distinct expression reads better than a portrait, and it
  * costs the bundle nothing.
  */
@@ -53,7 +53,7 @@ export function faceAt(index: number): Face {
  * radius 8.5.
  *
  * Split out from the component so the roster and the shop draw the exact same
- * head — the whole point of a skin is being recognisable, and two near-copies
+ * head , the whole point of a skin is being recognisable, and two near-copies
  * of this drifting apart is the standard way that stops being true.
  */
 export function browPath(brow: Brow): string | null {

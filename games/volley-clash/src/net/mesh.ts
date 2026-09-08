@@ -6,12 +6,12 @@ import { rtdb, dbRef, dbSet, dbPush, dbOnValue, dbOnDisconnect, dbRemove } from 
  *
  * Why a mesh and not a server: PlayBuddies is a static site. There is no game
  * server to run authority on, and routing 8 players' positions through
- * Firestore at even 10Hz is roughly 5,000 billed writes a minute *per room* —
+ * Firestore at even 10Hz is roughly 5,000 billed writes a minute *per room* ,
  * the single largest cost in the whole platform, and it would grow linearly
  * with players. Peer-to-peer traffic costs nothing and is an order of magnitude
  * lower latency. Firebase is used only to introduce the peers to each other.
  *
- * Signalling lives at `signaling/{room}/{sender}/{recipient}/…` — one channel
+ * Signalling lives at `signaling/{room}/{sender}/{recipient}/…` , one channel
  * per direction per pair. The old single-slot-per-uid layout could only carry
  * one negotiation at a time, which is fine for a two-player game and useless
  * for a mesh.
@@ -48,7 +48,7 @@ let MESH_SESSION = 0;
 function typesOf(raw: Set<string>): Set<string> {
   const out = new Set<string>();
   for (const one of raw) {
-    // "candidate:… typ srflx …" — the type is the token after `typ`.
+    // "candidate:… typ srflx …" , the type is the token after `typ`.
     const match = /typ (\w+)/.exec(one);
     if (match) out.add(match[1]);
   }
@@ -64,7 +64,7 @@ const DISCONNECT_GRACE = 3500;
 /**
  * How often the watchdog checks in on an attempt that has not yet opened.
  *
- * This used to also be the *ceiling* — a fixed budget of one or two windows,
+ * This used to also be the *ceiling* , a fixed budget of one or two windows,
  * after which a caller still in `checking` was killed and restarted from a
  * fresh RTCPeerConnection regardless of whether it was making progress. It
  * was not: `checking` means the ICE agent is actively working through a
@@ -88,7 +88,7 @@ interface Attempt {
    *
    * `addIceCandidate` rejects outright until `setRemoteDescription` has
    * resolved, and the answer and the first candidates almost always arrive in
-   * the same signalling update — so without somewhere to put them, the entire
+   * the same signalling update , so without somewhere to put them, the entire
    * opening batch is thrown away. They are never re-sent, because the sender
    * has no idea anything was lost, and the connection then has nothing to try
    * but the local half of the pair. That is not a connection that fails loudly;
@@ -120,7 +120,7 @@ interface Peer {
    * An answer that arrived before there was a local offer to attach it to.
    *
    * Held rather than discarded. A retry rebuilds the connection asynchronously
-   * — `createOffer` is a promise — and an answer landing inside that window
+   * , `createOffer` is a promise , and an answer landing inside that window
    * used to be thrown away *and* marked as seen, so the caller sat on an
    * unanswered offer until its next timeout. On a link where the handshake was
    * already slow, that is a loop that never terminates.
@@ -327,7 +327,7 @@ export class Mesh {
       const sdp = data.desc.sdp ?? '';
       if (sdp !== peer.lastDesc) {
         if (!iCall) {
-          // Their offer — and every offer is a fresh session, including the one
+          // Their offer , and every offer is a fresh session, including the one
           // that arrives because *they* gave up on the last attempt. Answering
           // it on the old connection is what used to leave one side happily
           // "connected" to a peer that had already moved on.
@@ -395,7 +395,7 @@ export class Mesh {
           // over the slow path instead.
           .catch((err) => console.warn('[mesh] candidate rejected:', err));
       } catch {
-        /* malformed candidate — skip */
+        /* malformed candidate , skip */
       }
     }
   }
@@ -439,7 +439,7 @@ export class Mesh {
      * the caller so it can decide what to do next.
      *
      * Shared between two genuinely different triggers. `onconnectionstatechange`
-     * calls this the moment the browser's own ICE agent reaches `failed` —
+     * calls this the moment the browser's own ICE agent reaches `failed` ,
      * which is the real "exhausted every candidate pair, no route exists"
      * signal, and the one that matters most. The watchdog below calls it too,
      * but only for a connection stuck at `new`: gathering never produced
@@ -450,12 +450,12 @@ export class Mesh {
       const blocked = !a.gathered.has('srflx');
       const verdict = blocked ? 'STUN blocked on this network' : 'this pair needs a TURN server';
       console.warn(
-        `[mesh] no channel to ${peerId} —` +
+        `[mesh] no channel to ${peerId} ,` +
           ` ice: ${ice}, gathering: ${pc.iceGatheringState},` +
           ` ours: [${[...a.gathered].join(', ') || 'nothing'}],` +
           ` theirs: [${[...typesOf(a.seen)].join(', ') || 'nothing'}]`,
         blocked
-          ? 'No server-reflexive candidate at all — STUN is being blocked on this network.'
+          ? 'No server-reflexive candidate at all , STUN is being blocked on this network.'
           : 'Both sides are reachable from outside but no route between them was found: this pair needs a TURN server.',
       );
       if (!peer.told) {
@@ -468,7 +468,7 @@ export class Mesh {
      * The backstop, for a connection that never even started checking.
      *
      * Only the caller runs one. The answerer cannot start a new negotiation of
-     * its own — `retry` returns immediately for it.
+     * its own , `retry` returns immediately for it.
      *
      * This used to also be where a stalled *`checking`* connection was killed
      * and restarted from a fresh RTCPeerConnection after a fixed budget. That
@@ -477,7 +477,7 @@ export class Mesh {
      * genuinely take longer than a couple of windows to finish, especially
      * gathering from three STUN servers. Killing it there never let one
      * attempt run long enough to find out, and every restart threw away the
-     * gathering already done — a loop that could not succeed even on a pair
+     * gathering already done , a loop that could not succeed even on a pair
      * that would have connected fine given the time its own ICE agent wanted
      * to spend on it. Comparing against this game's Fireboy & Watergirl
      * confirms it: that connection has no watchdog at all and simply waits,
@@ -485,10 +485,10 @@ export class Mesh {
      * "no route exists" signal is `failed`, and that is now handled directly
      * by `onconnectionstatechange` instead of guessed at here.
      *
-     * Waiting indefinitely for `new` to resolve is *not* safe the same way —
+     * Waiting indefinitely for `new` to resolve is *not* safe the same way ,
      * unlike `checking`, nothing is actively happening while gathering has
      * produced nothing at all, and that usually means signalling itself is
-     * stuck. So this still fires once, reports it, and retries — same as
+     * stuck. So this still fires once, reports it, and retries , same as
      * before, just now only for that case rather than for `checking` too.
      */
     const watchdog = () => {
@@ -555,7 +555,7 @@ export class Mesh {
       const state = pc.connectionState;
       if (state === 'failed') {
         // The browser's own ICE agent has exhausted every candidate pair it
-        // gathered and found no route — the real version of the thing the
+        // gathered and found no route , the real version of the thing the
         // watchdog above used to guess at from a timeout.
         reportTrouble(pc.iceConnectionState);
         this.retry(peerId, peer, iCall);
@@ -580,7 +580,7 @@ export class Mesh {
           const local = await pc.createOffer();
           if (a.dead) return;
           await pc.setLocalDescription(local);
-          // An answer may already be waiting — see Peer.pendingDesc.
+          // An answer may already be waiting , see Peer.pendingDesc.
           this.applyAnswer(peerId, peer);
           // After the path has been cleared of the last session, never before:
           // the clear targets the node this offer is written into.

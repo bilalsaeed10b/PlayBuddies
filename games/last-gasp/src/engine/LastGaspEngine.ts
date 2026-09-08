@@ -2,15 +2,15 @@
  * The word, the gallows, and what one guess does to both.
  *
  * This file is a pure function wearing a class. The entire state of a match
- * is derived by replaying `history` from nothing — no state is accumulated
+ * is derived by replaying `history` from nothing , no state is accumulated
  * incrementally, nothing is cached between rounds, and `replay()` from the
  * same history always lands on the identical result. That is what lets the
  * wire be "here is every action so far" rather than a patch stream, and it
  * is why there is no resync path anywhere in this game: a client that missed
  * six actions catches up by replaying six actions.
  *
- * The one piece of real time in the whole game — a correct guess buying a
- * short exclusive window — is handled without the engine ever touching a
+ * The one piece of real time in the whole game , a correct guess buying a
+ * short exclusive window , is handled without the engine ever touching a
  * clock. The host decides live when that window has lapsed and appends a
  * discrete `expire` action recording that it happened; every other client
  * only ever learns about it by replaying that action, the same as any other.
@@ -40,12 +40,12 @@ export interface PlayerState {
   correct: number;
   wrong: number;
   hangs: number;
-  /** Longest unbroken chain this player landed, match-long — the end screen's real bragging right. */
+  /** Longest unbroken chain this player landed, match-long , the end screen's real bragging right. */
   bestChain: number;
 }
 
 /**
- * What happened, newest last. The screen reads this straight out as a feed —
+ * What happened, newest last. The screen reads this straight out as a feed ,
  * it is the word's story, and it is deliberately in resolution order.
  */
 export type RoundEvent =
@@ -85,7 +85,7 @@ export class LastGaspEngine {
   phase: Phase = 'settingWord';
   winner: number | null = null;
 
-  /** The current word. Empty until it has actually been set — see the wire-protocol note on secrecy. */
+  /** The current word. Empty until it has actually been set , see the wire-protocol note on secrecy. */
   word = '';
 
   /** Free-For-All only: who is setting this round's word. */
@@ -187,7 +187,7 @@ export class LastGaspEngine {
     );
   }
 
-  /** Whether this seat may call a letter right now — the open table, or the current chain holder alone. */
+  /** Whether this seat may call a letter right now , the open table, or the current chain holder alone. */
   canGuess(seat: number): boolean {
     if (this.phase !== 'guessing') return false;
     const settingSide = this.rules.mode === 'teams' ? this.settingTeam : this.setterSeat;
@@ -196,7 +196,7 @@ export class LastGaspEngine {
     return true;
   }
 
-  /** Only the host ever calls this — it is not something a player "does". */
+  /** Only the host ever calls this , it is not something a player "does". */
   canExpire(): boolean {
     return this.phase === 'guessing' && this.chainHolder !== null;
   }
@@ -245,8 +245,8 @@ export class LastGaspEngine {
   /**
    * One action, start to finish.
    *
-   * Rejects rather than corrects. A rejected action simply never happened —
-   * the caller tries again or a timeout picks something for it — which is
+   * Rejects rather than corrects. A rejected action simply never happened ,
+   * the caller tries again or a timeout picks something for it , which is
    * only safe because this game has no fixed turn order to stall: rejecting
    * one player's stale packet blocks nobody else.
    */
@@ -406,14 +406,14 @@ export class LastGaspEngine {
       .sort((a, b) => b.total - a.total || b.round - a.round || a.seat - b.seat);
   }
 
-  /** Per-team totals, best first — only meaningful in Teams. */
+  /** Per-team totals, best first , only meaningful in Teams. */
   teamStandings(): { team: number; total: number }[] {
     const totals = new Array(this.teamCount).fill(0);
     for (let i = 0; i < this.playerCount; i++) totals[this.teamOf(i)] += this.liveTotal(i);
     return totals.map((total, team) => ({ team, total })).sort((a, b) => b.total - a.total || a.team - b.team);
   }
 
-  /** Total including the word in progress — what the roster shows mid-round. */
+  /** Total including the word in progress , what the roster shows mid-round. */
   liveTotal(seat: number): number {
     const p = this.players[seat];
     return p ? p.total + p.round : 0;

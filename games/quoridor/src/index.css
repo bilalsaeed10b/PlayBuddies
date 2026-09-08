@@ -35,7 +35,7 @@
 }
 
 /* Respect a system-level request for less motion: the menu stops breathing.
-   The board's own pawn slide is not gated on this — a piece that teleports
+   The board's own pawn slide is not gated on this , a piece that teleports
    makes a game harder to follow, not easier. */
 @media (prefers-reduced-motion: reduce) {
   *,

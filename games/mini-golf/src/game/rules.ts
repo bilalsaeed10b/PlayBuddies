@@ -19,7 +19,7 @@ export const PHYSICS = {
    * Friction as an exponential decay constant per surface: v *= e^(-k·dt).
    *
    * Chosen so the carry from a full swing (MAX_SPEED / k) is about 140 units
-   * on the green — a shade less than the widest course, so crossing one in a
+   * on the green , a shade less than the widest course, so crossing one in a
    * single putt is possible but never automatic.
    */
   K_GREEN: 1.35,
@@ -35,13 +35,13 @@ export const PHYSICS = {
    * Fast enough and the ball rides straight over the cup.
    *
    * Without this a hole is a magnet: any line through it drops, and power
-   * stops mattering at all. With it, a screamer lips out — which is the shot
+   * stops mattering at all. With it, a screamer lips out , which is the shot
    * everyone remembers.
    *
    * Tuned down hard from where it started. At a third of full speed a ball
    * still dropped, which meant getting the line right was the whole game and a
    * perfect player aced better than half the holes it saw. At a fifth, the
-   * ball has to be dying as it arrives — so line and weight are two separate
+   * ball has to be dying as it arrives , so line and weight are two separate
    * skills, which is what putting actually is.
    */
   CAPTURE_SPEED: 42,
@@ -103,7 +103,7 @@ export const clamp = (n: number, lo: number, hi: number) => (n < lo ? lo : n > h
  * The name of a score, which is most of the reason to play a hole out.
  *
  * Golf has had a word for every result for two hundred years and they are all
- * better than a number. `null` for the ones with no name — nobody has ever
+ * better than a number. `null` for the ones with no name , nobody has ever
  * been pleased enough about a quintuple bogey to have coined one.
  */
 export function scoreName(strokes: number, par: number): { label: string; tone: 'great' | 'good' | 'even' | 'bad' } {

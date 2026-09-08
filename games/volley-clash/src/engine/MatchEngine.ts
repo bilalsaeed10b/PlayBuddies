@@ -11,15 +11,15 @@
  * 2. **The host is the authority.** PlayBuddies is a static site with no game
  *    server, so one of the players is the server. The host runs every rule;
  *    everyone else runs the same physics purely so the picture is smooth, and
- *    is continuously corrected toward the host's snapshots. Rules — points,
- *    phase changes, power-up spawns — are host-only, and guarded as such.
+ *    is continuously corrected toward the host's snapshots. Rules , points,
+ *    phase changes, power-up spawns , are host-only, and guarded as such.
  */
 import { bakeCourt, drawFallbackCourt } from '../game/court';
 import { CHARACTERS, drawCharacter } from '../game/characters';
 import { Arena, BALANCE, POWER_META, TEAM_COLORS, clamp } from '../game/rules';
 import { newBrain, thinkFor } from './ai';
 // The engine's own timebase, shared with the wire so a packet's stamp and the
-// clock it is dated against are the same kind of number. Pure arithmetic —
+// clock it is dated against are the same kind of number. Pure arithmetic ,
 // importing it does not pull the network or Firebase into this chunk.
 import { localNow } from '../net/clock';
 import type { Quality } from '../game/quality';
@@ -110,8 +110,8 @@ interface BallEvents {
 /**
  * The ball's physics, and nothing else.
  *
- * Pulled out of the engine so the *predicted* ball — the host's last word, run
- * forward by however long the packet spent in flight — travels through exactly
+ * Pulled out of the engine so the *predicted* ball , the host's last word, run
+ * forward by however long the packet spent in flight , travels through exactly
  * the same arithmetic as the real one. A second, approximate integrator for
  * network use would be a second set of bugs, and the two would disagree
  * precisely when it matters: at speed, near the floor.
@@ -127,7 +127,7 @@ function integrateBall(b: Ball, dt: number, gravity: number, arena: Arena): Ball
   // is what makes a hit taken on the run curve rather than fly straight.
   //
   // Rotating the velocity vector is the whole implementation, and it has to
-  // be exactly that — a rotation preserves speed, so spin can only ever
+  // be exactly that , a rotation preserves speed, so spin can only ever
   // redirect the ball, never speed it up or hold it against gravity. See
   // MAGNUS_TURN for what happened when this was written as two sequential
   // component updates instead.
@@ -234,7 +234,7 @@ export class MatchEngine {
   phaseTimer: number = BALANCE.SERVE_DELAY;
   serving: Team = 0;
   winner: Team | null = null;
-  /** Big centred text — "SPIKE!", "MATCH POINT". Fades on its own. */
+  /** Big centred text , "SPIKE!", "MATCH POINT". Fades on its own. */
   call = '';
   callLeft = 0;
 
@@ -265,7 +265,7 @@ export class MatchEngine {
   /**
    * Where the network says things are, kept live.
    *
-   * Not "the last packet" — a packet is already old when it lands, and a target
+   * Not "the last packet" , a packet is already old when it lands, and a target
    * that stands still between packets is what a stuttering opponent actually
    * is. Each of these is dead-reckoned forward every frame with the same
    * physics the real thing uses, and the visible body is eased onto it.
@@ -281,7 +281,7 @@ export class MatchEngine {
      *
      * This is the difference between a body that is *corrected* and one that is
      * *driven*. Every character here is already being simulated with its real
-     * input — that is what the input byte in each packet buys — so the local
+     * input , that is what the input byte in each packet buys , so the local
      * simulation is the best account of how it is moving. All that is left for
      * the network to say is "you are a few pixels off", and that is fed back in
      * over about a tenth of a second. Easing toward a target position instead
@@ -310,7 +310,7 @@ export class MatchEngine {
   /**
    * One-way delay to each peer, kept per peer rather than as one shared
    * figure. In a 2v2 the four players are rarely on comparable paths, and a
-   * single `lastLag` — whichever packet happened to arrive most recently —
+   * single `lastLag` , whichever packet happened to arrive most recently ,
    * would rewind a 25ms peer by a relayed peer's 300ms.
    */
   private peerLag = new Map<string, number>();
@@ -322,7 +322,7 @@ export class MatchEngine {
    * rather than the one the host is looking at now. Without it the host tests
    * a remote player's reach against a ball that has already travelled on for
    * their whole round trip, so every marginal contact resolves as a miss and
-   * the guest — who watched themselves make it — sees the hit snatched back.
+   * the guest , who watched themselves make it , sees the hit snatched back.
    * Small: at 120Hz, MAX_EXTRAP seconds is a few dozen entries of six numbers.
    */
   private ballPast: { tick: number; x: number; y: number; vx: number; vy: number; spin: number }[] = [];
@@ -331,7 +331,7 @@ export class MatchEngine {
    *
    * Every threshold below is judged against this. A 400px disagreement about a
    * ball travelling 1500px/s is what a third of a second of latency *looks
-   * like* — it is not two simulations coming apart, and snapping the ball for
+   * like* , it is not two simulations coming apart, and snapping the ball for
    * it produces the teleporting that makes a slow connection unplayable rather
    * than merely slow.
    */
@@ -472,7 +472,7 @@ export class MatchEngine {
   /**
    * Advances the world by real elapsed time.
    *
-   * `inputs` carries one entry per human seat — local seats from the keyboard
+   * `inputs` carries one entry per human seat , local seats from the keyboard
    * or touch controls, remote seats from the network. AI seats are filled in
    * here, so a caller never has to know which is which.
    */
@@ -513,7 +513,7 @@ export class MatchEngine {
 
     for (const p of this.players) {
       // Local seats read the keyboard, AI seats think, and everyone else uses
-      // the last input that reached us — from their own packets if we are the
+      // the last input that reached us , from their own packets if we are the
       // host, from the host's snapshot if we are not. Falling back to "nothing
       // pressed" is what makes a remote player stutter to a halt between
       // packets and then jump to catch up.
@@ -580,7 +580,7 @@ export class MatchEngine {
       this.puff(p.x, p.y, TEAM_COLORS[p.team].light, 8, 130);
     }
 
-    // Variable-height jump: the initial impulse is fixed — all characters jump
+    // Variable-height jump: the initial impulse is fixed , all characters jump
     // the same height so nobody is at a fundamental disadvantage. The hold
     // extension (JUMP_HOLD_ACCEL) adds a tiny extra arc if the key stays down,
     // which is what makes a set feel different from a spike.
@@ -613,7 +613,7 @@ export class MatchEngine {
 
     p.r = BALANCE.PLAYER_R * (this.hasPower('giant', p.team) ? BALANCE.POWER_GIANT_SCALE : 1);
 
-    // Nobody crosses the net. Clamping is enough — a player pressing into it
+    // Nobody crosses the net. Clamping is enough , a player pressing into it
     // simply stops, which is the behaviour every volleyball game has.
     const { netX, netW, w } = this.arena;
     const lo = p.team === 0 ? p.r : netX + netW / 2 + p.r;
@@ -664,13 +664,13 @@ export class MatchEngine {
       /**
        * The touch *is* the point.
        *
-       * The bounce used to gate it — the rally only ended once the ball had
+       * The bounce used to gate it , the rally only ended once the ball had
        * dribbled to a near-stop, so both sides simply kept playing it off the
        * sand and AI-vs-AI rallies ran to 187 touches without a single point
        * being scored. In volleyball the floor ends the rally the instant it is
        * touched, full stop.
        *
-       * The hop is kept, because a ball that dies flat looks dead — it just
+       * The hop is kept, because a ball that dies flat looks dead , it just
        * plays out during the point delay now, after the score is already in.
        * `land()` ignores anything but the first call, and `contact()` is
        * rally-only, so nobody can play these bounces.
@@ -716,7 +716,7 @@ export class MatchEngine {
     this.cfg.onPoint?.(team, [...this.score] as [number, number], call);
     this.cfg.onWhistle?.();
 
-    // Loser serves. The reverse of real volleyball, and deliberate — it stops a
+    // Loser serves. The reverse of real volleyball, and deliberate , it stops a
     // good server from running away with a seven-point match.
     this.serving = team === 0 ? 1 : 0;
 
@@ -757,8 +757,8 @@ export class MatchEngine {
    * The ball as a given peer saw it, or null if we should just use the present.
    *
    * Rewinding is deliberately bounded twice over. It never goes back further
-   * than MAX_EXTRAP — the same ceiling the guest's own extrapolation obeys, so
-   * the two agree about how far ahead of a packet it is reasonable to reason —
+   * than MAX_EXTRAP , the same ceiling the guest's own extrapolation obeys, so
+   * the two agree about how far ahead of a packet it is reasonable to reason ,
    * and it never goes back past the last contact anyone made. That second
    * bound is the one that keeps this fair rather than merely generous: without
    * it, a laggier player could reach into a moment that had already been
@@ -799,8 +799,8 @@ export class MatchEngine {
      *
      * The host used to judge a remote player's reach against the ball in
      * front of *it*, which by then had travelled on for that player's entire
-     * round trip. The guest had already watched themselves make the contact —
-     * they play their own hits immediately — so every marginal touch resolved
+     * round trip. The guest had already watched themselves make the contact ,
+     * they play their own hits immediately , so every marginal touch resolved
      * as a miss here and then got yanked back out of their hands a moment
      * later. That is the "I hit that and nothing happened" of this game, and
      * no amount of smoothing downstream could fix it, because the two
@@ -864,7 +864,7 @@ export class MatchEngine {
     b.vy = dy * speed + p.vy * BALANCE.HIT_CARRY * 0.5;
 
     // The pop. Every touch lifts the ball, on top of whatever the contact
-    // normal did — a volleyball coming off a forearm goes *up*, and without
+    // normal did , a volleyball coming off a forearm goes *up*, and without
     // this a slightly-off contact skidded away flat and killed the rally.
     // A downward spike keeps most of its bite: it is scaled back, not cancelled.
     // Only balls that are already heading up get the pop. Lifting a downward
@@ -999,7 +999,7 @@ export class MatchEngine {
    *
    * This used to be `score >= target - 1` for either side, which is a different
    * question entirely: it latched on the moment anyone reached 6 of 7 and never
-   * cleared, so at 6-6 — where under win-by-two nobody is close to winning — the
+   * cleared, so at 6-6 , where under win-by-two nobody is close to winning , the
    * game still announced match point. It also drove a permanent slow motion over
    * the whole end of every match.
    */
@@ -1038,8 +1038,8 @@ export class MatchEngine {
    * Takes over the rules mid-match.
    *
    * Used when the host has gone quiet: see BALANCE.STALL_PROMOTE. Everything
-   * the promoted machine needs is already in hand — it has been simulating the
-   * whole match all along — so this is just permission to start scoring.
+   * the promoted machine needs is already in hand , it has been simulating the
+   * whole match all along , so this is just permission to start scoring.
    */
   promote() {
     if (this.host) return;
@@ -1121,7 +1121,7 @@ export class MatchEngine {
    * Takes the host's word for the rules, and its word about bodies as a target
    * rather than as truth.
    *
-   * `lag` is the one-way trip time in seconds — half the measured round trip.
+   * `lag` is the one-way trip time in seconds , half the measured round trip.
    * Everything in the packet is that old, so it is run forward by that much
    * before it is used.
    */
@@ -1144,7 +1144,7 @@ export class MatchEngine {
     this.powers = s.pw.map(([kind, team, left]) => ({ kind, team, left: left < 0 ? Infinity : left }));
     this.floating = s.fl.map(([kind, x, y]) => ({ kind, x, y, vy: BALANCE.POWER_FALL, spin: 0 }));
 
-    // The host rebuilds the court between points — everyone back to their
+    // The host rebuilds the court between points , everyone back to their
     // starting spot, ball back in the server's hands. There is nothing to ease
     // toward there: the two simulations are not drifting apart, they are
     // starting again, and easing would drag every character across the sand.
@@ -1167,7 +1167,7 @@ export class MatchEngine {
       if (!local) continue;
       // Everyone but us is simulated from the input that came with the packet,
       // so between snapshots they keep running, stopping and jumping the way
-      // their own machine says they are — not coasting on a stale velocity.
+      // their own machine says they are , not coasting on a stale velocity.
       if (local.control !== 'local') this.netInputs.set(id, unpackInput(d[6] ?? 0));
 
       if (restart) {
@@ -1197,8 +1197,8 @@ export class MatchEngine {
     /**
      * The ball, with one exception.
      *
-     * A guest plays its own contacts the instant they happen — that is the
-     * whole point of simulating locally — so for one round trip afterwards the
+     * A guest plays its own contacts the instant they happen , that is the
+     * whole point of simulating locally , so for one round trip afterwards the
      * host is still describing a ball that has not been hit yet. Believing it
      * would yank the ball back out of your own hands and then hand it to you
      * again a moment later, which reads as the hit not registering.
@@ -1235,8 +1235,8 @@ export class MatchEngine {
   /**
    * A guest's own account of where it is. Host side.
    *
-   * Taken at face value, within reason. The alternative — deriving the position
-   * from the input bitmask and hoping the two simulations agree — is a round
+   * Taken at face value, within reason. The alternative , deriving the position
+   * from the input bitmask and hoping the two simulations agree , is a round
    * trip of error on the one body whose owner is watching it most closely, and
    * it is what made a guest's character feel like it was wading.
    *
@@ -1285,7 +1285,7 @@ export class MatchEngine {
    *
    * Small differences are ignored outright: nudging a body by two pixels is
    * visible without being more correct. Large ones skip the smoothing and snap
-   * — sliding a character a third of the way across the court to catch up looks
+   * , sliding a character a third of the way across the court to catch up looks
    * far worse, and by then the two simulations have genuinely come apart rather
    * than merely drifted.
    */
@@ -1322,7 +1322,7 @@ export class MatchEngine {
    *
    * The ball and the characters are corrected differently on purpose. The ball
    * has no input to predict, so the host's last word can be run forward exactly
-   * and followed. A character does have input — it arrives with every packet —
+   * and followed. A character does have input , it arrives with every packet ,
    * so the local simulation is already right about how it is moving, and all
    * the network has to add is the small offset it has drifted by.
    */
@@ -1346,7 +1346,7 @@ export class MatchEngine {
         this.ball.spin = t.spin;
         this.trail.length = 0;
       } else if (gap > BALANCE.BALL_TOLERANCE) {
-        // Further out, closed faster — but always closed, never jumped. This is
+        // Further out, closed faster , but always closed, never jumped. This is
         // what keeps a relayed match readable instead of strobing.
         const k = Math.min(1, ease * (1 + gap / 240));
         this.ball.x += (t.x - this.ball.x) * k;
@@ -1391,7 +1391,7 @@ export class MatchEngine {
     // Hard cap: a long rally with power-ups can otherwise queue thousands and
     // the frame cost lands exactly when the action is busiest.
     if (this.particles.length > 320) return;
-    // Rounded up, so a burst that was asked for never vanishes entirely — a
+    // Rounded up, so a burst that was asked for never vanishes entirely , a
     // hit with no puff at all reads as a missed hit.
     const n = Math.max(1, Math.ceil(count * this.budget));
     for (let i = 0; i < n; i++) {
@@ -1429,7 +1429,7 @@ export class MatchEngine {
   /**
    * Letterboxes the court into the canvas.
    *
-   * The whole court is always visible — a volleyball court that scrolls is
+   * The whole court is always visible , a volleyball court that scrolls is
    * unplayable, because you cannot position yourself against a ball you cannot
    * see.
    */

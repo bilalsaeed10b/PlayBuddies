@@ -1,4 +1,4 @@
-# Tower Siege — Requirements
+# Tower Siege , Requirements
 
 A tower defence for 1–4 players where everybody defends their own keep against
 the *same* waves, and the interesting question is who holds out longest.
@@ -8,16 +8,16 @@ the *same* waves, and the interesting question is who holds out longest.
 ## 1. The shape of it
 
 Every player gets an identical map and an identical stream of enemies. Nothing
-about the terrain or the wave list is rolled per player — if you lose, you lost
+about the terrain or the wave list is rolled per player , if you lose, you lost
 to the same monsters your opponent just handled, which is the entire point.
 
 Two modes, chosen by the host:
 
-**Siege (versus)** — everyone defends alone. A leak costs you a life. Run out
+**Siege (versus)** , everyone defends alone. A leak costs you a life. Run out
 and your keep falls; the last keep standing wins. If several keeps are still up
 when the wave list runs dry, waves keep escalating until one falls.
 
-**Alliance (co-op)** — one shared pool of lives across the whole party. Waves
+**Alliance (co-op)** , one shared pool of lives across the whole party. Waves
 are scaled up for the head-count, so four players is harder than one, not four
 times easier. Everyone wins or nobody does.
 
@@ -37,7 +37,7 @@ Solo is Siege against nothing but the waves: survive all of them.
   while the match runs. A spectated keep is read-only and unmistakably marked
   as somebody else's.
 - **R5** A build phase between waves, and building allowed *during* a wave too
-  — a tower defence where you cannot react to what is walking at you is a
+  , a tower defence where you cannot react to what is walking at you is a
   puzzle, not a game.
 - **R6** Runs on a phone at a steady frame rate. Same quality governor the rest
   of the platform uses.
@@ -65,7 +65,7 @@ Solo is Siege against nothing but the waves: survive all of them.
 
 ## 3. The map
 
-One map, fixed, hand-laid rather than generated — a generated map is a
+One map, fixed, hand-laid rather than generated , a generated map is a
 different map, and R2 says everyone fights the same one.
 
 - A grid. Enemies walk a fixed path from a breach in the outer wall to the
@@ -73,8 +73,8 @@ different map, and R2 says everyone fights the same one.
 - Buildable tiles are the ground either side of the path. A tile holds one
   tower.
 - The path doubles back on itself so a tower placed in the crook covers two
-  stretches of it — that is where the placement decisions live.
-- Scenery — a pond, a copse, some rock — blocks a handful of tiles, including
+  stretches of it , that is where the placement decisions live.
+- Scenery , a pond, a copse, some rock , blocks a handful of tiles, including
   deliberately the best corridor on the board. A field of a hundred identical
   plots looks like a spreadsheet and plays like one: every plot as good as its
   neighbour is nothing to decide.
@@ -95,7 +95,7 @@ wave; what limits you is gold, not unlocks.
 | Ballista | very long range, heavy single hit | no | the answer to a brute |
 
 Two upgrade levels each. An upgrade raises damage and range and visibly
-changes the tower — a player must be able to see what is upgraded without
+changes the tower , a player must be able to see what is upgraded without
 selecting it.
 
 Selling refunds a fraction, so a bad placement is a setback and not a loss.
@@ -123,7 +123,7 @@ genuinely poor against a brute and the counter-play is real.
 
 ## 7. Netcode
 
-The transport is the platform's per-player Firestore document — the same one
+The transport is the platform's per-player Firestore document , the same one
 the turn-based games use. A tower defence looks real-time but almost nothing
 about it needs sending:
 
@@ -134,7 +134,7 @@ about it needs sending:
   simulated locally, which is what makes spectating cost nothing.
 - **What is actually sent** is what a client cannot derive: a tower being
   built, upgraded or sold; a send being bought; and a short summary at the end
-  of each wave — lives, gold, wave number.
+  of each wave , lives, gold, wave number.
 - **The owner is authoritative for their own keep.** A remote engine is a
   picture, and the wave-end summary corrects it. This is the platform's
   established rule and it is what keeps two devices from having to agree on a
@@ -147,7 +147,7 @@ That comes to a few dozen small writes for a whole match.
 A tower built mid-wave reaches a peer a moment after it went up locally, so a
 spectator can briefly see one fewer arrow in flight. That is accepted: the
 owner's lives are what decides the match, they are authoritative, and they are
-resynced every wave. The alternative — locking every client to the same tick —
+resynced every wave. The alternative , locking every client to the same tick ,
 buys a prettier spectator view at the price of a game that stalls whenever one
 phone is slow, and it is not worth that.
 
@@ -155,13 +155,13 @@ phone is slow, and it is not worth that.
 
 - Canvas 2D, one baked backdrop, sprites baked once per tower and enemy kind.
 - Towers turn to track what they are shooting. Projectiles have travel time and
-  can miss a dead target — a shot that visibly leads a runner is worth more
+  can miss a dead target , a shot that visibly leads a runner is worth more
   than an instant hit.
 - Damage numbers are off. A health bar and a hit flash say the same thing
   without turning the screen into a spreadsheet.
 - The keep shows its damage: at full lives it is whole, at one life it is
   burning.
-- The spectator view is unmistakable — a coloured frame, the owner's name, and
+- The spectator view is unmistakable , a coloured frame, the owner's name, and
   no build controls at all.
 
 ## 9. Done when

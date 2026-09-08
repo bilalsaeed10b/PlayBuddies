@@ -1,4 +1,4 @@
-# Battle of Pirates — Requirements
+﻿# Battle of Pirates , Requirements
 
 A turn-based artillery duel for PlayBuddies. One or two players, against a bot,
 across a room, or across the internet.
@@ -14,7 +14,7 @@ meant to stay in step.
 The platform has a co-op puzzler (Neon Elements), a free-for-all arcade game
 (Go Eat Fish) and a real-time sport (Volley Clash). All three are games of
 reflex: the person with the faster hands wins. There is nothing on the platform
-you can play **slowly** — nothing you can play while talking to the person you
+you can play **slowly** , nothing you can play while talking to the person you
 are playing against, nothing where the interesting part is the decision rather
 than the execution, and nothing playable one-handed on a phone on a bus.
 
@@ -43,7 +43,7 @@ netcode problem to solve**.
   battle never stops for a dropout.
 - **R2.4** Couch play is the mode that works on a laptop with no internet, and
   it must be reachable in two taps from the menu. Because turns alternate, one
-  device genuinely supports two people — no shared keyboard, no split screen.
+  device genuinely supports two people , no shared keyboard, no split screen.
 
 ### The arena
 
@@ -55,7 +55,7 @@ netcode problem to solve**.
   between them are visible at all times. There is no camera, because an
   artillery duel you have to scroll is a guessing game.
 - **R2.6** A shot may leave the top of the frame. It must not be deleted for
-  doing so — gravity brings a lofted mortar back — and while it is up there an
+  doing so , gravity brings a lofted mortar back , and while it is up there an
   arrow at the top edge marks where it is.
 
 ---
@@ -73,7 +73,7 @@ netcode problem to solve**.
   pulling back.
 - **R3.4** Physics runs at a fixed 120 Hz through an accumulator, so a 144 Hz
   desktop and a 60 Hz phone simulate the identical flight. This is not only
-  about feel — see §7.
+  about feel , see §7.
 - **R3.5** Every collision is a **swept** test against the shape: segment
   against inflated box for hulls and rigging, segment against circle for rocks,
   segment against the plane for the water. A ball at full power crosses many
@@ -112,7 +112,7 @@ netcode problem to solve**.
 ### Ships as a shop
 
 Eight hulls, three free, the rest bought with the platform's shared coin
-balance — the same `localStorage` economy the other two games use, so a
+balance , the same `localStorage` economy the other two games use, so a
 player's coins mean something across the site.
 
 - **R4.8** **They are paint. There are no stats.** No hull fires further, turns
@@ -196,8 +196,8 @@ is the powder.
 ## 8. The bot
 
 - **R8.1** It does not cheat and it does not read your aim. It solves the same
-  ballistics problem you are eyeballing, wind included — it can see the same
-  gauge you can — closed form, then three passes to settle the wind against the
+  ballistics problem you are eyeballing, wind included , it can see the same
+  gauge you can , closed form, then three passes to settle the wind against the
   flight time.
 - **R8.2** It then misses on purpose, by an amount set by its rank.
 - **R8.3** **A miss narrows its spread; a hit resets it.** It ranges in like
@@ -244,8 +244,8 @@ The platform is a static site with no game server. This game does not need one.
   be last night's final shot; the stamp makes a stale turn obvious instead of
   replayable.
 - **R9.7** A peer's claim is clamped: no single turn may take more than one
-  turn's worth of hull off. Trust here is social, not cryptographic — these are
-  friends in a room — but a tampered client should not be able to end a battle
+  turn's worth of hull off. Trust here is social, not cryptographic , these are
+  friends in a room , but a tampered client should not be able to end a battle
   in one write.
 - **R9.8** A shot that arrives while the previous explosion is still settling is
   held, not dropped, and played when its turn comes round.
@@ -278,7 +278,7 @@ The target is a cheap Android phone, not a desktop.
   one step rather than getting gradually stranger.
 - **R10.7** Backing-store pixels, not CSS pixels, are the budget. Device pixel
   ratio is capped by tier *and* the total width is capped outright.
-- **R10.8** While nothing is moving — a quiet aim phase, no drag in progress —
+- **R10.8** While nothing is moving , a quiet aim phase, no drag in progress ,
   the cheap tiers paint at half rate. The simulation still runs every frame;
   only the paint is skipped.
 - **R10.9** Nothing in the render loop causes a React render. The HUD is updated
@@ -294,7 +294,7 @@ The target is a cheap Android phone, not a desktop.
   `game.json` and the catalog picks it up.
 - **R11.2** It reads its session from the query string: `room`, `displayName`,
   `mode=single`. It writes only its own slot in the lobby document, and it
-  reuses the `fishIndex` field for the chosen hull — the security rules name the
+  reuses the `fishIndex` field for the chosen hull , the security rules name the
   writable fields one by one, so a new game inventing its own key would simply
   be refused.
 - **R11.3** Host status is read from `hostId` on the lobby document, never from
@@ -321,3 +321,4 @@ Stated so it is a decision and not an oversight:
 - Multiple gunners per ship. It doubles the UI to add one more decision.
 - Host migration, spectators, ranked play, persistent stats. The platform has
   no backend for it and the lobby is the matchmaking.
+

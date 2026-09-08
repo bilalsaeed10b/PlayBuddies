@@ -28,7 +28,7 @@ export interface CodeMatch {
  * Looks up public profiles by their friend code, excluding the caller.
  *
  * Searches `/profiles`, which by design holds no email or stats, and states an
- * explicit limit — the security rules reject profile queries that don't bound
+ * explicit limit , the security rules reject profile queries that don't bound
  * themselves.
  */
 export async function findByFriendCode(code: string, selfUid: string): Promise<CodeMatch[]> {
@@ -51,7 +51,7 @@ export async function findByFriendCode(code: string, selfUid: string): Promise<C
 export type FriendRequestOutcome = "sent" | "already-friends" | "already-pending" | "error";
 
 /**
- * Sends a friend request, guarding against clobbering an existing link — a
+ * Sends a friend request, guarding against clobbering an existing link , a
  * plain `setDoc` would reset an already-accepted friendship back to
  * "pending", and re-sending a pending one is a wasted write that looks to the
  * sender like nothing happened.

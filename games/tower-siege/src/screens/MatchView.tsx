@@ -11,7 +11,7 @@
  * fetched.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronLeft, ChevronRight, Coins, Eye, Heart, Loader2, Play, Send, Swords, Trophy, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Coins, Eye, Gauge, Heart, Loader2, Play, Send, Swords, Trophy, X } from 'lucide-react';
 import ControlsTray from '@shared/controls/ControlsTray';
 import { isStaleChunkError, recoverFromStaleChunk } from '@shared/net/staleChunk';
 import { SiegeEngine } from '../engine/SiegeEngine';
@@ -69,6 +69,9 @@ interface Session {
 
 const BANNER_MS = 2000;
 
+/** Fast-forward steps. 1x is implicit, everything to its right cycles in. */
+const SPEEDS = [1, 2, 3, 5, 10] as const;
+
 export default function MatchView({
   config,
   settings,
@@ -104,6 +107,7 @@ export default function MatchView({
   const [notice, setNotice] = useState<string | null>(null);
   const [over, setOver] = useState<{ won: boolean; standing: number[] } | null>(null);
   const [showSends, setShowSends] = useState(false);
+  const [speed, setSpeed] = useState<(typeof SPEEDS)[number]>(1);
 
   // HUD mirrors. Written from the frame loop only when the number a human is
   // reading has actually changed, so a quiet frame costs no React work at all.
@@ -141,7 +145,7 @@ export default function MatchView({
   /**
    * Every keep, simulated.
    *
-   * Rebuilt only when the *match* changes — a new seed or new rules. Listing
+   * Rebuilt only when the *match* changes , a new seed or new rules. Listing
    * anything the lobby can touch here would reset a siege in progress the
    * moment somebody's name changed.
    */
@@ -419,6 +423,7 @@ export default function MatchView({
     if (!ctx) return;
 
     let raf = 0;
+    let bgTimer: number | null = null;
     let last = performance.now();
     let clock = 0;
     let dpr = 1;
@@ -450,19 +455,28 @@ export default function MatchView({
     const observer = new ResizeObserver(fit);
     if (boardRef.current) observer.observe(boardRef.current);
 
-    const frame = (now: number) => {
-      raf = requestAnimationFrame(frame);
-      const dt = Math.min(0.05, (now - last) / 1000);
+    /**
+     * One simulation step: up to `dtCap` seconds of real time, ticked once
+     * per point of the speed multiplier so a fast-forwarded match still moves
+     * in small, accurate steps rather than one huge one. Shared by the
+     * visible loop and the backgrounded one below , the caller decides how
+     * tightly to cap a stutter versus how much wall clock to catch up on.
+     */
+    const step = (now: number, dtCap: number) => {
+      const dt = Math.min(dtCap, Math.max(0, (now - last) / 1000));
       last = now;
-      clock += dt;
+      const mul = speedRef.current;
+      clock += dt * mul;
 
       const engines = enginesRef.current;
-      if (engines.length === 0) return;
+      if (engines.length === 0) return null;
 
-      // Every keep advances, not only the one being watched — that is what
+      // Every keep advances, not only the one being watched , that is what
       // makes the spectator view live rather than a snapshot, and what lets a
       // bot lose a match while you are looking the other way.
-      for (const e of engines) e.update(dt);
+      for (let i = 0; i < mul; i++) {
+        for (const e of engines) e.update(dt);
+      }
 
       // Bots spend during their build phase, a tower at a time so the buying
       // is spread across the phase rather than landing in one frame.
@@ -481,9 +495,11 @@ export default function MatchView({
         if (want) e.apply(want);
       }
 
-      render(ctx, engines[watchRef.current] ?? engines[0], clock);
+      return engines;
+    };
 
-      // -- HUD, only when something a human can read has changed --
+    /** HUD mirrors, only touched when something a human can read has changed. */
+    const publish = (engines: SiegeEngine[]) => {
       const own = engines[mine];
       if (own) {
         const t = Math.ceil(own.phase === 'build' ? own.timer : own.timer);
@@ -506,10 +522,41 @@ export default function MatchView({
         setBoard(engines.map((e) => ({ lives: e.lives, wave: e.wave, down: e.phase === 'fallen' })));
       }
     };
+
+    /** Set every time `frame` actually runs, so the watchdog below can tell rAF is alive. */
+    let lastFrameStamp = performance.now();
+
+    const frame = (now: number) => {
+      raf = requestAnimationFrame(frame);
+      lastFrameStamp = now;
+      const engines = step(now, 0.05);
+      if (!engines) return;
+      render(ctx, engines[watchRef.current] ?? engines[0], clock);
+      publish(engines);
+    };
+
+    /**
+     * requestAnimationFrame stalls in a background tab -- throttled hard, or
+     * simply never called again -- and it does it without any obligation to
+     * fire `visibilitychange` first. Watching the clock instead of that event
+     * catches every way a browser can go quiet: a hidden tab, a minimised
+     * window, a phone screen locking. `step` measures real elapsed time
+     * itself, so the towers land on schedule whether this ran sixty times a
+     * second or once every half.
+     */
+    const watchdog = () => {
+      const now = performance.now();
+      if (now - lastFrameStamp < 400) return;
+      const engines = step(now, 2);
+      if (engines) publish(engines);
+    };
+    bgTimer = window.setInterval(watchdog, 500);
+
     raf = requestAnimationFrame(frame);
 
     return () => {
       cancelAnimationFrame(raf);
+      if (bgTimer !== null) window.clearInterval(bgTimer);
       observer.disconnect();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -522,6 +569,8 @@ export default function MatchView({
   pickedRef.current = picked;
   const selectedRef = useRef(selected);
   selectedRef.current = selected;
+  const speedRef = useRef(speed);
+  speedRef.current = speed;
   const viewRef = useRef({ scale: 1, offX: 0, offY: 0, dpr: 1 });
 
   // -- rendering --------------------------------------------------------------
@@ -627,7 +676,7 @@ export default function MatchView({
         ctx.globalAlpha = 1;
       }
 
-      // Health bar, only once it has actually been hurt — a full bar over
+      // Health bar, only once it has actually been hurt , a full bar over
       // every walker turns the board into a bar chart.
       if (e.hp < e.maxHp) {
         const w = meta.size * 2.1;
@@ -849,6 +898,16 @@ export default function MatchView({
               <span className="text-xs font-black tabular-nums text-emerald-200">Build {hud.timer}s</span>
             </div>
           )}
+          <button
+            onClick={() => setSpeed((s) => SPEEDS[(SPEEDS.indexOf(s) + 1) % SPEEDS.length])}
+            aria-label="Game speed"
+            className={`flex items-center gap-1.5 rounded-xl border px-2.5 py-1.5 backdrop-blur-md transition-colors ${
+              speed > 1 ? 'border-sky-400/40 bg-sky-500/15 text-sky-200' : 'border-white/15 bg-black/40 text-white/70'
+            }`}
+          >
+            <Gauge className="h-3.5 w-3.5" />
+            <span className="text-xs font-black tabular-nums">{speed}×</span>
+          </button>
         </div>
 
         <div className="pointer-events-auto shrink-0">
@@ -1051,7 +1110,7 @@ export default function MatchView({
 
       {spectating && (
         <div className="z-30 shrink-0 border-t border-white/10 bg-slate-950/80 p-3 text-center text-[11px] font-bold text-white/50 backdrop-blur-md">
-          Watching {engine?.name ?? 'another keep'} — your own towers are on your own board.
+          Watching {engine?.name ?? 'another keep'} , your own towers are on your own board.
         </div>
       )}
 

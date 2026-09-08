@@ -109,8 +109,8 @@ export default function MatchView({
   /**
    * The rules as one number, so the wire effect below can depend on them.
    *
-   * `config.rules` is a fresh object on every render — App rebuilds the whole
-   * config from each lobby snapshot — and listing it in a dependency array
+   * `config.rules` is a fresh object on every render , App rebuilds the whole
+   * config from each lobby snapshot , and listing it in a dependency array
    * would tear the link down and reopen it several times a second, writing a
    * `bye` each time.
    */
@@ -148,8 +148,8 @@ export default function MatchView({
   const [rematch, setRematch] = useState(0);
 
   /**
-   * True while the wire itself is the problem — it never opened, or it dropped
-   * mid-game — as opposed to an ordinary notice like somebody going idle.
+   * True while the wire itself is the problem , it never opened, or it dropped
+   * mid-game , as opposed to an ordinary notice like somebody going idle.
    * Without it the only way out of "could not reach the other players" was
    * leaving, so a page that failed to open a link once never got a second try.
    */
@@ -179,7 +179,7 @@ export default function MatchView({
    * snapshot, so its arrays are a different array each time even when nothing
    * about the game has changed. That is fine for the HUD and fatal for the
    * wire: an effect that lists an array identity in its dependencies tears the
-   * link down and opens a new one, and closing a link writes a `bye` — which
+   * link down and opens a new one, and closing a link writes a `bye` , which
    * tells everyone else this player abandoned their pawn, over and over.
    */
   const peerKey = config.peerUids.join(',');
@@ -198,9 +198,40 @@ export default function MatchView({
   }, [seatIdKey]);
 
   /**
+   * A seat the board was built believing was a bot, when the room's own
+   * roster now clearly says a real person belongs there.
+   *
+   * The board's seats are frozen the moment it is built, on purpose , that is
+   * what stops a live lobby snapshot from resetting a game in progress. The
+   * one case that slips past it: the very snapshot the board was built from
+   * was itself incomplete , a guest's own write to the room simply had not
+   * landed on this device yet , so their seat got made up as `bot-N` from
+   * the start rather than ever being theirs. Their `hello`, the ordinary way
+   * a seat like that gets handed back, fires once, right as their own link
+   * opens, and can cross the wire before this device's listener for it is
+   * even subscribed; nothing was ever going to ask a second time. This asks
+   * again , every time the room's roster settles on a real id for a seat the
+   * board still thinks is a bot, correcting it right then rather than
+   * staking the whole game on one packet's timing.
+   */
+  useEffect(() => {
+    const engine = engineRef.current;
+    if (!engine) return;
+    for (let i = 0; i < seats.length && i < engine.seats.length; i++) {
+      const roomSeat = seats[i];
+      const boardSeat = engine.seats[i];
+      if (boardSeat.control !== 'ai' || !boardSeat.id.startsWith('bot-')) continue;
+      if (roomSeat.control !== 'remote' || roomSeat.id.startsWith('bot-')) continue;
+      engine.correctSeat(i, roomSeat.id, roomSeat.name);
+      setNotice(`${roomSeat.name} was here all along.`);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seatIdKey]);
+
+  /**
    * Whether this device drives the bots, read from a ref inside the loop.
    *
-   * As a dependency it would rebuild the board — resetting a live game — the
+   * As a dependency it would rebuild the board , resetting a live game , the
    * moment the lobby handed the host badge to somebody else.
    */
   const aiDriverRef = useRef(aiDriver);
@@ -282,8 +313,8 @@ export default function MatchView({
           handlePacket,
           (message) => {
             setNotice(message);
-            // Everything TurnLink reports on its own — the open failing, a
-            // listener dropping, a send bouncing — means the link itself needs
+            // Everything TurnLink reports on its own , the open failing, a
+            // listener dropping, a send bouncing , means the link itself needs
             // a fresh attempt, not just an acknowledgement.
             setConnectionLost(true);
           },
@@ -306,7 +337,7 @@ export default function MatchView({
         }
 
         // `pagehide` fires with `persisted: false` on plenty of things that
-        // are not a real close — a phone screen locking, a tab switch, a page
+        // are not a real close , a phone screen locking, a tab switch, a page
         // holding an open Firestore listener not being bfcache-eligible in
         // most browsers. Give it a chance to come back (cancelled by
         // `pageshow` or the tab going visible again) before actually handing
@@ -423,7 +454,7 @@ export default function MatchView({
      * The canvas is sized from its container, not from the window.
      *
      * `resize` writes an explicit pixel width and height onto the element,
-     * which is what keeps a CSS pixel and a board coordinate the same thing —
+     * which is what keeps a CSS pixel and a board coordinate the same thing ,
      * and also what overrides the `w-full h-full` classes, so nothing else
      * will correct it. A window listener alone was not enough: the board's box
      * changes without the window doing anything at all when the player chips
@@ -472,7 +503,7 @@ export default function MatchView({
         );
       }
 
-      // The clock only ever runs against somebody sitting at this device — a
+      // The clock only ever runs against somebody sitting at this device , a
       // remote player's clock is their own device's business, and running a
       // second copy of it here would move their pawn for them.
       if (session.rules.turnTimer && engine.awaitingLocal) {
@@ -515,7 +546,7 @@ export default function MatchView({
       engineRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    // The board is rebuilt only when the *game* changes — a new seed, a new
+    // The board is rebuilt only when the *game* changes , a new seed, a new
     // toss, a rematch. Listing anything the lobby can touch here would reset a
     // game in progress the moment somebody's name or badge changed.
   }, [session?.seed, session?.first, session?.rules.players, session?.rules.teams, rematch]);
@@ -543,7 +574,7 @@ export default function MatchView({
   // -- actions ----------------------------------------------------------------
 
   /**
-   * A move landed. Declared above the keyboard listener on purpose — that
+   * A move landed. Declared above the keyboard listener on purpose , that
    * effect lists it as a dependency, and a dependency array is read during
    * render, so a `const` declared further down is still in its dead zone.
    */
@@ -588,7 +619,7 @@ export default function MatchView({
 
       const step = arrows.indexOf(e.code);
       if (step < 0) return;
-      // Up, down, left, right — the same four the rules allow and no more.
+      // Up, down, left, right , the same four the rules allow and no more.
       const delta = [
         [-1, 0],
         [1, 0],
@@ -896,7 +927,7 @@ export default function MatchView({
               ? 'You and your partner start on the same edge and run for the far one. Either of you crossing wins it for both.'
               : 'Race to the far side of the board. First pawn there wins.'}
           </p>
-          <p className="mt-1.5">Step one square — up, down, left, right, never diagonal. Facing another pawn with nothing behind it? Jump straight over.</p>
+          <p className="mt-1.5">Step one square , up, down, left, right, never diagonal. Facing another pawn with nothing behind it? Jump straight over.</p>
           <p className="mt-1.5">Walls block a step, never a path: any wall that would seal somebody in is not a legal wall to place.</p>
           <p className="mt-1.5">
             {layout.size}×{layout.size} board · {layout.walls} walls each, shared between everyone on it.
@@ -949,7 +980,7 @@ function ModeButton({
  * squares they still have to cross.
  *
  * The step count is the whole game stated as one number. It is also what makes
- * a wall's worth obvious the moment it lands — somebody's number jumps.
+ * a wall's worth obvious the moment it lands , somebody's number jumps.
  */
 function PlayerChip({
   seat,
@@ -989,7 +1020,7 @@ function PlayerChip({
           </span>
           <span className="flex items-center gap-0.5">
             <Flag className="h-3 w-3" />
-            {steps < 0 ? '—' : steps}
+            {steps < 0 ? ',' : steps}
           </span>
           {seat.control === 'ai' && (
             <span className="rounded bg-slate-200 px-1 text-[9px] uppercase tracking-wide text-slate-500">

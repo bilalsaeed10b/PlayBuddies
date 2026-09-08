@@ -19,7 +19,7 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(__dirname, '.'),
-      // games/_shared/ — code every game imports rather than keeps its own
+      // games/_shared/ , code every game imports rather than keeps its own
       // copy of. Pinning react/react-dom here too: without it, a bare import
       // from inside _shared (which has no node_modules of its own) would
       // resolve up to the repo root's copy instead of this game's own,
@@ -31,7 +31,7 @@ export default defineConfig({
   },
   build: {
     // The Firebase SDK is several times the weight of the whole board, and an
-    // offline game never touches it — it is only ever reached through the
+    // offline game never touches it , it is only ever reached through the
     // dynamic import in App.tsx, so it stays off the critical path entirely.
     chunkSizeWarningLimit: 700,
     rollupOptions: {

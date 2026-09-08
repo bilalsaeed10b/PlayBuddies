@@ -17,8 +17,8 @@ npm run logs -- --list            # what sessions exist
 npm run logs -- --clear           # start fresh
 ```
 
-The summary always leads with a **verdict** — errors and warnings, grouped and
-counted, with which device each came from — because "did that game run fine?"
+The summary always leads with a **verdict** , errors and warnings, grouped and
+counted, with which device each came from , because "did that game run fine?"
 is the question this exists to answer.
 
 ## Where logs come from
@@ -31,7 +31,7 @@ Logs are written by whichever server the game is being served from:
 | `npm run dev --prefix games/<id>` | yes | Single-game development. |
 | GitHub Pages | no | Nothing is listening on `/__log`. See below. |
 
-Everything appends to `dev-logs/session-<date>.ndjson` — one JSON object per
+Everything appends to `dev-logs/session-<date>.ndjson` , one JSON object per
 line, so it survives a crash mid-write and can be tailed live.
 
 **To capture a real multi-device playtest, serve it yourself:**
@@ -63,7 +63,7 @@ log.warn('mesh:relayed', { unreachable: 2 });
 log.error('wire:open-failed', { message });
 ```
 
-`context()` is what makes four devices' lines merge into one readable match —
+`context()` is what makes four devices' lines merge into one readable match ,
 pass the room code as soon as the game has it.
 
 ### What is captured without asking
@@ -79,7 +79,7 @@ predicted, so it has to land in the same timeline as the turns.
 
 Not every function call, and never once a frame. A 60fps loop would bury the
 signal in millions of lines and cost frames producing them. Log discrete,
-meaningful events — a packet in or out, a turn changing hands, a round
+meaningful events , a packet in or out, a turn changing hands, a round
 resolving, a connection dropping. A log you cannot read is not a log.
 
 ## Ordering across devices
@@ -88,8 +88,8 @@ Four phones do not agree on wall-clock time to better than a few seconds, so
 the client timestamp `t` is never trusted for ordering. Two other fields do
 that job:
 
-- `seq` — a per-client counter, which orders one device's own lines exactly.
-- `ord` — stamped by the collector on arrival, which is the single ordering
+- `seq` , a per-client counter, which orders one device's own lines exactly.
+- `ord` , stamped by the collector on arrival, which is the single ordering
   every device's lines can be merged by.
 
 The reader sorts by `ord`.

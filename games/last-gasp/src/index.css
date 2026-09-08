@@ -20,7 +20,7 @@
   body {
     @apply text-slate-100 selection:bg-lime-400/40;
     /* Chalk on a slate board in a cold room. Every other game on the platform
-       owns a different light — dry paper, a green, the sea — and this one is
+       owns a different light , dry paper, a green, the sea , and this one is
        the dark end of a classroom at four in the afternoon, so a glance at a
        screenshot says which game it is before anything on it is read. */
     background:

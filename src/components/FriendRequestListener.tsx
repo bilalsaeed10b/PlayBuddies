@@ -22,17 +22,17 @@ function saveSeen(seen: Set<string>) {
   try {
     sessionStorage.setItem(SEEN_KEY, JSON.stringify([...seen]));
   } catch {
-    /* private mode — the toast just reappears next reload, which is fine */
+    /* private mode , the toast just reappears next reload, which is fine */
   }
 }
 
 /**
- * Pops a toast the moment a friend request arrives, anywhere in the app —
+ * Pops a toast the moment a friend request arrives, anywhere in the app ,
  * including mid-lobby, where the friends panel used to not even mount.
  *
  * A request that was already pending before this component ever mounted
  * (the common case: you signed in and someone had asked days ago) does not
- * toast — it's already sitting in the panel's badge, and re-announcing it on
+ * toast , it's already sitting in the panel's badge, and re-announcing it on
  * every page load would be noise, not news. Only requests that appear after
  * the baseline is established, and haven't already been shown this session,
  * trigger the toast.
@@ -58,7 +58,7 @@ export default function FriendRequestListener() {
 
     if (baseline.current === null) {
       // First snapshot after mount/sign-in establishes what was already
-      // pending — none of it is "new".
+      // pending , none of it is "new".
       baseline.current = new Set(requests.map((r) => r.connId));
       for (const r of requests) seen.current.add(r.connId);
       return;

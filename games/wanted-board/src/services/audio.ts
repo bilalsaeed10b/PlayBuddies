@@ -1,7 +1,7 @@
 /**
  * Every sound in the game, synthesised.
  *
- * Six short noises made of oscillators and one burst of shaped noise — no
+ * Six short noises made of oscillators and one burst of shaped noise , no
  * audio files, so there is nothing to download, nothing to decode on a cold
  * start, and nothing to keep in sync with the bundle. The whole board is
  * quiet wood and clacking pieces; that is a cheaper palette to fake than a
@@ -56,7 +56,7 @@ class AudioService {
     osc.stop(t + len + 0.02);
   }
 
-  /** Shaped noise — the wood in "a wall going into a groove". */
+  /** Shaped noise , the wood in "a wall going into a groove". */
   private knock(at: number, len: number, gain: number, cutoff: number) {
     const ctx = this.ctx;
     if (!ctx || !this.master || this.volume <= 0) return;
@@ -99,7 +99,7 @@ class AudioService {
     this.tone(90, 0, 0.14, 0.28, 'square');
   }
 
-  /** A trap springing — tighter and meaner than a shot, and half the money. */
+  /** A trap springing , tighter and meaner than a shot, and half the money. */
   playSnap() {
     this.knock(0, 0.08, 0.7, 3800);
     this.tone(180, 0, 0.07, 0.14, 'sawtooth');

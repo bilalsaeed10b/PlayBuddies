@@ -11,7 +11,7 @@
  * the game worse.
  */
 
-/** A location on the board. Index is identity everywhere — on the wire too. */
+/** A location on the board. Index is identity everywhere , on the wire too. */
 export interface Place {
   name: string;
   /** One-word flavour under the name on the map. */
@@ -26,8 +26,8 @@ export interface Place {
  *
  * This used to be six places in a plain ring, and every ride was a choice of
  * exactly two directions. It is a wagon wheel now: the outer eight still
- * connect only to their two neighbours around the rim, but four of them —
- * Saloon, Mine, Canyon, Chapel — also sit on a spoke straight to the Bank.
+ * connect only to their two neighbours around the rim, but four of them ,
+ * Saloon, Mine, Canyon, Chapel , also sit on a spoke straight to the Bank.
  * That is the whole idea. A spoke place has a fast, exposed line to the money
  * and more directions to be read from; a rim-only place (Depot, Jail,
  * Graveyard, Livery) is quieter and harder to predict, but every trip to the
@@ -53,8 +53,8 @@ export const BANK = 0;
 export const PLACE_COUNT = PLACES.length;
 
 /**
- * Every direct edge, each listed once. Everything else — legal moves,
- * shortest paths, the roads drawn on the map and in the guide — is derived
+ * Every direct edge, each listed once. Everything else , legal moves,
+ * shortest paths, the roads drawn on the map and in the guide , is derived
  * from this.
  */
 export const ROADS: [number, number][] = [
@@ -71,7 +71,7 @@ for (const [a, b] of ROADS) {
 }
 for (const list of ADJACENCY) list.sort((a, b) => a - b);
 
-/** All places directly reachable from `place` by one ride. Not sorted by distance — sorted by index, for a stable UI. */
+/** All places directly reachable from `place` by one ride. Not sorted by distance , sorted by index, for a stable UI. */
 export function neighbours(place: number): number[] {
   return ADJACENCY[place] ?? [];
 }
@@ -83,7 +83,7 @@ export function reachable(place: number): number[] {
 
 /**
  * All-pairs shortest hop count, and the first hop of a shortest path between
- * any two places — both computed once, from the fixed graph above, rather
+ * any two places , both computed once, from the fixed graph above, rather
  * than on every call. Nine places makes this nine tiny breadth-first
  * searches at module load; nothing here ever runs again mid-match.
  */
@@ -106,7 +106,7 @@ for (let source = 0; source < PLACE_COUNT; source++) {
 }
 // Second pass, from the *destination* this time: the first hop of a shortest
 // from->to path is whichever neighbour of `from` is one step closer to `to`
-// than `from` itself is — ties broken by lowest index, so every client that
+// than `from` itself is , ties broken by lowest index, so every client that
 // runs this arrives at the identical answer.
 for (let to = 0; to < PLACE_COUNT; to++) {
   for (let from = 0; from < PLACE_COUNT; from++) {
@@ -131,7 +131,7 @@ export function stepToward(from: number, to: number): number {
   return NEXT_STEP[from]?.[to] ?? from;
 }
 
-/** Every place reachable from `place` in exactly two hops — not one, not `place` itself. */
+/** Every place reachable from `place` in exactly two hops , not one, not `place` itself. */
 export function twoHopTargets(place: number): number[] {
   const one = new Set(ADJACENCY[place] ?? []);
   const out = new Set<number>();
@@ -160,7 +160,7 @@ export const CARDS: Record<CardId, CardMeta> = {
   ride: {
     id: 'ride',
     name: 'Ride',
-    blurb: 'Move to a neighbouring place. Pays the most — and walks you into whatever is waiting there.',
+    blurb: 'Move to a neighbouring place. Pays the most , and walks you into whatever is waiting there.',
     needsTarget: true,
     onlyAt: null,
   },
@@ -234,7 +234,7 @@ export const BALANCE = {
   PAY_RIDE: 130,
   /**
    * A Gallop covers two hops and, by riding straight through whatever is on
-   * the place in between, sidesteps any trap or ambush waiting there — which
+   * the place in between, sidesteps any trap or ambush waiting there , which
    * is exactly the situation it exists for. Priced below a plain Ride so that
    * edge never becomes strictly better money on top of being strictly safer.
    */
@@ -243,7 +243,7 @@ export const BALANCE = {
    * Hiding pays badly, but not so badly that it is never worth it.
    *
    * Lay Low is the only hard counter to an ambush, so it has to stay a live
-   * option or ambushing becomes free money — which is exactly what happened
+   * option or ambushing becomes free money , which is exactly what happened
    * at 40: bot tables settled into everyone standing still robbing each other,
    * 60% of all cards played were Ambush, and a whole game's winner banked $161
    * because nobody ever accumulated anything to bank.
@@ -251,8 +251,8 @@ export const BALANCE = {
   PAY_LAY_LOW: 55,
   PAY_TRAP: 20,
   /**
-   * Scouting pays less than hiding — its value is the information, not the
-   * money — and it does not hide you: you are exactly as exposed as anyone
+   * Scouting pays less than hiding , its value is the information, not the
+   * money , and it does not hide you: you are exactly as exposed as anyone
    * standing still without a gun drawn.
    */
   PAY_SCOUT: 25,
@@ -266,7 +266,7 @@ export const BALANCE = {
    */
   AMBUSH_MISS: -150,
 
-  /** An ambush takes everything. A trap takes half — it is cheap and delayed. */
+  /** An ambush takes everything. A trap takes half , it is cheap and delayed. */
   TRAP_TAKE: 0.5,
 
   /**
@@ -331,7 +331,7 @@ export function mulberry32(seed: number): () => number {
 /**
  * Where each seat starts, spread as evenly around the rim as the count allows.
  *
- * Always a rim place, never the Bank and never a spoke place — starting
+ * Always a rim place, never the Bank and never a spoke place , starting
  * anyone already on a fast lane to the money, or on the one square that
  * matters, is a free head start nobody else gets. The rim alone has eight
  * places, plenty of room to spread six players out.

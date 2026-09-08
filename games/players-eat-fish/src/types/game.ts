@@ -5,7 +5,7 @@ export interface Vector2D {
 
 export type FishKind = 'player' | 'enemy' | 'boss';
 
-/** One fish in the simulation. Flat numbers throughout — this is the hot path. */
+/** One fish in the simulation. Flat numbers throughout , this is the hot path. */
 export interface Fish {
   id: string;
   kind: FishKind;
@@ -28,15 +28,15 @@ export interface Fish {
   angle: number;
   dead: boolean;
   name?: string;
-  /** performance.now() when it entered the world — drives spawn protection. */
+  /** performance.now() when it entered the world , drives spawn protection. */
   bornAt: number;
   /** Cruise speed multiplier, so a shoal doesn't move as one rigid block. */
   pace: number;
   /**
    * Where this fish is currently trying to go, and how long until it picks
    * somewhere new. A heading held for a few seconds is what makes a fish look
-   * like it is swimming *somewhere*. Steering by a pair of sine waves — which
-   * is what this used to do — traces a closed loop, and thirty fish each
+   * like it is swimming *somewhere*. Steering by a pair of sine waves , which
+   * is what this used to do , traces a closed loop, and thirty fish each
    * tracing their own loop is exactly the "just circling around" that was
    * reported.
    */

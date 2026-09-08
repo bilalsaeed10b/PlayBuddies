@@ -226,7 +226,7 @@ export interface EnemyMeta {
  * The first pass was simply too hard: simulated over sixteen seeds the best
  * bot died on wave 8 and the worst on 7, against a bar of "holds out past
  * wave 10". Sweeping the health curve found this one, which gives a clean
- * ladder — a Squire holds to about wave 10, a Captain to 17, a Warlord takes
+ * ladder , a Squire holds to about wave 10, a Captain to 17, a Warlord takes
  * all thirty. The boss took the largest cut by far: at its old health it was
  * not a wave, it was a wall, and halving it did not move the median at all
  * because what was actually killing runs was the wardens arriving at wave 9.
@@ -331,7 +331,16 @@ export function buildWaves(seed: number, count: number, players: number, coop: b
     let t = 0;
 
     if (boss) {
-      spawns.push({ kind: 'boss', at: 0.5, hpScale: hpScale * 0.85 });
+      // Bosses ramp in rather than landing at full strength on the first one:
+      // wave 5's Siege Beast gets the softest cut, and the cut shrinks toward
+      // the old flat 0.85 by the sixth boss (wave 30), which is where that
+      // figure was originally measured against. Without this, wave 5 asked a
+      // build that has had one clean wave to fund it to answer full armour on
+      // nearly a thousand health, which is a wall this early rather than a
+      // fight.
+      const bossN = n / 5;
+      const bossFactor = clamp(0.55 + (bossN - 1) * 0.06, 0.55, 0.85);
+      spawns.push({ kind: 'boss', at: 0.5, hpScale: hpScale * bossFactor });
       tally.set('boss', 1);
       t = 2.4;
     }
@@ -370,7 +379,7 @@ export function buildWaves(seed: number, count: number, players: number, coop: b
  * What a player can buy to make everybody else's next wave worse.
  *
  * Priced above what the same enemy pays out in bounty, so sending is a real
- * cost rather than free damage — and it lands on *everyone* else, which keeps
+ * cost rather than free damage , and it lands on *everyone* else, which keeps
  * a four-player Siege from turning into three players ganging up on one.
  */
 export interface SendMeta {
@@ -408,6 +417,9 @@ export const DEFAULT_RULES: MatchRules = {
   waves: 20,
   sends: true,
 };
+
+/** Every count this game seats, low to high -- what the lobby fits a room into. */
+export const PLAYER_COUNTS: PlayerCount[] = [1, 2, 3, 4];
 
 const WAVE_CODES = [10, 20, 30];
 

@@ -25,7 +25,7 @@ npm run dev
 ## The one idea worth knowing
 
 Every client simulates **every** keep, not just its own. Waves come from the
-match seed, so nothing about enemy composition or timing is ever sent — what
+match seed, so nothing about enemy composition or timing is ever sent , what
 crosses the wire is only what a client cannot derive for itself: a tower being
 built, a horde being sent, and a short summary at the end of each wave.
 
@@ -45,7 +45,7 @@ npx esbuild __entry.ts --bundle --format=esm --platform=neutral --outfile=siege.
 ```
 
 where `__entry.ts` re-exports `game/rules`, `game/map`, `engine/SiegeEngine`
-and `engine/ai`. Bundle them as *one* entry — four separate entries give each
+and `engine/ai`. Bundle them as *one* entry , four separate entries give each
 its own copy of the rules module, and a balance tweak then silently fails to
 reach the engine.
 
@@ -57,7 +57,7 @@ What was checked before this shipped:
 - a fallen keep stays fallen
 - a send lands exactly its own count on exactly the wave it was bought against
 - the bot ladder, over 24 seeds: Squire averages wave 8, Captain 18, Warlord
-  19. Captain and Warlord are closer than the labels suggest — the outcome
+  19. Captain and Warlord are closer than the labels suggest , the outcome
   distribution is strongly bimodal (a run either breaks around wave 8 or
   snowballs to the end), so two ranks a wave apart on the mean is inside the
   noise. What is solidly true is that the default rank holds well past ten,

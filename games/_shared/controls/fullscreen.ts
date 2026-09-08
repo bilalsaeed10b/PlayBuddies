@@ -1,7 +1,7 @@
 /**
  * Fullscreen that also works on a phone.
  *
- * `document.documentElement.requestFullscreen()` — what this used to rely on —
+ * `document.documentElement.requestFullscreen()` , what this used to rely on ,
  * fails in three separate ways here:
  *
  *   - iOS Safari has no Element.requestFullscreen at all. Only <video> can go
@@ -10,14 +10,14 @@
  *     it expands the frame's own document while the host page's chrome stays
  *     wrapped around it.
  *   - Android Chrome grants it, but the page underneath keeps its layout, so a
- *     game that sizes itself to 65vh is still 65vh — just on a bigger canvas.
+ *     game that sizes itself to 65vh is still 65vh , just on a bigger canvas.
  *
  * So all three routes are taken at once, cheapest first: ask the host page to
  * stretch the frame (the only one that works on iOS), try the real API, and
  * fall back to fixed-position CSS. Whichever lands, the game fills the screen.
  *
- * The single copy every game imports. Four copies of this file used to drift —
- * three of them never actually called requestFullscreen() at all — which is
+ * The single copy every game imports. Four copies of this file used to drift ,
+ * three of them never actually called requestFullscreen() at all , which is
  * exactly the bug this file existing once is meant to make impossible.
  */
 
@@ -25,7 +25,7 @@ export const IN_IFRAME: boolean = (() => {
   try {
     return window.self !== window.top;
   } catch {
-    // Cross-origin parent — reading window.top threw, so there is one.
+    // Cross-origin parent , reading window.top threw, so there is one.
     return true;
   }
 })();
@@ -46,11 +46,11 @@ export function isNativeFullscreen(): boolean {
 /**
  * Asks the host page to end the match for the whole room.
  *
- * A game can leave its own player's seat on its own — that is just this
- * device navigating away — but ending the match is a room-wide state change
+ * A game can leave its own player's seat on its own , that is just this
+ * device navigating away , but ending the match is a room-wide state change
  * that lives on the lobby document the platform owns, not this game. The host
  * page re-checks that the caller is actually the host before acting on it, so
- * it's safe to offer this button to anyone — a guest's click is simply a no-op.
+ * it's safe to offer this button to anyone , a guest's click is simply a no-op.
  */
 export function askHostToEndGame() {
   if (!IN_IFRAME) return;
@@ -85,8 +85,8 @@ export function toggleFullscreen(el: HTMLElement, on: boolean) {
   }
 
   // Real fullscreen first. It's the only path most mobile browsers will
-  // actually honour an orientation lock on — lockLandscape's own comment
-  // notes that — and it resizes the visual viewport itself instead of us
+  // actually honour an orientation lock on , lockLandscape's own comment
+  // notes that , and it resizes the visual viewport itself instead of us
   // guessing at CSS percentages while the address bar is mid-animation.
   // CSS immersive mode is the fallback: iOS has no Element.requestFullscreen
   // at all, and a permissions policy can deny the request outright.
