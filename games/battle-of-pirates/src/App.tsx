@@ -17,7 +17,6 @@ import {
   Target,
   Trophy,
   Users,
-  ArrowDown,
 } from 'lucide-react';
 import { askHostToEndGame, askToLeaveLobby, toggleFullscreen } from './fullscreen';
 import { FREE_SHIPS, SHIPS, drawShip } from './game/ships';
@@ -1486,7 +1485,21 @@ function RoomScreen({
    * neither of them readable; a tab costs one row.
    */
   const shipGridPanel = (extra: string) => (
-    <div className={`panel flex min-h-0 flex-col rounded-[2rem] p-3 sm:p-6 ${extra}`}>
+    <div className={`panel relative flex min-h-0 flex-col rounded-[2rem] p-3 sm:p-6 ${extra}`}>
+      {!iAmReady && (
+        <svg
+          className="pointer-events-none absolute -left-4 -top-12 z-50 h-28 w-28 animate-bounce text-white drop-shadow-[0_0_15px_rgba(255,255,255,0.6)] sm:-left-12 sm:-top-16 sm:h-40 sm:w-40"
+          viewBox="0 0 100 100"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="8"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <path d="M 15 20 Q 50 25 75 70" />
+          <path d="M 45 70 L 75 70 L 65 40" />
+        </svg>
+      )}
       <div className="mb-3 flex shrink-0 gap-1 rounded-xl bg-black/30 p-1">
         {(['ship', 'hull'] as const).map((t) => (
           <button
@@ -1588,12 +1601,6 @@ function RoomScreen({
   return (
     <div className="mx-auto flex h-full w-full max-w-6xl flex-col overflow-y-auto overscroll-contain gap-2 p-2.5 sm:gap-4 sm:p-6">
       {header}
-
-      {!iAmReady && (
-        <div className="flex shrink-0 items-center justify-center py-2 short:hidden">
-          <ArrowDown className="h-10 w-10 animate-bounce text-amber-400 drop-shadow-[0_0_8px_rgba(251,191,36,0.5)]" />
-        </div>
-      )}
 
       {/* On a phone the start button would otherwise sit below the fold, which
           is exactly what made it unreachable in the other games. Kept to two
