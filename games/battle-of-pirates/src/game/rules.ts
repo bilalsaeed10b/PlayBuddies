@@ -430,7 +430,7 @@ export interface CardMeta {
  */
 const POWER = 1.1;
 /** Flat per-pellet damage for grapeshot's five balls -- see the comment on `grape` below. */
-const GRAPE_PELLET = 3 / BALANCE.DIRECT;
+const GRAPE_PELLET = 1 / BALANCE.DIRECT;
 /** Flat per-ball damage for chain shot and bore shot -- see their comments below. */
 const FLAT_7 = 7 / BALANCE.DIRECT;
 
