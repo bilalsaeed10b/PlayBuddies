@@ -486,13 +486,18 @@ export default function App() {
    * enough to re-sort that roster and flip a captain's array index -- the
    * engine kept fighting the identical battle it started, but the HUD would
    * occasionally announce a different captain as your teammate mid-fight.
-   * Keyed on the match's own seed rather than on `lobby`, so it only rebuilds
-   * when a genuinely new battle actually starts.
+   *
+   * Keyed on the match's own seed AND `matchStarted`, so the config is
+   * recomputed at the moment the host fires the go-signal -- when every
+   * client's `people` array is fully populated. Once `matchStarted` is true
+   * it stays true for the entire battle, so this only rebuilds once per
+   * match (when the snapshot carries the start signal) and then stays frozen
+   * until `leaveBattle` resets `matchStarted` to false.
    */
   const battleConfig = useMemo(
     () => (online && uid && !offlineMatch ? onlineConfig() : offlineConfig()),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [session.seed, offlineMatch, uid],
+    [session.seed, offlineMatch, uid, lobby?.matchStarted],
   );
 
   if (view === 'game') {
