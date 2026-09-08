@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, startTransition } from "react";
 import { usePathname } from "next/navigation";
 import { doc, getDoc, addDoc, collection } from "firebase/firestore";
 import { db } from "@/lib/firebase";
@@ -38,7 +38,7 @@ export default function FriendsSidebar() {
   // while this happened to be open would otherwise leave it sitting over the
   // game with the one button that closes it now gone.
   useEffect(() => {
-    if (isPlaying) setIsOpen(false);
+    if (isPlaying) startTransition(() => setIsOpen(false));
   }, [isPlaying]);
   const [tab, setTab] = useState<"friends" | "requests" | "add">("friends");
 
@@ -399,6 +399,7 @@ function Avatar({ uid, src, name }: { uid: string; src?: string; name: string })
   const [failed, setFailed] = useState(false);
   const fallback = `https://api.dicebear.com/7.x/avataaars/svg?seed=${uid}`;
   return (
+    // eslint-disable-next-line @next/next/no-img-element
     <img
       src={!src || failed ? fallback : src}
       onError={() => setFailed(true)}
