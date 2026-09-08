@@ -3,7 +3,7 @@ import { getAuth, GoogleAuthProvider } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 import { getDatabase } from "firebase/database";
 
-// Firebase web config is public by design — it identifies the project, it does
+// Firebase web config is public by design , it identifies the project, it does
 // not authorise anything. Access is controlled by firestore.rules and
 // database.rules.json. Env vars let a build target a different project.
 const firebaseConfig = {

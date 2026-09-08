@@ -17,7 +17,7 @@ export type Control = 'local' | 'remote' | 'ai';
  *
  * `choosing` is the only phase a player does anything in; `reveal` is the
  * animation that pays it off, and it is deliberately a real phase rather than
- * a CSS flourish — everybody watches the same cards flip in the same order,
+ * a CSS flourish , everybody watches the same cards flip in the same order,
  * and nobody can act during it.
  */
 export type Phase = 'choosing' | 'reveal' | 'over';
@@ -47,7 +47,7 @@ export interface MatchRules {
 export const TARGET_CHOICES = [600, 1000, 1500];
 
 /**
- * `target: 0` — $600 — on purpose.
+ * `target: 0` , $600 , on purpose.
  *
  * Simulated bot tables bank somewhere around $750 for a winner at the middle
  * rank, so $600 is a post most games actually reach and a few reach early,
@@ -61,7 +61,14 @@ export const DEFAULT_RULES: MatchRules = {
   target: 0,
 };
 
-const PLAYER_CODES: PlayerCount[] = [2, 3, 4, 5, 6];
+/**
+ * The counts this game actually seats, low to high.
+ *
+ * Exported (not just used for wire-packing here) so the host's
+ * player-count picker and the lobby's own auto-fit logic read the
+ * same list rather than each keeping their own copy of it.
+ */
+export const PLAYER_CODES: PlayerCount[] = [2, 3, 4, 5, 6];
 
 /**
  * The rules as one integer.
@@ -71,7 +78,7 @@ const PLAYER_CODES: PlayerCount[] = [2, 3, 4, 5, 6];
  * terms from whatever packet happens to be in the document. Packing the rules
  * into a single number is what lets them ride along in that slot.
  *
- * Five player counts need 3 bits, not the 2 a 2/3/4-only game got away with —
+ * Five player counts need 3 bits, not the 2 a 2/3/4-only game got away with ,
  * everything above that shifted up a bit to make room.
  */
 export function packRules(rules: MatchRules): number {
@@ -125,7 +132,7 @@ export type EncodedRound = number[];
  * Firestore refuses any document containing an array directly inside another
  * array, and a list of rounds where each round is itself a list of choices is
  * exactly that. `setDoc` rejected the whole write, every time, with "Nested
- * arrays are not supported" — so the host's round packet never landed and no
+ * arrays are not supported" , so the host's round packet never landed and no
  * guest ever saw a card resolve. The retry path then reported it as "that
  * move did not reach the other players", which was true but pointed at the
  * network rather than at the shape of the data.
@@ -161,7 +168,7 @@ export function unpackHistory(h: number[] | undefined, hc: number[] | undefined)
  * The whole protocol.
  *
  * Simultaneous play turns out to be *easier* to put on a wire than alternating
- * turns, not harder — but only if exactly one client is allowed to decide when
+ * turns, not harder , but only if exactly one client is allowed to decide when
  * a round is over. So the host does: guests publish their own choice and
  * nothing else, the host resolves, and the host's history is the game. A guest
  * never computes a resolution, so there is no arithmetic for two clients to
@@ -183,7 +190,7 @@ export interface PickPacket {
   n: number;
   /** The game this belongs to. A mismatch means a document left over from last night. */
   s: number;
-  /** Which round this is a choice for — a late packet for a finished round is dropped. */
+  /** Which round this is a choice for , a late packet for a finished round is dropped. */
   rd: number;
   /** The choice itself, by `encodeChoice`. */
   c: number;
@@ -205,7 +212,7 @@ export interface RoundPacket {
   t: 'round';
   n: number;
   s: number;
-  /** Every resolved round, in order, flattened by `packHistory` — see there for why. */
+  /** Every resolved round, in order, flattened by `packHistory` , see there for why. */
   h: number[];
   /** How many entries each round in `h` occupies. */
   hc: number[];

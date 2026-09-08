@@ -2,7 +2,7 @@
  * Every number that decides how the game feels, in one file.
  *
  * The numbers here are the ones REQUIREMENTS.md quotes. If you change one,
- * change it there too — a spec that disagrees with the code is worse than no
+ * change it there too , a spec that disagrees with the code is worse than no
  * spec at all.
  */
 
@@ -23,7 +23,7 @@ export interface Arena {
 /**
  * Two courts, chosen by head count.
  *
- * The wide court is not just "the same court, bigger" — the net is taller too.
+ * The wide court is not just "the same court, bigger" , the net is taller too.
  * Four players means two of them can be at the net at once, and on the standard
  * net a 2v2 rally dies on the first block every single time.
  */
@@ -35,7 +35,7 @@ export interface Arena {
  * ends a rally: with the old 210-tall net a player could no longer reach above
  * the tape, so nothing was ever unreturnable and AI-vs-AI rallies ran past a
  * hundred touches. The net came down with the jump. What matters is the gap
- * between the tape and a jumping player's reach — keep that and the game plays
+ * between the tape and a jumping player's reach , keep that and the game plays
  * the same, whatever the absolute numbers are.
  */
 export const ARENAS: Record<ArenaKind, Arena> = {
@@ -65,7 +65,7 @@ export const BALANCE = {
    *
    * Magnus force acts perpendicular to travel, which means it does no work: it
    * bends the flight path without adding or removing speed. So it is applied as
-   * a rotation of the velocity vector, and this number is a *turn rate* — not
+   * a rotation of the velocity vector, and this number is a *turn rate* , not
    * the acceleration it used to be.
    *
    * That distinction was the bug. The old version added the sideways force to
@@ -73,7 +73,7 @@ export const BALANCE = {
    * is not a rotation at all: it bled vertical velocity away every step. At
    * full spin it cancelled about 85% of gravity, so a hard-hit ball stopped
    * falling and hung in the air, drifting sideways in proportion to how fast
-   * the player who hit it was moving — the ball appeared to follow them around.
+   * the player who hit it was moving , the ball appeared to follow them around.
    *
    * At MAX_SPIN this is ~0.63 rad/s, and spin decays quickly, so a whole flight
    * bends by perhaps 20°. Visible, never silly.
@@ -90,7 +90,7 @@ export const BALANCE = {
   /**
    * Heavier than it was (2600).
    *
-   * "Too floaty" is almost never about speed — it is about hang time. At 2600
+   * "Too floaty" is almost never about speed , it is about hang time. At 2600
    * a jump kept you airborne for the better part of a second with barely any
    * air control, so half of every rally was spent drifting and waiting to land.
    * More gravity shortens the hang without taking the jump away.
@@ -141,7 +141,7 @@ export const BALANCE = {
    *
    * The ball used to leave along the contact normal and nothing else, so a
    * touch taken slightly off-centre skidded away flat and low and the rally was
-   * over. A fixed pop makes every touch pick the ball *up* — which is what a
+   * over. A fixed pop makes every touch pick the ball *up* , which is what a
    * volleyball does off a forearm, and what makes a rally feel like a rally.
    */
   BOUNCE_LIFT: 150,
@@ -171,8 +171,8 @@ export const BALANCE = {
   /**
    * Multiplies the first contact after a serve.
    *
-   * Without it the serve is the weakest shot in the game — a dead ball, no
-   * incoming speed to borrow — so the serving side starts every rally behind.
+   * Without it the serve is the weakest shot in the game , a dead ball, no
+   * incoming speed to borrow , so the serving side starts every rally behind.
    * Combined with "the conceding side serves", that made the first point of a
    * match decide the whole thing: AI-vs-AI produced 7–0 four times out of four,
    * because the team that dropped one point then had to serve its way out of
@@ -188,7 +188,7 @@ export const BALANCE = {
    * missile, and AI-vs-AI rallies died after 1.4 touches because nothing could
    * be returned. At 0.62 a ground touch always arcs, which is both what a pass
    * looks like and what gives the other side time to get under it. The rule
-   * players learn from it — you can only spike in the air — is the single most
+   * players learn from it , you can only spike in the air , is the single most
    * important thing about how the game reads.
    */
   GROUND_LIFT: 0.7,
@@ -223,7 +223,7 @@ export const BALANCE = {
   /**
    * How often a guest tells the host where its own body actually is.
    *
-   * Guests are authoritative over their own body — see MatchEngine.applyBody.
+   * Guests are authoritative over their own body , see MatchEngine.applyBody.
    * Sending the body as well as the input is what removes the last source of
    * delay: with input alone the host has to re-derive the position from a
    * bitmask that is already one trip old, and every dropped packet becomes a
@@ -234,7 +234,7 @@ export const BALANCE = {
    * Floor on how often input is repeated when nothing is changing.
    *
    * Input is sent the instant a key changes state, so this is only a heartbeat
-   * against packet loss on an unreliable channel — not the input rate.
+   * against packet loss on an unreliable channel , not the input rate.
    */
   INPUT_HEARTBEAT_HZ: 10,
   /**
@@ -242,7 +242,7 @@ export const BALANCE = {
    *
    * Was 1. At that rate the clock offset and round trip that every piece of
    * extrapolation depends on took several seconds to follow a change, so on a
-   * phone — where the latency moves further than that between two rallies —
+   * phone , where the latency moves further than that between two rallies ,
    * the numbers being fed to the physics described the network as it had been.
    * Eight is enough to re-converge inside a single rally and still costs
    * nothing on a data channel; probes that would go over the Firestore relay
@@ -285,7 +285,7 @@ export const BALANCE = {
    *
    * Wildly looser on purpose. A character that is nudged under your own thumb
    * feels broken even when the nudge is technically more accurate, so the host
-   * only gets to move you when the two simulations have genuinely come apart —
+   * only gets to move you when the two simulations have genuinely come apart ,
    * a serve reset, or a correction big enough that ignoring it would put you on
    * the wrong side of the ball.
    */
@@ -301,11 +301,11 @@ export const BALANCE = {
    *
    * A guest cannot score, serve or spawn power-ups, so a host that vanishes
    * used to leave everyone else staring at a frozen court until they gave up
-   * and quit. Taking over is not always *right* — two guests could take over at
-   * once and drift apart — but a game that keeps playing beats a game that has
+   * and quit. Taking over is not always *right* , two guests could take over at
+   * once and drift apart , but a game that keeps playing beats a game that has
    * stopped, and the roster change that follows a real disconnect resolves it.
    *
-   * MatchView doubles this for a guest that has *never* heard from the host —
+   * MatchView doubles this for a guest that has *never* heard from the host ,
    * see the note by DROPPED_MS in MatchView.tsx for why the first contact
    * needs a longer allowance than a drop mid-match. Kept in step with that
    * number by hand: this doubled is meant to land close to it.

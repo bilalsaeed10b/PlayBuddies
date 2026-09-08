@@ -59,7 +59,7 @@ export interface Arena {
    * A bigger fleet means the rearmost ship on one side has to be able to
    * reach the rearmost ship on the other. Range goes as the square of muzzle
    * velocity, so the speed scales with the square root of the longest
-   * straight-line shot on the board — which leaves the *relative* reach of
+   * straight-line shot on the board , which leaves the *relative* reach of
    * the power dial exactly where it was tuned: the bottom third still falls
    * short and the top still clears a drifted target, whatever the size of
    * the battle. Deeper rows are if anything easier to reach at a given
@@ -120,8 +120,8 @@ function slotOffset(slot: number): { dx: number; row: number } {
  * The water for a battle of this size.
  *
  * A one-a-side call reproduces the hand-tuned arena this game shipped with,
- * down to the pixel — 2450 by 900, anchors at 300 and 2150, 1760 muzzle speed
- * — so growing the fleet is strictly an addition and the duel is untouched.
+ * down to the pixel , 2450 by 900, anchors at 300 and 2150, 1760 muzzle speed
+ * , so growing the fleet is strictly an addition and the duel is untouched.
  * A bigger fleet grows the frame *downward*, into the ocean already drawn
  * below the front rank, rather than widening it: the water fills with ships
  * instead of the ships spreading thin across more of it.
@@ -232,11 +232,11 @@ export const BALANCE = {
    * enough for one or two pellets, short by a wide margin the moment three
    * or more actually connected. When that happened, clampClaim floored the
    * receiver's hp above zero on a shot the sender's own engine had correctly
-   * resolved as lethal — the sender's afloat() check tripped and ended the
+   * resolved as lethal , the sender's afloat() check tripped and ended the
    * match on their screen; the receiver's never did, because their copy of
    * that ship was still, technically, floating. That is the "I finished the
    * game and it didn't finish for the other player" bug. The turn order the
-   * two sides kept afterward diverged from there too — a ship one side
+   * two sides kept afterward diverged from there too , a ship one side
    * considers sunk gets skipped in rotation, a ship the other side still has
    * afloat does not, and every turn from that point reads as skipped to
    * whichever side's count fell out of step. Set to the actual maximum a
@@ -261,7 +261,7 @@ export const BALANCE = {
    * Hits the mountain takes before it crumbles. It visibly wears down with each.
    *
    * Three was far too few. The mountain is the one thing making elevation a
-   * real decision, and it was gone inside the opening exchange — two stray
+   * real decision, and it was gone inside the opening exchange , two stray
    * shots and a bore, and the rest of the battle was the flat duel this arena
    * was widened specifically to prevent. Ten means it erodes across a battle
    * rather than in the first minute of one, and the host can put it beyond
@@ -430,7 +430,7 @@ export interface CardMeta {
  */
 const POWER = 1.1;
 /** Flat per-pellet damage for grapeshot's five balls -- see the comment on `grape` below. */
-const GRAPE_PELLET = 3 / BALANCE.DIRECT;
+const GRAPE_PELLET = 1 / BALANCE.DIRECT;
 /** Flat per-ball damage for chain shot and bore shot -- see their comments below. */
 const FLAT_7 = 7 / BALANCE.DIRECT;
 

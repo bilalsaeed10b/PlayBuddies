@@ -3,7 +3,7 @@
  *
  * Deliberately one keep and not the whole match: a four-player siege is four
  * of these running side by side on every device, which is what makes
- * spectating cost nothing at all (R4) — the keep you are watching is already
+ * spectating cost nothing at all (R4) , the keep you are watching is already
  * being simulated, it just was not the one being drawn.
  *
  * Nothing in here knows about React, Firestore or a canvas. It takes a wave
@@ -235,7 +235,7 @@ export class SiegeEngine {
    * One order, start to finish. The single entry point for a thumb, a bot or
    * the wire, so nothing downstream has to know which it was.
    *
-   * Returns the order actually carried out, or null if it was refused —
+   * Returns the order actually carried out, or null if it was refused ,
    * the caller broadcasts what came back rather than what it asked for, which
    * is what stops a refused order from being replayed as a real one on a peer
    * whose gold happened to allow it.
@@ -522,7 +522,7 @@ export class SiegeEngine {
   /**
    * What a tower shoots at: whatever is furthest along the path and in reach.
    *
-   * Furthest along, not nearest — the enemy about to reach the keep is the one
+   * Furthest along, not nearest , the enemy about to reach the keep is the one
    * that costs a life, and a tower that helpfully shot the healthy thing behind
    * it would be doing the wrong job well.
    */
@@ -563,7 +563,11 @@ export class SiegeEngine {
         if (!from || hit.has(from.id)) break;
         hit.add(from.id);
         chainPts.push({ x: from.x, y: from.y });
-        this.hurt(from, meta.levels[t.level].damage, t);
+        // The bolt loses a third of its charge at every hop, so a coil
+        // ringed by a crowd is a reason to build it and not a reason for
+        // every other tower to feel pointless.
+        const falloff = Math.pow(0.7, j);
+        this.hurt(from, meta.levels[t.level].damage * falloff, t);
         from = this.nearestUnhit(from, meta.chainRange, hit) as Enemy;
       }
       this.shots.push({
@@ -675,7 +679,7 @@ export class SiegeEngine {
    * One hit landing.
    *
    * Armour comes off the top, flat, and never takes a hit below
-   * ARMOUR_FLOOR — a tower that could be reduced to literally zero would make
+   * ARMOUR_FLOOR , a tower that could be reduced to literally zero would make
    * an armoured wave unkillable rather than merely a poor matchup, which is a
    * stalemate and not a decision.
    */

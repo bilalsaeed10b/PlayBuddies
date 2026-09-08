@@ -2,7 +2,7 @@ import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth, onAuthStateChanged } from 'firebase/auth';
 import {
   getFirestore, doc, getDoc, setDoc, onSnapshot, updateDoc, serverTimestamp,
-  addDoc, collection, query, orderBy, limit,
+  addDoc, collection, query, orderBy, limit, deleteField,
 } from 'firebase/firestore';
 import {
   getDatabase, ref as dbRef, set as dbSet, push as dbPush,
@@ -14,7 +14,7 @@ import {
 // why nothing about its multiplayer could ever line up with PlayBuddies.
 //
 // The web config is public by design: it identifies the project, it does not
-// authorise anything — security rules do that.
+// authorise anything , security rules do that.
 const env = import.meta.env;
 
 const firebaseConfig = {
@@ -36,6 +36,6 @@ export const rtdb = getDatabase(app);
 export {
   onAuthStateChanged,
   doc, getDoc, setDoc, onSnapshot, updateDoc, serverTimestamp,
-  addDoc, collection, query, orderBy, limit,
+  addDoc, collection, query, orderBy, limit, deleteField,
   dbRef, dbSet, dbPush, dbOnValue, dbOnDisconnect, dbRemove,
 };

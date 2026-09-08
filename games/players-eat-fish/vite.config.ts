@@ -22,7 +22,7 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(__dirname, '.'),
-      // games/_shared/ — code every game imports rather than keeps its own
+      // games/_shared/ , code every game imports rather than keeps its own
       // copy of. Pinning react/react-dom here too: without it, a bare import
       // from inside _shared (which has no node_modules of its own) would
       // resolve up to the repo root's copy instead of this game's own,

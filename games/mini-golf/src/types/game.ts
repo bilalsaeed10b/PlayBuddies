@@ -53,7 +53,14 @@ export const DEFAULT_RULES: MatchRules = {
 
 export const TURN_SECONDS = 20;
 
-const PLAYER_CODES: PlayerCount[] = [1, 2, 3, 4];
+/**
+ * The counts this game actually seats, low to high.
+ *
+ * Exported (not just used for wire-packing here) so the host's
+ * player-count picker and the lobby's own auto-fit logic read the
+ * same list rather than each keeping their own copy of it.
+ */
+export const PLAYER_CODES: PlayerCount[] = [1, 2, 3, 4];
 const HOLE_CODES: HoleCount[] = [1, 3, 6];
 
 /**
@@ -88,7 +95,7 @@ export function unpackRules(bits: number | undefined): MatchRules {
  *
  * Golf is turn-based, so there is no mesh: one putt is one document write and
  * a whole round is a few dozen of them. Turns travel through the lobby's
- * `updates/{uid}` collection and no peer connection is opened at all — no
+ * `updates/{uid}` collection and no peer connection is opened at all , no
  * STUN, no NAT traversal, no "connecting…" that never resolves behind a
  * corporate proxy.
  */
@@ -104,13 +111,13 @@ export interface StartPacket {
 }
 
 /**
- * Sent the instant the club meets the ball — before it has stopped, before
+ * Sent the instant the club meets the ball , before it has stopped, before
  * anybody knows where it finishes.
  *
  * The ShotPacket below is only written once a putt has fully settled, and on a
  * long green that is three or four seconds. Without this, the far side saw
  * nothing at all until the ball had already stopped *and* that had crossed the
- * network, and only then began its own replay — so a three-second putt took
+ * network, and only then began its own replay , so a three-second putt took
  * six seconds to appear. This carries the input alone, so every screen starts
  * rolling together, off by latency and nothing else.
  */
@@ -175,7 +182,7 @@ export interface ShotPacket {
    *
    * A player's update document is *replaced* by each write, so the moment the
    * host putts, the start packet it wrote is gone. A guest that subscribed a
-   * second later — a slow phone, a reconnect, a reload — would find a turn
+   * second later , a slow phone, a reconnect, a reload , would find a turn
    * where the negotiation should have been and sit on "waiting for the host"
    * for the rest of the round.
    */
@@ -205,7 +212,7 @@ export interface ByePacket {
 
 /**
  * Sent once, right after a guest's link opens, so a ball handed to a bot by a
- * `bye` gets handed back the moment its player actually returns — reload,
+ * `bye` gets handed back the moment its player actually returns , reload,
  * reopened tab, whatever the drop was. `bye` used to be one-way: nothing ever
  * told the round the seat's owner was back, so a reconnected player stayed a
  * spectator on a bot for the rest of it.

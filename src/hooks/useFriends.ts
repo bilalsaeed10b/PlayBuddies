@@ -47,7 +47,7 @@ function chunk<T>(items: T[], size: number): T[][] {
  * so a slow earlier response could overwrite a newer one. Profiles are now
  * batched, fetched in parallel, and stale responses are discarded.
  *
- * Pass `enabled: false` to keep the listener closed — used so pages that don't
+ * Pass `enabled: false` to keep the listener closed , used so pages that don't
  * show friends don't hold an open subscription.
  */
 export function useFriends(enabled = true): FriendsState {
@@ -108,7 +108,7 @@ export function useFriends(enabled = true): FriendsState {
             ),
           );
 
-          // A newer snapshot landed while these were in flight — drop this result.
+          // A newer snapshot landed while these were in flight , drop this result.
           if (!active || mine !== generation) return;
 
           const profiles = new Map<string, Record<string, unknown>>();

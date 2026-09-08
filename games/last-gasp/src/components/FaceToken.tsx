@@ -2,7 +2,7 @@
  * One player's chalk head.
  *
  * Every stroke comes from game/faces.ts so this and the shop grid cannot
- * drift apart — a skin that looks like a different skin in two places is not
+ * drift apart , a skin that looks like a different skin in two places is not
  * a skin.
  */
 import { browPath, extraPath, faceAt, mouthPath } from '../game/faces';

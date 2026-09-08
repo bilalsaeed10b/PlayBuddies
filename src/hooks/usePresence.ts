@@ -10,7 +10,7 @@ import { useAuthStore } from "@/store/useAuthStore";
  * only Firebase product with `onDisconnect`, so a closed tab or dropped network
  * clears the flag server-side without anyone having to poll for it.
  *
- * Every hook here waits on `.info/connected` before arming its onDisconnect —
+ * Every hook here waits on `.info/connected` before arming its onDisconnect ,
  * registering it before the socket is up means it is silently discarded, which
  * is one reason the previous presence code never worked.
  */
@@ -86,7 +86,7 @@ export function useLobbyPresence(roomId: string): Set<string> {
  *
  * One listener per friend, on that friend's own node. The earlier version
  * subscribed to all of `presence/users` and filtered locally, which meant every
- * client downloaded the entire online-user set — and re-downloaded it whenever
+ * client downloaded the entire online-user set , and re-downloaded it whenever
  * anyone anywhere on the platform connected or disconnected. That cost grows
  * with total traffic rather than with your friend count, and it is also why the
  * database rules no longer expose `presence/users` as a readable whole.

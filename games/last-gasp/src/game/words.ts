@@ -2,15 +2,15 @@
  * The answers.
  *
  * Stored base64-encoded rather than as plain strings, and decoded once on
- * first use. This is deliberately NOT presented as security — anyone who
+ * first use. This is deliberately NOT presented as security , anyone who
  * opens a console can decode it in one line. What it actually buys is that
  * the shipped bundle cannot be searched for the word on screen, which is the
  * realistic way somebody cheats at hangman in a browser: hit Ctrl+F, not
  * write a decoder.
  *
  * A serverless game cannot do better than this. Every client has to be able
- * to check a guessed letter on its own — that is what makes the whole match
- * replayable from its history and what removes any need for a resync path —
+ * to check a guessed letter on its own , that is what makes the whole match
+ * replayable from its history and what removes any need for a resync path ,
  * and checking a letter means holding the word. The only real fix is a
  * server that holds the answer and validates against it, which this platform
  * does not have.

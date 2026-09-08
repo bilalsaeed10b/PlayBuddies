@@ -30,7 +30,7 @@ import { GameWallet, reportResult } from './platform/wallet';
  * The platform owns the lobby.
  *
  * This game used to ship its own Firebase project, its own Google sign-in, its
- * own room codes and its own waiting room — none of which knew anything about
+ * own room codes and its own waiting room , none of which knew anything about
  * the PlayBuddies lobby that launched it. Everything here now reads the room it
  * was handed in the query string and writes only its own slot in it.
  */
@@ -74,7 +74,7 @@ export default function App() {
   /**
    * The player deliberately asked for an offline run.
    *
-   * Launched from a lobby this screen used to be unreachable altogether — the
+   * Launched from a lobby this screen used to be unreachable altogether , the
    * view opened straight on the room and the only way to the shared-keyboard
    * menu was to not be in a lobby at all. The room now offers it, and this flag
    * is what keeps the choice: without it the branch below still handed the
@@ -126,8 +126,8 @@ export default function App() {
   //
   // Firebase is imported dynamically, and only down the online path.
   //
-  // The SDK is 826 KB — more than three times the rest of this game put
-  // together — and a solo run never makes a single call into it. Statically
+  // The SDK is 826 KB , more than three times the rest of this game put
+  // together , and a solo run never makes a single call into it. Statically
   // imported it was a `modulepreload` in the built HTML, so every player
   // downloaded all of it before the reef could appear. Now the chunk is only
   // fetched when there is actually a lobby to talk to.
@@ -245,21 +245,21 @@ export default function App() {
   }, []);
 
   /**
-   * Leaving the water, online: back to the room, and — for the host — the
+   * Leaving the water, online: back to the room, and , for the host , the
    * go-signal comes down with it.
    *
    * `matchStarted` was never reset anywhere after being set, so a "Back to
    * lobby" round-trip was broken: the room screen's transition to 'game' is
    * driven by `matchStarted && myFish`, and re-pressing "start" is a true ->
    * true no-op, while picking a *different* fish is a real change to
-   * `myFish` — so it fired off a match nobody had started, with the stale
+   * `myFish` , so it fired off a match nobody had started, with the stale
    * flag still set from the last one.
    *
    * Resetting it here rather than only on some notion of "the round ended"
    * also covers the host leaving mid-match: fish has no discrete win/lose
    * moment (death is per-player, not global), so this is the one place every
-   * exit path — the defeat screen's "Back to lobby" and a premature host
-   * quit alike — actually passes through.
+   * exit path , the defeat screen's "Back to lobby" and a premature host
+   * quit alike , actually passes through.
    */
   const leaveWater = useCallback(() => {
     setOfflineMatch(false);
@@ -306,7 +306,7 @@ export default function App() {
   //
   // A fixed height with the scrolling done *inside* each screen. The root used
   // to be `min-h-[100dvh] overflow-y-auto`, which grows with its content rather
-  // than scrolling it — and since index.css sets `body { overflow: hidden }`,
+  // than scrolling it , and since index.css sets `body { overflow: hidden }`,
   // anything past the fold was simply unreachable. That is why the start button
   // could not be tapped on a phone.
   return (
@@ -485,7 +485,7 @@ function FishGrid({
   onPick: (index: number) => void;
   selected: number | null;
   /**
-   * Everyone else who has also picked this fish. Purely informational — size
+   * Everyone else who has also picked this fish. Purely informational , size
    * is what tells fish apart in the water, so nothing stops two players
    * choosing the same one.
    */

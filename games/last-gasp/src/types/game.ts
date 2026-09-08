@@ -30,7 +30,7 @@ export interface GameSettings {
 /**
  * How this game is played, set by the host and obeyed by everyone.
  *
- * Team assignment lives here rather than in an in-match settings panel —
+ * Team assignment lives here rather than in an in-match settings panel ,
  * "who is on which team" is a lobby decision with real consequences for who
  * you are about to play with, not a toggle to fix mid-match.
  */
@@ -55,7 +55,7 @@ export const DEFAULT_RULES: MatchRules = {
   rounds: 1,
 };
 
-/** An even split — team 0, team 1, team 0, team 1, ... — the default before a host drags anyone around. */
+/** An even split , team 0, team 1, team 0, team 1, ... , the default before a host drags anyone around. */
 export function defaultTeams(players: number, teamCount: number): number[] {
   return Array.from({ length: players }, (_, i) => i % Math.max(MIN_TEAMS, Math.min(MAX_TEAMS, teamCount)));
 }
@@ -106,8 +106,8 @@ export const MAX_WORD_LEN = 18;
 /**
  * A word attempt, reduced to something safe to store, replay and draw.
  *
- * This string is the one piece of free text in the whole protocol — every
- * other field is a number — so it is stripped to A-Z here, on the way in,
+ * This string is the one piece of free text in the whole protocol , every
+ * other field is a number , so it is stripped to A-Z here, on the way in,
  * rather than trusted anywhere downstream.
  */
 export function cleanWord(raw: string): string {
@@ -117,7 +117,7 @@ export function cleanWord(raw: string): string {
 /**
  * One action.
  *
- * Deliberately records what was *attempted*, never what it was worth — the
+ * Deliberately records what was *attempted*, never what it was worth , the
  * engine re-derives every consequence (points, pieces, whose chain it is,
  * whether the round ended) by replaying the list, so two clients can never
  * disagree about a round. A guess carries only the letter, not the chain
@@ -144,7 +144,7 @@ export type RoundHistory = Action[];
  * Firestore refuses any document containing an array directly inside another
  * array, and a list of rounds where each round is itself a list of actions is
  * exactly that. `setDoc` rejected the entire write with "Nested arrays are
- * not supported" — so the host's state packet never landed, no guess ever
+ * not supported" , so the host's state packet never landed, no guess ever
  * reached anybody, and the retry path surfaced it as "that move did not reach
  * the other players": true, but blaming the network for what was really the
  * shape of the data.
@@ -179,7 +179,7 @@ export function unpackHistory(h: Action[] | undefined, hc: number[] | undefined)
  * The whole protocol.
  *
  * Same shape as Wanted Board's and the turn-based version of this game: one
- * client — the host — decides what happened. Guests publish the action they
+ * client , the host , decides what happened. Guests publish the action they
  * want to take and nothing else; the host validates it, appends it, and
  * republishes the entire history. A guest never computes a consequence.
  *
@@ -189,7 +189,7 @@ export function unpackHistory(h: Action[] | undefined, hc: number[] | undefined)
  * room is readable by everyone else in it (`allow read: if signedIn()` in
  * the security rules is room-wide, not per-recipient). So the word is not
  * cryptographically hidden from a player willing to open devtools and read
- * the raw document — only from the interface, which never renders it before
+ * the raw document , only from the interface, which never renders it before
  * the round reveals it. The same trade-off this platform already makes for a
  * hangman word list, just with a human typing the secret instead of a seed
  * picking it.
@@ -210,7 +210,7 @@ export interface PlayPacket {
   n: number;
   /** The match this belongs to. A mismatch means a document left over from last night. */
   s: number;
-  /** Which round this is for — a late packet for a finished round is dropped. */
+  /** Which round this is for , a late packet for a finished round is dropped. */
   rd: number;
   /** How many actions this round had already seen. The host's guard against a double-send. */
   at: number;
@@ -229,7 +229,7 @@ export interface StatePacket {
   t: 'state';
   n: number;
   s: number;
-  /** Every round's actions, oldest round first, flattened by `packHistory` — see there for why. */
+  /** Every round's actions, oldest round first, flattened by `packHistory` , see there for why. */
   h: Action[];
   /** How many actions each round in `h` occupies. */
   hc: number[];

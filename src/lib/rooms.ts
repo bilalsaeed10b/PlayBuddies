@@ -1,7 +1,7 @@
 /** Room-code generation and shape helpers shared by the dashboard and the lobby. */
 
 /**
- * Unambiguous alphabet — no O/0 or I/1, so a code read aloud or copied off a
+ * Unambiguous alphabet , no O/0 or I/1, so a code read aloud or copied off a
  * screen can't land the player in the wrong room.
  */
 const ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -11,7 +11,7 @@ export const ROOM_CODE_LENGTH = 6;
 /**
  * A uniformly random room code. Rejection sampling avoids the modulo bias the
  * previous `toString(36).substring()` approach had, and always returns exactly
- * ROOM_CODE_LENGTH characters — the old one produced variable-length codes that
+ * ROOM_CODE_LENGTH characters , the old one produced variable-length codes that
  * the join input could not accept.
  */
 export function generateRoomCode(): string {
@@ -22,7 +22,7 @@ export function generateRoomCode(): string {
   while (out.length < ROOM_CODE_LENGTH) {
     crypto.getRandomValues(buf);
     for (const b of buf) {
-      if (b >= max) continue; // biased tail — draw again
+      if (b >= max) continue; // biased tail , draw again
       out.push(ALPHABET[b % ALPHABET.length]);
       if (out.length === ROOM_CODE_LENGTH) break;
     }
@@ -59,7 +59,7 @@ export const FRIEND_CODE_LENGTH = 6;
  * A 6-character friend code, always exactly that length.
  *
  * The previous version concatenated two base-36 numbers and sliced to 8, which
- * yields a shorter string whenever both numbers are small — and the search box
+ * yields a shorter string whenever both numbers are small , and the search box
  * requires exactly FRIEND_CODE_LENGTH characters, so those users could never
  * be found.
  */

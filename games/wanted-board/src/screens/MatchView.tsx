@@ -6,7 +6,7 @@
  * is over, and here that is the host. Guests publish their own card and
  * nothing else; the host collects every card, resolves, and publishes the
  * whole history. A guest never computes a resolution, so there is no
- * arithmetic for two clients to disagree about — which is the entire class of
+ * arithmetic for two clients to disagree about , which is the entire class of
  * bug that alternating-turn games on this platform have had to be fixed for.
  *
  * The engine is pure and knows nothing about React, Firestore or the DOM. This
@@ -72,8 +72,8 @@ export default function MatchView({
    * The seed every wire packet is actually checked against.
    *
    * The host's `config.seed` is authoritative from the start. A guest's
-   * `config.seed` is only ever this device's own locally-rolled guess — App.tsx
-   * never learns the host's real one — so filtering wire packets on it
+   * `config.seed` is only ever this device's own locally-rolled guess , App.tsx
+   * never learns the host's real one , so filtering wire packets on it
    * directly meant a guest rejected every `round` packet the host ever sent,
    * and the host rejected every `pick` the guest sent back, because the two
    * numbers were independently random and essentially never matched. This ref
@@ -85,7 +85,7 @@ export default function MatchView({
 
   const engine = useMemo(
     () => new WantedEngine({ seats: config.seats, seed: config.seed, rules: config.rules }),
-    // Rebuilt only when the match itself changes — a settings tweak must not
+    // Rebuilt only when the match itself changes , a settings tweak must not
     // reset the town mid-game.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [config.seed, config.seats.length],
@@ -101,7 +101,7 @@ export default function MatchView({
   const [notice, setNotice] = useState<string | null>(null);
 
   /**
-   * A short, wide screen — a phone turned sideways.
+   * A short, wide screen , a phone turned sideways.
    *
    * The stacked layout wants a header, a roster, a square board and a card
    * rack in one column, and on a 375px-tall landscape phone that leaves the
@@ -206,7 +206,7 @@ export default function MatchView({
       if (seat.control === 'ai' || seat.control === 'remote') {
         // A bot, or a human whose card never arrived. Both get the same
         // treatment: a bot plays its seeded decision, and anyone who ran out
-        // of clock lays low (see BALANCE.TIMEOUT_CARD — a timeout is a locked
+        // of clock lays low (see BALANCE.TIMEOUT_CARD , a timeout is a locked
         // phone, not a decision to gamble).
         if (seat.control === 'ai') {
           return encodeChoice(botChoice(engine, i, seat.aiLevel, engine.rngFor(round, i)));
@@ -357,7 +357,7 @@ export default function MatchView({
         }
         // `persisted` was meant to separate a real unload from the browser
         // freezing a backgrounded tab into its bfcache, but a page holding an
-        // open Firestore listener is not bfcache-eligible in most browsers —
+        // open Firestore listener is not bfcache-eligible in most browsers ,
         // `persisted` comes back false for a phone screen locking or a tab
         // switch too, not just a real close. So don't announce the bye the
         // instant `pagehide` fires: wait to see if the tab comes back first
@@ -456,7 +456,7 @@ export default function MatchView({
       linkRef.current?.send({
         t: 'pick',
         n: Date.now(),
-        // The learned seed, not config.seed — see effectiveSeedRef above. Using
+        // The learned seed, not config.seed , see effectiveSeedRef above. Using
         // this device's own local guess here is what made the host discard
         // every guest's card: the two seeds are independently random and
         // essentially never match.
@@ -493,8 +493,8 @@ export default function MatchView({
   const waiting = config.seats.filter((_, i) => !(lockedMask & (1 << i)) && !myPicks[i]).length;
   const allMineIn = config.localSeats.every((s) => myPicks[s]);
   const standings = engine.standings();
-  // The event that most recently landed — same one `soundFor` just played a
-  // beat ago — is what the pawns are reacting to right now.
+  // The event that most recently landed , same one `soundFor` just played a
+  // beat ago , is what the pawns are reacting to right now.
   const activeEvent = phase === 'reveal' ? engine.lastEvents[revealStep - 1] : undefined;
   const bubbles = bubbleFor(activeEvent);
 
@@ -706,8 +706,8 @@ export default function MatchView({
 /**
  * What everybody played, and what it cost them.
  *
- * The cards land first and all at once — that is the moment the whole game is
- * built around — and the consequences then arrive one line at a time, in the
+ * The cards land first and all at once , that is the moment the whole game is
+ * built around , and the consequences then arrive one line at a time, in the
  * order the rules actually resolved them. Nothing here re-derives anything;
  * it is a read-only view of `engine.lastEvents`.
  */
@@ -760,7 +760,7 @@ function describe(event: RoundEvent, seats: Seat[]): string {
       return `${name(event.seat)} rode to ${PLACES[event.to]?.name}.`;
     case 'trap':
       return event.amount > 0
-        ? `${name(event.seat)} hit ${name(event.owner)}'s trap at ${PLACES[event.place]?.name} — $${event.amount} gone.`
+        ? `${name(event.seat)} hit ${name(event.owner)}'s trap at ${PLACES[event.place]?.name} , $${event.amount} gone.`
         : `${name(event.seat)} tripped a trap at ${PLACES[event.place]?.name}, carrying nothing.`;
     case 'ambush':
       return `${name(event.seat)} was waiting at ${PLACES[event.place]?.name}. Took $${event.amount} off ${event.victims
@@ -779,7 +779,7 @@ function describe(event: RoundEvent, seats: Seat[]): string {
     case 'scout':
       return event.target === null
         ? `${name(event.seat)} sent word ahead. Nobody worth chasing.`
-        : `${name(event.seat)} sent word ahead — ${name(event.target)} is at ${PLACES[event.place as number]?.name} carrying $${event.amount}.`;
+        : `${name(event.seat)} sent word ahead , ${name(event.target)} is at ${PLACES[event.place as number]?.name} carrying $${event.amount}.`;
   }
 }
 
@@ -788,7 +788,7 @@ function describe(event: RoundEvent, seats: Seat[]): string {
  *
  * Purely cosmetic and purely local: every client computes the identical
  * `RoundEvent` from the same public history, but which of several lines gets
- * picked for it does not have to match from one screen to the next — nobody
+ * picked for it does not have to match from one screen to the next , nobody
  * is comparing bubbles, so this is the one piece of the reveal that is
  * allowed to use `Math.random()` instead of the seeded rng everything else
  * in this game is built on.
