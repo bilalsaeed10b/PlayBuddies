@@ -144,6 +144,8 @@ interface Ring {
   max: number;
   life: number;
   width: number;
+  /** Optional color override. Defaults to cream if not set. */
+  color?: string;
 }
 
 /** One floating number over a hull -- see `damageTexts` for why it exists. */
@@ -1391,15 +1393,8 @@ export class BattleEngine {
       const prevTimer = this.acidRainTimer;
       this.acidRainTimer = Math.max(0, this.acidRainTimer - dt);
 
-      // 6.0: Start of sequence, spawn clouds.
-      if (prevTimer === 6.0) {
-        const ship = this.ships[this.acidRainShooter];
-        for (let i = 0; i < this.ships.length; i++) {
-          if (this.ships[i].team !== ship.team && this.ships[i].hp > 0) {
-            this.spawnAcidClouds(this.ships[i].x, this.shipY(i));
-          }
-        }
-      }
+      // 6.0→4.5: Clouds and night sky are drawn directly in render().
+      // No particle clouds spawned here anymore.
 
       // 4.5: Rain starts, deal damage.
       if (prevTimer >= 4.5 && this.acidRainTimer < 4.5) {
@@ -1779,7 +1774,7 @@ export class BattleEngine {
           x: x0, y: y0, tx: x1, ty: y1,
           nx: (x1 - x0) / Math.max(1, dist),
           ny: (y1 - y0) / Math.max(1, dist),
-          speed: 400,
+          speed: 600,
           dist,
           travelled: 0,
           shooter,
@@ -1791,7 +1786,7 @@ export class BattleEngine {
 
         // Hold in impact phase while it travels — damage is dealt in update().
         this.phase = 'impact';
-        this.phaseTimer = dist / 400 + 1.2;
+        this.phaseTimer = dist / 600 + 1.2;
         this.skipping = false;
         this.lastShot = null;
         this.tally = prevTally;
@@ -1837,31 +1832,6 @@ export class BattleEngine {
     this.cfg.onPhase?.(this.phase);
   }
 
-
-  /**
-   * Acid rain phase 1: spawn clouds at the TOP of the screen, not near ships.
-   *
-   * The clouds form a thick green bank across the sky, spread over the full
-   * arena width. They sit at y 40-160 so they read as weather coming in from
-   * above, not smoke sitting on the hull.
-   */
-  private spawnAcidClouds(_targetX: number, _targetY: number) {
-    const w = this.arena.w;
-    for (let c = 0; c < 14; c++) {
-      const cx = Math.random() * w;
-      const cy = 40 + Math.random() * 120;
-      this.burst(2, 1, cx, cy, cy, (p) => {
-        p.vx = (Math.random() - 0.5) * 25;
-        p.vy = 4 + Math.random() * 8;
-        p.max = 4.5;
-        p.life = p.max;
-        p.size = 120 + Math.random() * 100;
-        p.grow = 1.4;
-        // Sickly green-grey storm clouds.
-        p.color = `rgba(25,75,35,0.85)`;
-      });
-    }
-  }
 
   /**
    * Acid rain phase 2: slow, visible green rain streaks from sky to ship.
@@ -1910,7 +1880,7 @@ export class BattleEngine {
   }
 
   /**
-   * Heal effect: a burst of rising green sparks around the healed hull.
+   * Heal effect: green aura rings + rising green sparks around the healed hull.
    */
   private spawnHealEffect(x: number, y: number) {
     // Green sparkles rising upward.
@@ -1925,8 +1895,11 @@ export class BattleEngine {
       p.grow = 0.5;
       p.color = `hsl(${130 + Math.random() * 30}, 80%, 60%)`;
     });
-    // Soft green glow ring.
-    this.pushRing({ x, y: y - 40, r: 10, max: 120, life: 1, width: 6 });
+    // Multiple expanding green aura rings at staggered sizes.
+    this.pushRing({ x, y: y - 30, r: 8,   max: 90,  life: 1,    width: 5, color: 'rgba(74, 222, 128, 1)' });
+    this.pushRing({ x, y: y - 30, r: 12,  max: 130, life: 0.85, width: 4, color: 'rgba(52, 211, 153, 1)' });
+    this.pushRing({ x, y: y - 30, r: 5,   max: 70,  life: 0.7,  width: 6, color: 'rgba(110, 231, 183, 1)' });
+    this.pushRing({ x, y: y - 30, r: 15,  max: 160, life: 0.6,  width: 3, color: 'rgba(74, 222, 128, 1)' });
     this.spawnDamageText(x, y - 70, 25, '#4ade80');
   }
 
@@ -2618,17 +2591,109 @@ export class BattleEngine {
     if (this.backdrop) ctx.drawImage(this.backdrop, 0, 0);
     else drawFallbackSea(ctx, this.arena);
 
-    // Night sky during Acid Rain — deep dark-blue, not just black.
+    // ── Acid Rain weather transition ──────────────────────────────────────────
     if (this.acidRainTimer > 0) {
       let darkness = 0;
+      // 6.0→4.5: intro (sun goes down, sky darkens)
+      // 4.5→1.5: full night (rain phase)
+      // 1.5→0.0: outro (dawn returns)
       if (this.acidRainTimer > 4.5) darkness = 1 - (this.acidRainTimer - 4.5) / 1.5;
       else if (this.acidRainTimer > 1.5) darkness = 1;
       else darkness = this.acidRainTimer / 1.5;
 
+      const { w, seaY, h } = this.arena;
+
       if (darkness > 0) {
-        // Deep night-blue overlay that truly darkens to nighttime.
-        ctx.fillStyle = `rgba(4, 8, 28, ${darkness * 0.78})`;
-        ctx.fillRect(0, 0, this.arena.w, this.arena.h);
+        // Deep night-blue overlay on the whole scene.
+        ctx.fillStyle = `rgba(4, 8, 32, ${darkness * 0.82})`;
+        ctx.fillRect(0, 0, w, h);
+
+        // ── Sun going down ──
+        // The baked sun sits at w*0.66, seaY*0.68. We slide it below the horizon.
+        const sunX = w * 0.66;
+        const sunBaseY = seaY * 0.68;
+        const sunR = seaY * 0.075;
+        const sunY = sunBaseY + darkness * (seaY - sunBaseY + sunR * 2 + 40);
+        // Only draw if still partially above horizon.
+        if (sunY < seaY + sunR) {
+          ctx.save();
+          // Clip to above the sea so the sun disappears at the horizon.
+          ctx.beginPath();
+          ctx.rect(0, 0, w, seaY);
+          ctx.clip();
+          // Warm bloom around sinking sun.
+          const bloom = ctx.createRadialGradient(sunX, sunY, 0, sunX, sunY, sunR * 6);
+          bloom.addColorStop(0, `rgba(255, 160, 60, ${0.5 * (1 - darkness)})`);
+          bloom.addColorStop(1, 'rgba(255, 120, 40, 0)');
+          ctx.fillStyle = bloom;
+          ctx.fillRect(sunX - sunR * 8, sunY - sunR * 8, sunR * 16, sunR * 16);
+          // Sun disc.
+          ctx.beginPath();
+          ctx.arc(sunX, sunY, sunR, 0, Math.PI * 2);
+          ctx.fillStyle = `rgba(255, 220, 140, ${Math.max(0, 1 - darkness * 1.3)})`;
+          ctx.fill();
+          ctx.restore();
+        }
+
+        // ── Moon appearing ──
+        const moonX = w * 0.25;
+        const moonBaseY = seaY * 0.18;
+        const moonR = seaY * 0.06;
+        // Moon fades in as darkness increases.
+        const moonAlpha = darkness * 0.85;
+        if (moonAlpha > 0.05) {
+          ctx.save();
+          ctx.globalAlpha = moonAlpha;
+          // Soft glow.
+          const glow = ctx.createRadialGradient(moonX, moonBaseY, 0, moonX, moonBaseY, moonR * 5);
+          glow.addColorStop(0, 'rgba(200, 220, 255, 0.25)');
+          glow.addColorStop(1, 'rgba(200, 220, 255, 0)');
+          ctx.fillStyle = glow;
+          ctx.fillRect(moonX - moonR * 6, moonBaseY - moonR * 6, moonR * 12, moonR * 12);
+          // Moon disc.
+          ctx.beginPath();
+          ctx.arc(moonX, moonBaseY, moonR, 0, Math.PI * 2);
+          ctx.fillStyle = '#dce8f5';
+          ctx.fill();
+          // Crescent shadow.
+          ctx.beginPath();
+          ctx.arc(moonX + moonR * 0.35, moonBaseY - moonR * 0.1, moonR * 0.85, 0, Math.PI * 2);
+          ctx.fillStyle = `rgba(4, 8, 32, ${darkness * 0.7})`;
+          ctx.fill();
+          ctx.restore();
+        }
+
+        // ── Storm clouds on the ENEMY half ──
+        // Determine which side of the arena is the enemy's.
+        const shooter = this.ships[this.acidRainShooter];
+        const enemyTeam: Team = shooter ? (shooter.team === 0 ? 1 : 0) as Team : 1 as Team;
+        // Team 0 is left, team 1 is right.
+        const cloudMinX = enemyTeam === 1 ? w * 0.45 : 0;
+        const cloudMaxX = enemyTeam === 1 ? w : w * 0.55;
+        const cloudAlpha = darkness * 0.75;
+
+        if (cloudAlpha > 0.05) {
+          ctx.save();
+          ctx.globalAlpha = cloudAlpha;
+          // Draw 6 puff-style clouds across the enemy half of the sky.
+          const cloudSeeds = [0.12, 0.3, 0.55, 0.72, 0.88, 0.42];
+          const cloudYs = [0.14, 0.22, 0.10, 0.28, 0.18, 0.32];
+          const cloudScales = [1.2, 0.9, 1.4, 0.8, 1.1, 1.0];
+          for (let c = 0; c < cloudSeeds.length; c++) {
+            const cx = cloudMinX + (cloudMaxX - cloudMinX) * cloudSeeds[c];
+            const cy = seaY * cloudYs[c];
+            const scale = cloudScales[c];
+            // Dark grey-green storm clouds.
+            ctx.fillStyle = `rgba(40, 55, 50, 0.8)`;
+            ctx.beginPath();
+            ctx.ellipse(cx, cy, 90 * scale, 26 * scale, 0, 0, Math.PI * 2);
+            ctx.ellipse(cx - 52 * scale, cy + 8 * scale, 54 * scale, 18 * scale, 0, 0, Math.PI * 2);
+            ctx.ellipse(cx + 58 * scale, cy + 6 * scale, 62 * scale, 20 * scale, 0, 0, Math.PI * 2);
+            ctx.ellipse(cx + 10 * scale, cy - 18 * scale, 58 * scale, 24 * scale, 0, 0, Math.PI * 2);
+            ctx.fill();
+          }
+          ctx.restore();
+        }
       }
     }
 
@@ -3032,11 +3097,23 @@ export class BattleEngine {
 
   private drawRings(ctx: CanvasRenderingContext2D) {
     for (const r of this.rings) {
-      ctx.strokeStyle = `rgba(255, 236, 190, ${Math.max(0, r.life) * 0.55})`;
+      const alpha = Math.max(0, r.life) * 0.55;
+      if (r.color) {
+        // Custom-coloured ring (e.g. green heal aura).
+        ctx.strokeStyle = r.color.replace(/[\d.]+\)$/, `${alpha})`);
+        // Fallback if the replace didn't match (hex/named colours).
+        if (!ctx.strokeStyle.includes('rgba')) {
+          ctx.globalAlpha = alpha;
+          ctx.strokeStyle = r.color;
+        }
+      } else {
+        ctx.strokeStyle = `rgba(255, 236, 190, ${alpha})`;
+      }
       ctx.lineWidth = r.width * Math.max(0.2, r.life);
       ctx.beginPath();
       ctx.arc(r.x, r.y, r.r, 0, Math.PI * 2);
       ctx.stroke();
+      ctx.globalAlpha = 1;
     }
   }
 
