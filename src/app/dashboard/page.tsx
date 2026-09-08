@@ -83,9 +83,6 @@ export default function DashboardPage() {
     return () => {
       cancelled = true;
     };
-    // cachedStats/setStats/statsFetchedAt intentionally omitted — stale-check
-    // runs once on mount; adding them would re-fetch on every store update.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
   useEffect(() => {
@@ -197,7 +194,6 @@ export default function DashboardPage() {
                 <p className="text-sm font-bold text-white">{user?.displayName}</p>
                 <p className="text-xs text-text-muted">{user?.email}</p>
               </div>
-              {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={user?.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user?.uid}`}
                 alt="Profile"
