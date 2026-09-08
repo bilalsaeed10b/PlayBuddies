@@ -1,8 +1,8 @@
 /**
  * Closing a modal the two ways every modal is expected to close.
  *
- * Every game grew the same panel independently , a full-screen scrim with a
- * card centred in it and a back arrow in the corner , and every one of them
+ * Every game grew the same panel independently — a full-screen scrim with a
+ * card centred in it and a back arrow in the corner — and every one of them
  * could only be closed by finding that arrow. Clicking the dimmed area outside
  * the card did nothing, and neither did Escape, which is not what either
  * gesture means anywhere else.
@@ -18,8 +18,8 @@ import type { MouseEvent } from 'react';
  *
  * The click is checked against the scrim *itself* rather than by stopping
  * propagation on the card: a click that begins on the card and drifts onto the
- * scrim before it is released , dragging a volume slider past the edge of the
- * panel, which is exactly what a slider invites , would otherwise close the
+ * scrim before it is released — dragging a volume slider past the edge of the
+ * panel, which is exactly what a slider invites — would otherwise close the
  * panel out from under the drag.
  */
 export function scrimProps(onClose: () => void) {

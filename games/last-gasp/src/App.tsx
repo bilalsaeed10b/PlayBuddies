@@ -80,7 +80,7 @@ const randomSeed = () => (Math.random() * 0x7fffffff) | 0;
 
 /**
  * Below this many real people, an online race has nobody to race against.
- * There are no bots to make up the difference anymore , see `onlineConfig`.
+ * There are no bots to make up the difference anymore — see `onlineConfig`.
  */
 const MIN_ONLINE_PLAYERS = 2;
 
@@ -136,7 +136,7 @@ export default function App() {
   }, [rules]);
 
   // Keeps `teamOf` the right length whenever the player count or team count
-  // changes, on a fresh even split , a host's individual taps on a roster
+  // changes, on a fresh even split — a host's individual taps on a roster
   // chip (see RoomScreen) override single entries after that, but a length
   // mismatch would otherwise leave stray or missing assignments the moment
   // either number moved.
@@ -229,7 +229,7 @@ export default function App() {
    *
    * Sorted by uid rather than by arrival, because arrival order differs
    * between clients and the seat index is what the whole wire protocol is
-   * addressed by. Capped at the hard table max, never at `rules.players` , an
+   * addressed by. Capped at the hard table max, never at `rules.players` — an
    * online table is exactly whoever is actually in the room, no more and no
    * fewer; there are no bots to pad it out to some earlier-chosen number, and
    * there is no reason to hide a real person who showed up late.
@@ -322,19 +322,10 @@ export default function App() {
       .catch((e) => console.error('Could not reset the match flag', e));
   }, [online, isHost, handoff.room, rollSession]);
 
-  const matchConfig = useMemo(
-    () => (online && uid && !offlineMatch ? onlineConfig() : offlineConfig()),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [session.seed, offlineMatch, uid],
-  );
-
   // -- into the game ----------------------------------------------------------
 
   if (view === 'game') {
-    // Frozen to match identity, not recomputed live: MatchView reads config
-    // fields like seat team every frame, and a live roster reorder mid-round
-    // (reconnect, late write) would otherwise flip them under a running game.
-    const config = matchConfig;
+    const config = online && uid && !offlineMatch ? onlineConfig() : offlineConfig();
     return (
       <>
         <MatchView
@@ -356,7 +347,7 @@ export default function App() {
     const seats: Seat[] = [];
     const localSeats: number[] = [];
 
-    // Exactly the real people in the room, in the same fixed order , no
+    // Exactly the real people in the room, in the same fixed order — no
     // filler. A race where everyone but you is a bot racing itself was the
     // bug, not a feature; a seat left short is just a smaller race.
     crew.forEach((person, i) => {
@@ -427,7 +418,7 @@ export default function App() {
       localSeats,
       seed: session.seed,
       // Always Free-For-All offline: Teams needs a lobby to assign people to
-      // teams in, and there is no lobby here , carrying over whatever mode
+      // teams in, and there is no lobby here — carrying over whatever mode
       // an earlier online match happened to be left on would seat a solo or
       // couch game into teams nobody had any way to configure.
       rules: { ...rules, mode: 'ffa' },
@@ -511,7 +502,7 @@ export default function App() {
           rules={rules}
           editable={!online || isHost}
           // The "Players" picker only means anything for an offline bot
-          // table , see `offlineConfig`. Reached from the online room itself
+          // table — see `offlineConfig`. Reached from the online room itself
           // (view === 'room'), the headcount is real people and is not a
           // knob to turn; reached from the offline menu or a couch match,
           // it is still the one thing choosing how many bots fill the table.
@@ -763,7 +754,7 @@ function FacePick({
           <ArrowLeft className="h-5 w-5" />
         </button>
         <h2 className="min-w-0 truncate text-center text-base font-black uppercase tracking-wide text-slate-100 sm:text-2xl">
-          {seatCount > 1 ? `Player ${seat + 1} , pick a face` : 'Pick a face'}
+          {seatCount > 1 ? `Player ${seat + 1} — pick a face` : 'Pick a face'}
         </h2>
         <div className="panel flex shrink-0 items-center gap-2 rounded-2xl px-3 py-2 font-bold text-amber-300">
           <Coins className="h-4 w-4" /> {coins}
@@ -811,7 +802,7 @@ function RoomScreen({
   onRules: () => void;
   onFullscreen: () => void;
   onPlayOffline: () => void;
-  /** Match type and team assignment live here, in the lobby itself , not behind the Rules modal. See ModeAndTeams. */
+  /** Match type and team assignment live here, in the lobby itself — not behind the Rules modal. See ModeAndTeams. */
   onRulesChange: (r: MatchRules) => void;
 }) {
   const pickedBy = useMemo(() => {
@@ -853,7 +844,7 @@ function RoomScreen({
             Pick a face
           </h2>
           <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-lime-400/80">
-            {people.length} player{people.length === 1 ? '' : 's'} in the room , no bots online
+            {people.length} player{people.length === 1 ? '' : 's'} in the room — no bots online
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
@@ -874,7 +865,7 @@ function RoomScreen({
         </div>
       </div>
 
-      {/* Loud on purpose , this is not the hangman anybody already knows, and
+      {/* Loud on purpose — this is not the hangman anybody already knows, and
           the small Rules button below is easy to never notice at all. */}
       <button
         onClick={onRules}
@@ -905,7 +896,7 @@ function RoomScreen({
             </button>
             {!enoughPlayers && (
               <p className="mt-1.5 text-center text-[10px] font-bold text-amber-400/90">
-                Need at least one more player , invite a friend, or play offline against bots below.
+                Need at least one more player — invite a friend, or play offline against bots below.
               </p>
             )}
           </>
@@ -1004,7 +995,7 @@ function ModeAndTeams({
     onChange({ ...rules, teamOf: next });
   };
 
-  // The real roster, not `rules.players` , there is no bot fill to pad up to
+  // The real roster, not `rules.players` — there is no bot fill to pad up to
   // anymore, so a team chip only ever exists for someone actually in the room.
   const slots = people.length;
 
@@ -1030,7 +1021,7 @@ function ModeAndTeams({
 
       {rules.mode === 'ffa' ? (
         <p className="text-[10px] leading-snug text-slate-500">
-          One person sets a word each round. Everybody else races to crack it , anyone can call any letter, any time.
+          One person sets a word each round. Everybody else races to crack it — anyone can call any letter, any time.
         </p>
       ) : (
         <>
@@ -1154,7 +1145,7 @@ function SettingsPanel({
           <span className="text-sm font-bold text-slate-100">
             Mark used letters
             <span className="block text-[11px] font-normal text-slate-400">
-              Colour the keys that have already been called , green for a hit, red for a miss.
+              Colour the keys that have already been called — green for a hit, red for a miss.
             </span>
           </span>
           <input
@@ -1173,9 +1164,9 @@ function SettingsPanel({
 function HowItWorks() {
   const steps = [
     { n: 1, title: 'Someone sets a word', body: 'Free-For-All: one player types it. Teams: your team suggests, then votes.' },
-    { n: 2, title: 'It is open to everyone', body: 'No turns. Anyone can call any letter, any moment , fastest right guess wins it.' },
+    { n: 2, title: 'It is open to everyone', body: 'No turns. Anyone can call any letter, any moment — fastest right guess wins it.' },
     { n: 3, title: 'A hit buys you a window', body: `Get one right and you alone get ${BALANCE.CHAIN_WINDOW_MS / 1000}s to keep going. Chain hits pay more each time.` },
-    { n: 4, title: 'A miss draws the gallows', body: `${PIECES} wrong guesses and he's finished , whoever drew the last line loses the word's points.` },
+    { n: 4, title: 'A miss draws the gallows', body: `${PIECES} wrong guesses and he's finished — whoever drew the last line loses the word's points.` },
   ];
   return (
     <div className="grid grid-cols-2 gap-2">
@@ -1219,7 +1210,7 @@ function StageStrip() {
  *
  * Separate from Settings on purpose: these change what the game *is*, so both
  * sides have to be playing the same one. They travel to a guest over the wire
- * (see `packRules`), and a guest can read this panel but not touch it ,
+ * (see `packRules`), and a guest can read this panel but not touch it —
  * letting them change a copy that the host's next write overwrites would be a
  * lie about who is in charge.
  */
@@ -1273,7 +1264,7 @@ function RulesPanel({
             ))}
           </div>
           <p className="text-[10px] leading-snug text-slate-400">
-            Per copy found, before any chain bonus. A safe E is worth one; a Z that lands is worth ten ,
+            Per copy found, before any chain bonus. A safe E is worth one; a Z that lands is worth ten —
             the bet you're making every time you go for a letter instead of waiting for a safer one.
           </p>
         </div>
@@ -1331,7 +1322,7 @@ function RulesPanel({
         </div>
 
         <p className="text-center text-[10px] font-bold text-slate-500">
-          Match type and teams are set right in the lobby, not here , see the board below "Pick a face".
+          Match type and teams are set right in the lobby, not here — see the board below "Pick a face".
         </p>
       </div>
     </div>

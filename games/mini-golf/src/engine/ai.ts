@@ -1,7 +1,7 @@
 /**
  * The bot.
  *
- * It has no model of the course at all , no idea what a wall is, no notion of
+ * It has no model of the course at all — no idea what a wall is, no notion of
  * a bunker. What it has is `simulate`, the same physics the player's ball
  * obeys, and it simply tries putts and keeps the one that finishes nearest the
  * flag. Everything that looks like understanding falls out of that: it plays
@@ -29,8 +29,8 @@ export interface Tier {
   /**
    * How finely the way-round sweep is searched.
    *
-   * Every rank sweeps when the line is blocked , a bot that cannot see a gap
-   * it is staring at is broken, not easy , but a lower rank sweeps coarsely
+   * Every rank sweeps when the line is blocked — a bot that cannot see a gap
+   * it is staring at is broken, not easy — but a lower rank sweeps coarsely
    * and so finds a worse way round, which is a fairer kind of weakness than
    * simply firing into the wall.
    */
@@ -38,8 +38,8 @@ export interface Tier {
   /**
    * Slop added to the chosen shot. This is the whole difference between the
    * ranks, and it has to do real work: the search itself is close to perfect
-   * at every rank , it tries a couple of hundred putts with the exact physics
-   * the ball obeys , so without a firm hand on the wobble even Rookie would
+   * at every rank — it tries a couple of hundred putts with the exact physics
+   * the ball obeys — so without a firm hand on the wobble even Rookie would
    * hole out from anywhere.
    */
   angleError: number;
@@ -78,7 +78,7 @@ const SEARCH_STEP = PHYSICS.STEP * 3;
  *
  * The route is what tells the search apart from a bot that just points at the
  * flag. Ruler distance rates "stopped against the near face of the barrier, a
- * few units from the cup as the crow flies" above "most of the way round it" ,
+ * few units from the cup as the crow flies" above "most of the way round it" —
  * the first spot looks closer, but the barrier is still entirely between it
  * and the flag, so the bot picked it, rammed the same wall again next turn,
  * and looked stuck because it was: nothing in the score ever told it that
@@ -88,7 +88,7 @@ const SEARCH_STEP = PHYSICS.STEP * 3;
 function score(course: Course, route: RouteField, rest: Vec, holed: boolean, splash: boolean, sand: boolean): number {
   if (holed) return -1000;
   const routed = route.at(rest.x, rest.y);
-  // A spot the field never reached is very close to something solid , the
+  // A spot the field never reached is very close to something solid — the
   // ball is resting right on a wall it just hit. Treated as roughly as bad as
   // the ruler distance plus a flat penalty rather than thrown out, since it is
   // still a real, physically-reachable resting place.
@@ -122,8 +122,8 @@ function evaluate(course: Course, route: RouteField, from: Vec, angle: number, p
 /**
  * One putt for one bot.
  *
- * Always returns something playable , the straight-at-the-flag shot underneath
- * every branch , so a bot can never stall a round.
+ * Always returns something playable — the straight-at-the-flag shot underneath
+ * every branch — so a bot can never stall a round.
  */
 export function chooseShot(
   course: Course,
@@ -169,7 +169,7 @@ export function chooseShot(
   // Every rank gets this whenever the line to the flag is actually blocked,
   // not just the top one. Sweeping a narrow arc either side of "straight at
   // the cup" is fine on an open green and useless on a hole with a barrier
-  // laid across it , every candidate points into the same wall, the bot picks
+  // laid across it — every candidate points into the same wall, the bot picks
   // whichever bounces least badly, and it does that again next turn. Rookie
   // finished one hole in six that way. What separates the ranks is the wobble
   // at the end, not whether the bot can see a gap that is plainly there.

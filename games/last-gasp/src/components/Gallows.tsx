@@ -6,7 +6,7 @@
  * free at the display's own refresh rate, stays sharp on any phone, and needs
  * nobody to think about device pixel ratios.
  *
- * The frame , posts and beam , is always there, faint. Only the eight pieces
+ * The frame — posts and beam — is always there, faint. Only the eight pieces
  * a wrong guess buys are drawn in full chalk, so the gap between "how bad is
  * it" and "how bad can it get" is visible at a glance from across a room.
  */
@@ -15,7 +15,7 @@ import { PIECES } from '../game/rules';
 /**
  * The stroke that appears at each wrong guess, in order.
  *
- * The traditional six, and the rope is not among them , an empty noose is
+ * The traditional six, and the rope is not among them — an empty noose is
  * part of the frame below, hanging there from the first turn. It costs
  * nothing to draw and it is the most ominous thing on the board, which is
  * exactly the wrong thing to hold back until somebody has already lost.
@@ -51,7 +51,7 @@ export default function Gallows({
         doomed ? 'The stickman is finished.' : `Stickman: ${pieces} of ${PIECES} lines drawn.`
       }
     >
-      {/* The frame. Always present, always faint , it is the stage, not the
+      {/* The frame. Always present, always faint — it is the stage, not the
           score, and drawing it piece by piece would waste the tension on
           scenery nobody is afraid of. */}
       <g stroke="#64748b" strokeWidth="4" strokeLinecap="round" opacity="0.45" fill="none">
@@ -84,7 +84,7 @@ export default function Gallows({
           return <path key={i} d={part.d} style={style} />;
         })}
 
-        {/* The face. Not a piece anybody pays for , it arrives on its own the
+        {/* The face. Not a piece anybody pays for — it arrives on its own the
             moment the last limb lands, so the drawing that has been a diagram
             all round suddenly becomes a person. That is the beat this game is
             built to land, and charging a turn for it would spend it early. */}

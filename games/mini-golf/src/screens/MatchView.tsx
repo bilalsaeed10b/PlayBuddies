@@ -110,8 +110,8 @@ export default function MatchView({
   /**
    * The rules as one number, so the wire effect below can depend on them.
    *
-   * `config.rules` is a fresh object on every render , App rebuilds the whole
-   * config from each lobby snapshot , and listing it in a dependency array
+   * `config.rules` is a fresh object on every render — App rebuilds the whole
+   * config from each lobby snapshot — and listing it in a dependency array
    * would tear the link down and reopen it several times a second, writing a
    * `bye` each time.
    */
@@ -136,8 +136,8 @@ export default function MatchView({
   const [rematch, setRematch] = useState(0);
 
   /**
-   * True while the wire itself is the problem , it never opened, or it dropped
-   * mid-round , as opposed to an ordinary notice like somebody going idle.
+   * True while the wire itself is the problem — it never opened, or it dropped
+   * mid-round — as opposed to an ordinary notice like somebody going idle.
    * Without it the only way out of "could not reach the other players" was
    * leaving, so a page that failed to open a link once never got a second try.
    */
@@ -169,7 +169,7 @@ export default function MatchView({
    * snapshot, so its arrays are a different array each time even when nothing
    * about the round has changed. That is fine for the HUD and fatal for the
    * wire: an effect that lists an array identity in its dependencies tears the
-   * link down and opens a new one, and closing a link writes a `bye` , which
+   * link down and opens a new one, and closing a link writes a `bye` — which
    * tells everyone else this player has walked off, over and over.
    */
   const peerKey = config.peerUids.join(',');
@@ -189,7 +189,7 @@ export default function MatchView({
   /**
    * Whether this device drives the bots, read from a ref inside the loop.
    *
-   * As a dependency it would rebuild the green , resetting a live round , the
+   * As a dependency it would rebuild the green — resetting a live round — the
    * moment the lobby handed the host badge to somebody else.
    */
   const aiDriverRef = useRef(aiDriver);
@@ -223,7 +223,7 @@ export default function MatchView({
         return;
       }
       if (packet.t === 'hello') {
-        // Every client runs this, not just the host , same as `bye` above. A
+        // Every client runs this, not just the host — same as `bye` above. A
         // no-op if this seat was never handed to a bot, so a guest's very
         // first `hello` (the ordinary case) costs nothing extra here.
         const seat = seatOfUid.get(from);
@@ -277,8 +277,8 @@ export default function MatchView({
           handlePacket,
           (message) => {
             setNotice(message);
-            // Everything TurnLink reports on its own , the open failing, a
-            // listener dropping, a send bouncing , means the link itself needs
+            // Everything TurnLink reports on its own — the open failing, a
+            // listener dropping, a send bouncing — means the link itself needs
             // a fresh attempt, not just an acknowledgement.
             setConnectionLost(true);
           },
@@ -301,7 +301,7 @@ export default function MatchView({
         }
 
         // `pagehide` fires with `persisted: false` on plenty of things that
-        // are not a real close , a phone screen locking, a tab switch, a page
+        // are not a real close — a phone screen locking, a tab switch, a page
         // holding an open Firestore listener not being bfcache-eligible in
         // most browsers. Give it a chance to come back (cancelled by
         // `pageshow` or the tab going visible again) before actually handing
@@ -450,7 +450,7 @@ export default function MatchView({
         : undefined,
       onOver: (winners, finalTotals) => {
         setOver({ winners, totals: finalTotals });
-        // A tie is not a win for either side of it , only sole possession of
+        // A tie is not a win for either side of it — only sole possession of
         // the low score is.
         const won = winners.length === 1 && config.localSeats.includes(winners[0]);
         const mine = config.localSeats[0] ?? 0;
@@ -478,7 +478,7 @@ export default function MatchView({
      * The canvas is sized from its container, not from the window.
      *
      * `resize` writes an explicit pixel width and height onto the element,
-     * which is what keeps a CSS pixel and a green coordinate the same thing ,
+     * which is what keeps a CSS pixel and a green coordinate the same thing —
      * and also what overrides the `w-full h-full` classes, so nothing else
      * will correct it. A ResizeObserver rather than a window listener because
      * the board's box changes without the window doing anything when the
@@ -532,7 +532,7 @@ export default function MatchView({
         );
       }
 
-      // The clock only ever runs against somebody sitting at this device , a
+      // The clock only ever runs against somebody sitting at this device — a
       // remote player's clock is their own device's business, and running a
       // second copy of it here would putt for them.
       if (session.rules.turnTimer && engine.awaitingLocal) {
@@ -591,7 +591,7 @@ export default function MatchView({
       aiTimer.current = null;
       engineRef.current = null;
     };
-    // The green is rebuilt only when the *round* changes , a new seed, a new
+    // The green is rebuilt only when the *round* changes — a new seed, a new
     // toss, a rematch. Listing anything the lobby can touch here would reset a
     // round in progress the moment somebody's name or badge changed.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -819,7 +819,7 @@ export default function MatchView({
                     <div key={seat.id} className="flex items-center gap-2 text-sm">
                       <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: SEATS[i].main }} />
                       <span className="min-w-0 flex-1 truncate text-left font-bold">{seat.name}</span>
-                      <span className="font-black tabular-nums">{took ?? ','}</span>
+                      <span className="font-black tabular-nums">{took ?? '—'}</span>
                       <span className="w-10 text-right text-xs font-bold text-white/50">
                         {took !== null && took !== undefined ? relativeToPar(took, par) : ''}
                       </span>

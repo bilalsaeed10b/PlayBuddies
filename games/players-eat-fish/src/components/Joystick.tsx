@@ -5,7 +5,7 @@ import { Vector2D } from '../types/game';
  * Dynamic joystick: touch anywhere in the play area and the stick appears under
  * your thumb.
  *
- * A fixed stick in a corner is the wrong shape for this game , you spend the
+ * A fixed stick in a corner is the wrong shape for this game — you spend the
  * whole match steering, and where your thumb naturally rests depends on how
  * you're holding the phone. This also replaces nipplejs, which was a dependency
  * for about forty lines of pointer maths and did not handle pointer capture, so

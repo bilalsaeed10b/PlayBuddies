@@ -28,7 +28,7 @@ export interface LobbyPlayer {
    * Written by the game, not the platform: Fish Eat Fish uses `fishIndex`.
    *
    * `role` was Neon Elements' fire/water pick. That game is gone, and
-   * Battle of Pirates has since claimed the field for its hull class , a
+   * Battle of Pirates has since claimed the field for its hull class — a
    * number, not one of the two strings below. The platform never reads
    * either; both are here because firestore.rules names them as writable by
    * their owner, which is what makes this the only spare per-player slot a

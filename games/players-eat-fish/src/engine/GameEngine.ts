@@ -16,7 +16,7 @@ import { QualityGovernor } from '../game/quality';
  * ONE PLACE TO TUNE THE GAME.
  *
  * Every number that decides how the ocean feels lives here. Times are seconds,
- * distances are world units, speeds are world units per second , the simulation
+ * distances are world units, speeds are world units per second — the simulation
  * has no notion of frames, which is what makes it identical at 30, 60 and 144Hz.
  */
 export const BALANCE = {
@@ -27,7 +27,7 @@ export const BALANCE = {
    * Constant *visible area*, not a constant width or height.
    *
    * The old code pinned 1200 world units to whichever screen edge was shorter,
-   * so a phone in portrait saw more than twice the ocean a laptop did , the
+   * so a phone in portrait saw more than twice the ocean a laptop did — the
    * same fish was a different size, and a player on a tall screen could see
    * predators coming that a player on a wide screen could not. Fixing the area
    * makes every fish cover the same fraction of every screen.
@@ -105,12 +105,12 @@ export const BALANCE = {
    * game event, not a mid-game one.
    */
   PREDATOR_RAMP_SIZE: 500,
-  /** Spawn ring, as a multiple of the view's half-diagonal , just out of sight. */
+  /** Spawn ring, as a multiple of the view's half-diagonal — just out of sight. */
   SPAWN_RING: 1.15,
   /** Beyond this (same units) a fish nobody can see is recycled. */
   CULL_RING: 2.1,
   /**
-   * AI fish ignore players entirely , they neither hunt you nor flee from you.
+   * AI fish ignore players entirely — they neither hunt you nor flee from you.
    * A predator that beelines at you is a timer, not a game, and prey that
    * scatters on sight is never catchable. They swim their own routes; a big one
    * is dangerous because it is *there*.
@@ -442,7 +442,7 @@ export class GameEngine {
         const dx = f.x - peer.x;
         const dy = f.y - peer.y;
         // Sending a fish 3000 units behind someone costs bandwidth and buys
-        // nothing , they cannot see it and cannot reach it before the next
+        // nothing — they cannot see it and cannot reach it before the next
         // snapshot corrects them.
         if (dx * dx + dy * dy > radius * radius) continue;
       }
@@ -485,7 +485,7 @@ export class GameEngine {
     this.config.onEat(fish.score, fish.size);
   }
 
-  /** True once every local seat has been eaten , the cue to show the defeat screen. */
+  /** True once every local seat has been eaten — the cue to show the defeat screen. */
   allLocalsDead(): boolean {
     for (const fish of this.locals.values()) if (!fish.dead) return false;
     return true;
@@ -515,7 +515,7 @@ export class GameEngine {
    * Starts the reef over at the size the players are *now*.
    *
    * The spawner sizes every fish against `referenceSize()`, the average of
-   * everyone alive , so a reef grown around a size-150 player is still full of
+   * everyone alive — so a reef grown around a size-150 player is still full of
    * size-150 fish the moment that player restarts at size 6. Nothing culls
    * them either: they are recycled only when they drift out of view, so a fresh
    * run opened surrounded by leftover giants from the last one and died to the
@@ -623,7 +623,7 @@ export class GameEngine {
     // Clamped at the top so a backgrounded tab doesn't resume with one enormous
     // step that teleports every fish across the map, and at the bottom because
     // the first rAF timestamp can precede the performance.now() captured in
-    // start() , a negative dt runs the whole simulation backwards for a frame.
+    // start() — a negative dt runs the whole simulation backwards for a frame.
     const dt = Math.max(0, Math.min(0.05, (time - this.lastTime) / 1000));
     this.lastTime = time;
     this.lastDt = dt;
@@ -768,7 +768,7 @@ export class GameEngine {
   }
 
   /**
-   * Average size of everyone alive , used only for the reef's overall
+   * Average size of everyone alive — used only for the reef's overall
    * population count below, never for how big any individual spawn is (see
    * `spawnEnemy`, which anchors each fish's size to whoever it's actually
    * appearing next to instead).
@@ -905,7 +905,7 @@ export class GameEngine {
    *
    * On top of the heading, shoal members pull gently toward their shoal and
    * match its direction. Shoals are always one species of small fish (they
-   * spawn that way) , a tiger shark drifting in the middle of a school of neon
+   * spawn that way) — a tiger shark drifting in the middle of a school of neon
    * tetras looked absurd, so nothing above `isShoalingSize` ever joins one.
    *
    * Players are not an input to any of this. Nothing chases, nothing flees.
@@ -934,7 +934,7 @@ export class GameEngine {
       fish.turnIn -= dt;
       if (fish.turnIn <= 0) {
         fish.turnIn = BALANCE.TURN_EVERY_MIN + Math.random() * (BALANCE.TURN_EVERY_MAX - BALANCE.TURN_EVERY_MIN);
-        // A change of course, not a reversal , a fish that spins 180° on the
+        // A change of course, not a reversal — a fish that spins 180° on the
         // spot reads as a glitch.
         fish.heading += (Math.random() - 0.5) * 1.9;
       }
@@ -1018,7 +1018,7 @@ export class GameEngine {
 
     const target = this.enemyTarget();
     // Topped up a few at a time, so a big cull doesn't produce a visible wall
-    // of fish appearing together , except for shoals, which arrive as a group
+    // of fish appearing together — except for shoals, which arrive as a group
     // because that is the entire point of them.
     for (let i = 0; i < 3 && this.enemies.size < target; i++) {
       if (Math.random() < BALANCE.SHOAL_CHANCE && this.enemies.size + BALANCE.SHOAL_MAX <= target) {
@@ -1045,7 +1045,7 @@ export class GameEngine {
     // in the match has gotten.
     const anchor = this.spawnAnchor();
     const ref = anchor.size;
-    // Always food, and always small , the whole appeal is a cloud of minnows.
+    // Always food, and always small — the whole appeal is a cloud of minnows.
     const size = Math.max(4, Math.min(SHOAL_MAX_SIZE, ref * (0.32 + Math.random() * 0.5)));
     const asset = assetForSize(size);
     const count = BALANCE.SHOAL_MIN + Math.floor(Math.random() * (BALANCE.SHOAL_MAX - BALANCE.SHOAL_MIN + 1));
@@ -1197,7 +1197,7 @@ export class GameEngine {
         return;
       }
 
-      // Other players , local co-op partners and everyone online.
+      // Other players — local co-op partners and everyone online.
       const others: [string, Fish][] = [];
       this.locals.forEach((f, id) => id !== myId && others.push([id, f]));
       this.remotes.forEach((f, id) => others.push([id, f]));
@@ -1233,7 +1233,7 @@ export class GameEngine {
     fish.vy = 0;
     this.burst(fish.x, fish.y, 26);
     audioService.playGameOverSound();
-    // The eater rides along so the App can hand them the growth , the victim is
+    // The eater rides along so the App can hand them the growth — the victim is
     // the only one who can say for certain that it happened.
     this.config.onDeath(id, killedBy, eaterId, Math.round(size));
   }
@@ -1289,7 +1289,7 @@ export class GameEngine {
   private initBubbles() {
     this.bubbles = [];
     // Ambient bubbles are pure atmosphere and there are sixty of them, each an
-    // arc fill every frame , the first thing worth thinning on a slow device.
+    // arc fill every frame — the first thing worth thinning on a slow device.
     const count = Math.round(BALANCE.BUBBLES * this.governor.quality.particles);
     for (let i = 0; i < count; i++) {
       this.bubbles.push({
@@ -1356,8 +1356,8 @@ export class GameEngine {
     };
 
     const bg = new Image();
-    // WebP, for the same reason the fish are: the JPEG was 775 KB , more than
-    // the entire rest of this bundle's assets put together , for an image that
+    // WebP, for the same reason the fish are: the JPEG was 775 KB — more than
+    // the entire rest of this bundle's assets put together — for an image that
     // is then stretched over a 3000x2200 world and never seen at native size.
     // The WebP is 125 KB and indistinguishable once scaled.
     //
@@ -1442,7 +1442,7 @@ export class GameEngine {
     ctx.globalAlpha = 1;
 
     // AI fish stay "alive" out to CULL_RING (2.1x the view radius) so the
-    // population doesn't visibly pop in and out , but that means most of them
+    // population doesn't visibly pop in and out — but that means most of them
     // sit well outside what the camera can actually see. Each one drawn costs
     // a save/rotate/drawImage plus a stroked+filled text label, which is real
     // money on a mobile GPU; skipping the ones the player can't see is what
@@ -1479,7 +1479,7 @@ export class GameEngine {
      * on at the instant the fish crosses vertical rather than easing in.
      *
      * Mirroring horizontally instead keeps the fish the right way up through
-     * every heading , a fish swimming left is the same fish facing the other
+     * every heading — a fish swimming left is the same fish facing the other
      * way. The remaining rotation is pitch only, measured against the
      * horizontal and clamped, so a fish climbing or diving still angles into
      * the direction it is going without ever standing on its nose.
@@ -1536,7 +1536,7 @@ export class GameEngine {
     const label = fish.kind === 'player' && fish.name ? `${fish.name} · ${Math.floor(fish.size)}` : String(Math.floor(fish.size));
     // The number on a fish is what tells you whether it eats you or you eat it,
     // so the label itself always draws. The outline behind it is legibility
-    // only, and stroked text is the most expensive call in this whole loop ,
+    // only, and stroked text is the most expensive call in this whole loop —
     // on a crowded reef it runs once per visible fish, every frame.
     if (this.governor.quality.outlines) {
       ctx.lineWidth = 3;
@@ -1554,7 +1554,7 @@ export class GameEngine {
     ctx.globalAlpha = boss.opacity ?? 1;
     ctx.translate(boss.x, boss.y);
     const aura = bodyRadius(boss.size) * 1.5;
-    // The aura is a warning, so it stays at every tier , but the cheap tier
+    // The aura is a warning, so it stays at every tier — but the cheap tier
     // pays a flat wash for it rather than building a gradient object a frame.
     ctx.beginPath();
     ctx.arc(0, 0, aura, 0, Math.PI * 2);
@@ -1583,8 +1583,8 @@ function clamp(v: number, lo: number, hi: number) {
  *
  * `size` is the abstract score-like quantity that grows by area; the sprite is
  * drawn from this compressed curve so that a size-200 whale is impressive
- * rather than screen-filling. Everything the player can see , the sprite, the
- * hitbox, the name label, the spawn ring , has to be derived from this one
+ * rather than screen-filling. Everything the player can see — the sprite, the
+ * hitbox, the name label, the spawn ring — has to be derived from this one
  * function or they drift apart as fish grow. They used to: collision scaled
  * linearly with `size` while the art scaled with `size^0.75`, so by size 150
  * the hitbox was about twice the width of the fish and you were eaten by open
@@ -1618,7 +1618,7 @@ const SPRITE_HALF_W = 1.25;
  * the rule is stated in exactly those terms: if the number over their head is
  * lower than the number over yours, you eat them. The old rule needed a 6%
  * edge, which at size 50 meant a fish showing "49" was uneatable and at size
- * 150 a fish showing "141" was , the bigger you got, the more the game
+ * 150 a fish showing "141" was — the bigger you got, the more the game
  * disagreed with its own HUD.
  *
  * Equal displayed sizes mean neither can eat the other, so two evenly matched
@@ -1638,7 +1638,7 @@ function clampView(target: number, view: number, world: number) {
  * Fish are longer than they are tall, so a circle is a poor hitbox: it lets a
  * fish be eaten by something level with its tail. This is an ellipse sized off
  * `bodyRadius`, the same curve the sprite is drawn from, and deliberately a
- * little tighter than the art , the sprites carry transparent padding, and a
+ * little tighter than the art — the sprites carry transparent padding, and a
  * hitbox that stops just inside the visible fish reads as fair, where one that
  * reaches past it reads as broken.
  */

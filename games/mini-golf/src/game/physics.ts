@@ -10,7 +10,7 @@
  * Nothing here is asked to be deterministic across machines, and it is not:
  * `Math.exp` is not specified to the last bit and two browsers may disagree in
  * the twelfth decimal. That is fine, because a shot's *outcome* never travels
- * as "replay this and trust yourself" , the player who took it sends where the
+ * as "replay this and trust yourself" — the player who took it sends where the
  * ball actually stopped, and the far side snaps to that once its own replay has
  * finished looking pretty. See ShotPacket.
  */
@@ -28,7 +28,7 @@ export interface Ball {
    * True while the ball is inside the cup's capture ring.
    *
    * A fast ball crosses that ring over several physics steps, not one, and the
-   * lip-out below is a single rim event , struck once, on the way in. Judging
+   * lip-out below is a single rim event — struck once, on the way in. Judging
    * it fresh on every step it happens to still be inside re-damped the same
    * ball again and again as it crossed, which bled off enough speed that a putt
    * hit well over the lip-out threshold still ended up captured a few steps
@@ -223,7 +223,7 @@ export function advance(course: Course, ball: Ball, dt: number, events: ShotEven
       return;
     }
     // Too quick. It rides the rim and carries on, a good deal slower and
-    // pushed off line , which is what a lip-out looks like. Struck once, here,
+    // pushed off line — which is what a lip-out looks like. Struck once, here,
     // at the rim: `overHole` stops this from firing again on every following
     // step the ball still happens to be over the cup, which would otherwise
     // bleed off its speed a second and third time before it has crossed and
@@ -238,7 +238,7 @@ export function advance(course: Course, ball: Ball, dt: number, events: ShotEven
   for (const p of course.water) {
     if (!inPatch(p, ball.x, ball.y)) continue;
     // It stops right where it went in, and it is left there. Deciding *where a
-    // drowned ball reappears* is not physics , it is a rule , so this only
+    // drowned ball reappears* is not physics — it is a rule — so this only
     // reports the splash and the caller plays the ball again from wherever it
     // was struck. `simulate` does the same, which is how the bot knows a pond
     // costs it the whole shot rather than a few units of position.
@@ -304,8 +304,8 @@ export function simulate(course: Course, from: Vec, angle: number, power: number
     events.endedInSand = s === 'sand';
     events.endedInRough = s === 'rough';
   }
-  // A drowned ball is played again from where it was struck, so that , not the
-  // bottom of the pond , is where this shot actually leaves it.
+  // A drowned ball is played again from where it was struck, so that — not the
+  // bottom of the pond — is where this shot actually leaves it.
   const rest = events.splash ? { x: from.x, y: from.y } : { x: ball.x, y: ball.y };
   return { rest, events, duration: t };
 }

@@ -293,36 +293,28 @@ export default function App() {
   }, []);
 
   /**
-   * Leaving the match, online: back to the room, and , for the host , the
+   * Leaving the match, online: back to the room, and — for the host — the
    * go-signal comes down with it.
    *
    * `matchStarted` was never reset anywhere after being set, so a rematch was
    * broken two different ways: pressing "Start Match" again did nothing,
    * because true -> true isn't a change the effect above reacts to, while
-   * simply picking a *different* character was , `myCharacter` changing while
+   * simply picking a *different* character was — `myCharacter` changing while
    * the stale flag was still `true` launched a match nobody had started.
    *
    * Resetting it here, on the way out, rather than only when a round finishes
    * normally, also covers the host quitting mid-match: with nobody left to run
    * the authoritative simulation, ending the match for everyone is correct,
-   * not a bug , it is exactly what the platform's own "End Game" already does.
+   * not a bug — it is exactly what the platform's own "End Game" already does.
    */
   const leaveMatch = useCallback(() => {
     setOfflineMatch(false);
     setView(online ? 'room' : 'menu');
     if (!online || !isHost) return;
     void import('./firebase')
-      .then(({ db, doc, updateDoc, deleteField }) => {
-        const reset: any = { matchStarted: false };
-        if (lobby?.players) {
-          for (const u of Object.keys(lobby.players)) {
-            reset[`players.${u}.character`] = deleteField();
-          }
-        }
-        return updateDoc(doc(db, 'lobbies', handoff.room), reset);
-      })
+      .then(({ db, doc, updateDoc }) => updateDoc(doc(db, 'lobbies', handoff.room), { matchStarted: false }))
       .catch((e) => console.error('Could not reset the match flag', e));
-  }, [online, isHost, handoff.room, lobby?.players]);
+  }, [online, isHost, handoff.room]);
 
   // ── in the match ───────────────────────────────────────────────────────────
   if (view === 'game') {
@@ -348,8 +340,8 @@ export default function App() {
    * Every empty seat gets a bot.
    *
    * This used to fill the fourth slot of a three-person lobby and nothing else,
-   * which meant a lobby with one person in it , the platform's solo mode, or
-   * simply being first into the room , started a match with **no opponent on
+   * which meant a lobby with one person in it — the platform's solo mode, or
+   * simply being first into the room — started a match with **no opponent on
    * the court at all**. The ball landed on an empty half over and over and the
    * score climbed on its own.
    *
@@ -671,7 +663,7 @@ function CharacterGrid({
   coins: number;
   selected: number | null;
   /**
-   * Everyone else who has also picked this character. Purely informational ,
+   * Everyone else who has also picked this character. Purely informational —
    * these are skins and nothing else, so nothing stops two players choosing
    * the same one.
    */
@@ -903,7 +895,7 @@ function RoomScreen({
           <button
             onClick={onStart}
             disabled={!iAmReady || !everyone}
-            className="flex w-full items-center justify-center gap-2 rounded-xl bg-amber-400 py-2.5 text-sm font-black text-slate-900 disabled:opacity-40"
+            className="flex w-full items-center justify-center gap-2 rounded-xl bg-amber-400 py-3 text-base font-black text-slate-900 disabled:opacity-40"
           >
             <Play className="h-5 w-5 fill-current" /> START MATCH
           </button>

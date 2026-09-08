@@ -9,7 +9,7 @@
  *
  * The expensive part is scoring walls, so the search never looks at all 128
  * slots. It looks at the ones lying on or beside the leader's own shortest
- * route, because a wall anywhere else cannot lengthen it , which cuts a few
+ * route, because a wall anywhere else cannot lengthen it — which cuts a few
  * hundred breadth-first searches a turn down to a few dozen.
  */
 import {
@@ -118,7 +118,7 @@ function candidateSlots(
  * How far this seat's *side* is from winning.
  *
  * In a free-for-all that is just this pawn. In a 2v2 it is whichever partner
- * is closer, because either of them crossing ends the game , a bot that
+ * is closer, because either of them crossing ends the game — a bot that
  * measured only its own route would panic and start walling while its partner
  * was two steps from the line, and would happily drop a wall across that
  * partner's road to do it.
@@ -159,7 +159,7 @@ function leaderOf(pos: Position, seat: number, layout: Layout): { seat: number; 
 /**
  * One move for one bot.
  *
- * Returns an encoded move, always a legal one , there is a plain step
+ * Returns an encoded move, always a legal one — there is a plain step
  * underneath every branch, so a bot can never stall the game.
  */
 export function chooseMove(
@@ -188,7 +188,7 @@ export function chooseMove(
     return encodeStep(pick ?? options[0]);
   }
 
-  // My side's route, not merely my own , see `sideDistance`.
+  // My side's route, not merely my own — see `sideDistance`.
   const myDist = sideDistance(pos, seat, layout);
   const leader = leaderOf(pos, seat, layout);
 

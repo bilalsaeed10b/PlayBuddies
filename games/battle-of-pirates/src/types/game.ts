@@ -67,16 +67,6 @@ export interface Ship {
   lean: number;
   /** Last shot this ship took, so the aim UI can open where it left off. */
   lastAim: { angle: number; power: number };
-  /**
-   * Seconds since this hull's `hp` first reached 0, or -1 while it is still
-   * afloat.
-   *
-   * Its own clock rather than one shared across the fleet: a ship that sinks
-   * in the middle of a battle the match is still deciding needs to slip
-   * under and become a wreck marker right then, not wait for a whole-fleet
-   * clock that used to only ever run once, at the very end of the match.
-   */
-  sinkAge: number;
 }
 
 export interface Projectile {
@@ -145,7 +135,7 @@ export interface Rock {
  * Anything that changes how the battle actually plays out lives in MatchRules
  * below instead. The split matters: both clients simulate the same shot from
  * the same seed, so a rule one of them disagreed about is a desync, not a
- * preference , which is exactly what `obstacles` used to be when it lived
+ * preference — which is exactly what `obstacles` used to be when it lived
  * here. A host with rocks on and a guest with rocks off built two different
  * seas and every shot after the first landed somewhere else on each screen.
  */
@@ -178,7 +168,7 @@ export interface MatchRules {
   /**
    * The dotted trajectory arc while aiming.
    *
-   * On by default. With it on the shot solves itself , you drag until the
+   * On by default. With it on the shot solves itself — you drag until the
    * dots point at the enemy and let go. The aim arrow on the pad is always
    * there regardless; that shows direction and power, not where the ball
    * lands.
@@ -204,21 +194,14 @@ export interface MatchRules {
 export const DEFAULT_RULES: MatchRules = {
   aimArc: true,
   turnTimer: true,
-  mountain: 'breakable',
+  mountain: 'solid',
   cards: true,
   players: 2,
   storm: false,
 };
 
 const MOUNTAIN_CODES: MountainRule[] = ['off', 'breakable', 'solid'];
-/**
- * The counts this game actually seats, low to high.
- *
- * Exported (not just used for wire-packing here) so the host's
- * player-count picker and the lobby's own auto-fit logic read the
- * same list rather than each keeping their own copy of it.
- */
-export const PLAYER_CODES: PlayerCount[] = [2, 4, 6];
+const PLAYER_CODES: PlayerCount[] = [2, 4, 6];
 
 /**
  * The rules as one integer.
@@ -434,7 +417,7 @@ export interface ByePacket {
  * reconnect apart from the connection simply settling for the first time.
  *
  * `bye` hands a ship to a bot; nothing used to hand it back. A captain who
- * came back , reloaded, reopened the tab, whatever the drop actually was ,
+ * came back — reloaded, reopened the tab, whatever the drop actually was —
  * stayed a spectator on their own ship for the rest of the match, watching a
  * bot fight in their place with no way to take the wheel back. This is that
  * "I'm here" the host was missing.

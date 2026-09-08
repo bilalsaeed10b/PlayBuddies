@@ -2,7 +2,7 @@
  * The one map, hand-laid.
  *
  * Deliberately not generated. R2 says every player fights the same ground, and
- * a generated map is a different map , two players' runs are only comparable
+ * a generated map is a different map — two players' runs are only comparable
  * if the thing they ran at is identical. One layout also means it can be tuned
  * by hand until the interesting plots are actually interesting, which no
  * generator was going to manage.
@@ -23,7 +23,7 @@ export const WORLD_H = ROWS * TILE;
 /**
  * The route, as tile coordinates, from the breach to the keep.
  *
- * Straight runs only , every turn is a right angle, so the walked line is
+ * Straight runs only — every turn is a right angle, so the walked line is
  * exactly the drawn line and a player can read reach off the picture.
  */
 const ROUTE: [number, number][] = [
@@ -56,8 +56,8 @@ export function centreOf(col: number, row: number): Vec {
  * The route as world-space corners, with the distance along it to each.
  *
  * Precomputed once at module load: every enemy on every one of the four
- * simulated keeps walks this same list, so working it out per enemy , or per
- * frame , would be the same answer several thousand times a second.
+ * simulated keeps walks this same list, so working it out per enemy — or per
+ * frame — would be the same answer several thousand times a second.
  */
 export interface PathNode extends Vec {
   /** Distance from the breach to this corner. */
@@ -135,7 +135,7 @@ export function airPointAt(d: number): Vec {
  * Tiles that hold scenery instead of a tower.
  *
  * Two jobs at once. A field of a hundred and eleven identical plots looks like
- * a spreadsheet and plays like one , every plot is as good as its neighbour,
+ * a spreadsheet and plays like one — every plot is as good as its neighbour,
  * so there is nothing to decide. A pond in the middle of the best corridor on
  * the map, and a copse where the long approach would otherwise be trivially
  * covered, turn placement into a question. That they also break up the green
@@ -168,7 +168,7 @@ export const SCENERY: { col: number; row: number; kind: 'tree' | 'rock' | 'pond'
  * Which tiles a tower may stand on.
  *
  * Built by walking the route and blocking out every tile it passes through
- * plus the keep, rather than by listing plots by hand , a hand list drifts
+ * plus the keep, rather than by listing plots by hand — a hand list drifts
  * out of step with the route the first time the route is nudged, and a plot
  * sitting under the path is the kind of bug that only shows up when an enemy
  * walks through a tower.

@@ -1,7 +1,7 @@
 /**
  * The ground: turf, road, scenery, and the plot grid.
  *
- * Split out of art.ts because it is a different job on a different schedule ,
+ * Split out of art.ts because it is a different job on a different schedule —
  * all of this is painted exactly once into an offscreen bitmap and blitted
  * from then on, where the towers and enemies in art.ts are drawn every frame.
  *
@@ -10,7 +10,7 @@
  * one flat green: real ground varies at a scale you notice from across the
  * board, not at the scale of a blade of grass. And a faint rounded square was
  * baked onto every one of the hundred-odd buildable tiles, which turned a
- * field into a spreadsheet , that grid is information a player wants while
+ * field into a spreadsheet — that grid is information a player wants while
  * they are deciding where a tower goes and at no other time, so it now lives
  * in `drawPlots` and appears only then.
  */
@@ -69,7 +69,7 @@ function distToRoad(x: number, y: number): number {
 let ground: HTMLCanvasElement | null = null;
 
 /**
- * Baked once for the whole session, and shared by every keep on screen , they
+ * Baked once for the whole session, and shared by every keep on screen — they
  * are all the same map. Which is also why it can afford to be this detailed:
  * however long the match runs, this is painted once.
  */
@@ -422,7 +422,7 @@ function paintBreach(ctx: CanvasRenderingContext2D) {
 /**
  * The buildable plots, drawn live and only while a tower is being placed.
  *
- * Baked into the ground this was the worst thing on the board , a hundred-odd
+ * Baked into the ground this was the worst thing on the board — a hundred-odd
  * identical rounded squares over every inch of turf, which is what made a
  * field look like a spreadsheet. It is information a player wants while they
  * are deciding where something goes and at no other moment, so that is when it

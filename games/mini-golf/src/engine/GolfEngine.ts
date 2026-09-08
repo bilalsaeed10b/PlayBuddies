@@ -3,7 +3,7 @@
  *
  * It knows nothing about React, the network or the shop. It is handed seats
  * and a seed, it is fed putts as an angle and a power, and it reports where
- * every ball came to rest , which is exactly what travels on the wire, so the
+ * every ball came to rest — which is exactly what travels on the wire, so the
  * same code path serves a round against a bot and a round against three
  * strangers.
  */
@@ -136,7 +136,7 @@ export class GolfEngine {
       onLocalFire?: (seat: number, angle: number, power: number, hole: number) => void;
       /** Fired once a local putt has settled and the green is authoritative. */
       onLocalShot?: (report: ShotReport) => void;
-      /** Every seat sharing the lowest total , more than one of them on a tie. */
+      /** Every seat sharing the lowest total — more than one of them on a tie. */
       onOver?: (winners: number[], totals: number[]) => void;
     },
   ) {
@@ -217,7 +217,7 @@ export class GolfEngine {
   /**
    * A putt struck here, on this device.
    *
-   * Rejected rather than queued while anything is still rolling , a second
+   * Rejected rather than queued while anything is still rolling — a second
    * swing landing mid-shot is a double-hit, and the wire has no way to express
    * one.
    */
@@ -253,7 +253,7 @@ export class GolfEngine {
    * A putt has stopped. Score it, say something about it, and pass the turn.
    *
    * When an authoritative result for this same shot has already arrived from
-   * its owner, everything worked out here is thrown away in favour of theirs ,
+   * its owner, everything worked out here is thrown away in favour of theirs —
    * the local replay exists to be watched, not to be believed.
    */
   private settle() {
@@ -269,8 +269,8 @@ export class GolfEngine {
       // Stroke and distance, which is the real rule and the one that makes a
       // pond frightening: a shot penalty, and the ball goes back to the spot it
       // was played from rather than being dropped on the near bank. Dropping on
-      // the bank quietly rewarded going in , the far bank of a pond that sits
-      // between you and the flag is *progress* , so the safe way round was the
+      // the bank quietly rewarded going in — the far bank of a pond that sits
+      // between you and the flag is *progress* — so the safe way round was the
       // slow way round and nobody ever took it.
       this.strokes[seat] += 1;
       const ball = this.balls[seat];
@@ -345,7 +345,7 @@ export class GolfEngine {
    * Bank this hole's strokes into the card and the totals.
    *
    * Idempotent per hole, and it has to be: a remote putt that finishes a hole
-   * reaches here twice , once when this client's own replay of it settles, and
+   * reaches here twice — once when this client's own replay of it settles, and
    * again when the shooter's authoritative green is applied on top. Without
    * the guard the second pass added every score a second time and the round
    * ended with doubled totals.
@@ -443,7 +443,7 @@ export class GolfEngine {
    * Take a green exactly as its owner reported it.
    *
    * This is the only place a remote result is believed, and it believes all of
-   * it at once , positions, strokes, who is out, whose turn , because a green
+   * it at once — positions, strokes, who is out, whose turn — because a green
    * that is half one client's idea and half another's is worse than either.
    */
   private applySnapshot(p: ShotPacket) {
@@ -465,7 +465,7 @@ export class GolfEngine {
     this.roll = null;
     this.trail = [];
 
-    // A ball that was in play and now is not went in , unless it hit the
+    // A ball that was in play and now is not went in — unless it hit the
     // stroke limit, which is not something to congratulate anybody for.
     for (let i = 0; i < this.players; i++) {
       if (!wasDone[i] && this.done[i] && this.strokes[i] < pickupAt(this.course.par)) {
@@ -662,7 +662,7 @@ export class GolfEngine {
     ctx.restore();
 
     // Mowing stripes. Two tones of the same green, banded at the course's own
-    // angle, clipped to the shape , the thing that makes a flat fill read as
+    // angle, clipped to the shape — the thing that makes a flat fill read as
     // grass rather than as a coloured rectangle.
     ctx.save();
     this.pathShape(ctx);
@@ -675,7 +675,7 @@ export class GolfEngine {
     for (let y = -diag; y < diag; y += band * 2) ctx.fillRect(-diag, y, diag * 2, band);
     ctx.restore();
 
-    // A shaggier ring just inside the wall , the same band the physics slows
+    // A shaggier ring just inside the wall — the same band the physics slows
     // the ball down in, so the surface you can see is the surface you get.
     ctx.save();
     this.pathShape(ctx);
@@ -746,7 +746,7 @@ export class GolfEngine {
   /**
    * Traces a block, at whatever angle it lies.
    *
-   * The rotation is applied while the path is being built and then unwound ,
+   * The rotation is applied while the path is being built and then unwound —
    * a canvas path bakes the transform in as each segment is added, so a
    * save/rotate/build/restore leaves exactly the rotated shape behind.
    */

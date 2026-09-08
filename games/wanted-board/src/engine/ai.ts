@@ -2,7 +2,7 @@
  * The bots.
  *
  * Every decision here is a pure function of (engine state, seeded rng), and
- * the rng is keyed on (match seed, round, seat) , so the host and every guest
+ * the rng is keyed on (match seed, round, seat) — so the host and every guest
  * would compute the identical bot even though only the host actually does.
  * `Math.random()` in this file would be a desync waiting for the first time a
  * second client ever recomputes a round, which is exactly the bug Battle of
@@ -10,8 +10,8 @@
  *
  * A bot that played optimally would be no fun and, worse, unreadable: the
  * whole game is guessing what a person will do, and a perfect opponent has no
- * habits to guess. So these have *tendencies* , a nerve threshold for banking,
- * a taste for ambushing , and the ranks differ mostly in how well they read
+ * habits to guess. So these have *tendencies* — a nerve threshold for banking,
+ * a taste for ambushing — and the ranks differ mostly in how well they read
  * the table rather than in how much they cheat.
  */
 import { BALANCE, BANK, CARDS, distanceToBank } from '../game/rules';
@@ -23,7 +23,7 @@ import type { WantedEngine } from './WantedEngine';
  * The Gallop target worth taking instead of a plain Ride, if there is one.
  *
  * "Worth it" means strictly closer to the Bank than the best single step
- * gets , never merely as close, or Gallop would just be a discount on the
+ * gets — never merely as close, or Gallop would just be a discount on the
  * same trip. That only actually happens leaving one of the four rim-only
  * places, where the spoke sitting one hop further on is a second hop Ride
  * cannot reach in one card. Shared by both places a bot considers moving,
@@ -63,7 +63,7 @@ export const TIERS: Tier[] = [
  *
  * Reads in priority order: rob somebody standing next to me, get my own money
  * to safety, then wander with intent. Falling through to "ride toward the
- * Bank" rather than to a random card matters , a bot that drifts aimlessly
+ * Bank" rather than to a random card matters — a bot that drifts aimlessly
  * never threatens anybody and the table stops watching it.
  */
 export function botChoice(engine: WantedEngine, seat: number, level: number, rnd: () => number): Choice {
@@ -80,7 +80,7 @@ export function botChoice(engine: WantedEngine, seat: number, level: number, rnd
   // Checked *before* looking for somebody to rob, and that order is the whole
   // difference between a table that plays the game and one that seizes up. The
   // other way round, a bot carrying $500 that happened to share a place with
-  // anybody would stand there robbing instead of banking , and on a crowded
+  // anybody would stand there robbing instead of banking — and on a crowded
   // table sharing a place happens constantly, so whole games settled into
   // mutual muggings where nobody ever banked a dollar. Somebody already
   // holding a fortune has far more to lose by showing themselves than there is
@@ -89,7 +89,7 @@ export function botChoice(engine: WantedEngine, seat: number, level: number, rnd
   if (heavy) {
     if (me.place === BANK && legal.includes('cashIn')) {
       // Standing on the Bank with a full pocket. The only reason not to take
-      // it is a bad feeling about the company , which, for a bot, is somebody
+      // it is a bad feeling about the company — which, for a bot, is somebody
       // else standing here too.
       const spooked = here.length > 0 && rnd() < tier.awareness * 0.7;
       if (!spooked) return pick('cashIn', BANK);
@@ -111,7 +111,7 @@ export function botChoice(engine: WantedEngine, seat: number, level: number, rnd
   if (richestHere !== undefined && rnd() < tier.awareness && legal.includes('ambush')) {
     const prize = engine.players[richestHere].bounty;
     // The pot has to clear a miss with enough margin to be a decision rather
-    // than a coin flip , and they might well be laying low, in which case the
+    // than a coin flip — and they might well be laying low, in which case the
     // whole thing costs and returns nothing.
     if (prize > -BALANCE.AMBUSH_MISS * 1.8) return pick('ambush', me.place);
   }
@@ -129,7 +129,7 @@ export function botChoice(engine: WantedEngine, seat: number, level: number, rnd
 
   if (rnd() < 0.18 && legal.includes('trap')) {
     const targets = engine.legalTargets(seat, 'trap');
-    // Prefer rigging the approach to the Bank , it is where the money walks.
+    // Prefer rigging the approach to the Bank — it is where the money walks.
     const towardBank = engine.stepToward(me.place, BANK);
     const target = targets.includes(towardBank) && rnd() < 0.7
       ? towardBank

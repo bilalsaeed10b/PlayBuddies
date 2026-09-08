@@ -42,7 +42,7 @@ interface Drag {
  * This is what replaced the trajectory arc on the water. That arc drew the
  * opening stretch of the ball's actual path, and it turned out to be the whole
  * game: you dragged until the dots lined up with the enemy and let go. An
- * arrow says direction and strength , the two things the gesture is setting ,
+ * arrow says direction and strength — the two things the gesture is setting —
  * and says nothing at all about where the ball comes down. Reading the range
  * is the player's job again.
  *
@@ -75,7 +75,7 @@ function Arrow({
   const dx = ox - x;
   const dy = oy - y;
   const len = Math.hypot(dx, dy);
-  // Below this the direction is noise , the finger has barely moved, and an
+  // Below this the direction is noise — the finger has barely moved, and an
   // arrow spinning wildly under a stationary thumb reads as a glitch.
   if (len < 12) return null;
 
@@ -140,7 +140,7 @@ export default function AimPad({
    * Full deflection, in CSS pixels. Scaled so a phone is not asking for a
    * longer pull than it has.
    *
-   * This is also the guide circle's radius, not a separate visual choice , the
+   * This is also the guide circle's radius, not a separate visual choice — the
    * ring is a promise about how far a full pull is, and drawing it any other
    * size than the number `measure` actually fires on would make it a promise
    * the pad doesn't keep.

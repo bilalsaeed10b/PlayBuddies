@@ -19,7 +19,7 @@ export default function AppChrome() {
   if (isLanding) return null;
 
   // The lobby has its own invite UI, but a friend request can land at any
-  // time , including mid-lobby , so the friends panel (and its accept/deny
+  // time — including mid-lobby — so the friends panel (and its accept/deny
   // controls) has to be reachable there too, not just from the dashboard.
   return (
     <>

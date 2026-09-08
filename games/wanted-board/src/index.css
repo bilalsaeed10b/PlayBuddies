@@ -20,8 +20,8 @@
   body {
     @apply text-amber-950 selection:bg-rose-300/50;
     /* An aged wanted poster nailed to a board in afternoon sun. Every other
-       game on the platform owns a different light , the sea, a lit table, a
-       green , and this one is dry paper and dust, so a glance at a screenshot
+       game on the platform owns a different light — the sea, a lit table, a
+       green — and this one is dry paper and dust, so a glance at a screenshot
        says which game it is before anything on it is read. */
     background:
       radial-gradient(circle at 18% 8%, rgba(255, 249, 232, 0.9) 0%, rgba(255, 249, 232, 0) 55%),
@@ -39,7 +39,7 @@
   }
 }
 
-/* The reveal: five cards turning over together. Kept short , it plays every
+/* The reveal: five cards turning over together. Kept short — it plays every
    single round, and an animation you watch twelve times a game has to be
    quick enough that nobody starts waiting for it to finish. */
 @keyframes flip {
@@ -53,7 +53,7 @@
   }
 }
 
-/* A pawn's reaction during the reveal , a beat behind the sound, gone before
+/* A pawn's reaction during the reveal — a beat behind the sound, gone before
    the next one lands, so a table full of them never turns into a wall of
    text sitting on the board. */
 @keyframes bubble {

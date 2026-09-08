@@ -25,7 +25,7 @@ import { GameWallet, reportResult } from './platform/wallet';
 import MatchView from './screens/MatchView';
 import type { MatchConfig } from './screens/MatchView';
 import type { Seat } from './engine/WantedEngine';
-import { DEFAULT_RULES, PLAYER_CODES, TARGET_CHOICES, packRules, unpackRules } from './types/game';
+import { DEFAULT_RULES, TARGET_CHOICES, packRules, unpackRules } from './types/game';
 import { createLogger } from '@shared/log/logger';
 import type { GameSettings, MatchRules, PlayerCount } from './types/game';
 
@@ -191,7 +191,7 @@ export default function App() {
           setLobby(data);
           // The host's terms, arriving on the one channel every client already
           // listens to. Without this a guest seats the table by its own idea of
-          // the player count and builds a different town , compared against
+          // the player count and builds a different town — compared against
           // `data.hostId` rather than the `isHost` variable, which still holds
           // the *previous* snapshot inside this same callback.
           if (typeof data.matchRules === 'number' && data.hostId !== uid) {
@@ -223,25 +223,6 @@ export default function App() {
 
   const mySkin = uid ? lobby?.players?.[uid]?.fishIndex : undefined;
   const isHost = Boolean(uid && lobby && lobby.hostId === uid);
-
-  /**
-   * The host's chosen player count follows the room, not the other way round.
-   *
-   * `rules.players` used to be whatever this device remembered from its last
-   * game -- often two -- so a host who opened a fresh room with three friends
-   * found the seats already decided one of them would be watching, with
-   * nothing on screen to say so before Start. This raises it to the smallest
-   * count the room actually fits the moment somebody new joins, and never on
-   * its own lowers a count the host (or an earlier run of this same effect)
-   * already set -- so choosing fewer seats than the room on purpose, bots
-   * filling the rest, still works exactly as before for whoever wants it.
-   */
-  useEffect(() => {
-    if (!online || !isHost || !lobby) return;
-    const roomSize = Object.keys(lobby.players ?? {}).length;
-    const fits = PLAYER_CODES.find((n) => n >= roomSize) ?? PLAYER_CODES[PLAYER_CODES.length - 1];
-    if (fits > rules.players) setRules((r) => ({ ...r, players: fits }));
-  }, [online, isHost, lobby, rules.players]);
 
   useEffect(() => {
     if (!online || offlineMatch) return;
@@ -309,19 +290,10 @@ export default function App() {
       .catch((e) => console.error('Could not reset the match flag', e));
   }, [online, isHost, handoff.room, rollSession]);
 
-  const matchConfig = useMemo(
-    () => (online && uid && !offlineMatch ? onlineConfig() : offlineConfig()),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [session.seed, offlineMatch, uid],
-  );
-
   // -- into the game ----------------------------------------------------------
 
   if (view === 'game') {
-    // Frozen to match identity, not recomputed live: MatchView reads config
-    // fields like seat team every frame, and a live roster reorder mid-round
-    // (reconnect, late write) would otherwise flip them under a running game.
-    const config = matchConfig;
+    const config = online && uid && !offlineMatch ? onlineConfig() : offlineConfig();
     return (
       <>
         <MatchView
@@ -626,7 +598,7 @@ function Menu({
           <p className="mb-1 font-black uppercase tracking-[0.15em] text-amber-900/50">How it works</p>
           <p>Everybody picks a card in secret. All of them flip at once.</p>
           <p className="mt-1">
-            Your bounty climbs while you run , but it is only yours once you have banked it, and the Bank is the
+            Your bounty climbs while you run — but it is only yours once you have banked it, and the Bank is the
             one place everyone knows you have to visit.
           </p>
         </div>
@@ -742,7 +714,7 @@ function OutlawPick({
           <ArrowLeft className="h-5 w-5" />
         </button>
         <h2 className="min-w-0 truncate text-center text-base font-black uppercase tracking-wide text-amber-950 sm:text-2xl">
-          {seatCount > 1 ? `Player ${seat + 1} , pick your face` : 'Pick your face'}
+          {seatCount > 1 ? `Player ${seat + 1} — pick your face` : 'Pick your face'}
         </h2>
         <div className="panel flex shrink-0 items-center gap-2 rounded-2xl px-3 py-2 font-bold text-amber-800">
           <Coins className="h-4 w-4" /> {coins}
@@ -850,7 +822,7 @@ function RoomScreen({
         </div>
       </div>
 
-      {/* Loud on purpose , this is the one moment before cards are hidden and
+      {/* Loud on purpose — this is the one moment before cards are hidden and
           money is on the line, and the small "Rules" button lower down is easy
           to never notice at all. */}
       <button
@@ -1024,7 +996,7 @@ function HowItWorks() {
   );
 }
 
-/** The board, drawn small and static , the same wheel TownMap draws, just for reading rather than playing. */
+/** The board, drawn small and static — the same wheel TownMap draws, just for reading rather than playing. */
 function MapDiagram() {
   return (
     <div className="rounded-2xl border border-amber-900/15 bg-amber-900/5 p-3">
@@ -1064,7 +1036,7 @@ function MapDiagram() {
         </span>
       </div>
       <p className="mt-1.5 text-center text-[10px] leading-snug text-amber-900/50">
-        Four spokes run straight to the Bank , fast, and everyone can see you take one. The rest of town is the
+        Four spokes run straight to the Bank — fast, and everyone can see you take one. The rest of town is the
         rim: slower, and easier to disappear into.
       </p>
     </div>
@@ -1076,7 +1048,7 @@ function MapDiagram() {
  *
  * Separate from Settings on purpose: these change what the game *is*, so both
  * sides have to be playing the same one. They travel to a guest over the wire
- * (see `packRules`), and a guest can read this panel but not touch it ,
+ * (see `packRules`), and a guest can read this panel but not touch it —
  * letting them change a copy that the host's next write overwrites would be a
  * lie about who is in charge.
  */
@@ -1114,7 +1086,7 @@ function RulesPanel({
         <div className="space-y-1.5">
           <p className="text-sm font-bold text-amber-950">Outlaws</p>
           <div className="grid grid-cols-5 gap-1.5">
-            {PLAYER_CODES.map((n) => (
+            {([2, 3, 4, 5, 6] as PlayerCount[]).map((n) => (
               <button
                 key={n}
                 disabled={!editable}

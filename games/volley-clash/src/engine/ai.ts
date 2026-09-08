@@ -1,7 +1,7 @@
 /**
  * The computer opponent.
  *
- * The naive version , walk toward the ball's current x , loses every rally,
+ * The naive version — walk toward the ball's current x — loses every rally,
  * because by the time it arrives the ball has moved. This one **solves for
  * where the ball will be**: it integrates the ball forward until it drops to
  * hitting height and walks to that point instead.
@@ -13,7 +13,7 @@
  *   second to cover half a court, and it simply cannot.
  * - It must almost never jump. Air acceleration is a third of ground
  *   acceleration, so an airborne AI is a stationary AI. An earlier version
- *   rolled dice for a jump every physics step , 120 times a second , and spent
+ *   rolled dice for a jump every physics step — 120 times a second — and spent
  *   entire rallies hopping on the spot while the ball landed beside it.
  *
  * Difficulty is not implemented by cheating. Every tier runs the same
@@ -81,7 +81,7 @@ function restingX(arena: Arena, team: Team, index: number, count: number) {
  *
  * `mates` is every player on the same team, so a 2v2 pair agrees on who takes
  * the ball rather than both charging it. `serveTeam` is the side holding the
- * serve, or null during open play , without it both teams treat the hanging
+ * serve, or null during open play — without it both teams treat the hanging
  * serve as theirs and jump at a ball on the wrong side of the net.
  */
 export function thinkFor(
@@ -106,7 +106,7 @@ export function thinkFor(
   const deadZone = self.r * 0.3;
 
   // Bang-bang steering overshoots at 470 px/s and then oscillates around the
-  // target , which is what a trace showed it doing while the ball landed two
+  // target — which is what a trace showed it doing while the ball landed two
   // body-widths away. Stop pushing once friction alone will carry us there.
   const brake = (self.vx * self.vx) / (2 * BALANCE.FRICTION);
   const dir = Math.abs(gap) < deadZone ? 0 : Math.sign(gap);

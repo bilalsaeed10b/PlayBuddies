@@ -1,4 +1,4 @@
-﻿# PlayBuddies
+# PlayBuddies
 
 A web platform for playing browser games with friends. Google sign-in, shareable
 room codes, real-time lobbies.
@@ -14,7 +14,7 @@ playbuddies/
 │  ├─ lib/                  # firebase, games registry, room codes
 │  └─ types/                # shared types
 │
-├─ games/                   # ONE folder per game , the source of truth
+├─ games/                   # ONE folder per game — the source of truth
 │  └─ volley-clash/
 │     ├─ game.json          # metadata: name, players, category, thumbnail
 │     ├─ thumb.webp         # card art
@@ -31,7 +31,7 @@ playbuddies/
 **A game's code lives in exactly one place: `games/<id>/`.**
 
 `public/g/` is build output and is gitignored. Never edit or commit it. The
-catalog (`src/lib/games.generated.ts`) is also generated , edit `game.json`
+catalog (`src/lib/games.generated.ts`) is also generated — edit `game.json`
 instead.
 
 This matters: the project previously carried six copies of the same game, and
@@ -57,7 +57,7 @@ level edits were being made to a copy that nothing compiled.
 
 2. Run `npm run build:games`.
 
-That's it , it appears on the landing page, the dashboard and the lobby picker.
+That's it — it appears on the landing page, the dashboard and the lobby picker.
 No platform file needs editing. `id` must match the folder name; the build fails
 loudly if the manifest is wrong.
 
@@ -77,7 +77,7 @@ document at `lobbies/{roomCode}`:
 | RTDB `signaling/{code}/{uid}` | game | WebRTC offer/answer/ICE |
 
 Read host status from `hostId` on the lobby document, never from a URL
-parameter , query strings are user-editable.
+parameter — query strings are user-editable.
 
 ## Commands
 
@@ -108,7 +108,7 @@ GitHub Actions builds and publishes to GitHub Pages on push to `main`
 
 Being static means there is no server: no request-time auth checks, no rate
 limiting, and no server-authoritative game state. Firestore security rules are
-therefore the only thing standing between a client and your data , read
+therefore the only thing standing between a client and your data — read
 `firestore.rules` before changing how any collection is written.
 
 ## Environment
@@ -116,4 +116,3 @@ therefore the only thing standing between a client and your data , read
 Firebase web config is public by design and is committed with sensible
 defaults. To point a build at a different Firebase project, copy
 `.env.example` to `.env.local` (platform) or `games/<id>/.env.local` (a game).
-

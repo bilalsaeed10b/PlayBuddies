@@ -1,4 +1,4 @@
-﻿# PlayBuddies , Complete Product Requirements & Technical Architecture
+# PlayBuddies — Complete Product Requirements & Technical Architecture
 
 **Author:** Bilal Saeed  
 **Project Name:** PlayBuddies  
@@ -13,10 +13,10 @@
 **PlayBuddies** is a premium web-based multiplayer gaming platform where users log in with their Google account, browse an arcade of 8–10 curated mini-games, invite friends via shareable room codes or links, and play together in real-time. The platform prioritizes low-latency gameplay, modular game architecture, and a stunning modern UI.
 
 ### 1.1 Core Value Proposition
-- **Instant Play** , No downloads, no installs. Log in and play in seconds.
-- **Social First** , Every game is built around playing with friends.
-- **Curated Arcade** , 8-10 polished mini-games, each with multiplayer support.
-- **Cross-Device** , Desktop + mobile responsive dashboard and lobbies.
+- **Instant Play** — No downloads, no installs. Log in and play in seconds.
+- **Social First** — Every game is built around playing with friends.
+- **Curated Arcade** — 8-10 polished mini-games, each with multiplayer support.
+- **Cross-Device** — Desktop + mobile responsive dashboard and lobbies.
 
 ### 1.2 Target Audience
 - Casual gamers (ages 13–30) who want quick, fun games to play with friends.
@@ -376,7 +376,7 @@ For real-time games (like Fireboy-Watergirl), the server:
 ### 6.2 Landing Page Design
 - **Hero Section**: Animated gradient background with floating game icons
 - **Tagline**: "Your friends are waiting. Pick a game. Start playing."
-- **CTA**: "Login with Google" , prominent, centered
+- **CTA**: "Login with Google" — prominent, centered
 - **Features Grid**: Quick highlights (Instant Play, 10 Games, Real-time, Free)
 - **Game Preview Carousel**: Scrollable showcase of available games
 - **Footer**: About, Privacy, Terms, Social links
@@ -449,13 +449,13 @@ interface GameMetadata {
 
 ### 7.2 Game Loading Strategies
 
-**Option A , React Component Module (Recommended)**
+**Option A — React Component Module (Recommended)**
 - Games are React components bundled into the main app
 - Loaded via dynamic `import()` / `next/dynamic`
 - Full access to shared state (Zustand), Socket.IO, and theme
 - Example: The existing Fireboy-Watergirl game uses this approach (React + Canvas)
 
-**Option B , Iframe Isolation**
+**Option B — Iframe Isolation**
 - Games run in isolated `<iframe>` sandboxes
 - Communication via `window.postMessage()` API
 - Better for third-party or externally-sourced games
@@ -487,7 +487,7 @@ Every game directory must contain a `metadata.json`:
 
 | # | Game | Category | Players | Description |
 |---|------|----------|---------|-------------|
-| 1 | **Neon Elements** (Fireboy & Watergirl) | Puzzle/Co-op | 2 | Cooperative platformer , solve puzzles together |
+| 1 | **Neon Elements** (Fireboy & Watergirl) | Puzzle/Co-op | 2 | Cooperative platformer — solve puzzles together |
 | 2 | **Tic-Tac-Toe** | Strategy | 2 | Classic grid battle with power-ups |
 | 3 | **Connect Four** | Strategy | 2 | Drop pieces, connect 4 to win |
 | 4 | **Snake Battle** | Action | 2-4 | Competitive snake arena |
@@ -671,11 +671,11 @@ service cloud.firestore {
 
 ### 10.2 Optimization Techniques
 
-1. **Delta State Updates** , Only send properties that changed since last tick.
-2. **Client-Side Prediction** , For action games, predict movement locally, reconcile with server.
-3. **Input Buffering** , Batch multiple inputs per frame before sending.
-4. **Binary Protocol** , Use Socket.IO binary transport for game state (not JSON) in high-frequency games.
-5. **Interpolation** , Smooth rendering between server ticks using linear interpolation.
+1. **Delta State Updates** — Only send properties that changed since last tick.
+2. **Client-Side Prediction** — For action games, predict movement locally, reconcile with server.
+3. **Input Buffering** — Batch multiple inputs per frame before sending.
+4. **Binary Protocol** — Use Socket.IO binary transport for game state (not JSON) in high-frequency games.
+5. **Interpolation** — Smooth rendering between server ticks using linear interpolation.
 
 ### 10.3 Disconnect Handling
 
@@ -724,12 +724,12 @@ service cloud.firestore {
 - **Rate limiting**: Max 60 inputs/second per player per socket connection
 
 ### 12.3 Infrastructure Security
-- **HTTPS everywhere** , SSL certificates via Vercel + Railway
-- **WSS only** , No unencrypted WebSocket connections
-- **CORS configured** , Only `playbuddies.com` origin allowed
-- **Rate limiting** , Express rate-limiter on all REST endpoints
-- **Helmet.js** , HTTP security headers
-- **Input sanitization** , All user-generated content (chat, names) sanitized
+- **HTTPS everywhere** — SSL certificates via Vercel + Railway
+- **WSS only** — No unencrypted WebSocket connections
+- **CORS configured** — Only `playbuddies.com` origin allowed
+- **Rate limiting** — Express rate-limiter on all REST endpoints
+- **Helmet.js** — HTTP security headers
+- **Input sanitization** — All user-generated content (chat, names) sanitized
 
 ---
 
@@ -751,9 +751,9 @@ service cloud.firestore {
 | **Text Secondary** | `#94A3B8` (Gray) | Body text, labels |
 
 ### 13.2 Typography
-- **Headings**: `Inter` or `Outfit` (from Google Fonts) , Bold, tight tracking
-- **Body**: `Inter` , Clean, readable
-- **Mono**: `JetBrains Mono` , Codes, room IDs, stats
+- **Headings**: `Inter` or `Outfit` (from Google Fonts) — Bold, tight tracking
+- **Body**: `Inter` — Clean, readable
+- **Mono**: `JetBrains Mono` — Codes, room IDs, stats
 
 ### 13.3 Animations
 - **Page transitions**: Framer Motion `AnimatePresence` with slide/fade (as used in Fireboy-Watergirl)
@@ -840,18 +840,18 @@ NODE_ENV=development
 ## 16. Future Roadmap 🚀
 
 ### Phase 2 (Post-Launch)
-- 🎙️ **WebRTC Voice Chat** , In-lobby and in-game voice comms
-- 🏆 **Global Leaderboards** , Cross-user competitive rankings per game
-- 👥 **Friend System** , Add, remove, direct invite without room codes
-- 🎨 **Custom Avatars** , Profile customization, banners, colors
-- 📱 **PWA Support** , Install as app on mobile, push notifications
+- 🎙️ **WebRTC Voice Chat** — In-lobby and in-game voice comms
+- 🏆 **Global Leaderboards** — Cross-user competitive rankings per game
+- 👥 **Friend System** — Add, remove, direct invite without room codes
+- 🎨 **Custom Avatars** — Profile customization, banners, colors
+- 📱 **PWA Support** — Install as app on mobile, push notifications
 
 ### Phase 3 (Growth)
-- 🌐 **Game SDK** , Allow community developers to submit games
-- 🎮 **Tournament Mode** , Bracket-style tournaments with prizes
-- 💬 **In-game Chat** , Text chat overlay during gameplay
-- 📊 **Analytics Dashboard** , Player engagement metrics, heatmaps
-- 🌍 **i18n** , Multi-language support
+- 🌐 **Game SDK** — Allow community developers to submit games
+- 🎮 **Tournament Mode** — Bracket-style tournaments with prizes
+- 💬 **In-game Chat** — Text chat overlay during gameplay
+- 📊 **Analytics Dashboard** — Player engagement metrics, heatmaps
+- 🌍 **i18n** — Multi-language support
 
 ---
 
@@ -860,22 +860,21 @@ NODE_ENV=development
 From analyzing the existing codebase in `games/fireboy-watergirl/`:
 
 ### ✅ Patterns to Replicate Platform-Wide
-1. **React + TypeScript + Vite** , Fast builds, type-safe, excellent DX
-2. **Framer Motion animations** , Page transitions via `AnimatePresence`
-3. **Socket.IO for multiplayer** , Room codes, join/create flows
-4. **Canvas-based game rendering** , Performant, hardware-accelerated
-5. **Modular game engine** , Separate `engine.ts`, `levels.ts`, `sounds.ts`
-6. **Metadata file** , `metadata.json` describes the game
-7. **Firebase integration** , Firestore for persistent state, Auth for identity
-8. **Role-based multiplayer** , `fire` / `water` roles per player
+1. **React + TypeScript + Vite** — Fast builds, type-safe, excellent DX
+2. **Framer Motion animations** — Page transitions via `AnimatePresence`
+3. **Socket.IO for multiplayer** — Room codes, join/create flows
+4. **Canvas-based game rendering** — Performant, hardware-accelerated
+5. **Modular game engine** — Separate `engine.ts`, `levels.ts`, `sounds.ts`
+6. **Metadata file** — `metadata.json` describes the game
+7. **Firebase integration** — Firestore for persistent state, Auth for identity
+8. **Role-based multiplayer** — `fire` / `water` roles per player
 
 ### ⚠️ Platform Adjustments Needed
-1. **Centralize auth** , Move from per-game Firebase init to platform-level
-2. **Unified socket server** , One backend with game-specific namespaces
-3. **Standardize game interface** , All games implement `IGameAdapter`
-4. **Remove per-game servers** , Games should be pure client modules; server logic lives in the platform backend
+1. **Centralize auth** — Move from per-game Firebase init to platform-level
+2. **Unified socket server** — One backend with game-specific namespaces
+3. **Standardize game interface** — All games implement `IGameAdapter`
+4. **Remove per-game servers** — Games should be pure client modules; server logic lives in the platform backend
 
 ---
 
 *This document serves as the master blueprint for building PlayBuddies. Each section should be implemented incrementally, starting with auth → dashboard → lobby → game container → individual games.*
-

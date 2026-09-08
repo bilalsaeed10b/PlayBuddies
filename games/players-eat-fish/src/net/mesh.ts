@@ -6,12 +6,12 @@ import { rtdb, dbRef, dbSet, dbPush, dbOnValue, dbOnDisconnect, dbRemove } from 
  *
  * Why a mesh and not a server: PlayBuddies is a static site. There is no game
  * server to run authority on, and routing 8 players' positions through
- * Firestore at even 10Hz is roughly 5,000 billed writes a minute *per room* ,
+ * Firestore at even 10Hz is roughly 5,000 billed writes a minute *per room* —
  * the single largest cost in the whole platform, and it would grow linearly
  * with players. Peer-to-peer traffic costs nothing and is an order of magnitude
  * lower latency. Firebase is used only to introduce the peers to each other.
  *
- * Signalling lives at `signaling/{room}/{sender}/{recipient}/…` , one channel
+ * Signalling lives at `signaling/{room}/{sender}/{recipient}/…` — one channel
  * per direction per pair. The old single-slot-per-uid layout could only carry
  * one negotiation at a time, which is fine for a two-player game and useless
  * for a mesh.
@@ -154,7 +154,7 @@ export class Mesh {
         try {
           pc.addIceCandidate(new RTCIceCandidate(JSON.parse(raw))).catch(() => {});
         } catch {
-          /* malformed candidate , skip */
+          /* malformed candidate — skip */
         }
       }
     };

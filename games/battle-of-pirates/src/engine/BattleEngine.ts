@@ -19,7 +19,7 @@
  *    carries turns rather than state.
  */
 import { fxSprites, bakeSea, drawFallbackSea, drawRock, drawWaves, drawWeather, rockRadius } from '../game/sea';
-import { SHIPS, drawFlag, drawShip } from '../game/ships';
+import { SHIPS, drawShip } from '../game/ships';
 import { HULLS, hullAt } from '../game/hulls';
 import type { HullClass } from '../game/hulls';
 import {
@@ -144,48 +144,11 @@ interface Ring {
   max: number;
   life: number;
   width: number;
-  /** Optional color override. Defaults to cream if not set. */
-  color?: string;
-}
-
-/** One floating number over a hull -- see `damageTexts` for why it exists. */
-interface DamageText {
-  x: number;
-  y: number;
-  vy: number;
-  life: number;
-  max: number;
-  text: string;
-  color: string;
-  size: number;
 }
 
 const STEP = 1 / 120;
 const PARTICLE_CAP = 420;
 const RING_CAP = 14;
-
-/** An animated torpedo that travels through the water from source to target. */
-interface TorpedoAnim {
-  x: number; y: number;
-  /** Target position. */
-  tx: number; ty: number;
-  /** Direction unit vector. */
-  nx: number; ny: number;
-  /** Speed in world px/s. */
-  speed: number;
-  /** Total distance to travel. */
-  dist: number;
-  /** Distance travelled so far. */
-  travelled: number;
-  /** Ship index that fired. */
-  shooter: number;
-  /** Ship index that is targeted. */
-  target: number;
-  /** Trail positions for the wake. */
-  trail: number[];
-}
-/** Seconds a sunk hull spends sliding under before it becomes just its flag. */
-const WRECK_SETTLE = 1.3;
 /** Barrel length, so the ball leaves the muzzle rather than the deck. */
 const BARREL = 58;
 /** A rigging hit is real but glancing. */
@@ -314,23 +277,6 @@ export class BattleEngine {
   streak: number[] = [];
 
   /**
-   * Hits this hull has landed since its last torpedo was fired.
-   *
-   * Every direct hit (hull or rig) on an enemy increments this. At 3 the bar
-   * is full and the player may fire a torpedo instead of a normal shot. It
-   * resets to 0 after a torpedo is launched.
-   */
-  specialHits: number[] = [];
-  /** True while a torpedo is being resolved (so the UI doesn't offer one mid-flight). */
-  torpedoInFlight = false;
-  /** The live torpedo projectile travelling across the water. Null when none is active. */
-  private torpedoAnim: TorpedoAnim | null = null;
-
-  /** Time left in the acid rain sequence. 0 if inactive. Max 6.0. */
-  acidRainTimer = 0;
-  acidRainShooter = -1;
-
-  /**
    * This turn's crosswind, in world px/s². Zero unless the storm rule is on.
    *
    * Drawn from the turn's own seeded stream rather than rolled live, so the
@@ -395,23 +341,13 @@ export class BattleEngine {
   private particles: Particle[] = [];
   private pool: Particle[] = [];
   private rings: Ring[] = [];
-  /**
-   * Floating combat text -- the actual number a hit took off a hull.
-   *
-   * `shout()`'s big banner already says *that* something died; this says
-   * *how much* every hit along the way actually cost, which the banner never
-   * did and the health bar only shows as a slow drain you have to be looking
-   * at the right corner to catch. One of these spawns from `damage()` for a
-   * direct or splash hit, and another from the burn tick in `resolve()`, so
-   * a fire that finishes a hull off is not a silent last few points.
-   */
-  private damageTexts: DamageText[] = [];
   private backdrop: HTMLCanvasElement | null = null;
   private acc = 0;
   private clock = 0;
   private shake = 0;
   private phaseTimer = 0;
   private botTimer = 0;
+  private sinkT = 0;
   private budget = 1;
 
   /** Burn stacks as they stood before the current shot, so a firebomb cannot tick on itself. */
@@ -536,7 +472,6 @@ export class BattleEngine {
     this.ships = cfg.seats.map((seat, i) => this.makeShip(seat, filled[seat.team]++, i * 2.1));
     this.lastShotHit = this.ships.map(() => null);
     this.streak = this.ships.map(() => 0);
-    this.specialHits = this.ships.map(() => 0);
     this.burnBefore = this.ships.map(() => 0);
     this.burnFrom = this.ships.map(() => -1);
 
@@ -582,7 +517,6 @@ export class BattleEngine {
       flash: 0,
       lean: 0,
       lastAim: { angle: seat.team === 0 ? -0.72 : -Math.PI + 0.72, power: 0.65 },
-      sinkAge: -1,
     };
   }
 
@@ -598,43 +532,24 @@ export class BattleEngine {
   /**
    * Who fires after this hull.
    *
-   * Simple round-robin through every living ship, regardless of team.
-   * In a 2v2 where one player is sunk the order is P1 → P2 → P3 → P1,
-   * giving each survivor exactly one turn per cycle rather than the old
-   * team-alternating scheme that doubled the surviving team's fire rate
-   * in a lopsided fight.
+   * The helm alternates sides every single turn, however lopsided the battle
+   * has become: a fleet down to its last ship still gets every other shot
+   * rather than being pounded three times between replies. Within a side it
+   * goes round the survivors in order, so the same captain does not fire twice
+   * while a crewmate waits.
    */
   private nextTurn(from: number): number {
-    const n = this.ships.length;
-    for (let step = 1; step <= n; step++) {
-      const candidate = (from + step) % n;
-      if (this.ships[candidate].hp > 0) return candidate;
+    const other = (1 - this.ships[from].team) as Team;
+    const theirs = this.afloat(other);
+    if (theirs.length > 0) {
+      // Whoever on that side has waited longest — the first one past the last
+      // of theirs to fire, wrapping around.
+      const after = theirs.find((i) => i > (this.lastFired[other] ?? -1));
+      return after ?? theirs[0];
     }
-    // Fallback: nobody alive (should not happen, finish() catches this first).
-    return from;
-  }
-
-  /**
-   * A turn index from somewhere else -- a remote packet, a host beacon, a
-   * catch-up snapshot -- corrected if it names a hull that is not there to
-   * answer for.
-   *
-   * `resolve()`'s own local turns always go through `nextTurn()`, which
-   * never hands the helm to a sunk ship in the first place. But the wire's
-   * three other sources of a turn index (a peer's `packet.o`, a host's
-   * `beacon.o`, a catch-up snapshot's `o`) were all trusted verbatim, with
-   * nothing here re-checking that the ship they named was still afloat by
-   * the time this client received them. A captain whose ship a receiver
-   * still believed was sunk from an earlier, differently-timed write could
-   * get *given* the turn back this way -- which read as a dead ship taking
-   * someone else's turn from the far side of the same bug. `nextTurn()`
-   * only needs `from`'s own team to work out who answers, and a dead ship's
-   * team never changes, so it is a perfectly good anchor to hand it even
-   * after that ship is gone.
-   */
-  private aliveTurn(target: number): number {
-    const ship = this.ships[target];
-    return ship && ship.hp > 0 ? target : this.nextTurn(target);
+    // Nobody left to answer; the same side keeps firing until finish() notices.
+    const mine = this.afloat(this.ships[from].team);
+    return mine.find((i) => i > from) ?? mine[0] ?? from;
   }
 
   /**
@@ -805,7 +720,7 @@ export class BattleEngine {
     // Cards off is a real mode, not a hidden hand: everyone fires the plain
     // round shot every turn, so the battle is aim and range and nothing else.
     // Skipping the deal leaves this turn's generator untouched, which costs
-    // nothing , drift rolls from its own stream (see resolve), and both
+    // nothing — drift rolls from its own stream (see resolve), and both
     // clients are on the same rule either way.
     this.hand = this.cfg.rules.cards ? dealHand(rnd) : ['round'];
     this.selected = this.hand[0];
@@ -875,14 +790,6 @@ export class BattleEngine {
       shooter, balls: card.shots, card: card.id,
       hulls: 0, rigs: 0, damage: 0, sunk: [], burned: false, pierced: false, grazed: false,
     };
-    // Round shot needs no announcement -- it is the shot everyone already
-    // expects. Anything else drawn from the hand is the one moment a player
-    // spent a card rather than just aiming, and it used to look identical to
-    // an ordinary shot right up until the impact called out its result. This
-    // is overwritten by that same result a couple of seconds later -- the
-    // same banner, so "MORTAR!" giving way to "sank her!" reads as one
-    // continuous beat rather than two systems talking over each other.
-    if (card.id !== 'round') this.shout(`${card.name}!`, 'big');
 
     // Sent before a single physics step has run. Only for a shot this device
     // actually owns -- not a replay of what the wire just handed us, and not
@@ -1068,7 +975,7 @@ export class BattleEngine {
     this.beaconIn = null;
     this.offT = 0;
 
-    const helm = this.aliveTurn(clamp(Math.round(beacon.o), 0, this.ships.length - 1));
+    const helm = clamp(Math.round(beacon.o), 0, this.ships.length - 1);
     if (moved) this.cfg.onHp?.(this.hp);
     if (this.afloat(0).length === 0 || this.afloat(1).length === 0) {
       this.finish();
@@ -1177,7 +1084,7 @@ export class BattleEngine {
     }
 
     this.turnNo = ahead.tn ?? this.turnNo + 1;
-    this.turn = this.aliveTurn(clamp(Math.round(ahead.o), 0, this.ships.length - 1));
+    this.turn = clamp(Math.round(ahead.o), 0, this.ships.length - 1);
     this.lastFired[this.ships[this.turn].team] = this.turn;
     this.dropThrough(this.turnNo);
 
@@ -1263,7 +1170,7 @@ export class BattleEngine {
    * back, even mid-match.
    *
    * Deliberately does not check whose turn it is. A bot may already be
-   * mid-think for this ship when the real captain returns , the check inside
+   * mid-think for this ship when the real captain returns — the check inside
    * `update()`'s bot-decision branch is against `ship.control`, so flipping
    * it here is enough to stop the bot from acting again; there is nothing
    * further to unwind because nothing has been decided yet, only queued.
@@ -1281,7 +1188,7 @@ export class BattleEngine {
   update(dt: number, decide?: (ship: number) => Shot) {
     this.clock += dt;
     this.settleBob();
-    this.acc += Math.min(dt, 2.0);
+    this.acc += Math.min(dt, 0.25);
 
     // Smoke and splinters are decoration -- nothing in the simulation ever
     // reads them -- so they run at the frame rate rather than inside the
@@ -1290,146 +1197,22 @@ export class BattleEngine {
     // loop in the game on a 60Hz display and quarters it on a phone holding
     // 30, and the picture is identical.
     this.stepParticles(Math.min(dt, 0.25));
-    this.stepDamageTexts(Math.min(dt, 0.25));
 
     let steps = 0;
-    while (this.acc >= STEP && steps < 250) {
+    while (this.acc >= STEP && steps < 10) {
       this.acc -= STEP;
       steps++;
       this.step(STEP);
     }
     // A tab that was asleep must not spend a minute on catch-up frames.
-    if (this.acc > STEP * 250) this.acc = 0;
+    if (this.acc > STEP * 10) this.acc = 0;
 
     this.decay(dt);
 
-    // -- Animated torpedo projectile ------------------------------------------
-    if (this.torpedoAnim) {
-      const tp = this.torpedoAnim;
-      const step = tp.speed * dt;
-      tp.travelled += step;
-      tp.x += tp.nx * step;
-      tp.y += tp.ny * step;
-      tp.trail.push(tp.x, tp.y);
-      // Cap trail to 30 pairs (60 entries).
-      if (tp.trail.length > 60) tp.trail.splice(0, tp.trail.length - 60);
-
-      // Wake bubbles every few pixels.
-      if (Math.random() < dt * 18) {
-        this.burst(2, 3, tp.x - tp.nx * 30, tp.y - tp.ny * 30, tp.y + 20, (p) => {
-          p.vx = -tp.ny * (Math.random() - 0.5) * 80;
-          p.vy = -40 - Math.random() * 60;
-          p.max = 0.35 + Math.random() * 0.2;
-          p.life = p.max;
-          p.size = 10 + Math.random() * 12;
-          p.grow = 1.3;
-          p.color = '#e2f4ff';
-        });
-      }
-      // Small fire sparks on the torpedo.
-      if (Math.random() < dt * 12) {
-        this.burst(1, 0, tp.x, tp.y, tp.y, (p) => {
-          p.vx = (Math.random() - 0.5) * 40;
-          p.vy = -20 - Math.random() * 30;
-          p.max = 0.15 + Math.random() * 0.12;
-          p.life = p.max;
-          p.size = 14 + Math.random() * 16;
-          p.grow = 1.3;
-        });
-      }
-
-      // Arrived at target.
-      if (tp.travelled >= tp.dist) {
-        // Big explosion at impact.
-        this.burst(14, 0, tp.tx, tp.ty, tp.ty, (p) => {
-          const a = Math.random() * Math.PI * 2;
-          const spd = 100 + Math.random() * 250;
-          p.vx = Math.cos(a) * spd;
-          p.vy = Math.sin(a) * spd - 60;
-          p.max = 0.45 + Math.random() * 0.35;
-          p.life = p.max;
-          p.size = 32 + Math.random() * 44;
-          p.grow = 2.0;
-        });
-        // Water splash.
-        this.burst(8, 3, tp.tx, tp.ty, tp.ty + 20, (p) => {
-          p.vx = (Math.random() - 0.5) * 200;
-          p.vy = -100 - Math.random() * 180;
-          p.max = 0.5 + Math.random() * 0.3;
-          p.life = p.max;
-          p.size = 16 + Math.random() * 18;
-          p.grow = 1.4;
-          p.color = '#e2f4ff';
-        });
-        this.pushRing({ x: tp.tx, y: tp.ty, r: 10, max: 100, life: 1, width: 10 });
-        this.shake = Math.min(34, this.shake + 18);
-        this.cfg.onSfx?.('hull', 1);
-
-        // Deal damage.
-        const prevTally = this.tally;
-        this.tally = {
-          shooter: tp.shooter, balls: 0, card: 'round' as CardId,
-          hulls: 0, rigs: 0, damage: 0, sunk: [], burned: false, pierced: false, grazed: false,
-        };
-        const ship = this.ships[tp.shooter];
-        this.damage(tp.target, 25, this.ships[tp.target].x < ship.x ? ship.x - 1 : ship.x + 1);
-        this.logLine(`${this.shipName(tp.shooter)} torpedo → ${this.shipName(tp.target)} −25`, 'big');
-        this.tally = prevTally;
-        this.cfg.onHp?.(this.hp);
-        this.torpedoInFlight = false;
-        this.torpedoAnim = null;
-
-        if (this.afloat(0).length === 0 || this.afloat(1).length === 0) {
-          this.finish();
-        }
-      }
+    if (this.phase === 'over') {
+      this.sinkT = Math.min(1, this.sinkT + dt * 0.55);
+      return;
     }
-
-    if (this.acidRainTimer > 0) {
-      const prevTimer = this.acidRainTimer;
-      this.acidRainTimer = Math.max(0, this.acidRainTimer - dt);
-
-      // 6.0→4.5: Clouds and night sky are drawn directly in render().
-      // No particle clouds spawned here anymore.
-
-      // 4.5: Rain starts, deal damage.
-      if (prevTimer >= 4.5 && this.acidRainTimer < 4.5) {
-        const ship = this.ships[this.acidRainShooter];
-        let hit = false;
-        const prevTally = this.tally;
-        this.tally = {
-          shooter: this.acidRainShooter, balls: 0, card: 'round',
-          hulls: 0, rigs: 0, damage: 0, sunk: [], burned: false, pierced: false, grazed: false,
-        };
-        for (let i = 0; i < this.ships.length; i++) {
-          if (this.ships[i].team !== ship.team && this.ships[i].hp > 0) {
-            this.damage(i, 10, this.ships[i].x < ship.x ? ship.x - 1 : ship.x + 1);
-            hit = true;
-          }
-        }
-        if (hit) {
-          this.shout('ACID RAIN!', 'kill');
-          this.logLine(`${this.shipName(this.acidRainShooter)} acid rain −10 all`, 'kill');
-        }
-        this.tally = prevTally;
-        this.cfg.onHp?.(this.hp);
-        if (this.afloat(0).length === 0 || this.afloat(1).length === 0) {
-          this.finish();
-        }
-      }
-
-      // 4.5 to 1.5: Spawn continuous rain drops and splashes.
-      if (this.acidRainTimer < 4.5 && this.acidRainTimer > 1.5) {
-        const ship = this.ships[this.acidRainShooter];
-        for (let i = 0; i < this.ships.length; i++) {
-          if (this.ships[i].team !== ship.team && this.ships[i].hp > 0) {
-            this.spawnAcidRainDrop(this.ships[i].x, this.shipY(i), dt);
-          }
-        }
-      }
-    }
-
-    if (this.phase === 'over') return;
 
     if (this.phase === 'deal') {
       this.phaseTimer -= dt;
@@ -1660,7 +1443,7 @@ export class BattleEngine {
         // hull is the one shot in the deck worth calling by name.
         if (p.through) this.tally.pierced = true;
       }
-      this.damage(struckShip, p.damage * mult, ix, p.from);
+      this.damage(struckShip, p.damage * mult, ix);
       if (p.burn > 0) {
         this.ships[struckShip].burn = p.burn + 1;
         this.burnFrom[struckShip] = p.from;
@@ -1671,7 +1454,7 @@ export class BattleEngine {
     }
 
     if (kind === 'rock' && struck) {
-      // A solid mountain still takes the shot and still stops the ball , it
+      // A solid mountain still takes the shot and still stops the ball — it
       // just never wears through, so `drawRock` keeps drawing it whole.
       if (this.cfg.rules.mountain !== 'solid') struck.hp -= 1;
       // The mountain sits at row 0 always, whichever ship fired at it.
@@ -1706,7 +1489,7 @@ export class BattleEngine {
     if (closest < p.blast && this.tally) this.tally.grazed = true;
   }
 
-  private damage(i: number, amount: number, fromX: number, fromShip?: number) {
+  private damage(i: number, amount: number, fromX: number) {
     const ship = this.ships[i];
     if (ship.hp <= 0 || amount <= 0) return;
     ship.hp = Math.max(0, ship.hp - amount);
@@ -1717,210 +1500,11 @@ export class BattleEngine {
       // rather than having already been under before it was fired.
       if (ship.hp <= 0) this.tally.sunk.push(i);
     }
-    // Charge the special bar for the shooter on a direct damage.
-    if (fromShip !== undefined && fromShip >= 0) {
-      this.specialHits[fromShip] = Math.min(3, (this.specialHits[fromShip] ?? 0) + 1);
-    }
     ship.flash = Math.min(1, ship.flash + amount / 30);
     ship.lean += (fromX < ship.x ? 1 : -1) * Math.min(0.12, amount / 260);
     this.shake = Math.min(34, this.shake + amount * 0.4);
     this.cfg.onSfx?.('hull', clamp(amount / BALANCE.DIRECT, 0.2, 1));
-    this.spawnDamageText(ship.x, this.shipY(i) - 60, amount);
     this.cfg.onHp?.(this.hp);
-  }
-
-  /**
-   * Fire a special attack, consuming the current player's turn.
-   *
-   * Modes:
-   *   'torpedo'   — 25 damage to one chosen enemy (animated torpedo trail).
-   *   'acidRain'  — 10 damage to every living enemy (cloud + green rain).
-   *   'heal'      — Restore 25 HP on the shooter's own hull (green sparkles).
-   *
-   * Always advances the turn at the end, so the player cannot fire AND
-   * launch a special in the same turn.
-   */
-  special(mode: 'torpedo' | 'acidRain' | 'heal', shooter: number, target?: number) {
-    if ((this.specialHits[shooter] ?? 0) < 3) return;
-    if (this.torpedoInFlight) return;
-    if (this.phase !== 'aim' && this.phase !== 'deal') return;
-    const ship = this.ships[shooter];
-    if (!ship || ship.hp <= 0) return;
-
-    this.specialHits[shooter] = 0;
-    this.torpedoInFlight = true;
-
-    // Temporarily open a tally so damage() accounting works correctly.
-    const prevTally = this.tally;
-    this.tally = {
-      shooter, balls: 0, card: 'round',
-      hulls: 0, rigs: 0, damage: 0, sunk: [], burned: false, pierced: false, grazed: false,
-    };
-
-    if (mode === 'torpedo' && target !== undefined) {
-      const tgt = this.ships[target];
-      if (tgt && tgt.hp > 0 && tgt.team !== ship.team) {
-        // Launch an animated torpedo that travels across the water.
-        const x0 = ship.x;
-        const y0 = this.shipY(shooter);
-        const x1 = tgt.x;
-        const y1 = this.shipY(target);
-        const dist = Math.hypot(x1 - x0, y1 - y0);
-        this.torpedoAnim = {
-          x: x0, y: y0, tx: x1, ty: y1,
-          nx: (x1 - x0) / Math.max(1, dist),
-          ny: (y1 - y0) / Math.max(1, dist),
-          speed: 600,
-          dist,
-          travelled: 0,
-          shooter,
-          target,
-          trail: [x0, y0],
-        };
-        this.shout('TORPEDO!', 'big');
-        this.cfg.onSfx?.('fire', 0.6);
-
-        // Hold in impact phase while it travels — damage is dealt in update().
-        this.phase = 'impact';
-        this.phaseTimer = dist / 600 + 1.2;
-        this.skipping = false;
-        this.lastShot = null;
-        this.tally = prevTally;
-        this.cfg.onPhase?.(this.phase);
-        return;
-      }
-    } else if (mode === 'acidRain') {
-      this.acidRainTimer = 6.0;
-      this.acidRainShooter = shooter;
-      
-      // Delay everything else; the damage and sequence run in update().
-      this.phase = 'impact';
-      this.phaseTimer = 6.5; // Hold impact phase for the 6s duration
-      this.skipping = false;
-      this.lastShot = null;
-      this.tally = prevTally;
-      this.torpedoInFlight = false;
-      this.cfg.onPhase?.(this.phase);
-      return;
-    } else if (mode === 'heal') {
-      const before = ship.hp;
-      ship.hp = Math.min(ship.maxHp, ship.hp + 25);
-      this.spawnHealEffect(ship.x, this.shipY(shooter));
-      this.shout('REPAIRED!', 'hit');
-      this.logLine(`${this.shipName(shooter)} repaired +${Math.round(ship.hp - before)}`, 'hit');
-      this.cfg.onHp?.(this.hp);
-    }
-
-    this.tally = prevTally;
-    this.torpedoInFlight = false;
-
-    // Check for game over before advancing.
-    if (this.afloat(0).length === 0 || this.afloat(1).length === 0) {
-      this.finish();
-      return;
-    }
-
-    // Consume the turn — treat it exactly like a shot that just landed.
-    this.lastShot = null;
-    this.skipping = false;
-    this.phase = 'impact';
-    this.phaseTimer = BALANCE.IMPACT_HOLD * 0.7;
-    this.cfg.onPhase?.(this.phase);
-  }
-
-
-  /**
-   * Acid rain phase 2: slow, visible green rain streaks from sky to ship.
-   *
-   * Drops start near the top of the world and fall slowly enough that the
-   * player can actually watch them descend. They are larger and brighter
-   * so each one reads as a distinct streak.
-   */
-  private spawnAcidRainDrop(targetX: number, targetY: number, dt: number) {
-    // Fewer but bigger, slower drops — each one should be visible.
-    const drops = Math.round(60 * dt * this.budget);
-    for (let d = 0; d < drops; d++) {
-      const dx = targetX + (Math.random() - 0.5) * 300;
-      const p = this.take();
-      p.kind = 4; // Splinter reused as rain drop
-      p.x = dx;
-      p.y = 80 + Math.random() * 100; // Start near the top of the sky
-      p.vx = (Math.random() - 0.5) * 15;
-      p.vy = 180 + Math.random() * 100; // Much slower so you can see them fall
-      p.max = 2.5 + Math.random() * 1.5; // Live longer since they travel further
-      p.life = p.max;
-      p.size = 18 + Math.random() * 16; // Bigger
-      p.grow = 0.6;
-      p.rot = 0;
-      p.spin = 0;
-      p.color = `hsl(${110 + Math.random() * 30}, 85%, 52%)`;
-      p.sink = targetY + 40;
-    }
-    // Green splashes on the water where rain lands.
-    if (Math.random() < dt * 12) {
-      const sx = targetX + (Math.random() - 0.5) * 260;
-      this.burst(3, 3, sx, targetY, targetY + 10, (p) => {
-        p.vx = (Math.random() - 0.5) * 100;
-        p.vy = -60 - Math.random() * 80;
-        p.max = 0.5 + Math.random() * 0.3;
-        p.life = p.max;
-        p.size = 14 + Math.random() * 16;
-        p.grow = 1.3;
-        p.color = '#6ee7b7';
-      });
-    }
-    // Occasional rumble.
-    if (Math.random() < dt * 4) {
-      this.shake = Math.max(this.shake, 5);
-    }
-  }
-
-  /**
-   * Heal effect: green aura rings + rising green sparks around the healed hull.
-   */
-  private spawnHealEffect(x: number, y: number) {
-    // Green sparkles rising upward.
-    this.burst(18, 2, x, y, y - 300, (p) => {
-      const a = -Math.PI / 2 + (Math.random() - 0.5) * Math.PI * 1.4;
-      const spd = 80 + Math.random() * 200;
-      p.vx = Math.cos(a) * spd;
-      p.vy = Math.sin(a) * spd;
-      p.max = 0.7 + Math.random() * 0.6;
-      p.life = p.max;
-      p.size = 12 + Math.random() * 14;
-      p.grow = 0.5;
-      p.color = `hsl(${130 + Math.random() * 30}, 80%, 60%)`;
-    });
-    // Multiple expanding green aura rings at staggered sizes.
-    this.pushRing({ x, y: y - 30, r: 8,   max: 90,  life: 1,    width: 5, color: 'rgba(74, 222, 128, 1)' });
-    this.pushRing({ x, y: y - 30, r: 12,  max: 130, life: 0.85, width: 4, color: 'rgba(52, 211, 153, 1)' });
-    this.pushRing({ x, y: y - 30, r: 5,   max: 70,  life: 0.7,  width: 6, color: 'rgba(110, 231, 183, 1)' });
-    this.pushRing({ x, y: y - 30, r: 15,  max: 160, life: 0.6,  width: 3, color: 'rgba(74, 222, 128, 1)' });
-    this.spawnDamageText(x, y - 70, 25, '#4ade80');
-  }
-
-  /**
-   * A number over a hull, sized and coloured by how much it actually cost.
-   *
-   * Same three-tier read as `shout()`'s banners (a graze, an ordinary hit, a
-   * heavy one) so the two systems agree with each other rather than teaching
-   * the eye two different colour languages for the same idea. `dx`/`dy` let
-   * the burn tick spawn its number over the flame rather than dead centre,
-   * so consecutive burn ticks do not stack exactly on top of each other.
-   */
-  private spawnDamageText(x: number, y: number, amount: number, color?: string) {
-    const ratio = clamp(amount / BALANCE.DIRECT, 0, 1);
-    const tone = color ?? (ratio >= 0.75 ? TONE_COLOR.big : ratio >= 0.35 ? TONE_COLOR.hit : TONE_COLOR.graze);
-    this.damageTexts.push({
-      x: x + (Math.random() * 2 - 1) * 14,
-      y,
-      vy: -46,
-      life: 0.9,
-      max: 0.9,
-      text: String(Math.round(amount)),
-      color: tone,
-      size: ratio >= 0.75 ? 40 : ratio >= 0.35 ? 32 : 25,
-    });
   }
 
   /**
@@ -1949,11 +1533,6 @@ export class BattleEngine {
         ship.burn = Math.max(0, ship.burn - 1);
         this.burnAt(i);
         this.cfg.onSfx?.('burn');
-        // Its own colour, not the hit tiers above -- a burn tick is a fixed,
-        // small amount every time, so scoring it against BALANCE.DIRECT would
-        // paint it the same muted grey turn after turn regardless of how much
-        // it has already worn a hull down.
-        this.spawnDamageText(ship.x - 18, this.shipY(i) - 74, BALANCE.BURN_PER_TURN, TONE_COLOR.kill);
 
         // The fire belongs to whoever lit it, however many turns ago.
         const lit = this.burnFrom[i] ?? -1;
@@ -1997,7 +1576,7 @@ export class BattleEngine {
       // keeps every client numbering the same turn the same way even after one
       // of them has had to skip forward.
       this.turnNo = packet.tn ?? next;
-      this.turn = this.aliveTurn(clamp(Math.round(packet.o), 0, this.ships.length - 1));
+      this.turn = clamp(Math.round(packet.o), 0, this.ships.length - 1);
       this.lastFired[this.ships[this.turn].team] = this.turn;
       this.dropThrough(this.turnNo);
     } else {
@@ -2064,7 +1643,7 @@ export class BattleEngine {
     this.cfg.onHp?.(this.hp);
 
     // A side is beaten when every one of its hulls is under, not when any one
-    // of them is , which is the whole difference between a duel and a fleet.
+    // of them is — which is the whole difference between a duel and a fleet.
     if (this.afloat(0).length === 0 || this.afloat(1).length === 0) {
       this.finish();
       return;
@@ -2093,6 +1672,7 @@ export class BattleEngine {
     // level, the side that did not fire survives.
     this.winner = a > b ? 0 : b > a ? 1 : ((1 - this.ships[this.turn].team) as Team);
     this.phase = 'over';
+    this.sinkT = 0;
     const loser = (1 - this.winner) as Team;
     for (let i = 0; i < this.ships.length; i++) if (this.ships[i].team === loser) this.wreck(i);
     this.shout('she goes down!');
@@ -2335,7 +1915,7 @@ export class BattleEngine {
 
     if (landed === 0) {
       this.shout(t.grazed ? 'close!' : 'miss', t.grazed ? 'graze' : 'miss');
-      this.logLine(t.grazed ? `${who} , near miss` : `${who} missed`, t.grazed ? 'graze' : 'miss');
+      this.logLine(t.grazed ? `${who} — near miss` : `${who} missed`, t.grazed ? 'graze' : 'miss');
       return;
     }
 
@@ -2356,7 +1936,7 @@ export class BattleEngine {
     // Said after the hit, not instead of it, so the shout stays about the
     // shot and the streak is the footnote it should be.
     const run = this.streak[t.shooter] ?? 0;
-    if (run >= 3) this.logLine(`${who} , ${run} in a row`, 'big');
+    if (run >= 3) this.logLine(`${who} — ${run} in a row`, 'big');
   }
 
   /** One shot, into this battle's running log. Local hulls only -- see `record`. */
@@ -2441,20 +2021,6 @@ export class BattleEngine {
     }
   }
 
-  /** Rises, slows, fades. Same shape every combat-text system uses because it reads instantly. */
-  private stepDamageTexts(dt: number) {
-    for (let i = this.damageTexts.length - 1; i >= 0; i--) {
-      const t = this.damageTexts[i];
-      t.life -= dt;
-      if (t.life <= 0) {
-        this.damageTexts.splice(i, 1);
-        continue;
-      }
-      t.y += t.vy * dt;
-      t.vy *= 0.92;
-    }
-  }
-
   private decay(dt: number) {
     this.shake = Math.max(0, this.shake - dt * 46);
     this.callLeft = Math.max(0, this.callLeft - dt);
@@ -2468,10 +2034,6 @@ export class BattleEngine {
       const list = ship.hp <= 0 ? 0.55 : (1 - ship.hp / ship.maxHp) * 0.09;
       const want = (ship.team === 0 ? 1 : -1) * list;
       ship.lean += (want - ship.lean) * Math.min(1, dt * 3.4);
-      // Starts the instant this hull is actually found dead, whichever turn
-      // that happens to be -- not a shared clock that only ever ran once, at
-      // the very end of the match.
-      if (ship.hp <= 0) ship.sinkAge = ship.sinkAge < 0 ? 0 : ship.sinkAge + dt;
     }
   }
 
@@ -2587,112 +2149,6 @@ export class BattleEngine {
     if (this.backdrop) ctx.drawImage(this.backdrop, 0, 0);
     else drawFallbackSea(ctx, this.arena);
 
-    // ── Acid Rain weather transition ──────────────────────────────────────────
-    if (this.acidRainTimer > 0) {
-      let darkness = 0;
-      // 6.0→4.5: intro (sun goes down, sky darkens)
-      // 4.5→1.5: full night (rain phase)
-      // 1.5→0.0: outro (dawn returns)
-      if (this.acidRainTimer > 4.5) darkness = 1 - (this.acidRainTimer - 4.5) / 1.5;
-      else if (this.acidRainTimer > 1.5) darkness = 1;
-      else darkness = this.acidRainTimer / 1.5;
-
-      const { w, seaY, h } = this.arena;
-
-      if (darkness > 0) {
-        // Deep night-blue overlay on the whole scene.
-        ctx.fillStyle = `rgba(4, 8, 32, ${darkness * 0.82})`;
-        ctx.fillRect(0, 0, w, h);
-
-        // ── Sun going down ──
-        // The baked sun sits at w*0.66, seaY*0.68. We slide it below the horizon.
-        const sunX = w * 0.66;
-        const sunBaseY = seaY * 0.68;
-        const sunR = seaY * 0.075;
-        const sunY = sunBaseY + darkness * (seaY - sunBaseY + sunR * 2 + 40);
-        // Only draw if still partially above horizon.
-        if (sunY < seaY + sunR) {
-          ctx.save();
-          // Clip to above the sea so the sun disappears at the horizon.
-          ctx.beginPath();
-          ctx.rect(0, 0, w, seaY);
-          ctx.clip();
-          // Warm bloom around sinking sun.
-          const bloom = ctx.createRadialGradient(sunX, sunY, 0, sunX, sunY, sunR * 6);
-          bloom.addColorStop(0, `rgba(255, 160, 60, ${0.5 * (1 - darkness)})`);
-          bloom.addColorStop(1, 'rgba(255, 120, 40, 0)');
-          ctx.fillStyle = bloom;
-          ctx.fillRect(sunX - sunR * 8, sunY - sunR * 8, sunR * 16, sunR * 16);
-          // Sun disc.
-          ctx.beginPath();
-          ctx.arc(sunX, sunY, sunR, 0, Math.PI * 2);
-          ctx.fillStyle = `rgba(255, 220, 140, ${Math.max(0, 1 - darkness * 1.3)})`;
-          ctx.fill();
-          ctx.restore();
-        }
-
-        // ── Moon appearing ──
-        const moonX = w * 0.25;
-        const moonBaseY = seaY * 0.18;
-        const moonR = seaY * 0.06;
-        // Moon fades in as darkness increases.
-        const moonAlpha = darkness * 0.85;
-        if (moonAlpha > 0.05) {
-          ctx.save();
-          ctx.globalAlpha = moonAlpha;
-          // Soft glow.
-          const glow = ctx.createRadialGradient(moonX, moonBaseY, 0, moonX, moonBaseY, moonR * 5);
-          glow.addColorStop(0, 'rgba(200, 220, 255, 0.25)');
-          glow.addColorStop(1, 'rgba(200, 220, 255, 0)');
-          ctx.fillStyle = glow;
-          ctx.fillRect(moonX - moonR * 6, moonBaseY - moonR * 6, moonR * 12, moonR * 12);
-          // Moon disc.
-          ctx.beginPath();
-          ctx.arc(moonX, moonBaseY, moonR, 0, Math.PI * 2);
-          ctx.fillStyle = '#dce8f5';
-          ctx.fill();
-          // Crescent shadow.
-          ctx.beginPath();
-          ctx.arc(moonX + moonR * 0.35, moonBaseY - moonR * 0.1, moonR * 0.85, 0, Math.PI * 2);
-          ctx.fillStyle = `rgba(4, 8, 32, ${darkness * 0.7})`;
-          ctx.fill();
-          ctx.restore();
-        }
-
-        // ── Storm clouds on the ENEMY half ──
-        // Determine which side of the arena is the enemy's.
-        const shooter = this.ships[this.acidRainShooter];
-        const enemyTeam: Team = shooter ? (shooter.team === 0 ? 1 : 0) as Team : 1 as Team;
-        // Team 0 is left, team 1 is right.
-        const cloudMinX = enemyTeam === 1 ? w * 0.45 : 0;
-        const cloudMaxX = enemyTeam === 1 ? w : w * 0.55;
-        const cloudAlpha = darkness * 0.75;
-
-        if (cloudAlpha > 0.05) {
-          ctx.save();
-          ctx.globalAlpha = cloudAlpha;
-          // Draw 6 puff-style clouds across the enemy half of the sky.
-          const cloudSeeds = [0.12, 0.3, 0.55, 0.72, 0.88, 0.42];
-          const cloudYs = [0.14, 0.22, 0.10, 0.28, 0.18, 0.32];
-          const cloudScales = [1.2, 0.9, 1.4, 0.8, 1.1, 1.0];
-          for (let c = 0; c < cloudSeeds.length; c++) {
-            const cx = cloudMinX + (cloudMaxX - cloudMinX) * cloudSeeds[c];
-            const cy = seaY * cloudYs[c];
-            const scale = cloudScales[c];
-            // Dark grey-green storm clouds.
-            ctx.fillStyle = `rgba(40, 55, 50, 0.8)`;
-            ctx.beginPath();
-            ctx.ellipse(cx, cy, 90 * scale, 26 * scale, 0, 0, Math.PI * 2);
-            ctx.ellipse(cx - 52 * scale, cy + 8 * scale, 54 * scale, 18 * scale, 0, 0, Math.PI * 2);
-            ctx.ellipse(cx + 58 * scale, cy + 6 * scale, 62 * scale, 20 * scale, 0, 0, Math.PI * 2);
-            ctx.ellipse(cx + 10 * scale, cy - 18 * scale, 58 * scale, 24 * scale, 0, 0, Math.PI * 2);
-            ctx.fill();
-          }
-          ctx.restore();
-        }
-      }
-    }
-
     const storm = this.cfg.rules.storm;
     drawWaves(ctx, this.arena, this.clock, storm ? q.waves + 2 : q.waves, storm ? 1.7 : 1);
     // Behind the ships on purpose. Rain in front of the hulls turns a six-ship
@@ -2709,9 +2165,7 @@ export class BattleEngine {
     for (const i of this.drawOrder) this.drawOneShip(ctx, i, q);
 
     this.drawProjectiles(ctx, q);
-    this.drawTorpedo(ctx);
     this.drawParticles(ctx);
-    this.drawDamageTexts(ctx);
     this.drawRings(ctx);
     // The arc is a rule now, and off by default. `aiming` only says a drag is
     // live; whether that drag is allowed to show where the ball lands is the
@@ -2726,29 +2180,14 @@ export class BattleEngine {
   private drawOneShip(ctx: CanvasRenderingContext2D, i: number, q: Quality) {
     const ship = this.ships[i];
     const sunk = ship.hp <= 0;
-
-    // Fully under: the hull itself stops being drawn at all, in favour of
-    // just the flag -- see `drawWreckFlag`. A sunk ship used to keep sitting
-    // there full-size and apparently undamaged but for a missing health bar,
-    // which read as "still in this" rather than "gone", especially for the
-    // whole rest of a battle its side went on to lose.
-    if (sunk && ship.sinkAge >= WRECK_SETTLE) {
-      this.drawWreckFlag(ctx, i);
-      return;
-    }
-
-    // Still sinking: slides under and fades on its own clock, not a
-    // whole-fleet one -- a hull that goes down in the middle of a battle the
-    // match is still deciding needs to start settling right then.
-    const settle = sunk ? easeIn(ship.sinkAge / WRECK_SETTLE) * 150 : 0;
-    const fade = sunk ? 1 - easeIn(ship.sinkAge / WRECK_SETTLE) : 1;
+    // A sunk hull slides under rather than blinking out, which is the part of
+    // the ending anybody actually remembers.
+    const settle = sunk ? easeIn(this.sinkT) * 150 : 0;
 
     // The barrel tracks whoever is shooting; an idle ship rests its gun at the
     // elevation it last used, so it never looks unmanned.
     const live = this.turn === i && (this.phase === 'aim' || this.phase === 'deal');
 
-    ctx.save();
-    ctx.globalAlpha *= fade;
     drawShip(ctx, {
       skin: ship.skin,
       x: ship.x,
@@ -2760,59 +2199,9 @@ export class BattleEngine {
       flash: ship.flash,
       clock: this.clock,
     });
-    ctx.restore();
 
     if (ship.burn > 0 && q.fancy && Math.random() < 0.35) this.burnAt(i);
     if (!sunk) this.drawHealthBar(ctx, i);
-  }
-
-  /**
-   * All that is left once a hull has fully settled: its colours, on a pole,
-   * riding the water where it went down.
-   *
-   * Reuses the same flag geometry `drawShip` itself paints onto a living
-   * hull's rigging, so a wreck's flag is recognisably the same flag rather
-   * than a different piece of art invented just for this -- only its anchor
-   * point moves, from partway up a mast to just above the waterline.
-   */
-  private drawWreckFlag(ctx: CanvasRenderingContext2D, i: number) {
-    const ship = this.ships[i];
-    const y = this.waterLevelFor(i);
-    const bob = Math.sin(this.clock * 1.6 + ship.bobPhase) * 5;
-
-    ctx.save();
-    ctx.translate(ship.x, y + bob);
-
-    // A short spar rather than a bare flag -- floating fabric with nothing
-    // holding it up reads as debris, not as a marker.
-    ctx.strokeStyle = 'rgba(20, 14, 8, 0.8)';
-    ctx.lineWidth = 4;
-    ctx.beginPath();
-    ctx.moveTo(0, 18);
-    ctx.lineTo(0, -30);
-    ctx.stroke();
-
-    drawFlag(
-      ctx,
-      SHIPS[clamp(ship.skin, 0, SHIPS.length - 1)],
-      this.clock,
-      { x: -26, y: -30 },
-      TEAM_COLORS[ship.team].main,
-    );
-
-    // A slow, widening ring standing in for the ripple where she went down --
-    // once, not on a loop, so a wreck the eye has already found stops asking
-    // for attention.
-    const ringT = clamp((ship.sinkAge - WRECK_SETTLE) / 1.4, 0, 1);
-    if (ringT < 1) {
-      ctx.globalAlpha = (1 - ringT) * 0.35;
-      ctx.strokeStyle = '#e2f4ff';
-      ctx.lineWidth = 3;
-      ctx.beginPath();
-      ctx.ellipse(0, 22, 20 + ringT * 60, 7 + ringT * 18, 0, 0, Math.PI * 2);
-      ctx.stroke();
-    }
-    ctx.restore();
   }
 
   /**
@@ -2859,37 +2248,6 @@ export class BattleEngine {
       ctx.font = '700 13px system-ui, sans-serif';
       ctx.fillText(`on fire (${ship.burn})`, ship.x, y + h + 14);
     }
-
-    // Special attack charge bar — shown below the HP bar.
-    // Three segments; each lights up when a hit is banked.
-    const specialH = 8;
-    const specialY = y + h + (ship.burn > 0 ? 30 : 8);
-    const charges = this.specialHits[i] ?? 0;
-    const segW = (w - 4) / 3;
-    ctx.fillStyle = 'rgba(4, 16, 28, 0.55)';
-    roundRect(ctx, x - 3, specialY - 2, w + 6, specialH + 4, 5);
-    ctx.fill();
-    for (let s = 0; s < 3; s++) {
-      const filled = s < charges;
-      ctx.fillStyle = filled ? '#f59e0b' : 'rgba(255,255,255,0.1)';
-      roundRect(ctx, x + s * (segW + 2), specialY, segW, specialH, 3);
-      ctx.fill();
-      if (filled) {
-        // Inner glow on filled segments.
-        ctx.fillStyle = 'rgba(255,220,80,0.35)';
-        roundRect(ctx, x + s * (segW + 2), specialY, segW, specialH, 3);
-        ctx.fill();
-      }
-    }
-    if (charges >= 3) {
-      ctx.globalAlpha = 0.95;
-      ctx.fillStyle = '#fbbf24';
-      ctx.font = '700 11px system-ui, sans-serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText('⚡ READY', ship.x, specialY + specialH + 11);
-      ctx.globalAlpha = 1;
-    }
     ctx.restore();
   }
 
@@ -2931,63 +2289,6 @@ export class BattleEngine {
       }
       ctx.restore();
     }
-  }
-
-  /** Draw the animated torpedo projectile with its wake trail. */
-  private drawTorpedo(ctx: CanvasRenderingContext2D) {
-    const tp = this.torpedoAnim;
-    if (!tp) return;
-
-    ctx.save();
-
-    // Wake trail — white-to-transparent fading line.
-    if (tp.trail.length >= 4) {
-      ctx.lineCap = 'round';
-      for (let i = 2; i < tp.trail.length; i += 2) {
-        const t = i / tp.trail.length;
-        ctx.strokeStyle = `rgba(200, 230, 255, ${t * 0.35})`;
-        ctx.lineWidth = 6 * t;
-        ctx.beginPath();
-        ctx.moveTo(tp.trail[i - 2], tp.trail[i - 1]);
-        ctx.lineTo(tp.trail[i], tp.trail[i + 1]);
-        ctx.stroke();
-      }
-    }
-
-    // Torpedo body — dark metallic cylinder oriented toward its direction.
-    const angle = Math.atan2(tp.ny, tp.nx);
-    ctx.translate(tp.x, tp.y);
-    ctx.rotate(angle);
-
-    // Body (dark cylinder).
-    const bodyLen = 44;
-    const bodyH = 14;
-    ctx.fillStyle = '#2d3748';
-    ctx.beginPath();
-    ctx.ellipse(-bodyLen / 2, 0, bodyLen / 2, bodyH / 2, 0, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Metallic sheen.
-    ctx.fillStyle = 'rgba(255,255,255,0.15)';
-    ctx.beginPath();
-    ctx.ellipse(-bodyLen / 2 + 2, -2, bodyLen / 2 - 4, bodyH / 4, 0, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Red nose cone.
-    ctx.fillStyle = '#e53e3e';
-    ctx.beginPath();
-    ctx.moveTo(bodyLen / 2, 0);
-    ctx.lineTo(bodyLen / 2 - 10, -bodyH / 2);
-    ctx.lineTo(bodyLen / 2 - 10, bodyH / 2);
-    ctx.closePath();
-    ctx.fill();
-
-    // Fins at the back.
-    ctx.fillStyle = '#4a5568';
-    ctx.fillRect(-bodyLen / 2 - 4, -bodyH / 2 - 4, 8, 4);
-    ctx.fillRect(-bodyLen / 2 - 4, bodyH / 2, 8, 4);
-
-    ctx.restore();
   }
 
   private drawProjectiles(ctx: CanvasRenderingContext2D, q: Quality) {
@@ -3048,68 +2349,19 @@ export class BattleEngine {
 
       const sprite = p.kind === 0 ? fx.fire : p.kind === 1 ? fx.smoke : p.kind === 2 ? fx.spark : fx.splash;
       if (!sprite) continue;
-      const alpha = p.kind === 1 ? Math.min(0.5, t * 0.7) : Math.min(1, t * 1.5);
-      ctx.globalAlpha = alpha;
+      ctx.globalAlpha = p.kind === 1 ? Math.min(0.5, t * 0.7) : Math.min(1, t * 1.5);
       ctx.drawImage(sprite, p.x - size / 2, p.y - size / 2, size, size);
-
-      // Tint smoke particles that have a custom color (e.g. acid rain clouds).
-      if (p.kind === 1 && p.color !== '#fff') {
-        ctx.globalCompositeOperation = 'source-atop';
-        ctx.globalAlpha = alpha * 0.55;
-        ctx.fillStyle = p.color;
-        ctx.fillRect(p.x - size / 2, p.y - size / 2, size, size);
-        ctx.globalCompositeOperation = 'source-over';
-      }
     }
     ctx.globalAlpha = 1;
-  }
-
-  private drawDamageTexts(ctx: CanvasRenderingContext2D) {
-    if (this.damageTexts.length === 0) return;
-    ctx.save();
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.lineJoin = 'round';
-    for (const t of this.damageTexts) {
-      const k = t.life / t.max;
-      // Punches in over the first tenth of its life rather than starting at
-      // full size -- a number that is already there the instant a shot lands
-      // reads as part of the hull, not as something that just happened to it.
-      const pop = t.life > t.max - 0.1 ? 1 + (1 - (t.max - t.life) / 0.1) * 0.4 : 1;
-      ctx.globalAlpha = Math.min(1, k * 2.2);
-      // Bumped from the original sizes: damage numbers are the one piece of
-      // feedback that must read instantly at arm's length on a phone screen.
-      const displaySize = t.size * 1.35 * pop;
-      ctx.font = `900 ${Math.round(displaySize)}px system-ui, sans-serif`;
-      ctx.lineWidth = 7;
-      ctx.strokeStyle = 'rgba(4, 16, 28, 0.85)';
-      ctx.fillStyle = t.color;
-      ctx.strokeText(t.text, t.x, t.y);
-      ctx.fillText(t.text, t.x, t.y);
-    }
-    ctx.globalAlpha = 1;
-    ctx.restore();
   }
 
   private drawRings(ctx: CanvasRenderingContext2D) {
     for (const r of this.rings) {
-      const alpha = Math.max(0, r.life) * 0.55;
-      if (r.color) {
-        // Custom-coloured ring (e.g. green heal aura).
-        ctx.strokeStyle = r.color.replace(/[\d.]+\)$/, `${alpha})`);
-        // Fallback if the replace didn't match (hex/named colours).
-        if (!ctx.strokeStyle.includes('rgba')) {
-          ctx.globalAlpha = alpha;
-          ctx.strokeStyle = r.color;
-        }
-      } else {
-        ctx.strokeStyle = `rgba(255, 236, 190, ${alpha})`;
-      }
+      ctx.strokeStyle = `rgba(255, 236, 190, ${Math.max(0, r.life) * 0.55})`;
       ctx.lineWidth = r.width * Math.max(0.2, r.life);
       ctx.beginPath();
       ctx.arc(r.x, r.y, r.r, 0, Math.PI * 2);
       ctx.stroke();
-      ctx.globalAlpha = 1;
     }
   }
 
@@ -3231,34 +2483,33 @@ export class BattleEngine {
    */
   private drawFeed(ctx: CanvasRenderingContext2D) {
     if (this.feed.length === 0) return;
-    const size = Math.round(this.arena.w * 0.013);
-    const pad = size * 0.8;
-    const lineH = size * 2.2;
-    // Centre the feed horizontally under the call banner.
-    const cx = this.arena.w / 2;
+    const size = Math.round(this.arena.w * 0.0125);
+    const pad = size * 0.7;
+    const lineH = size * 2.05;
+    const right = this.arena.w - size * 1.6;
 
     ctx.save();
-    ctx.textAlign = 'center';
+    ctx.textAlign = 'right';
     ctx.textBaseline = 'middle';
     ctx.font = `800 ${size}px system-ui, sans-serif`;
 
     for (let i = 0; i < this.feed.length; i++) {
       const entry = this.feed[i];
-      // Full strength until the last second, then out.
+      // Full strength until the last second, then out. A line that starts
+      // fading the moment it appears is unreadable exactly when it matters.
       const fade = Math.min(1, entry.life / 1);
-      // Stack downward from just below the call banner area (y ≈ 210).
-      const y = 220 + i * lineH;
+      const y = size * 2.6 + i * lineH;
       if (entry.w === undefined) entry.w = ctx.measureText(entry.text).width;
       const w = entry.w;
 
-      ctx.globalAlpha = fade * 0.6;
+      ctx.globalAlpha = fade * 0.55;
       ctx.fillStyle = '#04101c';
-      roundRect(ctx, cx - w / 2 - pad, y - lineH * 0.42, w + pad * 2, lineH * 0.84, size * 0.55);
+      roundRect(ctx, right - w - pad * 1.4, y - lineH * 0.38, w + pad * 2, lineH * 0.76, size * 0.5);
       ctx.fill();
 
       ctx.globalAlpha = fade;
       ctx.fillStyle = TONE_COLOR[entry.tone];
-      ctx.fillText(entry.text, cx, y);
+      ctx.fillText(entry.text, right, y);
     }
     ctx.restore();
   }

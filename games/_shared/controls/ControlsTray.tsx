@@ -31,7 +31,7 @@ const THEME: Record<TrayTheme, { icon: string; labelled: string }> = {
  * wiring up a second `fullscreenchange` listener of its own.
  *
  * `onChange` is the escape hatch for a game whose canvas needs an explicit
- * resize on top of what the browser's own layout gives it for free , Fish Eat
+ * resize on top of what the browser's own layout gives it for free — Fish Eat
  * Fish's engine is the one that needs it. It fires from the real
  * `fullscreenchange` event, and again ~200ms after an explicit toggle to cover
  * the CSS-only fallback path (iOS, or a denied fullscreen request), where
@@ -74,14 +74,14 @@ export default function ControlsTray({
   shellRef: RefObject<HTMLElement | null>;
   /** A real online match. An offline one (couch, solo vs. bots) always shows End Game. */
   online: boolean;
-  /** Whether this device is the room's real host , online guests never see End Game. */
+  /** Whether this device is the room's real host — online guests never see End Game. */
   isHost: boolean;
   onSettings: () => void;
   onExit: () => void;
   theme?: TrayTheme;
-  /** Extra content rendered before the standard buttons , a wifi/ping badge, say. */
+  /** Extra content rendered before the standard buttons — a wifi/ping badge, say. */
   before?: ReactNode;
-  /** See useFullscreenTray's onChange , only needed if a game's canvas wants a manual resize. */
+  /** See useFullscreenTray's onChange — only needed if a game's canvas wants a manual resize. */
   onFullscreenChange?: (isFull: boolean) => void;
 }) {
   const { isFull, toggle } = useFullscreenTray(shellRef, onFullscreenChange);

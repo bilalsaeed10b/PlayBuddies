@@ -36,7 +36,7 @@ export class TurnLink {
      *
      * One document each, one listener each. A duel has a single entry here; a
      * three-a-side has five, which is still five listeners on five small
-     * documents that change once a turn , nothing like the mesh a real-time
+     * documents that change once a turn — nothing like the mesh a real-time
      * game would need, and no peer connection anywhere.
      */
     private peerUids: string[],

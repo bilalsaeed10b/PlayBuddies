@@ -18,7 +18,7 @@ export default function OutlawToken({
   size?: number;
   /** Seat colour, drawn as the band around the token. Omit in the shop. */
   ring?: string;
-  /** Out of the running , drawn back so the live pieces read first. */
+  /** Out of the running — drawn back so the live pieces read first. */
   dimmed?: boolean;
   /** Laying low: shown as a ghost, because that is exactly what the rules say they are. */
   hidden?: boolean;

@@ -2,12 +2,12 @@
  * The roster.
  *
  * Nothing here is a downloaded image. Every character is a handful of numbers
- * and a `draw` case , eight of them cost about four kilobytes, where eight
+ * and a `draw` case — eight of them cost about four kilobytes, where eight
  * sprite sheets cost megabytes. Fish Eat Fish shipped 11.6 MB of PNGs before
  * anyone noticed; this is that lesson applied up front.
  *
  * **These are skins and nothing else.** They used to carry speed / jump / power
- * multipliers. Even balanced on paper , every line summed to the same total ,
+ * multipliers. Even balanced on paper — every line summed to the same total —
  * it meant two players in the same match were playing slightly different games,
  * and every loss came with an excuse attached. A 1v1 sport has to be decided by
  * who read the ball better, so the stats are gone. The only difference between

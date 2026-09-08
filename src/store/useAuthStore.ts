@@ -3,6 +3,7 @@ import { User } from 'firebase/auth';
 
 export interface UserStats {
   gamesPlayed: number;
+  winRate: string;
 }
 
 interface AuthState {
