@@ -4,7 +4,7 @@ import { GENERATED_GAMES } from "./games.generated";
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH || "";
 
 /**
- * The game catalog. Generated from games/<id>/game.json at build time , to add
+ * The game catalog. Generated from games/<id>/game.json at build time — to add
  * or change a game, edit its game.json and run `npm run build:games`.
  */
 export const GAMES: GameMetadata[] = GENERATED_GAMES;
@@ -27,7 +27,7 @@ export function gameThumbnail(game: GameMetadata): string {
  *
  * `solo` tells the game to run its local mode (one person on both control sets)
  * instead of waiting for a peer that isn't coming. Note there is deliberately
- * no `host` parameter , host status is read from the lobby document, since a
+ * no `host` parameter — host status is read from the lobby document, since a
  * query string is trivially editable.
  */
 export function gameUrl(

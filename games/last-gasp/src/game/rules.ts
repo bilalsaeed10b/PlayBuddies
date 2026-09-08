@@ -3,8 +3,8 @@
  *
  * The idea this is all built around: a plain hangman is a puzzle, and a
  * puzzle is a thing one person solves while everybody else watches. Here
- * somebody at the table sets the word , typed by hand, not drawn from a list
- * , and everybody else races to crack it. Nobody waits for a turn: any
+ * somebody at the table sets the word — typed by hand, not drawn from a list
+ * — and everybody else races to crack it. Nobody waits for a turn: any
  * guesser may call any letter at any moment, and the one who gets a letter
  * right earns a short window to keep going before the board opens back up to
  * the whole table. The gallows is still shared, and whoever draws its last
@@ -21,7 +21,7 @@
  * Kept from the turn-based version's own measurement rather than re-guessed:
  * six is the number everybody already recognises, and simulating full
  * matches showed it lands a real table's hang rate around a third of
- * rounds , often enough to be feared every round, rare enough that reaching
+ * rounds — often enough to be feared every round, rare enough that reaching
  * it still feels like something went wrong. The mechanics generating misses
  * changed completely; the count that makes them land right did not.
  */
@@ -42,7 +42,7 @@ export const PIECE_NAMES = [
  *
  * Scrabble's values, and for Scrabble's reason: rare letters are worth more
  * because they are less likely to be there. That is the decision every open
- * guess is , take E for a pittance where five other people might beat you to
+ * guess is — take E for a pittance where five other people might beat you to
  * it, or take K for real money on the same bet.
  */
 export const LETTER_VALUE: Record<string, number> = {
@@ -63,7 +63,7 @@ export const BY_FREQUENCY = 'ETAOINSRHLDCUMFPGWYBVKXJQZ'.split('');
 export const BALANCE = {
   /**
    * A wrong guess draws one line on the shared stickman. Whoever draws the
-   * line that finishes it loses every point they earned this word , not the
+   * line that finishes it loses every point they earned this word — not the
    * whole table's, just theirs. It is what keeps an open guess a real bet
    * rather than a free lottery ticket: five people racing for the same
    * letter is fine right up until missing it costs something.
@@ -84,7 +84,7 @@ export const BALANCE = {
 
   /**
    * How much each consecutive chained hit is worth, as a multiplier on the
-   * letter's own value , 1.0 for a cold, open-table guess, rising with every
+   * letter's own value — 1.0 for a cold, open-table guess, rising with every
    * hit landed inside the same unbroken chain.
    *
    * Uncapped in principle but self-limiting in practice: a word only has so
@@ -103,7 +103,7 @@ export const BALANCE = {
   /** Seconds a team gets to vote once every suggestion is in. */
   VOTE_SECONDS: 15,
 
-  /** A word must be at least this long , one letter is not a hangman word. */
+  /** A word must be at least this long — one letter is not a hangman word. */
   MIN_WORD_LEN: 3,
 } as const;
 

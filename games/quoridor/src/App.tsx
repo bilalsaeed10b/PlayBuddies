@@ -27,7 +27,7 @@ import { GameWallet, reportResult } from './platform/wallet';
 import MatchView from './screens/MatchView';
 import type { MatchConfig } from './screens/MatchView';
 import type { Seat } from './engine/QuoridorEngine';
-import { DEFAULT_RULES, PLAYER_CODES } from './types/game';
+import { DEFAULT_RULES } from './types/game';
 import { createLogger } from '@shared/log/logger';
 import type { GameSettings, MatchRules, PlayerCount } from './types/game';
 
@@ -83,7 +83,7 @@ const randomSeed = () => (Math.random() * 0x7fffffff) | 0;
  * The bot rank for any seat this device fills automatically in an online game.
  *
  * The tier picker in the Menu is only ever reached offline, so `aiLevel`
- * there is really "how hard should the *practice* bot be" , a preference for
+ * there is really "how hard should the *practice* bot be" — a preference for
  * solo and couch play. Online, the same state used to leak into every bot
  * PlayBuddies seats for a room: pick Architect once to test the offline game,
  * then go play a real match with friends, and the empty seats were suddenly
@@ -116,7 +116,7 @@ export default function App() {
    *
    * Being signed into a lobby is not the same as wanting to play in it, and
    * the offline menu is reachable from *inside* the room. Without this flag the
-   * branch below would rebuild the online config for it anyway , one local
+   * branch below would rebuild the online config for it anyway — one local
    * seat rather than two, so the second player at the keyboard drove nothing,
    * with the whole Firebase path still running underneath a game that has no
    * peers to talk to.
@@ -257,7 +257,7 @@ export default function App() {
    * Who is playing, and in what order.
    *
    * Sorted by uid so every client computes the identical answer from data it
-   * already has , arrival order would give two players different ideas about
+   * already has — arrival order would give two players different ideas about
    * who sits at the bottom of the board. Anyone past the host's chosen player
    * count is in the room but not in the game: Quoridor seats face each other
    * across fixed edges, so a fifth person watches rather than making it a
@@ -277,26 +277,6 @@ export default function App() {
   const mySkin = uid ? lobby?.players?.[uid]?.fishIndex : undefined;
   const isHost = Boolean(uid && lobby && lobby.hostId === uid);
 
-  /**
-   * The host's chosen player count follows the room, not the other way round.
-   *
-   * `rules.players` used to be whatever this device remembered from its last
-   * match -- often two players, from a duel -- so a host who opened a fresh
-   * room with three friends found the seats already decided one of them
-   * would be watching, with nothing on screen to say so before Start. This
-   * raises it to the smallest count the room actually fits the moment
-   * somebody new joins, and never on its own lowers a count the host (or an
-   * earlier run of this same effect) already set -- so choosing fewer seats
-   * than the room on purpose, bots filling the rest, still works exactly as
-   * before for whoever wants it.
-   */
-  useEffect(() => {
-    if (!online || !isHost || !lobby) return;
-    const roomSize = Object.keys(lobby.players ?? {}).length;
-    const fits = PLAYER_CODES.find((n) => n >= roomSize) ?? PLAYER_CODES[PLAYER_CODES.length - 1];
-    if (fits > rules.players) setRules((r) => ({ ...r, players: fits }));
-  }, [online, isHost, lobby, rules.players]);
-
   useEffect(() => {
     // An offline game is the player's own; the room does not get to start or
     // end it. This guard is also what stops an unrelated lobby update from
@@ -310,7 +290,7 @@ export default function App() {
   /**
    * A fresh seed and a fresh toss for every game.
    *
-   * Quoridor's board is the same every time , the only thing to draw for is
+   * Quoridor's board is the same every time — the only thing to draw for is
    * who moves first, and the seed exists so a document left over from the last
    * game is obviously stale rather than replayable.
    *
@@ -318,7 +298,7 @@ export default function App() {
    * one is running: rolling them from an effect keyed on the view fires one
    * render after the board has already mounted, so the engine keeps the toss
    * it was built with while the start packet goes out carrying a different
-   * one , and the guest then builds a game whose turn order disagrees with
+   * one — and the guest then builds a game whose turn order disagrees with
    * every move that arrives.
    */
   const [session, setSession] = useState(() => ({
@@ -370,7 +350,7 @@ export default function App() {
 
   const award = useCallback((won: boolean, movesTaken: number) => {
     // Something for turning up, more for crossing first, and a bonus for doing
-    // it briskly , a ninety-move win is a grind, a thirty-move win is a plan.
+    // it briskly — a ninety-move win is a grind, a thirty-move win is a plan.
     setCoins((c) => c + (won ? 95 : 30) + (won ? Math.max(0, 60 - movesTaken) : 0));
     reportResult(won);
   }, []);
@@ -419,8 +399,8 @@ export default function App() {
   /**
    * An empty seat gets a bot.
    *
-   * A lobby with one person in it , the platform's solo mode, or simply being
-   * first into the room , must still be a game. Two of the earlier games
+   * A lobby with one person in it — the platform's solo mode, or simply being
+   * first into the room — must still be a game. Two of the earlier games
    * shipped with a version of this that only filled a *partly* full match, so
    * a room of one started with nothing on the other side of the board at all.
    */
@@ -712,7 +692,7 @@ function Menu({
           onClick={onSolo}
           className="flex w-full items-center justify-center gap-2 rounded-2xl bg-amber-400 py-4 text-lg font-black text-slate-900 transition-transform active:scale-95"
         >
-          <Play className="h-5 w-5 fill-current" /> Solo , you against the bot
+          <Play className="h-5 w-5 fill-current" /> Solo — you against the bot
         </button>
 
         <div className="space-y-2">
@@ -744,7 +724,7 @@ function Menu({
 
         <div className="rounded-2xl bg-slate-900/5 p-3 text-center text-xs leading-relaxed text-slate-500">
           <p className="mb-1 font-black uppercase tracking-[0.15em] text-slate-400">How it works</p>
-          <p>One step a turn , up, down, left or right, never diagonally , or spend a wall instead.</p>
+          <p>One step a turn — up, down, left or right, never diagonally — or spend a wall instead.</p>
           <p className="mt-1">
             Face another pawn with nothing between you and you may jump straight over it; if a wall or the
             board's edge is right behind them, the jump bends to either side.
@@ -811,7 +791,7 @@ function PawnGrid({
   coins: number;
   selected: number | null;
   /**
-   * Everyone else who has also picked this pawn. Purely informational , the
+   * Everyone else who has also picked this pawn. Purely informational — the
    * shape is cosmetic and the seat colour is what tells pawns apart, so
    * nothing stops two players choosing the same one.
    */
@@ -946,7 +926,7 @@ function OfflinePick({
     if (Object.keys(next).length >= seatCount) onDone(next);
   };
 
-  const title = seatCount > 1 ? `Player ${seat + 1} , pick a pawn` : 'Pick your pawn';
+  const title = seatCount > 1 ? `Player ${seat + 1} — pick a pawn` : 'Pick your pawn';
   return (
     <Shell title={title} coins={coins} onBack={onBack}>
       <PawnGrid owned={owned} coins={coins} selected={null} pickedBy={pickedBy} onPick={pick} />
@@ -1023,7 +1003,7 @@ function RoomScreen({
    *
    * The host used to be able to start the moment its *own* pawn was picked,
    * which dropped anyone still choosing onto a board playing a pawn the lobby
-   * had never recorded , their opponent saw a piece they had not chosen, and
+   * had never recorded — their opponent saw a piece they had not chosen, and
    * the shop was still open over the top of it.
    */
   const everyonePicked = people.every((p) => p.skin !== undefined && p.skin !== null);
@@ -1043,7 +1023,7 @@ function RoomScreen({
           </p>
         </div>
         {/* The same tray the board itself carries: purse, fullscreen, settings,
-            and , for the host only , the switch that ends it for everyone. */}
+            and — for the host only — the switch that ends it for everyone. */}
         <div className="flex shrink-0 items-center gap-2">
           <div className="panel flex items-center gap-2 rounded-xl px-3 py-2 font-bold text-amber-600">
             <Coins className="h-4 w-4" /> {coins}
@@ -1067,31 +1047,6 @@ function RoomScreen({
         </div>
       </div>
 
-      {/* Loud on purpose. "Game rules" further down read as maintenance --
-          the same plain grey box as "Play offline" right next to it -- so
-          nothing on screen said a wall that seals someone in isn't legal, or
-          that a jump bends sideways when it's blocked, before a first game
-          taught it the slow way. This is the thing actually worth reading,
-          so it looks like it. */}
-      <button
-        onClick={onRules}
-        className="relative flex shrink-0 items-center gap-3 overflow-hidden rounded-2xl border-2 border-amber-400/70 bg-amber-400/10 px-4 py-3 short:py-1.5 text-left transition-transform active:scale-[0.99]"
-      >
-        <span className="absolute -right-6 -top-6 h-16 w-16 animate-pulse rounded-full bg-amber-400/20" aria-hidden />
-        <ScrollText className="h-6 w-6 short:h-5 short:w-5 shrink-0 text-amber-600" />
-        <div className="min-w-0 flex-1">
-          <p className="text-sm font-black uppercase tracking-wide text-amber-700">
-            {isHost ? 'New to Quoridor? Read the rules' : 'How walls and jumps work'}
-          </p>
-          <p className="text-[11px] font-bold text-amber-700/70 short:hidden">
-            Worth 30 seconds before the walls start going down.
-          </p>
-        </div>
-        <span className="shrink-0 rounded-xl bg-amber-500 px-3 py-1.5 text-[11px] font-black uppercase tracking-wide text-slate-900 short:hidden">
-          Guide
-        </span>
-      </button>
-
       {/* On a phone the start button would otherwise sit below the fold, which
           is exactly what made it unreachable in the earlier games. */}
       <div className="panel shrink-0 rounded-2xl p-3 lg:hidden">
@@ -1099,7 +1054,7 @@ function RoomScreen({
           <button
             onClick={onStart}
             disabled={!canStart}
-            className="flex w-full items-center justify-center gap-2 rounded-xl bg-amber-400 py-2.5 text-sm font-black text-slate-900 disabled:opacity-40"
+            className="flex w-full items-center justify-center gap-2 rounded-xl bg-amber-400 py-3 text-base font-black text-slate-900 disabled:opacity-40"
           >
             <Play className="h-5 w-5 fill-current" /> START
           </button>
@@ -1180,7 +1135,7 @@ function RoomScreen({
                       style={{ color: seatLayout.sides[i]?.dark }}
                     >
                       {seatLayout.sides[i]?.name}
-                      {p.uid === uid ? ' , you' : ''}
+                      {p.uid === uid ? ' — you' : ''}
                     </p>
                   </div>
                 </div>
@@ -1253,7 +1208,7 @@ function SettingsPanel({
    *
    * The player count and the turn clock used to live here and no longer do:
    * they change what the game *is*, so everybody has to agree on them. They
-   * are Game Rules now, set by the host. What is left is genuinely local , how
+   * are Game Rules now, set by the host. What is left is genuinely local — how
    * loud it is, and how much the board is willing to tell you.
    */
   const toggles: { key: 'hints'; label: string; hint: string }[] = [
@@ -1314,8 +1269,8 @@ function SettingsPanel({
 /**
  * The rules of the game, set once by the host and obeyed by everyone.
  *
- * Separate from Settings on purpose. Settings are this device's business ,
- * volume, how much help the board offers , and nobody else is affected. These
+ * Separate from Settings on purpose. Settings are this device's business —
+ * volume, how much help the board offers — and nobody else is affected. These
  * change what the game *is*, so everyone has to be playing the same one: they
  * travel to a guest over the wire (see `packRules`) and its board is built
  * from whatever arrives, not from anything stored locally.
@@ -1357,11 +1312,11 @@ function RulesPanel({
             Players
             <span className="block text-[11px] font-normal text-slate-500">
               Two sit opposite each other; four take all sides of the board. Anyone in the room beyond this
-              watches , the seats are fixed edges, not a queue. Empty seats are played by bots.
+              watches — the seats are fixed edges, not a queue. Empty seats are played by bots.
             </span>
           </p>
           <div className="grid grid-cols-2 gap-2">
-            {PLAYER_CODES.map((option) => (
+            {([2, 4] as PlayerCount[]).map((option) => (
               <button
                 key={option}
                 disabled={!editable}
@@ -1381,7 +1336,7 @@ function RulesPanel({
           </div>
           <p className="text-[11px] text-slate-400">
             {rules.players === 2
-              ? 'The duel. Ten walls apiece , enough to build a real maze between you.'
+              ? 'The duel. Ten walls apiece — enough to build a real maze between you.'
               : rules.teams
                 ? 'Two pairs on a bigger board. Seven walls each, and a partner who wins it for you.'
                 : 'Four corners of the same board, every pawn for itself. Five walls each, so every one of them has to matter.'}
@@ -1414,7 +1369,7 @@ function RulesPanel({
           <span className="text-sm font-bold">
             Turn clock
             <span className="block text-[11px] font-normal text-slate-500">
-              A move goes in on its own after thirty seconds , a step along that pawn's own shortest route,
+              A move goes in on its own after thirty seconds — a step along that pawn's own shortest route,
               never a wall. Off lets a turn take as long as it takes.
             </span>
           </span>
@@ -1432,7 +1387,7 @@ function RulesPanel({
           <p>A pawn moves one square up, down, left or right. Never diagonally, except out of a jump.</p>
           <p className="mt-1">A wall covers two squares of groove and may not cross or overlap another.</p>
           <p className="mt-1">
-            No wall may leave any pawn with no route at all to its goal, so the board can never be sealed ,
+            No wall may leave any pawn with no route at all to its goal, so the board can never be sealed —
             only made longer.
           </p>
         </div>

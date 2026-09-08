@@ -1,4 +1,4 @@
-# Volley Clash , Requirements
+# Volley Clash — Requirements
 
 A two-touch arcade volleyball game for PlayBuddies. One to four players, on a
 keyboard, on a phone, or across the internet.
@@ -12,7 +12,7 @@ meant to stay in step.
 ## 1. Why this game
 
 The platform has a co-op puzzler (Neon Elements) and a free-for-all arcade game
-(Fish Eat Fish). It has nothing **competitive and symmetrical** , no game where
+(Fish Eat Fish). It has nothing **competitive and symmetrical** — no game where
 two people are trying to beat each other at the same task, and no game that
 supports teams. Volleyball is the smallest possible sport that does both: one
 ball, one rule ("don't let it land on your side"), and a skill ceiling that
@@ -42,7 +42,7 @@ Rules that follow from the table:
   a person short must not block a match.
 - **R2.3** If a player disconnects mid-match, an AI takes their character over
   within one second. The match never stops for a dropout.
-- **R2.4** Couch mode is not a stand-in for online play , it is the mode that
+- **R2.4** Couch mode is not a stand-in for online play — it is the mode that
   works on a laptop with no internet, and it must be reachable in two clicks
   from the menu.
 
@@ -57,11 +57,11 @@ Rules that follow from the table:
 can reach, so that a held jump gets a player meaningfully above the tape. Lower
 the jump without lowering the net and nothing can be spiked; nothing can be
 spiked, so nothing is ever unreturnable, and rallies run to a hundred touches
-without a point. The absolute numbers do not matter , the gap does.
+without a point. The absolute numbers do not matter — the gap does.
 
 - **R2.5** The arena is chosen once at match start from the player count and
   never changes mid-match.
-- **R2.6** The canvas letterboxes the arena , the whole court is always visible.
+- **R2.6** The canvas letterboxes the arena — the whole court is always visible.
   There is no camera to follow, because a volleyball court that scrolls is
   unplayable.
 
@@ -75,7 +75,7 @@ without a point. The absolute numbers do not matter , the gap does.
   horizontal velocity at contact is what puts spin on it.
 - **R3.3** The ball bounces off the side walls and the ceiling with restitution
   slightly below 1, so a rally that gets stuck in the roof still decays.
-- **R3.4** The ball bounces off the **net post** , the net is a solid vertical
+- **R3.4** The ball bounces off the **net post** — the net is a solid vertical
   bar, not a plane the ball passes through. Clipping the tape and dribbling over
   is a legitimate and delightful outcome, so the collision must be a real
   circle-vs-rounded-rectangle test, not an axis test.
@@ -88,7 +88,7 @@ without a point. The absolute numbers do not matter , the gap does.
 ## 4. The players
 
 Each character is a rounded capsule with a head. Physics is deliberately
-simple , the depth comes from timing, not from a complex character controller.
+simple — the depth comes from timing, not from a complex character controller.
 
 - **R4.1** **Run.** Ground acceleration toward the input direction, with a
   friction term. Air control is weaker than ground control.
@@ -106,17 +106,17 @@ simple , the depth comes from timing, not from a complex character controller.
   the game is no slower for losing it.
 - **R4.5** Players collide with each other (soft push-apart) but cannot pass
   through the net or the walls, and cannot cross into the opponent's half.
-- **R4.6** Hitting the ball is not a button press , it is **contact**. Where the
+- **R4.6** Hitting the ball is not a button press — it is **contact**. Where the
   ball hits the player relative to their centre determines the outgoing angle.
   Hitting it off the top of your head sends it straight up (a set); hitting it
   off the side sends it sideways (a pass); hitting it while descending onto it
   from above sends it down (a spike).
 - **R4.7** On the ground the outgoing angle is clamped upward, hard. A grazing
   contact would otherwise leave almost horizontally, and a horizontal ball at
-  hit speed is unreturnable , rallies died after 1.4 touches. The clamp is what
+  hit speed is unreturnable — rallies died after 1.4 touches. The clamp is what
   teaches the one rule the game rests on: **you can only spike in the air.**
 - **R4.8** A hit returns only a tenth of the incoming speed. Any more and a
-  rally escalates , each swing adds to an already-fast ball until it crosses
+  rally escalates — each swing adds to an already-fast ball until it crosses
   the whole court every touch and both players are pinned to opposite walls.
   Energy must leave a rally faster than the swings put it in.
 
@@ -138,7 +138,7 @@ the numbers are gone: Rookie and Titan differ only in colour and hat.
 - **R4.11** Every contact adds a fixed upward pop on top of the bounce, capped
   so it cannot compound. Without the pop, a touch taken slightly off-centre
   skids away flat and the rally dies; without the cap, each touch adds more
-  height than gravity removes and the ball never comes down at all , that
+  height than gravity removes and the ball never comes down at all — that
   version produced a single rally of 187 touches.
 
 ## 5. Scoring
@@ -146,7 +146,7 @@ the numbers are gone: Rookie and Titan differ only in colour and hat.
 - **R5.1** Rally scoring: every rally ends in a point for someone.
 - **R5.2** First to 7, win by 2, hard cap at 11. (Configurable to 5 or 11 in
   the settings; the host's choice is the one that counts online.)
-- **R5.3** The ball touching the floor scores for the **other** side , on the
+- **R5.3** The ball touching the floor scores for the **other** side — on the
   *touch*, not once it has stopped moving. The ball still visibly bounces
   afterwards, but that bounce plays out during the point delay and cannot be
   hit: gating the point on the ball coming to rest meant both sides simply kept
@@ -161,7 +161,7 @@ the numbers are gone: Rookie and Titan differ only in colour and hat.
   one; combined with "the loser serves", that meant conceding a single point
   put a team into a spiral it could not escape. Dropping the ball on the
   server rather than at a fixed spot removed the scramble, and the bonus turned
-  serving from a penalty into a small advantage , which makes the format
+  serving from a penalty into a small advantage — which makes the format
   self-correcting: lose a point, get the advantage back. Scores after the fix
   are 7–4, 3–7, 6–8, 7–4, including deuce games.
 - **R5.5** At match point the game enters a brief slow-motion. It is pure
@@ -172,7 +172,7 @@ the numbers are gone: Rookie and Titan differ only in colour and hat.
 ## 6. Power-ups
 
 A power-up spawns near the top of the court every 12–20 seconds during a rally
-and drifts down. **The ball collects it, not the player** , so the team that
+and drifts down. **The ball collects it, not the player** — so the team that
 last touched the ball earns it, which rewards keeping the ball alive rather
 than camping under a spawn point.
 
@@ -187,7 +187,7 @@ than camping under a spawn point.
   is always a clean test of skill.
 - **R6.2** Every power-up is visible on the HUD with a countdown. A player must
   never be surprised by their own controls.
-- **R6.3** Power-ups can be disabled entirely in the settings , some people just
+- **R6.3** Power-ups can be disabled entirely in the settings — some people just
   want volleyball.
 
 ## 7. Feel
@@ -200,7 +200,7 @@ worth playing.
 - **R7.3** Screen shake on spikes, scaled by impact power.
 - **R7.4** A rally counter that appears after 6 touches, and a shout
   ("NICE!", "SPIKE!", "ACE!") on notable events.
-- **R7.5** The court is drawn **once into an offscreen canvas and blitted** ,
+- **R7.5** The court is drawn **once into an offscreen canvas and blitted** —
   crowd, banners, sky gradient, net posts. The lesson from Fish Eat Fish is
   that a per-frame vector background is where the frame budget goes. Only the
   ball, players, particles and HUD are drawn live.
@@ -211,15 +211,15 @@ worth playing.
 
 | | Move | Jump | Dash | |
 |---|---|---|---|---|
-| P1 keyboard | A / D | W | Left Shift | , |
-| P2 keyboard | ← / → | ↑ | Right Shift or / | , |
-| Touch | Drag anywhere in the left half | Tap the right half | , | , |
+| P1 keyboard | A / D | W | Left Shift | — |
+| P2 keyboard | ← / → | ↑ | Right Shift or / | — |
+| Touch | Drag anywhere in the left half | Tap the right half | — | — |
 
 - **R8.1** On a touchscreen the whole screen is the controller, and it is the
   **same scheme Neon Elements uses**, so one PlayBuddies game teaches you how to
   hold the next: the left half is a joystick that appears under your thumb and
   steers left/right only, the right half is jump. Both halves work at once. No
-  floating buttons , a button beside the court is a target you have to find, and
+  floating buttons — a button beside the court is a target you have to find, and
   it costs the court the space it sits in.
 - **R8.4** The first touch of a match requests fullscreen. The Fullscreen API
   only grants a request that is handling a real user gesture, so asking at any
@@ -228,7 +228,7 @@ worth playing.
 - **R8.2** Keyboard layout is remappable between the two sets in settings, for
   couch play where one person prefers arrows.
 - **R8.3** Full-screen works on iOS Safari, which has no Fullscreen API on
-  iPhone , the same pseudo-fullscreen fallback the other games use.
+  iPhone — the same pseudo-fullscreen fallback the other games use.
 
 ## 9. Netcode
 
@@ -240,14 +240,14 @@ about four seconds.
 simulates the whole match, and the wire only corrects it.**
 
 - **R9.1** Transport is `Link`, which carries the same messages two ways: a
-  WebRTC full mesh signalled through Realtime Database, and , for any peer the
-  mesh has not reached , a relay through `lobbies/{room}/updates/{uid}`. There
+  WebRTC full mesh signalled through Realtime Database, and — for any peer the
+  mesh has not reached — a relay through `lobbies/{room}/updates/{uid}`. There
   is no TURN server on this platform, so a mesh-only game does not connect at
   all for a real share of players, and "doesn't connect" must degrade to "plays
   with more latency", never to a frozen court.
 - **R9.2** The mesh retries, with backoff, for as long as the peer is in the
   room. A handshake that fails once is normal; giving up on it is not.
-- **R9.3** Clients send their own body , position, velocity, flags , together
+- **R9.3** Clients send their own body — position, velocity, flags — together
   with their input bitmask, at 30 Hz **and on the frame any key changes**. The
   host places that character where its owner says it is, within a clamp to the
   court and to a legal speed. Deriving a guest's position from an input byte
@@ -268,7 +268,7 @@ simulates the whole match, and the wire only corrects it.**
   the host's account of the ball until the host has had time to see that
   contact. The alternative reads as the hit not registering.
 - **R9.8** The host is the lobby host, read from the lobby document, never from
-  a query parameter , and authority follows it in place, without rebuilding the
+  a query parameter — and authority follows it in place, without rebuilding the
   match, when the lobby elects a new one.
 - **R9.9** A guest that has heard nothing from the host for six seconds runs
   the rules itself, and hands them straight back when the host returns. Nobody

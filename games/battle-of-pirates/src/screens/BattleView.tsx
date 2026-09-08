@@ -84,8 +84,8 @@ export default function BattleView({
   /**
    * The rules as one number, so the wire effect below can depend on them.
    *
-   * `config.rules` is a fresh object on every render , App rebuilds the whole
-   * config from scratch each lobby snapshot , and listing it in a dependency
+   * `config.rules` is a fresh object on every render — App rebuilds the whole
+   * config from scratch each lobby snapshot — and listing it in a dependency
    * array would tear the link down and reopen it several times a second,
    * writing a `bye` each time. See the note on `localTeamsKey`: this is the
    * same hazard, and the same fix.
@@ -291,7 +291,7 @@ export default function BattleView({
         return;
       }
       if (packet.t === 'hello') {
-        // Every client runs this, not just the host , same as `bye` above.
+        // Every client runs this, not just the host — same as `bye` above.
         // A no-op if this ship was never handed to a bot, so a guest's very
         // first `hello` (the ordinary case) costs nothing extra here.
         const ship = shipOfUid.get(from);
@@ -497,7 +497,7 @@ export default function BattleView({
       onOver: (winner) => {
         setOver({ winner });
         // With a fleet, "did I win" is about the side I am sailing on, and the
-        // hull the prize is counted from is my own , not some crewmate's.
+        // hull the prize is counted from is my own — not some crewmate's.
         const won = config.localShips.some((i) => engine.ships[i].team === winner);
         const mine = config.localShips[0] ?? 0;
         onResult(won, Math.round(Math.max(0, engine.ships[mine].hp)), engine.record);
@@ -719,7 +719,7 @@ export default function BattleView({
 
   const myTurn = localShips.has(turn) && (phase === 'aim' || phase === 'deal');
   const canAim = phase === 'aim' && myTurn && !over;
-  /** My side, for colouring the HUD , the first hull this device sails. */
+  /** My side, for colouring the HUD — the first hull this device sails. */
   const myTeam: Team = config.seats[config.localShips[0] ?? 0]?.team ?? 0;
   const turnTeam: Team = config.seats[turn]?.team ?? 0;
   const facing: 1 | -1 = turnTeam === 0 ? 1 : -1;

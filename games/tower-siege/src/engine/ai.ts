@@ -27,7 +27,7 @@ export interface Tier {
    * The dial that actually works. Measured over twenty seeds at a fixed
    * everything-else: taking the best plot every time averages wave 20, and
    * being willing to settle for something in the top quarter averages 11.
-   * Which is the right shape for a difficulty setting , a weaker captain is
+   * Which is the right shape for a difficulty setting — a weaker captain is
    * one who puts towers in nearly-good places, not one who buys less.
    */
   slack: number;
@@ -37,7 +37,7 @@ export interface Tier {
    * The axis that actually separates good play from bad here, which took
    * measuring to find. Damage per gold is near enough flat across a tower's
    * three levels, so "more towers" and "better towers" look equivalent on
-   * paper , and they are not, for two reasons the numbers only show once a
+   * paper — and they are not, for two reasons the numbers only show once a
    * whole match is simulated. Upgrades concentrate damage on the plots that
    * see the most road, while each new tower goes on a worse plot than the
    * last; and armour is subtracted flat, so a level-1 arrow nest does 1
@@ -48,7 +48,7 @@ export interface Tier {
    * cheap towers died on wave 9 and the miserly one reached 19.
    *
    * Swept on its own over twenty seeds it moves the mean by about two waves
-   * either way with no clear trend, which at this spread is noise , so it is
+   * either way with no clear trend, which at this spread is noise — so it is
    * set sensibly and `slack` below is what actually separates the ranks.
    */
   upgrade: number;
@@ -76,7 +76,7 @@ const NOMINAL_RANGE = 185;
  *
  * Coverage is measured against these rather than analytically, because "how
  * much of the road does this plot see" has no closed form once the road bends
- * back on itself , and the bending back is the entire point of the map.
+ * back on itself — and the bending back is the entire point of the map.
  */
 const SAMPLE_STEP = 16;
 const SAMPLES: { x: number; y: number }[] = (() => {
@@ -122,8 +122,8 @@ export const PLOT_VALUE: Map<number, number> = (() => {
  * work down that list. It made the sharpest tier the worst one: the top ten
  * plots by raw coverage all sit around the same two hairpins, so a Warlord
  * stacked its whole fleet on one corner of the map and let everything walk the
- * other three quarters untouched, while a Squire , which picked sloppily and
- * therefore spread out , accidentally covered more road. Measured over twelve
+ * other three quarters untouched, while a Squire — which picked sloppily and
+ * therefore spread out — accidentally covered more road. Measured over twelve
  * seeds the "best" tier died on wave 8 and the worst reached 11.
  *
  * Scoring what a plot adds rather than what it sees fixes that, and it is also
@@ -209,7 +209,7 @@ export function decide(engine: SiegeEngine, level: number, nth: number): BuildOr
 
   // What the wave needs. Order matters: no answer to air at all is a losing
   // position no amount of ground damage fixes, so it is checked first. A
-  // Squire does not look , it buys the cheap thing and finds out.
+  // Squire does not look — it buys the cheap thing and finds out.
   let want: TowerId;
   if (!tier.reads) {
     want = rnd() < 0.7 ? 'arrow' : 'cannon';

@@ -6,7 +6,7 @@
  * place once every twenty seconds". A CSS transform transition does that for
  * free, at whatever the display's refresh rate is, and it stays crisp on a
  * phone without anybody having to think about backing stores or device pixel
- * ratios , none of which a canvas would have given us here.
+ * ratios — none of which a canvas would have given us here.
  */
 import { useEffect, useRef, useState } from 'react';
 import { BANK, PLACES, ROADS, SEAT_COLORS } from '../game/rules';
@@ -58,7 +58,7 @@ function fan(index: number, count: number): { dx: number; dy: number } {
 export default function TownMap({
   engine,
   seats,
-  /** Seats driven from this device , theirs are the pieces drawn largest. */
+  /** Seats driven from this device — theirs are the pieces drawn largest. */
   localSeats,
   /** Places the current chooser may ride to, lit up while they are deciding. */
   highlight,
@@ -81,7 +81,7 @@ export default function TownMap({
 }) {
   const [box, size] = useSquare();
   // A bank-and-spoke wheel needs more room to stay readable than the old
-  // ring did , nine places drawn into the same 560px cap the six-place ring
+  // ring did — nine places drawn into the same 560px cap the six-place ring
   // used sat cramped, especially the four rim-only places tucked between a
   // spoke and its neighbour.
   // Minus a marker's worth of room. Every place is drawn centred on its point
@@ -94,9 +94,9 @@ export default function TownMap({
     <div ref={box} className="flex h-full w-full items-center justify-center">
       {/* shrink-0 is load-bearing: the wrapper is a row flex, so without it the
           square is a flex item free to have its *width* squeezed while its
-          explicit height stays put , which drew a 186x298 "square". */}
+          explicit height stays put — which drew a 186x298 "square". */}
       <div className="relative shrink-0" style={{ width: edge, height: edge }}>
-      {/* Roads. Under everything, and deliberately faint , the graph is a fact
+      {/* Roads. Under everything, and deliberately faint — the graph is a fact
           about the rules, not the thing you should be looking at. Four spokes
           plus the rim, not a single loop, so "which roads reach the Bank
           directly" is something the map itself shows rather than something a

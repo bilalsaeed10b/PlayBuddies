@@ -4,7 +4,7 @@
  * Everything this game draws for a remote player is a guess about the present
  * built from a packet describing the past, so the single number the whole
  * synchronisation rests on is *how old is this packet*. Get that wrong and
- * every body and the ball are placed wrong , not jittery, wrong , and no
+ * every body and the ball are placed wrong — not jittery, wrong — and no
  * amount of smoothing downstream can recover it.
  *
  * The previous answer was `rtt / 2`, from a round-trip probe sent once a
@@ -41,7 +41,7 @@
  * Subtracting `t2 - t1` is the part that matters here: it removes however long
  * the reply sat in the peer's own relay batch before leaving, so what is left
  * is time actually spent in flight. Once the offset is known, a packet's age
- * stops being inferred from the round trip at all , the sender stamps its own
+ * stops being inferred from the round trip at all — the sender stamps its own
  * clock, the receiver converts that into its own, and subtracts. That is a
  * measurement, and it stays correct on a path whose two directions are
  * nothing like each other.
@@ -49,7 +49,7 @@
  * Sample selection is NTP's as well: keep a window, and trust the offset from
  * the sample with the *lowest* round trip. A fast round trip is one that got
  * through without queueing anywhere, which makes its offset the least
- * contaminated , and picking the best of a window converges in a couple of
+ * contaminated — and picking the best of a window converges in a couple of
  * probes rather than easing towards the truth over five seconds, while
  * rejecting a single slow packet outright instead of averaging it in.
  */
@@ -61,7 +61,7 @@ const WINDOW = 16;
  * How long a sample may still be selected as the best one.
  *
  * Without this a single unusually fast probe would pin the offset forever, and
- * a path that genuinely changed , a phone moving from wifi to mobile data ,
+ * a path that genuinely changed — a phone moving from wifi to mobile data —
  * would never be believed.
  */
 const SAMPLE_TTL_MS = 12_000;
@@ -89,7 +89,7 @@ interface Sample {
 }
 
 export interface PeerTiming {
-  /** Typical round trip in ms , the median of the window. For display. */
+  /** Typical round trip in ms — the median of the window. For display. */
   rtt: number;
   /** The floor: the fastest round trip seen recently, i.e. the path's real cost. */
   rttMin: number;
@@ -115,7 +115,7 @@ class PeerClock {
   /**
    * Folds in one completed probe.
    *
-   * Returns false for a sample that is not physically possible , a negative
+   * Returns false for a sample that is not physically possible — a negative
    * round trip, or one long enough that the reply was almost certainly sitting
    * in a backgrounded tab rather than on a wire. Those are dropped rather than
    * clamped: a clamped nonsense sample is still nonsense, and it would compete
@@ -209,7 +209,7 @@ export class PeerClocks {
    *
    * A probe that goes out over the Firestore relay is minted, queued, and only
    * written up to a batch interval later. Left alone, that wait would be
-   * measured as time on the wire , the exact mistake the peer-side `t2 - t1`
+   * measured as time on the wire — the exact mistake the peer-side `t2 - t1`
    * subtraction exists to avoid on the other leg, so it has to be avoided on
    * this one too or the relay's round trip is inflated by both queues.
    */

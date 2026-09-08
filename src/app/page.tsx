@@ -21,6 +21,8 @@ import {
   Trophy,
   MessageSquare,
   Play,
+  Monitor,
+  Smartphone,
   Menu,
   X,
   Loader2,
@@ -237,7 +239,6 @@ function Navbar() {
                 onClick={() => router.push("/dashboard")}
                 className="flex items-center gap-2 hover:opacity-80 transition-opacity"
               >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={user.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.uid}`}
                   alt="Avatar"
@@ -391,7 +392,7 @@ function HeroSection() {
 
         {/* Main Heading */}
         <motion.h1
-          className="text-[clamp(1.25rem,9vw,7rem)] font-black font-[family-name:var(--font-display)] tracking-tighter leading-[0.85] mb-8"
+          className="text-6xl sm:text-7xl md:text-8xl lg:text-[7rem] font-black font-[family-name:var(--font-display)] tracking-tighter leading-[0.85] mb-8"
         >
           <motion.span
             initial={{ opacity: 0, x: -100, rotateY: -45 }}
@@ -451,7 +452,7 @@ function HeroSection() {
             disabled={isLoggingIn}
             whileHover={{ scale: 1.05, y: -3 }}
             whileTap={{ scale: 0.95 }}
-            className="btn-glow group w-full sm:w-auto px-6 py-4 sm:px-12 sm:py-6 bg-transparent rounded-3xl text-white font-black text-base sm:text-xl flex items-center justify-center gap-2 sm:gap-4 shadow-[0_0_50px_rgba(139,92,246,0.2)] hover:shadow-[0_0_80px_rgba(236,72,153,0.4)] transition-shadow duration-500 disabled:opacity-75 relative z-10 uppercase tracking-wide border border-white/10 overflow-visible"
+            className="btn-glow group w-full sm:w-auto px-12 py-6 bg-transparent rounded-3xl text-white font-black text-xl flex items-center justify-center gap-4 shadow-[0_0_50px_rgba(139,92,246,0.2)] hover:shadow-[0_0_80px_rgba(236,72,153,0.4)] transition-shadow duration-500 disabled:opacity-75 relative z-10 uppercase tracking-wide border border-white/10 overflow-visible"
           >
             {/* The crazy background layer that animates independently */}
             <div className="absolute inset-0 bg-gradient-to-r from-primary via-accent to-secondary rounded-3xl z-[-1] opacity-80 group-hover:opacity-100 transition-opacity animate-gradient-shift blur-[2px] group-hover:blur-[8px]" />
@@ -941,6 +942,117 @@ function HowItWorks() {
 }
 
 
+function MarqueeBanner() {
+  const badges = [
+    "⚡ WebRTC Powered", "🌍 Cross-Platform", "🔒 Anti-Cheat", "🎮 10+ Games",
+    "💬 In-Game Chat", "🏆 Leaderboards", "📱 Mobile Ready", "🖥️ Desktop Optimized",
+    "🚀 Zero Downloads", "🎯 Instant Matchmaking", "👥 Party Mode", "🔥 Real-Time PvP",
+  ];
+
+  return (
+    <section className="relative py-6 overflow-hidden border-y border-white/5">
+      <div className="absolute inset-0 bg-gradient-to-r from-primary/5 via-transparent to-accent/5" />
+      <div className="marquee-container">
+        <div className="marquee-track">
+          {[...badges, ...badges].map((badge, i) => (
+            <span
+              key={i}
+              className="inline-flex items-center gap-2 px-6 py-2 mx-3 text-sm font-semibold text-text-secondary whitespace-nowrap glass rounded-full border border-white/5"
+            >
+              {badge}
+            </span>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+
+function TestimonialsSection() {
+  const testimonials = [
+    {
+      name: "Alex R.",
+      avatar: "🎮",
+      role: "Casual Gamer",
+      text: "Finally a platform where I can play with friends without downloading anything. We played for 3 hours straight!",
+      gradient: "from-purple-500 to-violet-500",
+    },
+    {
+      name: "Sarah K.",
+      avatar: "⚡",
+      role: "Competitive Player",
+      text: "The zero-lag multiplayer is insane. I've tried other browser games and nothing comes close to this responsiveness.",
+      gradient: "from-pink-500 to-rose-500",
+    },
+    {
+      name: "Mike T.",
+      avatar: "🏆",
+      role: "Party Host",
+      text: "I host game nights every weekend now. Just send a link and everyone is in. No accounts, no hassle.",
+      gradient: "from-blue-500 to-cyan-500",
+    },
+  ];
+
+  return (
+    <section className="relative py-32 px-6">
+      <div className="absolute inset-0" style={{ background: "radial-gradient(ellipse at 80% 20%, rgba(236, 72, 153, 0.06) 0%, transparent 50%)" }} />
+      <div className="max-w-7xl mx-auto relative">
+        <motion.div
+          initial={{ opacity: 0, y: 30 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true }}
+          className="text-center mb-16"
+        >
+          <motion.div className="inline-flex items-center gap-2 px-4 py-2 rounded-full glass mb-6">
+            <Star size={14} className="text-warning" />
+            <span className="text-xs font-semibold text-text-secondary tracking-wider uppercase">
+              Player Reviews
+            </span>
+          </motion.div>
+          <h2 className="text-4xl md:text-6xl font-black font-[family-name:var(--font-display)] tracking-tight mb-4">
+            <span className="text-white">Loved by</span>
+            <br />
+            <span className="bg-gradient-to-r from-warning to-accent bg-clip-text text-transparent inline-block animate-float-slow">
+              Gamers
+            </span>
+          </h2>
+        </motion.div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          {testimonials.map((t, i) => (
+            <motion.div
+              key={t.name}
+              initial={{ opacity: 0, y: 30 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true, margin: "-50px" }}
+              transition={{ delay: i * 0.15 }}
+              className="testimonial-card glass rounded-2xl p-8 border border-white/5 cursor-default"
+            >
+              <div className="flex items-center gap-4 mb-6">
+                <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${t.gradient} flex items-center justify-center text-xl shadow-lg`}>
+                  {t.avatar}
+                </div>
+                <div>
+                  <p className="font-bold text-white">{t.name}</p>
+                  <p className="text-xs text-text-muted">{t.role}</p>
+                </div>
+              </div>
+              <p className="text-sm text-text-secondary leading-relaxed italic">
+                &ldquo;{t.text}&rdquo;
+              </p>
+              <div className="flex gap-1 mt-4">
+                {[1, 2, 3, 4, 5].map((s) => (
+                  <Star key={s} size={14} className="text-warning fill-warning" />
+                ))}
+              </div>
+            </motion.div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
 
 
 function CTASection() {

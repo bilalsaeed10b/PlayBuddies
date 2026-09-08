@@ -20,7 +20,7 @@ export default function Keyboard({
   onPick,
 }: {
   called: string[];
-  /** Letters that turned out to be in the word , coloured apart from the misses. */
+  /** Letters that turned out to be in the word — coloured apart from the misses. */
   hits: Set<string>;
   disabled: boolean;
   markUsed: boolean;

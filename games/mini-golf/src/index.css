@@ -35,7 +35,7 @@
 }
 
 /* The big HOLE IN ONE! / IN THE DRINK! text. It lands hard, sits, and lifts
-   away , so it never has to be dismissed and never covers the next putt. */
+   away — so it never has to be dismissed and never covers the next putt. */
 .shout {
   animation: shout 1.9s ease-out forwards;
 }
@@ -63,7 +63,7 @@
 }
 
 /* Respect a system-level request for less motion. Nothing in the round itself
-   is gated on this , a ball that does not roll is not a game. */
+   is gated on this — a ball that does not roll is not a game. */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -74,7 +74,7 @@
 
   /* Except the shout, which has to opt back out. It is a `forwards` animation
      that ends at opacity 0, so collapsing its duration to nothing does not
-     calm it down , it deletes it, and the reader never sees HOLE IN ONE! at
+     calm it down — it deletes it, and the reader never sees HOLE IN ONE! at
      all. It holds still and stays put instead; React unmounts it on a timer
      regardless. */
   .shout {

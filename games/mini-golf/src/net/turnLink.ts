@@ -8,7 +8,7 @@
  * of them.
  *
  * So this game does not open a peer connection at all, and gets three things
- * for free by not doing so , no STUN, no NAT traversal, and no "connecting…"
+ * for free by not doing so — no STUN, no NAT traversal, and no "connecting…"
  * that never resolves on a corporate or mobile network where the mesh cannot
  * get through. It also means a player who reloads mid-round reads the whole
  * green straight out of the document rather than having to renegotiate.
@@ -59,7 +59,7 @@ export class TurnLink {
    * Change what rides along on every write from here on.
    *
    * A guest does not know who tees off first until the host tells it, and once it
-   * does it should be stamping that onto its own writes too , otherwise a
+   * does it should be stamping that onto its own writes too — otherwise a
    * third player who joins late and happens to hear a guest's move first still
    * has no round to build.
    */
@@ -151,7 +151,7 @@ export class TurnLink {
    * Send a turn.
    *
    * A putt made in the second before the document handle resolved is held
-   * rather than dropped , losing the opening putt of a round to an import that
+   * rather than dropped — losing the opening putt of a round to an import that
    * had not finished is the kind of bug that reads as "multiplayer is broken".
    * Only one is ever held, which is correct here: a shot packet carries the
    * whole green, so the newest one makes every older one redundant.

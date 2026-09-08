@@ -16,7 +16,7 @@
  * Coins are per game, the same as unlocks: what this game pays out cannot be
  * spent in any other. Every game on the platform is served from the same
  * origin, so a bare `localStorage` key would be shared the moment two games
- * happened to pick the same name , exactly why `unlockKey` below has always
+ * happened to pick the same name — exactly why `unlockKey` below has always
  * been per-game, and why the coins key now is too.
  */
 

@@ -15,7 +15,7 @@ on one keyboard) so you can develop it without a lobby.
 
 ## How the multiplayer works
 
-There is no game server , PlayBuddies is a static site. Instead:
+There is no game server — PlayBuddies is a static site. Instead:
 
 - **Firestore** holds the lobby (`lobbies/{room}`). This game only ever writes
   `players.{uid}.fishIndex`, plus `matchStarted` if it is the host.
@@ -31,7 +31,7 @@ Two rules keep the clients agreeing with each other:
   ignored.
 - Only the fish being eaten decides that it died, and tells the eater. Both
   clients run the same overlap test on their own player, so the victim is the
-  only one who can be certain , this is why two players can never both claim
+  only one who can be certain — this is why two players can never both claim
   the same kill.
 
 ## Layout
@@ -54,5 +54,5 @@ npm install
 npm run dev
 ```
 
-Building is done from the repository root , `npm run build:games` compiles every
+Building is done from the repository root — `npm run build:games` compiles every
 game into `public/g/`.

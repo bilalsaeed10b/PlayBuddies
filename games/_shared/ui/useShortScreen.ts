@@ -1,14 +1,14 @@
 import { useEffect, useState } from 'react';
 
 /**
- * True when the screen is too short to spend height freely , a phone held
+ * True when the screen is too short to spend height freely — a phone held
  * sideways, which is how these games are actually played on a phone.
  *
  * The CSS half of this is the `short:` variant each game defines in its
  * index.css, and anything that can be solved in CSS should be. This hook is
  * for the cases that cannot: a canvas whose pixel size is set in JS, or a
  * layout that has to be a different shape rather than a smaller one. Same
- * 520px threshold as the variant, deliberately , two numbers that could drift
+ * 520px threshold as the variant, deliberately — two numbers that could drift
  * apart would be a bug waiting to happen.
  *
  * Matches on `orientation` too, so a phone that reports an odd viewport height

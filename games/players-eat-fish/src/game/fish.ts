@@ -2,7 +2,7 @@
  * The fish catalogue: one entry per sprite, ordered smallest to largest.
  *
  * `size` is the collision radius the fish is worth, and it doubles as the
- * unlock ladder , index order, size order and price order are deliberately the
+ * unlock ladder — index order, size order and price order are deliberately the
  * same, so "the next one along" always means "a bit bigger".
  *
  * Art is served from public/asset/fishes/. The originals were 800×800 PNGs
@@ -66,7 +66,7 @@ export const STARTER_FISH = [0, 1, 2];
  *
  * `FISH_ASSETS[i].size` still orders the catalogue and decides what a fish
  * looks like once it's grown into that size on its own, but coins buy a
- * look, not a head start , a Tiger Shark skin should not spawn already
+ * look, not a head start — a Tiger Shark skin should not spawn already
  * bigger than everyone who couldn't afford one. Every player enters the
  * water at the same size and grows from there purely by eating.
  */
@@ -76,7 +76,7 @@ export const STARTING_SIZE = 10;
  * Sprite for an AI fish of a given size.
  *
  * Only used when spawning. A *player* keeps the fish they chose for the whole
- * run and simply gets bigger , swapping their sprite as their score climbed
+ * run and simply gets bigger — swapping their sprite as their score climbed
  * meant you stopped being the fish you picked, which nobody asked for.
  */
 export function assetForSize(size: number): number {
@@ -87,7 +87,7 @@ export function assetForSize(size: number): number {
 }
 
 /**
- * Biggest fish that will ever travel in a group. Above this they swim alone ,
+ * Biggest fish that will ever travel in a group. Above this they swim alone —
  * a shark drifting in the middle of a school of neon tetras looked ridiculous.
  */
 export const SHOAL_MAX_SIZE = 40;

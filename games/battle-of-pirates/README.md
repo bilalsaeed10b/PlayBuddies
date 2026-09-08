@@ -1,4 +1,4 @@
-﻿# Battle of Pirates
+# Battle of Pirates
 
 A turn-based artillery duel for PlayBuddies. Two ships, one stretch of open
 water, one cannon each. Drag back and let go.
@@ -43,7 +43,7 @@ bundle to `public/g/battle-of-pirates/`. Nothing outside
 **There is no mesh.** The other three games open a WebRTC connection because a
 ball or a shoal of fish needs twenty updates a second. A turn is one write, so
 this game exchanges turns through `lobbies/{room}/updates/{uid}` and never
-negotiates a peer connection at all , no STUN, no NAT traversal, and nothing to
+negotiates a peer connection at all — no STUN, no NAT traversal, and nothing to
 fail silently on a restrictive network.
 
 **The seed is the whole handshake.** The host draws a number and a coin toss and
@@ -54,7 +54,7 @@ the power, the card, and the state it left behind.
 
 **The muzzle is inside the hull.** Every projectile starts life unarmed against
 the ship that fired it and arms the moment it is clear. Without that, every shot
-detonated on its own deck , and the same rule is what makes a mortar dropped
+detonated on its own deck — and the same rule is what makes a mortar dropped
 into your own rigging a real and deserved outcome.
 
 **Quality is measured, not assumed.** `deviceMemory` and `hardwareConcurrency`
@@ -73,4 +73,3 @@ If you retune anything in `rules.ts`, re-run that measurement. In a dev build
 the engine and the bot's decision function are on `window.__battle` and
 `window.__decide`, and `update(dt, decide)` can be driven in a loop from the
 console faster than real time.
-

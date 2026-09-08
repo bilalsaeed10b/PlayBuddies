@@ -2,13 +2,13 @@
  * The outlaws: eight faces for the wanted posters, three free.
  *
  * They are skins and nothing else. Not one of them rides further, banks
- * faster or takes less off an ambush, and none ever will , this is a game
+ * faster or takes less off an ambush, and none ever will — this is a game
  * played against other people, and a shop that sells an advantage in one is
  * worse than no shop at all. Every other game on the platform holds the same
  * line; see the note at the top of Battle of Pirates' ships.ts.
  *
  * Drawn as a few SVG primitives rather than shipped as art. At the size these
- * actually appear , a token on a map and a thumbnail in a shop , a silhouette
+ * actually appear — a token on a map and a thumbnail in a shop — a silhouette
  * with a distinct hat reads better than a detailed portrait, and it costs the
  * bundle nothing.
  */
@@ -77,7 +77,7 @@ export function outlawAt(index: number): Outlaw {
  * The hat, as an SVG path in a 24x24 box whose head sits at (12, 13) r 5.5.
  *
  * Split out from the token component so the shop and the map draw the exact
- * same silhouette , the whole point of a skin is being recognisable, and two
+ * same silhouette — the whole point of a skin is being recognisable, and two
  * near-copies of this drifting apart is the standard way that stops being true.
  */
 export function hatPath(hat: HatShape): string | null {

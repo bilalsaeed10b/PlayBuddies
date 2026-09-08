@@ -1,7 +1,7 @@
 /**
  * Every sound in the game, synthesised.
  *
- * A handful of short noises made of oscillators and shaped noise , no
+ * A handful of short noises made of oscillators and shaped noise — no
  * audio files, so there is nothing to download, nothing to decode on a cold
  * start, and nothing to keep in sync with the bundle. A golf course is a quiet
  * place with a few sharp sounds in it; that is a cheaper palette to fake than
@@ -56,7 +56,7 @@ class AudioService {
     osc.stop(t + len + 0.02);
   }
 
-  /** Shaped noise , the wood in "a wall going into a groove". */
+  /** Shaped noise — the wood in "a wall going into a groove". */
   private knock(at: number, len: number, gain: number, cutoff: number) {
     const ctx = this.ctx;
     if (!ctx || !this.master || this.volume <= 0) return;

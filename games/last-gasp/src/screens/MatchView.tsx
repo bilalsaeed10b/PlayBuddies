@@ -5,7 +5,7 @@
  * one client decides what happened, and that is the host. Guests publish the
  * action they want to take and nothing else; the host validates it, appends
  * it, and republishes the whole history. A guest never computes a
- * consequence , including the one piece of real time in this game, a chain
+ * consequence — including the one piece of real time in this game, a chain
  * window lapsing, which only the host ever decides and always records as a
  * discrete action rather than something every client independently notices.
  *
@@ -69,7 +69,7 @@ export default function MatchView({
 
   const engine = useMemo(
     () => new LastGaspEngine({ seats: config.seats, seed: config.seed, rules: config.rules }),
-    // Rebuilt only when the match itself changes , a settings tweak must not
+    // Rebuilt only when the match itself changes — a settings tweak must not
     // reset the board mid-word.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [config.seed, config.seats.length],
@@ -85,12 +85,12 @@ export default function MatchView({
   const [activeLocal, setActiveLocal] = useState(0);
 
   /**
-   * A short, wide screen , a phone turned sideways.
+   * A short, wide screen — a phone turned sideways.
    *
    * Stacked, this screen wants a gallows, a word, a status line and a 26-key
    * rack in one column. Measured at 812x375 without this, the gallows sat at
    * y=-2 (clipped by the header) and the keyboard's own bottom edge landed
-   * at y=416 , 41px below a 375px-tall viewport, on the one row a landscape
+   * at y=416 — 41px below a 375px-tall viewport, on the one row a landscape
    * phone actually needs to reach. Side by side, the board takes the height
    * and the rack takes the width there is plenty of. The same measured
    * approach Wanted Board and the original build of this game both needed.
@@ -110,7 +110,7 @@ export default function MatchView({
   }, []);
 
   /**
-   * The learned match seed , see the identical field in Wanted Board's
+   * The learned match seed — see the identical field in Wanted Board's
    * MatchView for why this exists at all. A guest's `config.seed` is only
    * ever this device's own locally-rolled guess; the host's `start` packet
    * (or the `seed` stamped on the first `state` packet) corrects it.
@@ -143,7 +143,7 @@ export default function MatchView({
    *
    * The half of `commit` that everyone is allowed to do. Guests use it to show
    * a move the instant they hear about it rather than waiting for the host's
-   * authoritative echo to come back round , see `play` for why that matters so
+   * authoritative echo to come back round — see `play` for why that matters so
    * much here.
    */
   const applyLocal = useCallback(
@@ -218,7 +218,7 @@ export default function MatchView({
         const seat = seatOfUid.get(from);
         if (seat === undefined) return;
         // Only ever trust the sender's own seat number, never whatever the
-        // packet claims , a guest cannot act, vote or set a word for anyone
+        // packet claims — a guest cannot act, vote or set a word for anyone
         // but themselves.
         const claimed = packet.a;
         const action: Action =
@@ -294,14 +294,14 @@ export default function MatchView({
         if (config.isHost) {
           link.send({ t: 'start', n: Date.now(), seed: config.seed, r: rulesBits });
         }
-        // `pagehide` fires with `persisted: false` , indistinguishable from a
-        // real close , on plenty of things that are not: a phone screen
+        // `pagehide` fires with `persisted: false` — indistinguishable from a
+        // real close — on plenty of things that are not: a phone screen
         // locking, switching apps for a moment, an iOS Safari tab going into
         // the background. A page holding an open Firestore listener is not
         // bfcache-eligible in most browsers, so `persisted` alone cannot
         // catch this. Rather than hand the seat to a bot on the spot, wait to
-        // see if the tab comes back , cancel on `pageshow` or the tab going
-        // visible again , and only actually announce the bye once it hasn't.
+        // see if the tab comes back — cancel on `pageshow` or the tab going
+        // visible again — and only actually announce the bye once it hasn't.
         let leaveTimer: number | undefined;
         cancelLeave = () => {
           if (leaveTimer !== undefined) {
@@ -353,8 +353,8 @@ export default function MatchView({
   // One heartbeat rather than a pile of individually-tracked timers: every
   // time anything eligibility-relevant changes, every currently-eligible bot
   // seat gets a fresh randomised delay before it acts. The delay itself needs
-  // no cross-client agreement , only the host ever runs this, and the choice
-  // it produces (which letter, which word) is what actually gets replayed ,
+  // no cross-client agreement — only the host ever runs this, and the choice
+  // it produces (which letter, which word) is what actually gets replayed —
   // so it is timed with plain Math.random() rather than the seeded rng.
   const botTimers = useRef(new Map<number, number>());
   useEffect(() => {
@@ -512,7 +512,7 @@ export default function MatchView({
   // Which of my own seats is the one that can act right now, for whichever
   // phase we are in. On a solo device this is trivially localSeats[0]; on a
   // shared couch device it is whichever seat the little picker below has set
-  // as "you" , see activeLocal.
+  // as "you" — see activeLocal.
   const actingLocal = (predicate: (seat: number) => boolean) => config.localSeats.find(predicate);
 
   const mySetter = actingLocal((s) => engine.canSetWord(s));
@@ -807,7 +807,7 @@ function WordEntry({
   onChange: (v: string) => void;
   onSubmit: () => void;
   label: string;
-  /** The clock only ever ran silently against the person actually typing , everyone else waiting on them saw it, they didn't. */
+  /** The clock only ever ran silently against the person actually typing — everyone else waiting on them saw it, they didn't. */
   seconds: number;
 }) {
   return (
@@ -899,7 +899,7 @@ function ChainBanner({
   if (engine.chainHolder === null) {
     return (
       <p className="flex items-center justify-center gap-1.5 text-[11px] font-black uppercase tracking-wide text-slate-400">
-        <ThumbsUp className="h-3.5 w-3.5" /> Open table , first correct letter wins it
+        <ThumbsUp className="h-3.5 w-3.5" /> Open table — first correct letter wins it
       </p>
     );
   }
@@ -936,8 +936,8 @@ function describe(event: RoundEvent, seats: Seat[], mine: Set<number>): string {
       return `The team picked ${name(event.author)}'s word.`;
     case 'hit':
       return event.chain > 0
-        ? `${name(event.seat)} chained ${event.letter} , +${event.points}.`
-        : `${name(event.seat)} called ${event.letter} , ${event.copies} of them, +${event.points}.`;
+        ? `${name(event.seat)} chained ${event.letter} — +${event.points}.`
+        : `${name(event.seat)} called ${event.letter} — ${event.copies} of them, +${event.points}.`;
     case 'miss':
       return `No ${event.letter}. That is line ${event.piece} of ${PIECES}.`;
     case 'chainEnded':

@@ -1,11 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState, startTransition } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { usePathname } from "next/navigation";
 import { doc, getDoc, addDoc, collection } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useAuthStore } from "@/store/useAuthStore";
-import { useGameplayStore } from "@/store/useGameplayStore";
 import { useFriends, type FriendProfile } from "@/hooks/useFriends";
 import { useFriendRequests } from "@/hooks/useFriendRequests";
 import { useFriendsOnline } from "@/hooks/usePresence";
@@ -24,22 +23,10 @@ export default function FriendsSidebar() {
   const user = useAuthStore((s) => s.user);
   const pathname = usePathname();
   // The lobby has its own fixed bottom-right button (mobile only, for the
-  // players/chat panel) in this same corner , nudge ours above it there so
+  // players/chat panel) in this same corner — nudge ours above it there so
   // the two don't stack on top of each other.
   const isLobby = pathname?.startsWith("/lobby");
-  // A game actually on screen, not just a lobby somebody hasn't started yet.
-  // The pill floats over whatever the game itself is showing in that corner
-  // -- a start button, in the report this came from -- so it disappears
-  // while true rather than merely making room for a second floating button.
-  const isPlaying = useGameplayStore((s) => s.isPlaying);
   const [isOpen, setIsOpen] = useState(false);
-
-  // Closes the panel itself too, for the same reason -- a match starting
-  // while this happened to be open would otherwise leave it sitting over the
-  // game with the one button that closes it now gone.
-  useEffect(() => {
-    if (isPlaying) startTransition(() => setIsOpen(false));
-  }, [isPlaying]);
   const [tab, setTab] = useState<"friends" | "requests" | "add">("friends");
 
   const [searchQuery, setSearchQuery] = useState("");
@@ -49,7 +36,7 @@ export default function FriendsSidebar() {
   const [sentTo, setSentTo] = useState<string | null>(null);
   const [notice, setNotice] = useState<string>("");
 
-  // The friends-list listener only runs while the panel is open , it used to
+  // The friends-list listener only runs while the panel is open — it used to
   // stay open on every page for every signed-in user, including during
   // gameplay. Requests are different: a badge that only updates once the
   // panel is already open can never announce that a request just arrived, so
@@ -139,7 +126,7 @@ export default function FriendsSidebar() {
 
   return (
     <>
-      {!isOpen && !isPlaying && (
+      {!isOpen && (
         <motion.button
           initial={{ opacity: 0, x: 20 }}
           animate={{ opacity: 1, x: 0 }}
@@ -399,7 +386,6 @@ function Avatar({ uid, src, name }: { uid: string; src?: string; name: string })
   const [failed, setFailed] = useState(false);
   const fallback = `https://api.dicebear.com/7.x/avataaars/svg?seed=${uid}`;
   return (
-    // eslint-disable-next-line @next/next/no-img-element
     <img
       src={!src || failed ? fallback : src}
       onError={() => setFailed(true)}

@@ -2,7 +2,7 @@
  * The town, and what happens when everybody moves at once.
  *
  * This file is a pure function wearing a class. The entire state of a match is
- * derived by replaying `history` from an empty town , nothing is accumulated
+ * derived by replaying `history` from an empty town — nothing is accumulated
  * incrementally, nothing is cached across rounds, and `replay()` from the same
  * history always lands on the identical state. That is what lets the wire be
  * "here is every round so far" instead of a patch stream, and it is why there
@@ -69,7 +69,7 @@ export interface TrapState {
  * What happened, in the order the reveal should play it.
  *
  * The screen animates straight down this list, so the order here is the order
- * the story is told in , and it is deliberately the same order the rules
+ * the story is told in — and it is deliberately the same order the rules
  * resolve in, so what a player sees is never a dramatised version of what the
  * numbers did.
  */
@@ -146,7 +146,7 @@ export class WantedEngine {
   /**
    * Rebuild the whole match from a history.
    *
-   * Called whenever the host's history is longer than ours , which is every
+   * Called whenever the host's history is longer than ours — which is every
    * round for a guest, and after any reconnection for anybody. Cheap enough to
    * do unconditionally: a full game is a dozen rounds of arithmetic.
    */
@@ -169,7 +169,7 @@ export class WantedEngine {
     return (Object.keys(CARDS) as CardId[]).filter((id) => {
       const meta = CARDS[id];
       if (meta.onlyAt !== null && meta.onlyAt !== place) return false;
-      // Gallop has nowhere to point from a place with no two-hop reach , never
+      // Gallop has nowhere to point from a place with no two-hop reach — never
       // actually happens on this graph, but it costs nothing to guarantee.
       if (meta.needsTarget && this.legalTargets(seat, id).length === 0) return false;
       return true;
@@ -181,12 +181,12 @@ export class WantedEngine {
     if (!CARDS[card].needsTarget) return [];
     const place = this.players[seat]?.place ?? 0;
     // Ride and a trap both reach exactly one step. A Gallop clears the place
-    // in between entirely, so its targets are two-hop only , never a place
+    // in between entirely, so its targets are two-hop only — never a place
     // Ride could also reach, or Gallop would just be a strictly better Ride.
     return card === 'gallop' ? twoHopTargets(place) : neighbours(place);
   }
 
-  /** Corrects an illegal or stale choice rather than rejecting it , see `applyRound`. */
+  /** Corrects an illegal or stale choice rather than rejecting it — see `applyRound`. */
   sanitise(seat: number, choice: Choice): Choice {
     const legal = this.legalCards(seat);
     const card = legal.includes(choice.card) ? choice.card : BALANCE.TIMEOUT_CARD;
@@ -202,8 +202,8 @@ export class WantedEngine {
    * One round, start to finish.
    *
    * Every choice is run through `sanitise` first rather than trusted. A packet
-   * can legitimately be stale , somebody picked "Cash In" at the Bank, then a
-   * round they had not seen yet moved them out of it , and the alternative to
+   * can legitimately be stale — somebody picked "Cash In" at the Bank, then a
+   * round they had not seen yet moved them out of it — and the alternative to
    * correcting it is a round that resolves differently depending on which
    * client is doing the arithmetic.
    */
@@ -219,7 +219,7 @@ export class WantedEngine {
     const hidden = (seat: number) => choices[seat].card === 'layLow';
 
     // ── 1. movement ────────────────────────────────────────────────────────
-    // Ride and Gallop both just relocate a seat , the only difference between
+    // Ride and Gallop both just relocate a seat — the only difference between
     // them is how far `sanitise` let the target be, which is already settled
     // by the time a choice reaches this point. Whatever was waiting on the
     // place in between a Gallop's start and end never gets a look at it: that
@@ -241,7 +241,7 @@ export class WantedEngine {
       if (trap.armedOn > roundNo) continue;
       const victims = this.seatsAt(trap.place).filter((s) => s !== trap.owner && !hidden(s));
       if (victims.length === 0) continue;
-      // Springs once, on whoever is there , a trap is not a minefield.
+      // Springs once, on whoever is there — a trap is not a minefield.
       const victim = victims[0];
       const amount = Math.round(this.players[victim].bounty * BALANCE.TRAP_TAKE);
       this.players[victim].bounty -= amount;
@@ -267,7 +267,7 @@ export class WantedEngine {
       if (victims.length === 0) {
         if (ambushers.length > 1) {
           // Two people with the same idea. Nobody gets robbed, everybody gets
-          // seen , which costs the same as any other wasted ambush.
+          // seen — which costs the same as any other wasted ambush.
           events.push({ kind: 'standoff', seats: ambushers, place });
         }
         for (const a of ambushers) {
@@ -322,7 +322,7 @@ export class WantedEngine {
 
     // ── 5b. scouting ─────────────────────────────────────────────────────
     // Read last, after every robbery and every bank run this round has
-    // already happened , a scout is reporting where the money genuinely
+    // already happened — a scout is reporting where the money genuinely
     // stands right now, not a stale read from before the dust settled.
     for (let i = 0; i < this.playerCount; i++) {
       if (choices[i].card !== 'scout') continue;

@@ -17,7 +17,7 @@ import { db } from "@/lib/firebase";
  */
 export interface Wallet {
   /**
-   * Coins, per game , what mini-golf pays out cannot be spent in Quoridor.
+   * Coins, per game — what mini-golf pays out cannot be spent in Quoridor.
    * Same shape as `unlocks`, and for the same reason: a purse earned in one
    * game buying something in another was never a purse, it was one shared
    * account-wide currency wearing six different games' skins.
@@ -45,7 +45,7 @@ function cleanUnlocks(raw: unknown): Record<string, number[]> {
  * Same shape of guard as `cleanUnlocks`, one game's balance at a time.
  *
  * A wallet written before coins were split per game has a bare number here
- * instead of a map , `typeof raw !== "object"` catches that and the account
+ * instead of a map — `typeof raw !== "object"` catches that and the account
  * comes back with an empty purse in every game rather than a crash. That is
  * deliberate: coins earned under one shared balance do not have a single
  * honest game to land in, so the split starts everyone at zero rather than

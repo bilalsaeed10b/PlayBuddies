@@ -27,6 +27,7 @@ import {
   Plus,
   ArrowRight,
   Play,
+  Trophy,
   Users,
 } from "lucide-react";
 
@@ -39,7 +40,7 @@ export default function DashboardPage() {
   const [joinCode, setJoinCode] = useState("");
   const [joinError, setJoinError] = useState("");
   const [isJoining, setIsJoining] = useState(false);
-  const [userStats, setUserStats] = useState({ gamesPlayed: 0 });
+  const [userStats, setUserStats] = useState({ gamesPlayed: 0, winRate: "0%" });
   const [loadingStats, setLoadingStats] = useState(true);
   // Read once on mount: localStorage isn't available during the server render,
   // and reading it in the body would make the first paint mismatch.
@@ -70,7 +71,11 @@ export default function DashboardPage() {
         if (cancelled || !snap.exists()) return;
         const data = snap.data();
         const games = data.stats?.gamesPlayed || 0;
-        const freshStats = { gamesPlayed: games };
+        const wins = data.stats?.wins || 0;
+        const freshStats = {
+          gamesPlayed: games,
+          winRate: games > 0 ? Math.round((wins / games) * 100) + "%" : "0%",
+        };
         setUserStats(freshStats);
         setStats(freshStats);
       } catch (error) {
@@ -83,9 +88,6 @@ export default function DashboardPage() {
     return () => {
       cancelled = true;
     };
-    // cachedStats/setStats/statsFetchedAt intentionally omitted — stale-check
-    // runs once on mount; adding them would re-fetch on every store update.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
   useEffect(() => {
@@ -129,7 +131,7 @@ export default function DashboardPage() {
     try {
       // `players` is a MAP keyed by uid, and the host is seeded here. The lobby
       // page updates it with dotted paths (`players.<uid>`), which Firestore
-      // rejects against an array field , that mismatch meant a host never
+      // rejects against an array field — that mismatch meant a host never
       // appeared in the lobby they had just created.
       await setDoc(doc(db, "lobbies", roomId), {
         hostId: user.uid,
@@ -197,7 +199,6 @@ export default function DashboardPage() {
                 <p className="text-sm font-bold text-white">{user?.displayName}</p>
                 <p className="text-xs text-text-muted">{user?.email}</p>
               </div>
-              {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={user?.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user?.uid}`}
                 alt="Profile"
@@ -282,7 +283,7 @@ export default function DashboardPage() {
 
           {/* Resume banner. The room code only ever lived in the URL, so before
               this a reload or a stray "back" lost the room and the only way
-              onward was a brand new lobby , stranding whoever was still in the
+              onward was a brand new lobby — stranding whoever was still in the
               old one. */}
           {resumeRoom && (
             <motion.div
@@ -323,10 +324,11 @@ export default function DashboardPage() {
           )}
 
           {/* Quick Stats */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 mb-16">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 mb-16">
             {[
               { label: "Friends Online", value: onlineFriends.size, icon: Users, color: "text-green-400" },
               { label: "Games Played", value: loadingStats ? "-" : userStats.gamesPlayed, icon: Gamepad2, color: "text-blue-400" },
+              { label: "Win Rate", value: loadingStats ? "-" : userStats.winRate, icon: Trophy, color: "text-yellow-400" },
             ].map((stat, i) => (
               <motion.div
                 key={stat.label}
@@ -361,7 +363,7 @@ export default function DashboardPage() {
                   initial={{ opacity: 0, scale: 0.9 }}
                   animate={{ opacity: 1, scale: 1 }}
                   transition={{ delay: index * 0.05 }}
-                  className="group relative w-36 sm:w-40 glass rounded-2xl p-4 border border-white/5 hover:border-transparent transition-all cursor-pointer overflow-hidden"
+                  className="group relative glass rounded-2xl p-4 border border-white/5 hover:border-transparent transition-all cursor-pointer overflow-hidden"
                   onClick={() => createLobby(game.id)}
                 >
                   <motion.div

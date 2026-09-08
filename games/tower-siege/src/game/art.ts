@@ -129,7 +129,7 @@ function paintTowerBase(ctx: CanvasRenderingContext2D, kind: TowerId, level: num
   const grow = 1 + level * 0.11;
   const r = 22 * grow;
 
-  // A long soft shadow, thrown the same way as every tree's , one light
+  // A long soft shadow, thrown the same way as every tree's — one light
   // source across the whole board is most of what makes a flat top-down scene
   // read as having depth at all.
   ctx.fillStyle = 'rgba(0, 0, 0, 0.34)';
@@ -358,7 +358,7 @@ function paintEnemy(ctx: CanvasRenderingContext2D, kind: EnemyId) {
 
   if (kind === 'flyer') {
     // Wings, so it reads as airborne at a glance rather than as a fast grunt
-    // in a different colour , the one thing a player must not misread, since
+    // in a different colour — the one thing a player must not misread, since
     // half the towers cannot touch it.
     ctx.fillStyle = 'rgba(205, 198, 255, 0.5)';
     for (const sgn of [-1, 1]) {

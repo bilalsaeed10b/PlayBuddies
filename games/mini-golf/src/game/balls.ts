@@ -44,7 +44,7 @@ export interface BallPaint {
  * The body colour of each skin. Everything else is drawn over it.
  *
  * Onyx is the only one that is not basically white, which is why the ring has
- * a light inner edge , without it a black ball on a dark green loses its
+ * a light inner edge — without it a black ball on a dark green loses its
  * outline entirely.
  */
 const BODY: Record<number, [string, string]> = {

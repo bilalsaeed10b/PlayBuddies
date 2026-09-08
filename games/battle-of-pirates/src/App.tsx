@@ -29,7 +29,7 @@ import { accuracy, clearStats, favouriteCard, readStats, recordBattle } from './
 import type { MatchRecord, Stats } from './platform/stats';
 import BattleView, { MatchConfig } from './screens/BattleView';
 import type { Seat } from './engine/BattleEngine';
-import { DEFAULT_RULES, PLAYER_CODES, packRules, unpackRules } from './types/game';
+import { DEFAULT_RULES, packRules, unpackRules } from './types/game';
 import { createLogger } from '@shared/log/logger';
 import type { GameSettings, MatchRules, MountainRule, PlayerCount, Team } from './types/game';
 
@@ -328,25 +328,6 @@ export default function App() {
   const myHull = typeof myHullRaw === 'number' ? myHullRaw : 0;
   const isHost = Boolean(uid && lobby && lobby.hostId === uid);
 
-  /**
-   * The host's chosen player count follows the room, not the other way round.
-   *
-   * `rules.players` used to be whatever this device remembered from its last
-   * battle -- often two -- so a host who opened a fresh room with three
-   * friends found the seats already decided one of them would be watching,
-   * with nothing on screen to say so before Start. This raises it to the
-   * smallest count the room actually fits the moment somebody new joins, and
-   * never on its own lowers a count the host (or an earlier run of this same
-   * effect) already set -- so choosing fewer seats than the room on purpose,
-   * bots filling the rest, still works exactly as before for whoever wants it.
-   */
-  useEffect(() => {
-    if (!online || !isHost || !lobby) return;
-    const roomSize = Object.keys(lobby.players ?? {}).length;
-    const fits = PLAYER_CODES.find((n) => n >= roomSize) ?? PLAYER_CODES[PLAYER_CODES.length - 1];
-    if (fits > rules.players) setRules((r) => ({ ...r, players: fits }));
-  }, [online, isHost, lobby, rules.players]);
-
   useEffect(() => {
     // An offline battle is the player's own; the room does not get to start or
     // end it. This guard is also what stops an unrelated lobby update from
@@ -470,33 +451,12 @@ export default function App() {
 
   // -- into the battle --------------------------------------------------------
 
-  /**
-   * Frozen for the whole battle, not recomputed on every render.
-   *
-   * `onlineConfig()` reads the live lobby roster and assigns `team: i % 2`
-   * from its current sorted position -- which is fine the moment a match
-   * starts, and wrong to keep doing afterward. `config` used to be a plain
-   * `const` built fresh on every render, and BattleView's own `myTeam` /
-   * `turnTeam` read `config.seats[i].team` directly every frame, not the
-   * frozen ships the battle engine actually simulates with. A reconnect, a
-   * late spectator, even an unrelated field changing on the lobby doc, was
-   * enough to re-sort that roster and flip a captain's array index -- the
-   * engine kept fighting the identical battle it started, but the HUD would
-   * occasionally announce a different captain as your teammate mid-fight.
-   * Keyed on the match's own seed rather than on `lobby`, so it only rebuilds
-   * when a genuinely new battle actually starts.
-   */
-  const battleConfig = useMemo(
-    () => (online && uid && !offlineMatch ? onlineConfig() : offlineConfig()),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [session.seed, offlineMatch, uid],
-  );
-
   if (view === 'game') {
+    const config = online && uid && !offlineMatch ? onlineConfig() : offlineConfig();
     return (
       <>
         <BattleView
-          config={battleConfig}
+          config={config}
           settings={settings}
           onOpenSettings={() => setShowSettings(true)}
           onExit={leaveBattle}
@@ -607,7 +567,7 @@ export default function App() {
 
     // The fleet-size rule applies offline too, so a solo player can take a
     // wing of bots against a fleet of them. Sides alternate down the list, so
-    // the first two berths are opposite each other , which is what makes a
+    // the first two berths are opposite each other — which is what makes a
     // couch battle two people facing off rather than sharing a side.
     for (let i = 0; i < rules.players; i++) {
       const team = (i % 2) as Team;
@@ -946,7 +906,7 @@ function ShipGrid({
   coins: number;
   selected: number | null;
   /**
-   * Everyone else who has also picked this ship. Purely informational , the
+   * Everyone else who has also picked this ship. Purely informational — the
    * paint is cosmetic, so nothing stops two captains flying the same colours.
    */
   pickedBy: Record<number, string[]>;
@@ -1363,7 +1323,7 @@ function RoomScreen({
    *
    * The host used to be able to weigh anchor the moment its *own* ship was
    * picked, which left anyone still choosing to be dropped into a battle
-   * sailing a hull the lobby had never recorded , their opponent saw a ship
+   * sailing a hull the lobby had never recorded — their opponent saw a ship
    * they had not chosen, and the shop screen was still open over the top of it.
    */
   const everyonePicked = people.every((p) => p.skin !== undefined && p.skin !== null);
@@ -1585,28 +1545,6 @@ function RoomScreen({
     <div className="mx-auto flex h-full w-full max-w-6xl flex-col overflow-y-auto overscroll-contain gap-2 p-2.5 sm:gap-4 sm:p-6">
       {header}
 
-      {/* Loud on purpose, and the one thing this whole screen fights for
-          height on that skips `short:` -- see `sideBySide` above for what
-          happens instead when there truly is none to spare. "Rules" further
-          down among the CTA buttons read as maintenance, not as the wind and
-          the mountain and the reload that decide most battles. */}
-      <button
-        onClick={onRules}
-        className="relative flex shrink-0 items-center gap-3 overflow-hidden rounded-2xl border-2 border-amber-400/60 bg-amber-400/10 px-4 py-3 text-left transition-transform active:scale-[0.99] short:hidden"
-      >
-        <span className="absolute -right-6 -top-6 h-16 w-16 animate-pulse rounded-full bg-amber-400/20" aria-hidden />
-        <ScrollText className="h-6 w-6 shrink-0 text-amber-300" />
-        <div className="min-w-0 flex-1">
-          <p className="text-sm font-black uppercase tracking-wide text-amber-200">
-            {isHost ? 'New here? Read the rules' : 'How wind and cards work'}
-          </p>
-          <p className="text-[11px] font-bold text-amber-300/70">Worth 30 seconds before the first shot.</p>
-        </div>
-        <span className="shrink-0 rounded-xl bg-amber-400 px-3 py-1.5 text-[11px] font-black uppercase tracking-wide text-slate-900">
-          Guide
-        </span>
-      </button>
-
       {/* On a phone the start button would otherwise sit below the fold, which
           is exactly what made it unreachable in the other games. Kept to two
           short rows now rather than three stacked full-height buttons: that
@@ -1699,7 +1637,7 @@ function SettingsPanel({
    * The aim guide, the turn clock and the mountain used to live here and no
    * longer do: they change how the battle plays, so both sides have to agree
    * on them. They are Battle Rules now, set by the host in the room. What is
-   * left is genuinely local , how loud it is, and how hard this particular
+   * left is genuinely local — how loud it is, and how hard this particular
    * machine is willing to work.
    */
   const toggles: { key: keyof GameSettings; label: string; hint: string }[] = [
@@ -1762,8 +1700,8 @@ function SettingsPanel({
 /**
  * The rules of the battle, set once by the host and obeyed by everyone.
  *
- * Separate from Settings on purpose. Settings are this device's business ,
- * volume, render cost , and nobody else is affected by them. These change what
+ * Separate from Settings on purpose. Settings are this device's business —
+ * volume, render cost — and nobody else is affected by them. These change what
  * the battle *is*, so both fleets have to be playing the same one: they travel
  * to the guest over the wire (see `packRules`) and its engine is built from
  * whatever arrives, not from anything stored locally.
@@ -1805,7 +1743,7 @@ function StatsPanel({
     { label: 'Shots that landed', value: String(stats.hits) },
     { label: 'Iron on target', value: `${stats.ballsLanded} of ${stats.balls} balls · ${ballAcc}%` },
     { label: 'Damage dealt', value: String(Math.round(stats.damage)) },
-    { label: 'Best run', value: stats.bestStreak > 0 ? `${stats.bestStreak} in a row` : ',' },
+    { label: 'Best run', value: stats.bestStreak > 0 ? `${stats.bestStreak} in a row` : '—' },
   ];
 
   // Escape closes it too. See @shared/ui/dismiss.
@@ -1830,7 +1768,7 @@ function StatsPanel({
             <Anchor className="mx-auto mb-3 h-10 w-10 text-white/25" />
             <p className="text-sm font-bold text-white/60">Nothing logged yet.</p>
             <p className="mt-1 text-[11px] text-white/40">
-              Fight a battle and this fills itself in , every shot you take, and what it did.
+              Fight a battle and this fills itself in — every shot you take, and what it did.
             </p>
           </div>
         ) : (
@@ -1842,7 +1780,7 @@ function StatsPanel({
               <Figure
                 icon={<ScrollText className="h-4 w-4" />}
                 label="Favourite card"
-                value={fav ? CARDS[fav.id].name : ','}
+                value={fav ? CARDS[fav.id].name : '—'}
                 sub={fav ? `${fav.n} fired` : undefined}
                 tone="sky"
               />
@@ -1963,7 +1901,7 @@ function RulesPanel({
     {
       key: 'storm',
       label: 'Foul weather',
-      hint: 'A crosswind that changes every turn and is drawn across the top of the water , read the barbs and lean the shot into it. The sea shoves the hulls about harder between turns too.',
+      hint: 'A crosswind that changes every turn and is drawn across the top of the water — read the barbs and lean the shot into it. The sea shoves the hulls about harder between turns too.',
     },
     {
       key: 'cards',
@@ -1978,7 +1916,7 @@ function RulesPanel({
     {
       key: 'aimArc',
       label: 'Aim arc',
-      hint: 'Draws the opening stretch of the shot while aiming. It makes the game a great deal easier , line the dots up and let go. The aim arrow on the pad stays either way.',
+      hint: 'Draws the opening stretch of the shot while aiming. It makes the game a great deal easier — line the dots up and let go. The aim arrow on the pad stays either way.',
     },
   ];
 
@@ -2003,12 +1941,12 @@ function RulesPanel({
           <p className="text-sm font-bold">
             Ships on the water
             <span className="block text-[11px] font-normal text-white/50">
-              Split evenly into two fleets. Anyone in the room beyond this watches , the two sides have to
+              Split evenly into two fleets. Anyone in the room beyond this watches — the two sides have to
               match. Empty berths are sailed by bots.
             </span>
           </p>
           <div className="grid grid-cols-3 gap-2">
-            {PLAYER_CODES.map((option) => (
+            {([2, 4, 6] as PlayerCount[]).map((option) => (
               <button
                 key={option}
                 disabled={!editable}

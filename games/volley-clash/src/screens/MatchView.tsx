@@ -57,19 +57,19 @@ export interface MatchConfig {
  * character is handed to a bot.
  *
  * A phone changing cell is a two-second hole in the wire and a perfectly normal
- * thing to play through, so the second number is generous , and the seat is
+ * thing to play through, so the second number is generous — and the seat is
  * handed straight back the moment its owner speaks again.
  *
  * DROPPED_MS used to be 8 seconds, and it was wrong: it is measured from the
  * moment the match *engine* starts, which is before the wire has even begun
  * connecting. Entering an online match downloads this game's own Firebase
- * chunk for the first time that session , several hundred KB, on whatever
- * connection the player has , then opens a database socket, then attempts
+ * chunk for the first time that session — several hundred KB, on whatever
+ * connection the player has — then opens a database socket, then attempts
  * WebRTC, then falls back to a relay if that fails. None of that is optional
  * and none of it is instant, and 8 seconds was not a fair trial for it: a
  * connection that would have come up fine in 10 or 12 seconds was declared
  * dead and handed to a bot before it had a real chance. This is what "the
- * bot controlled the other person" turned out to be , not a broken
+ * bot controlled the other person" turned out to be — not a broken
  * connection, an impatient clock.
  */
 const QUIET_MS = 1500;
@@ -93,7 +93,7 @@ function isStale(last: number | undefined, n: number): boolean {
  * Two keyboard layouts, so two people can share a laptop without arguing.
  *
  * There is no space bar binding any more. It used to hold a charge meter, which
- * is gone , and on a shared keyboard the space bar was the one key both players
+ * is gone — and on a shared keyboard the space bar was the one key both players
  * reached for anyway.
  */
 const KEYSETS = [
@@ -137,7 +137,7 @@ export default function MatchView({
     stalled: false,
     reason: null,
   });
-  // The render loop reads this rather than `wire` directly , it is not in that
+  // The render loop reads this rather than `wire` directly — it is not in that
   // effect's dependency list, since putting it there would rebuild the engine
   // (and reset the score) on every connection status change.
   const wireRef = useRef(wire);
@@ -186,7 +186,7 @@ export default function MatchView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Live input state, outside React , this is read 120 times a second and has
+  // Live input state, outside React — this is read 120 times a second and has
   // no business causing a re-render.
   const held = useRef<Record<string, boolean>>({});
   /** Written by the touch pad, read by the render loop. Never causes a render. */
@@ -195,8 +195,8 @@ export default function MatchView({
   /**
    * When each remote seat was last heard from, and the newest packet it sent.
    *
-   * The channel is unordered , that is what keeps it from stalling to
-   * retransmit a position that is already stale , so a packet that arrives out
+   * The channel is unordered — that is what keeps it from stalling to
+   * retransmit a position that is already stale — so a packet that arrives out
    * of order has to be recognised and dropped rather than believed.
    */
   const heardAt = useRef(new Map<string, number>());
@@ -264,7 +264,7 @@ export default function MatchView({
       dash: on(set.dash),
     };
 
-    // Touch only ever drives the first seat , nobody plays couch co-op on one
+    // Touch only ever drives the first seat — nobody plays couch co-op on one
     // phone, and letting the pad drive seat two makes it feel broken.
     if (!isOnlySeat || !touch) return keyboard;
 
@@ -280,7 +280,7 @@ export default function MatchView({
     };
   }, [touch]);
 
-  // The render loop must not be rebuilt when `touch` flips , rebuilding it
+  // The render loop must not be rebuilt when `touch` flips — rebuilding it
   // rebuilds the engine, and rebuilding the engine resets the score mid-match.
   const readInputRef = useRef(readInput);
   readInputRef.current = readInput;
@@ -370,7 +370,7 @@ export default function MatchView({
       }
       // Host only. A guest hears about everyone else through the host's
       // snapshots, never directly, so silence from a peer says nothing at all
-      // about whether that player is still there , and acting on it would hand
+      // about whether that player is still there — and acting on it would hand
       // the host's own character to a bot while the match ran perfectly.
       if (online && engine.isHost) {
         for (const seat of seats) {
@@ -378,11 +378,11 @@ export default function MatchView({
           const heard = heardAt.current.get(seat.id) ?? mountedAt;
           if (now - heard > DROPPED_MS) {
             // This used to happen silently. It is the single most confusing
-            // thing that can occur in a match , a real player's seat starts
-            // moving on its own , and it deserves a paper trail explaining why.
+            // thing that can occur in a match — a real player's seat starts
+            // moving on its own — and it deserves a paper trail explaining why.
             console.warn(
               `[net] no contact from ${seat.name} (${seat.id}) for ${Math.round((now - heard) / 1000)}s` +
-                ` , handing their seat to a bot. Link status at the time:`,
+                ` — handing their seat to a bot. Link status at the time:`,
               wireRef.current,
             );
             engine.handOverToAI(seat.id);
@@ -433,7 +433,7 @@ export default function MatchView({
 
         // A host that has gone quiet is not a slow host. Nobody but the host
         // can score, serve or spawn, so a guest left waiting on one is watching
-        // a frozen court , which is exactly what "multiplayer doesn't work"
+        // a frozen court — which is exactly what "multiplayer doesn't work"
         // looked like from the other side.
         if (!engine.isHost) {
           const quiet = (now - lastSnapshotAt.current) / 1000;
@@ -449,7 +449,7 @@ export default function MatchView({
           // was running a moment ago.
           const patience = heardHost.current ? BALANCE.STALL_PROMOTE : BALANCE.STALL_PROMOTE * 2;
           if (quiet > patience) {
-            console.warn('[net] host silent for', quiet.toFixed(1), 's , running the match here');
+            console.warn('[net] host silent for', quiet.toFixed(1), 's — running the match here');
             engine.promote();
             lastSnapshotAt.current = now;
             stalledRef.current = false;
@@ -486,7 +486,7 @@ export default function MatchView({
       engineRef.current = null;
     };
     // `isHost` is deliberately not a dependency. The lobby can elect a new host
-    // mid-match , the platform does exactly that when a host walks away , and
+    // mid-match — the platform does exactly that when a host walks away — and
     // rebuilding the engine for it would throw away the score along with the
     // rally in progress. Authority is handed over in place instead; see below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -496,12 +496,12 @@ export default function MatchView({
   useEffect(() => {
     const engine = engineRef.current;
     if (!engine || !online) return;
-    // Only worth a line in the console when it actually changes something ,
+    // Only worth a line in the console when it actually changes something —
     // every match hits this once at mount as a no-op, confirming what the
     // engine was already built with.
     if (engine.isHost !== isHost) {
       console.warn(
-        `[net] lobby reassigned the host , this machine is now ${isHost ? 'authoritative' : 'a guest'}`,
+        `[net] lobby reassigned the host — this machine is now ${isHost ? 'authoritative' : 'a guest'}`,
       );
     }
     if (isHost) engine.promote();
@@ -515,7 +515,7 @@ export default function MatchView({
     if (!online || !roomId || !uid) return;
 
     // The wire drags in the Firebase SDK for its signalling, so it is fetched
-    // only now , on the online path , rather than by every solo player. See the
+    // only now — on the online path — rather than by every solo player. See the
     // import comment in App.tsx.
     let disposed = false;
     let link: Link | null = null;
@@ -543,7 +543,7 @@ export default function MatchView({
              * Measured from the sender's own stamp against the offset between
              * the two clocks, rather than assumed to be half a round trip.
              * The old assumption only held on a path costing the same in both
-             * directions, which the Firestore relay very much is not , see
+             * directions, which the Firestore relay very much is not — see
              * net/clock.ts.
              *
              * The jitter lead on top is the one part still a guess: the packet
@@ -568,7 +568,7 @@ export default function MatchView({
                 // the match ourselves, means it came back. Stand down: two
                 // machines scoring the same rally is worse than a pause was.
                 if (engine.isHost && !isHost && from === config.hostId) {
-                  console.warn('[net] host is back , handing the match back');
+                  console.warn('[net] host is back — handing the match back');
                   engine.demote();
                   // Their character was handed to a bot while they were gone.
                   engine.reclaim(from);
@@ -618,7 +618,7 @@ export default function MatchView({
         link.setPeers(peopleRef.current.map((p) => p.uid));
 
         // `pagehide` fires on a phone screen locking or a tab switch, not
-        // just a real close , a page with an open connection like this one is
+        // just a real close — a page with an open connection like this one is
         // not bfcache-eligible in most browsers, so there is no reliable
         // `persisted` flag to lean on here at all. Give the tab a chance to
         // come back (cancelled by `pageshow` or the tab going visible again)
@@ -675,7 +675,7 @@ export default function MatchView({
    * Keeps the connection set in step with the room.
    *
    * This is the one that mattered most. The peer list used to be handed over
-   * exactly once, in the callback of a dynamic import, and never again , so a
+   * exactly once, in the callback of a dynamic import, and never again — so a
    * roster that changed by so much as a re-render after the match began left
    * the mesh connecting to nobody, with no error anywhere to say so. A player
    * who joined, left and came back, or simply arrived while the import was
