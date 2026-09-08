@@ -598,24 +598,20 @@ export class BattleEngine {
   /**
    * Who fires after this hull.
    *
-   * The helm alternates sides every single turn, however lopsided the battle
-   * has become: a fleet down to its last ship still gets every other shot
-   * rather than being pounded three times between replies. Within a side it
-   * goes round the survivors in order, so the same captain does not fire twice
-   * while a crewmate waits.
+   * Simple round-robin through every living ship, regardless of team.
+   * In a 2v2 where one player is sunk the order is P1 → P2 → P3 → P1,
+   * giving each survivor exactly one turn per cycle rather than the old
+   * team-alternating scheme that doubled the surviving team's fire rate
+   * in a lopsided fight.
    */
   private nextTurn(from: number): number {
-    const other = (1 - this.ships[from].team) as Team;
-    const theirs = this.afloat(other);
-    if (theirs.length > 0) {
-      // Whoever on that side has waited longest , the first one past the last
-      // of theirs to fire, wrapping around.
-      const after = theirs.find((i) => i > (this.lastFired[other] ?? -1));
-      return after ?? theirs[0];
+    const n = this.ships.length;
+    for (let step = 1; step <= n; step++) {
+      const candidate = (from + step) % n;
+      if (this.ships[candidate].hp > 0) return candidate;
     }
-    // Nobody left to answer; the same side keeps firing until finish() notices.
-    const mine = this.afloat(this.ships[from].team);
-    return mine.find((i) => i > from) ?? mine[0] ?? from;
+    // Fallback: nobody alive (should not happen, finish() catches this first).
+    return from;
   }
 
   /**
