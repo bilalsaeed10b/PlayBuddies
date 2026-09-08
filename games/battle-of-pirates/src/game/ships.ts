@@ -307,11 +307,25 @@ function drawCannon(ctx: CanvasRenderingContext2D, d: ShipDraw) {
 }
 
 /** Live, because it is the one part of the rig that is supposed to move. */
-function drawFlag(ctx: CanvasRenderingContext2D, skin: ShipSkin, clock: number) {
-  const { x, y } = RIGS[skin.rig].flag;
+/**
+ * `origin` and `color` default to the rig's own masthead and the skin's own
+ * decorative colour -- what a living hull always wants. A wreck marker is
+ * the one caller that supplies both itself: its own pole rather than a mast
+ * partway up a hull that is no longer drawn, and the side's own colour
+ * rather than whatever this particular skin happened to be painted, since a
+ * skin is shared cosmetic stock and tells you nothing about whose it was.
+ */
+export function drawFlag(
+  ctx: CanvasRenderingContext2D,
+  skin: ShipSkin,
+  clock: number,
+  origin?: { x: number; y: number },
+  color?: string,
+) {
+  const { x, y } = origin ?? RIGS[skin.rig].flag;
   const wave = Math.sin(clock * 3.1) * 5;
   const wave2 = Math.sin(clock * 3.1 + 1.2) * 7;
-  ctx.fillStyle = skin.flag;
+  ctx.fillStyle = color ?? skin.flag;
   ctx.beginPath();
   ctx.moveTo(x, y);
   ctx.quadraticCurveTo(x + 26, y - 6 + wave, x + 52, y + 2 + wave2);

@@ -198,6 +198,37 @@ export default function MatchView({
   }, [seatIdKey]);
 
   /**
+   * A seat the board was built believing was a bot, when the room's own
+   * roster now clearly says a real person belongs there.
+   *
+   * The board's seats are frozen the moment it is built, on purpose , that is
+   * what stops a live lobby snapshot from resetting a game in progress. The
+   * one case that slips past it: the very snapshot the board was built from
+   * was itself incomplete , a guest's own write to the room simply had not
+   * landed on this device yet , so their seat got made up as `bot-N` from
+   * the start rather than ever being theirs. Their `hello`, the ordinary way
+   * a seat like that gets handed back, fires once, right as their own link
+   * opens, and can cross the wire before this device's listener for it is
+   * even subscribed; nothing was ever going to ask a second time. This asks
+   * again , every time the room's roster settles on a real id for a seat the
+   * board still thinks is a bot, correcting it right then rather than
+   * staking the whole game on one packet's timing.
+   */
+  useEffect(() => {
+    const engine = engineRef.current;
+    if (!engine) return;
+    for (let i = 0; i < seats.length && i < engine.seats.length; i++) {
+      const roomSeat = seats[i];
+      const boardSeat = engine.seats[i];
+      if (boardSeat.control !== 'ai' || !boardSeat.id.startsWith('bot-')) continue;
+      if (roomSeat.control !== 'remote' || roomSeat.id.startsWith('bot-')) continue;
+      engine.correctSeat(i, roomSeat.id, roomSeat.name);
+      setNotice(`${roomSeat.name} was here all along.`);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seatIdKey]);
+
+  /**
    * Whether this device drives the bots, read from a ref inside the loop.
    *
    * As a dependency it would rebuild the board , resetting a live game , the

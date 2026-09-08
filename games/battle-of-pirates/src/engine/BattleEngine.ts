@@ -19,7 +19,7 @@
  *    carries turns rather than state.
  */
 import { fxSprites, bakeSea, drawFallbackSea, drawRock, drawWaves, drawWeather, rockRadius } from '../game/sea';
-import { SHIPS, drawShip } from '../game/ships';
+import { SHIPS, drawFlag, drawShip } from '../game/ships';
 import { HULLS, hullAt } from '../game/hulls';
 import type { HullClass } from '../game/hulls';
 import {
@@ -146,9 +146,23 @@ interface Ring {
   width: number;
 }
 
+/** One floating number over a hull -- see `damageTexts` for why it exists. */
+interface DamageText {
+  x: number;
+  y: number;
+  vy: number;
+  life: number;
+  max: number;
+  text: string;
+  color: string;
+  size: number;
+}
+
 const STEP = 1 / 120;
 const PARTICLE_CAP = 420;
 const RING_CAP = 14;
+/** Seconds a sunk hull spends sliding under before it becomes just its flag. */
+const WRECK_SETTLE = 1.3;
 /** Barrel length, so the ball leaves the muzzle rather than the deck. */
 const BARREL = 58;
 /** A rigging hit is real but glancing. */
@@ -341,13 +355,23 @@ export class BattleEngine {
   private particles: Particle[] = [];
   private pool: Particle[] = [];
   private rings: Ring[] = [];
+  /**
+   * Floating combat text -- the actual number a hit took off a hull.
+   *
+   * `shout()`'s big banner already says *that* something died; this says
+   * *how much* every hit along the way actually cost, which the banner never
+   * did and the health bar only shows as a slow drain you have to be looking
+   * at the right corner to catch. One of these spawns from `damage()` for a
+   * direct or splash hit, and another from the burn tick in `resolve()`, so
+   * a fire that finishes a hull off is not a silent last few points.
+   */
+  private damageTexts: DamageText[] = [];
   private backdrop: HTMLCanvasElement | null = null;
   private acc = 0;
   private clock = 0;
   private shake = 0;
   private phaseTimer = 0;
   private botTimer = 0;
-  private sinkT = 0;
   private budget = 1;
 
   /** Burn stacks as they stood before the current shot, so a firebomb cannot tick on itself. */
@@ -517,6 +541,7 @@ export class BattleEngine {
       flash: 0,
       lean: 0,
       lastAim: { angle: seat.team === 0 ? -0.72 : -Math.PI + 0.72, power: 0.65 },
+      sinkAge: -1,
     };
   }
 
@@ -550,6 +575,29 @@ export class BattleEngine {
     // Nobody left to answer; the same side keeps firing until finish() notices.
     const mine = this.afloat(this.ships[from].team);
     return mine.find((i) => i > from) ?? mine[0] ?? from;
+  }
+
+  /**
+   * A turn index from somewhere else -- a remote packet, a host beacon, a
+   * catch-up snapshot -- corrected if it names a hull that is not there to
+   * answer for.
+   *
+   * `resolve()`'s own local turns always go through `nextTurn()`, which
+   * never hands the helm to a sunk ship in the first place. But the wire's
+   * three other sources of a turn index (a peer's `packet.o`, a host's
+   * `beacon.o`, a catch-up snapshot's `o`) were all trusted verbatim, with
+   * nothing here re-checking that the ship they named was still afloat by
+   * the time this client received them. A captain whose ship a receiver
+   * still believed was sunk from an earlier, differently-timed write could
+   * get *given* the turn back this way -- which read as a dead ship taking
+   * someone else's turn from the far side of the same bug. `nextTurn()`
+   * only needs `from`'s own team to work out who answers, and a dead ship's
+   * team never changes, so it is a perfectly good anchor to hand it even
+   * after that ship is gone.
+   */
+  private aliveTurn(target: number): number {
+    const ship = this.ships[target];
+    return ship && ship.hp > 0 ? target : this.nextTurn(target);
   }
 
   /**
@@ -790,6 +838,14 @@ export class BattleEngine {
       shooter, balls: card.shots, card: card.id,
       hulls: 0, rigs: 0, damage: 0, sunk: [], burned: false, pierced: false, grazed: false,
     };
+    // Round shot needs no announcement -- it is the shot everyone already
+    // expects. Anything else drawn from the hand is the one moment a player
+    // spent a card rather than just aiming, and it used to look identical to
+    // an ordinary shot right up until the impact called out its result. This
+    // is overwritten by that same result a couple of seconds later -- the
+    // same banner, so "MORTAR!" giving way to "sank her!" reads as one
+    // continuous beat rather than two systems talking over each other.
+    if (card.id !== 'round') this.shout(`${card.name}!`, 'big');
 
     // Sent before a single physics step has run. Only for a shot this device
     // actually owns -- not a replay of what the wire just handed us, and not
@@ -975,7 +1031,7 @@ export class BattleEngine {
     this.beaconIn = null;
     this.offT = 0;
 
-    const helm = clamp(Math.round(beacon.o), 0, this.ships.length - 1);
+    const helm = this.aliveTurn(clamp(Math.round(beacon.o), 0, this.ships.length - 1));
     if (moved) this.cfg.onHp?.(this.hp);
     if (this.afloat(0).length === 0 || this.afloat(1).length === 0) {
       this.finish();
@@ -1084,7 +1140,7 @@ export class BattleEngine {
     }
 
     this.turnNo = ahead.tn ?? this.turnNo + 1;
-    this.turn = clamp(Math.round(ahead.o), 0, this.ships.length - 1);
+    this.turn = this.aliveTurn(clamp(Math.round(ahead.o), 0, this.ships.length - 1));
     this.lastFired[this.ships[this.turn].team] = this.turn;
     this.dropThrough(this.turnNo);
 
@@ -1197,6 +1253,7 @@ export class BattleEngine {
     // loop in the game on a 60Hz display and quarters it on a phone holding
     // 30, and the picture is identical.
     this.stepParticles(Math.min(dt, 0.25));
+    this.stepDamageTexts(Math.min(dt, 0.25));
 
     let steps = 0;
     while (this.acc >= STEP && steps < 10) {
@@ -1209,10 +1266,7 @@ export class BattleEngine {
 
     this.decay(dt);
 
-    if (this.phase === 'over') {
-      this.sinkT = Math.min(1, this.sinkT + dt * 0.55);
-      return;
-    }
+    if (this.phase === 'over') return;
 
     if (this.phase === 'deal') {
       this.phaseTimer -= dt;
@@ -1504,7 +1558,32 @@ export class BattleEngine {
     ship.lean += (fromX < ship.x ? 1 : -1) * Math.min(0.12, amount / 260);
     this.shake = Math.min(34, this.shake + amount * 0.4);
     this.cfg.onSfx?.('hull', clamp(amount / BALANCE.DIRECT, 0.2, 1));
+    this.spawnDamageText(ship.x, this.shipY(i) - 60, amount);
     this.cfg.onHp?.(this.hp);
+  }
+
+  /**
+   * A number over a hull, sized and coloured by how much it actually cost.
+   *
+   * Same three-tier read as `shout()`'s banners (a graze, an ordinary hit, a
+   * heavy one) so the two systems agree with each other rather than teaching
+   * the eye two different colour languages for the same idea. `dx`/`dy` let
+   * the burn tick spawn its number over the flame rather than dead centre,
+   * so consecutive burn ticks do not stack exactly on top of each other.
+   */
+  private spawnDamageText(x: number, y: number, amount: number, color?: string) {
+    const ratio = clamp(amount / BALANCE.DIRECT, 0, 1);
+    const tone = color ?? (ratio >= 0.75 ? TONE_COLOR.big : ratio >= 0.35 ? TONE_COLOR.hit : TONE_COLOR.graze);
+    this.damageTexts.push({
+      x: x + (Math.random() * 2 - 1) * 14,
+      y,
+      vy: -46,
+      life: 0.9,
+      max: 0.9,
+      text: String(Math.round(amount)),
+      color: tone,
+      size: ratio >= 0.75 ? 40 : ratio >= 0.35 ? 32 : 25,
+    });
   }
 
   /**
@@ -1533,6 +1612,11 @@ export class BattleEngine {
         ship.burn = Math.max(0, ship.burn - 1);
         this.burnAt(i);
         this.cfg.onSfx?.('burn');
+        // Its own colour, not the hit tiers above -- a burn tick is a fixed,
+        // small amount every time, so scoring it against BALANCE.DIRECT would
+        // paint it the same muted grey turn after turn regardless of how much
+        // it has already worn a hull down.
+        this.spawnDamageText(ship.x - 18, this.shipY(i) - 74, BALANCE.BURN_PER_TURN, TONE_COLOR.kill);
 
         // The fire belongs to whoever lit it, however many turns ago.
         const lit = this.burnFrom[i] ?? -1;
@@ -1576,7 +1660,7 @@ export class BattleEngine {
       // keeps every client numbering the same turn the same way even after one
       // of them has had to skip forward.
       this.turnNo = packet.tn ?? next;
-      this.turn = clamp(Math.round(packet.o), 0, this.ships.length - 1);
+      this.turn = this.aliveTurn(clamp(Math.round(packet.o), 0, this.ships.length - 1));
       this.lastFired[this.ships[this.turn].team] = this.turn;
       this.dropThrough(this.turnNo);
     } else {
@@ -1672,7 +1756,6 @@ export class BattleEngine {
     // level, the side that did not fire survives.
     this.winner = a > b ? 0 : b > a ? 1 : ((1 - this.ships[this.turn].team) as Team);
     this.phase = 'over';
-    this.sinkT = 0;
     const loser = (1 - this.winner) as Team;
     for (let i = 0; i < this.ships.length; i++) if (this.ships[i].team === loser) this.wreck(i);
     this.shout('she goes down!');
@@ -2021,6 +2104,20 @@ export class BattleEngine {
     }
   }
 
+  /** Rises, slows, fades. Same shape every combat-text system uses because it reads instantly. */
+  private stepDamageTexts(dt: number) {
+    for (let i = this.damageTexts.length - 1; i >= 0; i--) {
+      const t = this.damageTexts[i];
+      t.life -= dt;
+      if (t.life <= 0) {
+        this.damageTexts.splice(i, 1);
+        continue;
+      }
+      t.y += t.vy * dt;
+      t.vy *= 0.92;
+    }
+  }
+
   private decay(dt: number) {
     this.shake = Math.max(0, this.shake - dt * 46);
     this.callLeft = Math.max(0, this.callLeft - dt);
@@ -2034,6 +2131,10 @@ export class BattleEngine {
       const list = ship.hp <= 0 ? 0.55 : (1 - ship.hp / ship.maxHp) * 0.09;
       const want = (ship.team === 0 ? 1 : -1) * list;
       ship.lean += (want - ship.lean) * Math.min(1, dt * 3.4);
+      // Starts the instant this hull is actually found dead, whichever turn
+      // that happens to be -- not a shared clock that only ever ran once, at
+      // the very end of the match.
+      if (ship.hp <= 0) ship.sinkAge = ship.sinkAge < 0 ? 0 : ship.sinkAge + dt;
     }
   }
 
@@ -2166,6 +2267,7 @@ export class BattleEngine {
 
     this.drawProjectiles(ctx, q);
     this.drawParticles(ctx);
+    this.drawDamageTexts(ctx);
     this.drawRings(ctx);
     // The arc is a rule now, and off by default. `aiming` only says a drag is
     // live; whether that drag is allowed to show where the ball lands is the
@@ -2180,14 +2282,29 @@ export class BattleEngine {
   private drawOneShip(ctx: CanvasRenderingContext2D, i: number, q: Quality) {
     const ship = this.ships[i];
     const sunk = ship.hp <= 0;
-    // A sunk hull slides under rather than blinking out, which is the part of
-    // the ending anybody actually remembers.
-    const settle = sunk ? easeIn(this.sinkT) * 150 : 0;
+
+    // Fully under: the hull itself stops being drawn at all, in favour of
+    // just the flag -- see `drawWreckFlag`. A sunk ship used to keep sitting
+    // there full-size and apparently undamaged but for a missing health bar,
+    // which read as "still in this" rather than "gone", especially for the
+    // whole rest of a battle its side went on to lose.
+    if (sunk && ship.sinkAge >= WRECK_SETTLE) {
+      this.drawWreckFlag(ctx, i);
+      return;
+    }
+
+    // Still sinking: slides under and fades on its own clock, not a
+    // whole-fleet one -- a hull that goes down in the middle of a battle the
+    // match is still deciding needs to start settling right then.
+    const settle = sunk ? easeIn(ship.sinkAge / WRECK_SETTLE) * 150 : 0;
+    const fade = sunk ? 1 - easeIn(ship.sinkAge / WRECK_SETTLE) : 1;
 
     // The barrel tracks whoever is shooting; an idle ship rests its gun at the
     // elevation it last used, so it never looks unmanned.
     const live = this.turn === i && (this.phase === 'aim' || this.phase === 'deal');
 
+    ctx.save();
+    ctx.globalAlpha *= fade;
     drawShip(ctx, {
       skin: ship.skin,
       x: ship.x,
@@ -2199,9 +2316,59 @@ export class BattleEngine {
       flash: ship.flash,
       clock: this.clock,
     });
+    ctx.restore();
 
     if (ship.burn > 0 && q.fancy && Math.random() < 0.35) this.burnAt(i);
     if (!sunk) this.drawHealthBar(ctx, i);
+  }
+
+  /**
+   * All that is left once a hull has fully settled: its colours, on a pole,
+   * riding the water where it went down.
+   *
+   * Reuses the same flag geometry `drawShip` itself paints onto a living
+   * hull's rigging, so a wreck's flag is recognisably the same flag rather
+   * than a different piece of art invented just for this -- only its anchor
+   * point moves, from partway up a mast to just above the waterline.
+   */
+  private drawWreckFlag(ctx: CanvasRenderingContext2D, i: number) {
+    const ship = this.ships[i];
+    const y = this.waterLevelFor(i);
+    const bob = Math.sin(this.clock * 1.6 + ship.bobPhase) * 5;
+
+    ctx.save();
+    ctx.translate(ship.x, y + bob);
+
+    // A short spar rather than a bare flag -- floating fabric with nothing
+    // holding it up reads as debris, not as a marker.
+    ctx.strokeStyle = 'rgba(20, 14, 8, 0.8)';
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(0, 18);
+    ctx.lineTo(0, -30);
+    ctx.stroke();
+
+    drawFlag(
+      ctx,
+      SHIPS[clamp(ship.skin, 0, SHIPS.length - 1)],
+      this.clock,
+      { x: -26, y: -30 },
+      TEAM_COLORS[ship.team].main,
+    );
+
+    // A slow, widening ring standing in for the ripple where she went down --
+    // once, not on a loop, so a wreck the eye has already found stops asking
+    // for attention.
+    const ringT = clamp((ship.sinkAge - WRECK_SETTLE) / 1.4, 0, 1);
+    if (ringT < 1) {
+      ctx.globalAlpha = (1 - ringT) * 0.35;
+      ctx.strokeStyle = '#e2f4ff';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.ellipse(0, 22, 20 + ringT * 60, 7 + ringT * 18, 0, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.restore();
   }
 
   /**
@@ -2353,6 +2520,30 @@ export class BattleEngine {
       ctx.drawImage(sprite, p.x - size / 2, p.y - size / 2, size, size);
     }
     ctx.globalAlpha = 1;
+  }
+
+  private drawDamageTexts(ctx: CanvasRenderingContext2D) {
+    if (this.damageTexts.length === 0) return;
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.lineJoin = 'round';
+    for (const t of this.damageTexts) {
+      const k = t.life / t.max;
+      // Punches in over the first tenth of its life rather than starting at
+      // full size -- a number that is already there the instant a shot lands
+      // reads as part of the hull, not as something that just happened to it.
+      const pop = t.life > t.max - 0.1 ? 1 + (1 - (t.max - t.life) / 0.1) * 0.4 : 1;
+      ctx.globalAlpha = Math.min(1, k * 2.2);
+      ctx.font = `900 ${Math.round(t.size * pop)}px system-ui, sans-serif`;
+      ctx.lineWidth = 5;
+      ctx.strokeStyle = 'rgba(4, 16, 28, 0.75)';
+      ctx.fillStyle = t.color;
+      ctx.strokeText(t.text, t.x, t.y);
+      ctx.fillText(t.text, t.x, t.y);
+    }
+    ctx.globalAlpha = 1;
+    ctx.restore();
   }
 
   private drawRings(ctx: CanvasRenderingContext2D) {
