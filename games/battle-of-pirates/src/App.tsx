@@ -17,6 +17,7 @@ import {
   Target,
   Trophy,
   Users,
+  ArrowDown,
 } from 'lucide-react';
 import { askHostToEndGame, askToLeaveLobby, toggleFullscreen } from './fullscreen';
 import { FREE_SHIPS, SHIPS, drawShip } from './game/ships';
@@ -171,15 +172,9 @@ export default function App() {
    * arrive on the wire.
    */
   const [rules, setRules] = useState<MatchRules>(() => {
-    // Key bumped once, deliberately. Aim arc is meant to be on for a fresh
-    // player and only off if someone actually chose that -- but a device that
-    // had ever toggled it off under the old key kept getting that `false`
-    // forever, merged straight over the true default on every load, with
-    // nothing on screen suggesting a stale preference was the reason a
-    // beginner-friendly game suddenly stopped being one. A new key means
-    // every device starts clean on the documented default again; the very
-    // next toggle here writes to `_v2` and persists exactly as before.
-    const saved = localStorage.getItem('pirates_rules_v2');
+    // Key bumped to v3 to reset the mountain default to "breakable" for
+    // returning players who had an old setting stored.
+    const saved = localStorage.getItem('pirates_rules_v3');
     return saved ? { ...DEFAULT_RULES, ...JSON.parse(saved) } : DEFAULT_RULES;
   });
   const [showRules, setShowRules] = useState(false);
@@ -187,7 +182,7 @@ export default function App() {
   const [stats, setStats] = useState<Stats>(readStats);
   const [showStats, setShowStats] = useState(false);
   useEffect(() => {
-    localStorage.setItem('pirates_rules_v2', JSON.stringify(rules));
+    localStorage.setItem('pirates_rules_v3', JSON.stringify(rules));
   }, [rules]);
 
   // The coin balance is shared with the rest of PlayBuddies on purpose. Coins
@@ -1595,11 +1590,8 @@ function RoomScreen({
       {header}
 
       {!iAmReady && (
-        <div className="relative flex shrink-0 items-center justify-center gap-3 overflow-hidden rounded-2xl border-2 border-amber-400/60 bg-amber-400/10 px-4 py-4 text-center shadow-[0_0_20px_rgba(251,191,36,0.15)] short:hidden">
-          <span className="absolute -inset-4 animate-pulse bg-amber-400/10" aria-hidden />
-          <p className="relative text-base font-black uppercase tracking-widest text-amber-300">
-            Select Your Ship Below
-          </p>
+        <div className="flex shrink-0 items-center justify-center py-2 short:hidden">
+          <ArrowDown className="h-10 w-10 animate-bounce text-amber-400 drop-shadow-[0_0_8px_rgba(251,191,36,0.5)]" />
         </div>
       )}
 
