@@ -483,13 +483,13 @@ export default function App() {
    * enough to re-sort that roster and flip a captain's array index -- the
    * engine kept fighting the identical battle it started, but the HUD would
    * occasionally announce a different captain as your teammate mid-fight.
-   * Keyed on the match's own seed rather than on `lobby`, so it only rebuilds
-   * when a genuinely new battle actually starts.
+   * Capture again when entering the game, after the lobby and picks have
+   * settled. Freezing only by seed could otherwise retain an empty menu roster.
    */
   const battleConfig = useMemo(
     () => (online && uid && !offlineMatch ? onlineConfig() : offlineConfig()),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [session.seed, offlineMatch, uid],
+    [session.seed, offlineMatch, uid, view],
   );
 
   if (view === 'game') {
@@ -586,6 +586,7 @@ export default function App() {
 
     return {
       roomId: handoff.room,
+      hostUid: lobby?.hostId,
       uid,
       peerUids,
       isHost,
@@ -2006,6 +2007,11 @@ function RulesPanel({
               Split evenly into two fleets. Anyone in the room beyond this watches , the two sides have to
               match. Empty berths are sailed by bots.
             </span>
+          </p>
+          <p className="rounded-xl border border-amber-300/20 bg-amber-300/10 px-3 py-2 text-xs leading-relaxed text-amber-100">
+            Every living captain takes one turn in order. Land 3 damaging cannon attacks to charge a special:
+            Torpedo deals 25 to one enemy, Acid Rain deals 10 to every enemy, or Heal restores up to 25 HP.
+            Each special spends the meter and uses your turn.
           </p>
           <div className="grid grid-cols-3 gap-2">
             {PLAYER_CODES.map((option) => (

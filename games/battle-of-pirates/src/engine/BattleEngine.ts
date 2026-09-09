@@ -18,7 +18,7 @@
  *    deal themselves the same match with nothing to negotiate, and the wire
  *    carries turns rather than state.
  */
-import { fxSprites, bakeSea, drawFallbackSea, drawRock, drawWaves, drawWeather, rockRadius } from '../game/sea';
+import { fxSprites, bakeSea, drawSky, drawFallbackSea, drawRock, drawWaves, drawWeather, rockRadius } from '../game/sea';
 import { SHIPS, drawFlag, drawShip } from '../game/ships';
 import { HULLS, hullAt } from '../game/hulls';
 import type { HullClass } from '../game/hulls';
@@ -39,6 +39,8 @@ import {
 } from '../game/rules';
 import type { Arena } from '../game/rules';
 import type { Quality } from '../game/quality';
+import { isSpecial, SPECIAL_HITS, SPECIALS, type SpecialId } from '../game/specials';
+import { drawSpecialSky, drawSpecialForeground, specialNightAmount, type SpecialVisual } from '../game/specialEffects';
 import { EMPTY_RECORD } from '../platform/stats';
 import type { MatchRecord } from '../platform/stats';
 import type {
@@ -108,6 +110,7 @@ export interface EngineConfig {
    * to stop happening.
    */
   isHost?: boolean;
+  hostUid?: string;
 }
 
 /** 0 fire, 1 smoke, 2 spark, 3 splash, 4 splinter. */
@@ -266,7 +269,7 @@ export class BattleEngine {
   turnNo = 0;
   winner: Team | null = null;
   /** Seconds left to aim. Only counted down on the device whose turn it is. */
-  turnClock = BALANCE.TURN_TIME;
+  turnClock: number = BALANCE.TURN_TIME;
   hand: CardId[] = [];
   selected: CardId = 'round';
   /** Big centred shout. Fades on its own. */
@@ -385,8 +388,15 @@ export class BattleEngine {
    * and no damage dealt. -1 for a hull nobody has set alight.
    */
   private burnFrom: number[] = [];
-  /** The last hull on each side to take a shot, so the helm goes round a fleet rather than sticking. */
-  private lastFired: Record<Team, number> = { 0: -1, 1: -1 };
+  /** An attack fills only one meter segment, even with multiple projectiles. */
+  private chargedThisShot = false;
+  private lastSpecial: { kind: SpecialId; target?: number } | null = null;
+  special: (SpecialVisual & { shooter: number; indices: number[]; applied: boolean }) | null = null;
+  /** No input or old timeout may run until a waking client has asked the fleet. */
+  resyncing = false;
+  private resumeWait = 0;
+  private resumeToken = 0;
+  private syncReplies = new Set<number>();
   /** The preview of the other side's shot: what was fired, before its outcome is known. */
   private pendingFire: FirePacket | null = null;
   /**
@@ -533,6 +543,7 @@ export class BattleEngine {
       skin: clamp(seat.skin, 0, SHIPS.length - 1),
       hull: clamp(seat.hull ?? 0, 0, HULLS.length - 1),
       hp: BALANCE.MAX_HP * hullAt(seat.hull).hp,
+      charge: 0,
       maxHp: BALANCE.MAX_HP * hullAt(seat.hull).hp,
       anchorX,
       x: anchorX,
@@ -557,24 +568,15 @@ export class BattleEngine {
   /**
    * Who fires after this hull.
    *
-   * The helm alternates sides every single turn, however lopsided the battle
-   * has become: a fleet down to its last ship still gets every other shot
-   * rather than being pounded three times between replies. Within a side it
-   * goes round the survivors in order, so the same captain does not fire twice
-   * while a crewmate waits.
+   * Every living seat gets one turn per circuit, regardless of fleet size.
+   * Seat order is fixed at match start; sinking only removes a seat from it.
    */
   private nextTurn(from: number): number {
-    const other = (1 - this.ships[from].team) as Team;
-    const theirs = this.afloat(other);
-    if (theirs.length > 0) {
-      // Whoever on that side has waited longest , the first one past the last
-      // of theirs to fire, wrapping around.
-      const after = theirs.find((i) => i > (this.lastFired[other] ?? -1));
-      return after ?? theirs[0];
+    for (let offset = 1; offset <= this.ships.length; offset++) {
+      const next = (from + offset) % this.ships.length;
+      if (this.ships[next].hp > 0) return next;
     }
-    // Nobody left to answer; the same side keeps firing until finish() notices.
-    const mine = this.afloat(this.ships[from].team);
-    return mine.find((i) => i > from) ?? mine[0] ?? from;
+    return from;
   }
 
   /**
@@ -590,10 +592,8 @@ export class BattleEngine {
    * the time this client received them. A captain whose ship a receiver
    * still believed was sunk from an earlier, differently-timed write could
    * get *given* the turn back this way -- which read as a dead ship taking
-   * someone else's turn from the far side of the same bug. `nextTurn()`
-   * only needs `from`'s own team to work out who answers, and a dead ship's
-   * team never changes, so it is a perfectly good anchor to hand it even
-   * after that ship is gone.
+   * someone else's turn from the far side of the same bug. A sunk ship's
+   * fixed seat remains a valid cursor for the living-seat rotation.
    */
   private aliveTurn(target: number): number {
     const ship = this.ships[target];
@@ -785,7 +785,7 @@ export class BattleEngine {
 
   /** True when the human sitting at this device is the one who has to shoot. */
   get awaitingLocal(): boolean {
-    return this.phase === 'aim' && this.ships[this.turn].control === 'local';
+    return !this.resyncing && this.phase === 'aim' && this.ships[this.turn].hp > 0 && this.ships[this.turn].control === 'local';
   }
 
   /** True while the turn belongs to somebody at the other end of a wire. */
@@ -807,6 +807,88 @@ export class BattleEngine {
     this.budget = scale;
   }
 
+  /** UI entry point. Replays use startSpecial only after checking their seat and turn. */
+  useSpecial(kind: SpecialId, target?: number): boolean {
+    if (!this.awaitingLocal) return false;
+    return this.startSpecial(kind, target);
+  }
+
+  private startSpecial(kind: SpecialId, target?: number): boolean {
+    const ship = this.ships[this.turn];
+    if (!isSpecial(kind) || (this.phase !== 'aim' && this.phase !== 'deal') ||
+        ship.hp <= 0 || ship.charge < SPECIAL_HITS) return false;
+    const enemies = this.afloat((1 - ship.team) as Team);
+    if (kind === 'torpedo' && (!Number.isInteger(target) || !enemies.includes(target!))) return false;
+    if (kind === 'heal' && ship.hp >= ship.maxHp) return false;
+    if (kind !== 'heal' && enemies.length === 0) return false;
+    const indices = kind === 'heal' ? [this.turn] : kind === 'torpedo' ? [target!] : enemies;
+    ship.charge = 0;
+    this.lastSpecial = { kind, ...(kind === 'torpedo' ? { target } : {}) };
+    this.lastShot = { angle: ship.lastAim.angle, power: ship.lastAim.power, card: 'round' };
+    this.burnBefore = this.ships.map((s) => s.burn);
+    this.tally = null;
+    this.projectiles.length = 0;
+    this.special = {
+      kind, age: 0, duration: SPECIALS[kind].duration, enemyTeam: (1 - ship.team) as Team,
+      origin: { x: ship.x, y: this.waterLevelFor(this.turn) },
+      targets: indices.map((i) => ({ x: this.ships[i].x, y: this.waterLevelFor(i) })),
+      shooter: this.turn, indices, applied: false,
+    };
+    this.firedPreviewThisShot = Boolean(this.cfg.onLocalShot) && this.ownsTurn();
+    if (this.firedPreviewThisShot) {
+      this.cfg.onLocalShot!({
+        t: 'fire', n: ++this.localSeq, s: this.cfg.seed, tn: this.turnNo + 1, who: this.turn,
+        a: 0, p: 0, c: 'round', sp: kind, ...(kind === 'torpedo' ? { tg: target } : {}),
+      });
+    }
+    this.phase = 'special';
+    this.shout(`${SPECIALS[kind].name}!`, 'big');
+    this.cfg.onSfx?.(kind === 'torpedo' ? 'fire' : 'deal');
+    this.cfg.onPhase?.(this.phase);
+    return true;
+  }
+
+  private ownsTurn(): boolean {
+    const control = this.ships[this.turn].control;
+    return control === 'local' || (control === 'ai' && Boolean(this.cfg.isHost));
+  }
+
+  private stepSpecial(dt: number) {
+    const effect = this.special;
+    if (!effect) return;
+    effect.age = Math.min(effect.duration, effect.age + dt);
+    const ability = SPECIALS[effect.kind];
+    if (!effect.applied && effect.age >= ability.impact) {
+      effect.applied = true;
+      const source = this.ships[effect.shooter];
+      if (effect.kind === 'heal') {
+        const healed = Math.min(ability.amount, source.maxHp - source.hp);
+        source.hp += healed;
+        this.spawnDamageText(source.x, this.shipY(effect.shooter) - 100, healed, '#86efac', '+');
+        this.logLine(`${source.name} healed ${Math.round(healed)}`, 'hit');
+        this.cfg.onHp?.(this.hp);
+      } else {
+        for (const i of effect.indices) {
+          const before = this.ships[i].hp;
+          this.damage(i, ability.amount, source.x);
+          if (source.control === 'local') {
+            this.record.damage += before - this.ships[i].hp;
+            if (before > 0 && this.ships[i].hp <= 0) this.record.sunk++;
+          }
+          if (before > 0 && this.ships[i].hp <= 0) this.cfg.onSfx?.('sink');
+        }
+        this.logLine(`${source.name} · ${ability.name} · ${ability.amount}${effect.kind === 'acid-rain' ? ' to each enemy' : ' damage'}`, 'big');
+      }
+    }
+    // Even a fleet-ending rain waits for the complete sunrise before results.
+    if (effect.age >= effect.duration) {
+      this.special = null;
+      this.phase = 'impact';
+      this.phaseTimer = 0;
+      this.cfg.onPhase?.(this.phase);
+    }
+  }
+
   /**
    * Fire from the ship whose turn it is.
    *
@@ -815,7 +897,7 @@ export class BattleEngine {
    * to know which it was.
    */
   fire(shot: Shot) {
-    if (this.phase !== 'aim' && this.phase !== 'deal') return;
+    if (this.resyncing || (this.phase !== 'aim' && this.phase !== 'deal') || this.ships[this.turn].hp <= 0) return;
     const shooter = this.turn;
     const ship = this.ships[shooter];
     const card = CARDS[shot.card] ?? CARDS.round;
@@ -832,7 +914,8 @@ export class BattleEngine {
     ship.lastAim = { angle, power };
     this.lastShot = { angle, power, card: card.id };
     this.lastShotHit[shooter] = false;
-    this.lastFired[ship.team] = shooter;
+    this.lastSpecial = null;
+    this.chargedThisShot = false;
     this.burnBefore = this.ships.map((s) => s.burn);
     this.tally = {
       shooter, balls: card.shots, card: card.id,
@@ -847,20 +930,17 @@ export class BattleEngine {
     // continuous beat rather than two systems talking over each other.
     if (card.id !== 'round') this.shout(`${card.name}!`, 'big');
 
-    // Sent before a single physics step has run. Only for a shot this device
-    // actually owns -- not a replay of what the wire just handed us, and not
-    // a bot's turn, which every client now decides identically on its own
-    // (see aiRng) and so never needs to send at all. This used to read
-    // `!== 'remote'`, which -- despite what this very comment already
-    // claimed -- included 'ai' and broadcast every bot decision from every
-    // connected device at once.
-    this.firedPreviewThisShot = Boolean(this.cfg.onLocalShot) && ship.control === 'local';
+    // Only the owning human or the host driving a bot broadcasts an action.
+    // Guests replay that action; they never independently decide bot turns.
+    this.firedPreviewThisShot = Boolean(this.cfg.onLocalShot) && this.ownsTurn();
     if (this.firedPreviewThisShot) {
       this.localSeq += 1;
       this.cfg.onLocalShot!({
         t: 'fire',
         n: this.localSeq,
         s: this.cfg.seed,
+        tn: this.turnNo + 1,
+        who: shooter,
         a: round3(angle),
         p: round3(power),
         c: card.id,
@@ -933,6 +1013,8 @@ export class BattleEngine {
    */
   applyFire(packet: FirePacket, from: string) {
     if (packet.s !== this.cfg.seed) return;
+    if (packet.tn !== undefined && packet.tn <= this.turnNo) return;
+    if (packet.who !== undefined && !this.validSender(packet.who, from)) return;
     if (packet.n <= (this.remoteFireSeq.get(from) ?? 0)) return;
     this.remoteFireSeq.set(from, packet.n);
     this.pendingFire = packet;
@@ -950,6 +1032,25 @@ export class BattleEngine {
     // A player's update document outlives the match that wrote it, so the
     // first snapshot after subscribing can be last night's final shot.
     if (packet.s !== this.cfg.seed) return;
+    if (!packet.st && packet.who !== undefined && !this.validSender(packet.who, from)) return;
+
+    if (this.resyncing && packet.st && packet.ack === this.resumeToken && packet.tn !== undefined) {
+      // A response made after our request, not a cached pre-sleep beacon.
+      if (packet.tn >= this.turnNo || from === this.cfg.hostUid) {
+        this.resyncing = false;
+        this.beaconIn = packet;
+        this.offT = BALANCE.BEACON * 2;
+        if (packet.tn === this.turnNo) {
+          // The response describes a settled aim state; discard any partial replay.
+          this.clearAction();
+          this.turn = this.aliveTurn(clamp(Math.round(packet.o), 0, this.ships.length - 1));
+          this.beginTurn();
+          this.reconcile(packet);
+        } else this.catchUp();
+        this.restoreClock(packet);
+        return;
+      }
+    }
 
     // A beacon is not a turn. It never triggers a flight and never advances
     // anybody by itself -- it is only ever a way back for a client that has
@@ -993,13 +1094,59 @@ export class BattleEngine {
    */
   applySync(packet: SyncPacket) {
     if (packet.s !== this.cfg.seed) return;
-    if (packet.tn >= this.turnNo) return;
     if (!this.cfg.onLocalShot) return;
     // Where we are *now*, not the last turn we happened to send. Most turns are
     // broadcast by somebody else, so a client's own last send is usually far
     // enough back that the asker would have dropped it as stale -- which made
     // the answer worthless exactly when it was needed.
-    this.cfg.onLocalShot(this.snapshot());
+    // Never publish half-applied damage or the old shooter during an animation.
+    if (this.phase !== 'aim' && this.phase !== 'deal' && this.phase !== 'over') {
+      this.syncReplies.add(packet.n);
+      return;
+    }
+    if (packet.tn > this.turnNo && !this.cfg.isHost) return;
+    this.cfg.onLocalShot({ ...this.snapshot(), ack: packet.n });
+  }
+
+  private validSender(who: number, from: string): boolean {
+    const ship = this.ships[who];
+    return Number.isInteger(who) && Boolean(ship) &&
+      (from === ship.id || from === this.cfg.hostUid);
+  }
+
+  requestSync() {
+    if (!this.cfg.onAsk) return;
+    this.resyncing = true;
+    this.resumeWait = 0;
+    this.resumeToken = ++this.localSeq;
+    this.pendingFire = null;
+    this.cfg.onAsk({ t: 'sync', n: this.resumeToken, s: this.cfg.seed, tn: this.turnNo });
+  }
+
+  private clearAction() {
+    this.special = null;
+    this.lastSpecial = null;
+    this.tally = null;
+    this.projectiles.length = 0;
+    this.acc = 0;
+    this.pendingFire = null;
+    this.awaitingOutcome = false;
+    this.outcomeWait = 0;
+    this.skipping = false;
+  }
+
+  private restoreClock(packet: ShotPacket) {
+    if (typeof packet.tc !== 'number' || !Number.isFinite(packet.tc)) return;
+    const age = typeof packet.at === 'number' ? clamp((Date.now() - packet.at) / 1000, 0, BALANCE.TURN_TIME) : 0;
+    this.turnClock = clamp(packet.tc - age, 0, BALANCE.TURN_TIME);
+    this.stallT = BALANCE.TURN_TIME - this.turnClock;
+  }
+
+  private restoreCharge(charges: number[] | undefined) {
+    if (!charges) return;
+    for (let i = 0; i < this.ships.length; i++) {
+      if (Number.isFinite(charges[i])) this.ships[i].charge = clamp(Math.round(charges[i]), 0, SPECIAL_HITS);
+    }
   }
 
   /**
@@ -1015,6 +1162,7 @@ export class BattleEngine {
    * against the host's beacon is what closes that.
    */
   private reconcile(beacon: ShotPacket) {
+    this.restoreCharge(beacon.ch);
     let moved = false;
     for (let i = 0; i < this.ships.length; i++) {
       if (beacon.hp[i] !== undefined) {
@@ -1042,8 +1190,8 @@ export class BattleEngine {
     // clean re-entry rather than a patch.
     if (helm !== this.turn) {
       this.turn = helm;
-      this.lastFired[this.ships[helm].team] = helm;
       this.beginTurn();
+      this.restoreClock(beacon);
       return true;
     }
     return false;
@@ -1061,6 +1209,9 @@ export class BattleEngine {
       p: 0,
       c: 'round',
       hp: this.ships.map((s) => Math.round(s.hp)),
+      ch: this.ships.map((s) => s.charge),
+      tc: this.phase === 'aim' ? this.turnClock : BALANCE.TURN_TIME,
+      at: Date.now(),
       f: this.ships.map((s) => s.burn),
       d: this.ships.map((s) => Math.round(s.x)),
       rk: this.rocks.map((r) => Math.round(r.hp)),
@@ -1125,6 +1276,8 @@ export class BattleEngine {
     if (beaconDue && (ahead === null || beaconTn > (ahead.tn ?? -1) || stale)) ahead = beacon;
 
     if (!ahead) return false;
+    this.clearAction();
+    this.restoreCharge(ahead.ch);
     if (ahead === this.beaconIn) {
       this.beaconIn = null;
       this.offT = 0;
@@ -1141,7 +1294,6 @@ export class BattleEngine {
 
     this.turnNo = ahead.tn ?? this.turnNo + 1;
     this.turn = this.aliveTurn(clamp(Math.round(ahead.o), 0, this.ships.length - 1));
-    this.lastFired[this.ships[this.turn].team] = this.turn;
     this.dropThrough(this.turnNo);
 
     this.pendingFire = null;
@@ -1158,6 +1310,7 @@ export class BattleEngine {
       return true;
     }
     this.beginTurn();
+    this.restoreClock(ahead);
     return true;
   }
 
@@ -1173,6 +1326,8 @@ export class BattleEngine {
     this.shout('out of time');
     this.logLine(`${this.shipName(this.turn)} let the turn run out`, 'miss');
     this.lastShot = null;
+    this.lastSpecial = null;
+    this.burnBefore = this.ships.map((s) => s.burn);
     this.skipping = true;
     this.pendingFire = null;
     this.awaitingOutcome = false;
@@ -1242,6 +1397,20 @@ export class BattleEngine {
   // -- simulation -------------------------------------------------------------
 
   update(dt: number, decide?: (ship: number) => Shot) {
+    if (!Number.isFinite(dt) || dt < 0) return;
+    if (this.syncReplies.size && (this.phase === 'aim' || this.phase === 'deal' || this.phase === 'over')) {
+      for (const ack of this.syncReplies) this.cfg.onLocalShot?.({ ...this.snapshot(), ack });
+      this.syncReplies.clear();
+    }
+    if (this.resyncing) {
+      this.resumeWait += dt;
+      if (this.resumeWait < 2) return;
+      // An offline host cannot answer. Resume bounded local execution and keep
+      // the ordinary stall/beacon recovery active instead of freezing forever.
+      this.resyncing = false;
+      this.offT = BALANCE.BEACON * 2;
+      if (this.catchUp()) return;
+    }
     this.clock += dt;
     this.settleBob();
     this.acc += Math.min(dt, 0.25);
@@ -1268,6 +1437,11 @@ export class BattleEngine {
 
     if (this.phase === 'over') return;
 
+    if (this.phase === 'special') {
+      this.stepSpecial(dt);
+      return;
+    }
+
     if (this.phase === 'deal') {
       this.phaseTimer -= dt;
       if (this.phaseTimer <= 0) {
@@ -1281,9 +1455,7 @@ export class BattleEngine {
     if (this.phase === 'aim') {
       // The host says where it is, on a timer, whoever's turn it is. This is
       // the only packet in the protocol that goes out when nothing has
-      // happened, and the only one that can rescue a client whose divergence
-      // came from a bot's turn -- which nobody broadcasts and everybody
-      // resolves alone.
+      // happened, rescuing clients that missed the latest resolved action.
       if (this.cfg.isHost && this.cfg.onLocalShot) {
         this.beaconT -= dt;
         if (this.beaconT <= 0) {
@@ -1308,14 +1480,24 @@ export class BattleEngine {
       if (this.catchUp()) return;
 
       const ship = this.ships[this.turn];
+      if (ship.hp <= 0) {
+        if (!this.afloat(0).length || !this.afloat(1).length) this.finish();
+        else { this.turn = this.nextTurn(this.turn); this.beginTurn(); }
+        return;
+      }
+      this.turnClock = Math.max(0, this.turnClock - dt);
 
-      if (ship.control === 'remote') {
+      if (ship.control === 'remote' || (ship.control === 'ai' && this.cfg.onLocalShot && !this.cfg.isHost)) {
         // Whichever arrived first triggers the flight -- the preview, or,
         // failing that, the fully resolved turn, which carries the same aim
         // and doubles as its own trigger. The resolved turn is left on the
         // queue either way; resolve() takes it once the flight settles.
         const due = this.nextRemote();
-        const trigger = this.pendingFire ?? due;
+        if (this.pendingFire?.tn !== undefined && this.pendingFire.tn <= this.turnNo) this.pendingFire = null;
+        const preview = this.pendingFire &&
+          (this.pendingFire.tn === undefined || this.pendingFire.tn === this.turnNo + 1) &&
+          (this.pendingFire.who === undefined || this.pendingFire.who === this.turn) ? this.pendingFire : null;
+        const trigger = preview ?? due;
         if (!trigger) {
           this.waitOnRemote(dt);
           return;
@@ -1330,18 +1512,30 @@ export class BattleEngine {
           return;
         }
         this.awaitingOutcome = due === null;
-        this.fire({ angle: trigger.a, power: trigger.p, card: trigger.c });
+        if (trigger.sp) {
+          // A resolved snapshot can restore a missed meter charge. It must
+          // still name this exact turn/seat and validate an enemy target.
+          if (due?.sp === trigger.sp) ship.charge = SPECIAL_HITS;
+          if (!this.startSpecial(trigger.sp, trigger.tg)) this.waitOnRemote(dt);
+        } else this.fire({ angle: trigger.a, power: trigger.p, card: trigger.c });
         return;
       }
 
       if (ship.control === 'ai' && decide) {
         this.botTimer -= dt;
-        if (this.botTimer <= 0) this.fire(decide(this.turn));
+        if (this.botTimer <= 0) {
+          if (ship.charge >= SPECIAL_HITS) {
+            const enemies = this.afloat((1 - ship.team) as Team);
+            const target = enemies.reduce((best, i) => this.ships[i].hp < this.ships[best].hp ? i : best, enemies[0]);
+            const kind: SpecialId = ship.maxHp - ship.hp >= 25 ? 'heal' : enemies.length >= 3 ? 'acid-rain' : 'torpedo';
+            if (this.startSpecial(kind, target)) return;
+          }
+          this.fire(decide(this.turn));
+        }
         return;
       }
 
       if (this.cfg.rules.turnTimer) {
-        this.turnClock -= dt;
         if (this.turnClock <= 0) this.skipTurn();
       }
       return;
@@ -1546,7 +1740,13 @@ export class BattleEngine {
   private damage(i: number, amount: number, fromX: number) {
     const ship = this.ships[i];
     if (ship.hp <= 0 || amount <= 0) return;
-    ship.hp = Math.max(0, ship.hp - amount);
+    amount = Math.min(ship.hp, amount);
+    ship.hp -= amount;
+    if (this.tally && !this.chargedThisShot && ship.team !== this.ships[this.tally.shooter].team) {
+      const shooter = this.ships[this.tally.shooter];
+      shooter.charge = Math.min(SPECIAL_HITS, shooter.charge + 1);
+      this.chargedThisShot = true;
+    }
     if (this.tally) {
       this.tally.damage += amount;
       // Checked here rather than by scanning the fleet afterwards, because
@@ -1571,16 +1771,16 @@ export class BattleEngine {
    * the burn tick spawn its number over the flame rather than dead centre,
    * so consecutive burn ticks do not stack exactly on top of each other.
    */
-  private spawnDamageText(x: number, y: number, amount: number, color?: string) {
+  private spawnDamageText(x: number, y: number, amount: number, color?: string, sign = '−') {
     const ratio = clamp(amount / BALANCE.DIRECT, 0, 1);
     const tone = color ?? (ratio >= 0.75 ? TONE_COLOR.big : ratio >= 0.35 ? TONE_COLOR.hit : TONE_COLOR.graze);
     this.damageTexts.push({
       x: x + (Math.random() * 2 - 1) * 14,
       y,
       vy: -46,
-      life: 0.9,
-      max: 0.9,
-      text: String(Math.round(amount)),
+      life: 1.25,
+      max: 1.25,
+      text: `${sign}${Math.round(amount)}`,
       color: tone,
       size: ratio >= 0.75 ? 40 : ratio >= 0.35 ? 32 : 25,
     });
@@ -1598,6 +1798,8 @@ export class BattleEngine {
     /** Whether this client broadcast the turn itself, rather than only living through it. */
     let sent = false;
     const skipped = this.skipping;
+    const special = this.lastSpecial;
+    const actingShip = this.turn;
     this.skipping = false;
     this.pendingFire = null;
     this.awaitingOutcome = false;
@@ -1634,6 +1836,7 @@ export class BattleEngine {
     const next = this.turnNo + 1;
 
     if (packet) {
+      this.restoreCharge(packet.ch);
       // Trust here is social, not cryptographic: these are friends in a room,
       // and a static site has no server to be the authority. But a single turn
       // still cannot take more than a turn's worth of hull off, so a tampered
@@ -1661,7 +1864,6 @@ export class BattleEngine {
       // of them has had to skip forward.
       this.turnNo = packet.tn ?? next;
       this.turn = this.aliveTurn(clamp(Math.round(packet.o), 0, this.ships.length - 1));
-      this.lastFired[this.ships[this.turn].team] = this.turn;
       this.dropThrough(this.turnNo);
     } else {
       const rnd = this.rngFor(next + 977);
@@ -1670,21 +1872,10 @@ export class BattleEngine {
       this.turnNo = next;
       this.turn = this.nextTurn(shooter);
 
-      // Only a real local human's seat produces a packet. A bot never does --
-      // whether it started the match that way or took over for someone who
-      // left, aiRng makes its decision a pure function of the match seed, the
-      // turn and the seat, so every connected client (host, every guest, and
-      // a device that only just inherited the wheel after a `bye`) computes
-      // the identical shot on its own and there is nothing to exchange. An
-      // offline match has nobody listening either way, and the hook is
-      // simply absent.
-      //
-      // A skipped turn is the exception to all of that. Nobody fired, so there
-      // is no shooter whose seat could be local: the client whose own clock ran
-      // out sends it, and so does the host when it is the one passing a silent
-      // captain's turn on. Both may send the same skip; both carry the same
-      // turn number, so the second is dropped rather than applied twice.
-      const mine = this.ships[shooter].control === 'local';
+      // Humans publish their own actions; the host publishes bot actions.
+      // Only the host may also skip a silent remote captain. Duplicate skips
+      // carry the same turn number and are dropped rather than played twice.
+      const mine = this.ships[shooter].control === 'local' || (this.ships[shooter].control === 'ai' && Boolean(this.cfg.isHost));
       const send = skipped ? mine || Boolean(this.cfg.isHost) : mine && Boolean(this.lastShot);
 
       if (this.cfg.onLocalShot && send) {
@@ -1700,10 +1891,13 @@ export class BattleEngine {
           // else, so a turn can be late, duplicated or missed entirely without
           // any client quietly ending up on a different one.
           tn: this.turnNo,
+          who: actingShip,
+          ...(special ? { sp: special.kind, ...(special.target !== undefined ? { tg: special.target } : {}) } : {}),
           a: skipped ? 0 : round3(this.lastShot!.angle),
           p: skipped ? 0 : round3(this.lastShot!.power),
           c: skipped ? 'round' : this.lastShot!.card,
           hp: this.ships.map((s) => Math.round(s.hp)),
+          ch: this.ships.map((s) => s.charge),
           f: this.ships.map((s) => s.burn),
           d: this.ships.map((s) => Math.round(s.x)),
           rk: this.rocks.map((r) => Math.round(r.hp)),
@@ -1725,6 +1919,7 @@ export class BattleEngine {
     }
 
     this.cfg.onHp?.(this.hp);
+    this.lastSpecial = null;
 
     // A side is beaten when every one of its hulls is under, not when any one
     // of them is , which is the whole difference between a duel and a fleet.
@@ -2247,8 +2442,11 @@ export class BattleEngine {
     const sy = this.shake ? (Math.random() - 0.5) * this.shake : 0;
     ctx.setTransform(this.scale, 0, 0, this.scale, this.offX + sx * this.scale, this.offY + sy * this.scale);
 
-    if (this.backdrop) ctx.drawImage(this.backdrop, 0, 0);
-    else drawFallbackSea(ctx, this.arena);
+    const night = specialNightAmount(this.special);
+    if (this.backdrop) {
+      drawSky(ctx, this.arena, night, q.fancy);
+      ctx.drawImage(this.backdrop, 0, 0);
+    } else drawFallbackSea(ctx, this.arena, night, this.cfg.rules.storm);
 
     const storm = this.cfg.rules.storm;
     drawWaves(ctx, this.arena, this.clock, storm ? q.waves + 2 : q.waves, storm ? 1.7 : 1);
@@ -2256,6 +2454,7 @@ export class BattleEngine {
     // fleet action into a smear on the cheap phones this has to run on, and
     // the hulls are the one thing that must stay readable in a gale.
     if (storm) drawWeather(ctx, this.arena, this.clock, this.gust, Math.round(120 * q.particles));
+    if (this.special) drawSpecialSky(ctx, this.arena, this.special, q);
 
     for (const rock of this.rocks) if (rock.hp > 0) drawRock(ctx, rock);
     // Every hull, not a fixed pair -- `[0,1] as Team[]` only ever drew ships 0
@@ -2264,6 +2463,7 @@ export class BattleEngine {
     // Sorted by depth so a back-row ship, correctly, draws in front of
     // whatever's shallower where the two overlap on screen.
     for (const i of this.drawOrder) this.drawOneShip(ctx, i, q);
+    if (this.special) drawSpecialForeground(ctx, this.arena, this.special, q);
 
     this.drawProjectiles(ctx, q);
     this.drawParticles(ctx);
@@ -2296,8 +2496,9 @@ export class BattleEngine {
     // Still sinking: slides under and fades on its own clock, not a
     // whole-fleet one -- a hull that goes down in the middle of a battle the
     // match is still deciding needs to start settling right then.
-    const settle = sunk ? easeIn(ship.sinkAge / WRECK_SETTLE) * 150 : 0;
-    const fade = sunk ? 1 - easeIn(ship.sinkAge / WRECK_SETTLE) : 1;
+    const sinkProgress = clamp(ship.sinkAge / WRECK_SETTLE, 0, 1);
+    const settle = sunk ? easeIn(sinkProgress) * 150 : 0;
+    const fade = sunk ? 1 - easeIn(sinkProgress) : 1;
 
     // The barrel tracks whoever is shooting; an idle ship rests its gun at the
     // elevation it last used, so it never looks unmanned.
@@ -2410,10 +2611,28 @@ export class BattleEngine {
     ctx.fillStyle = TEAM_COLORS[ship.team].light;
     ctx.fillText(ship.name.length > 16 ? `${ship.name.slice(0, 15)}.` : ship.name, ship.x, y - 15);
 
+    const ready = ship.charge >= SPECIAL_HITS;
+    const meterY = y + h + 10;
+    const gap = 5;
+    const pipW = (w - gap * 2) / SPECIAL_HITS;
+    for (let pip = 0; pip < SPECIAL_HITS; pip++) {
+      ctx.fillStyle = pip < ship.charge ? (ready ? '#fde68a' : '#38bdf8') : 'rgba(4,16,28,.7)';
+      ctx.shadowColor = ready ? '#fbbf24' : 'transparent';
+      ctx.shadowBlur = ready ? 8 + Math.sin(this.clock * 4) * 3 : 0;
+      roundRect(ctx, x + pip * (pipW + gap), meterY, pipW, 7, 3);
+      ctx.fill();
+    }
+    ctx.shadowBlur = 0;
+    if (ready) {
+      ctx.fillStyle = '#fde68a';
+      ctx.font = '800 12px system-ui, sans-serif';
+      ctx.fillText('SPECIAL READY', ship.x, meterY + 21);
+    }
+
     if (ship.burn > 0) {
       ctx.fillStyle = '#fb923c';
       ctx.font = '700 13px system-ui, sans-serif';
-      ctx.fillText(`on fire (${ship.burn})`, ship.x, y + h + 14);
+      ctx.fillText(`on fire (${ship.burn})`, ship.x, meterY + (ready ? 39 : 21));
     }
     ctx.restore();
   }
@@ -2597,7 +2816,7 @@ export class BattleEngine {
     ctx.lineJoin = 'round';
     ctx.strokeStyle = 'rgba(4, 16, 28, 0.75)';
     ctx.fillStyle = TONE_COLOR[this.callTone];
-    const y = 150 - (1 - t) * 26;
+    const y = this.arena.h * 0.26 - (1 - t) * 26;
     ctx.strokeText(this.call.toUpperCase(), this.arena.w / 2, y);
     ctx.fillText(this.call.toUpperCase(), this.arena.w / 2, y);
     ctx.restore();
@@ -2665,7 +2884,7 @@ export class BattleEngine {
   }
 
   /**
-   * The running log, down the top right.
+   * Brief damage notifications, centred below the main callout.
    *
    * Drawn in world space like everything else on this canvas, so it scales
    * with the arena and needs no separate layout pass -- the trade is that a
@@ -2674,33 +2893,33 @@ export class BattleEngine {
    */
   private drawFeed(ctx: CanvasRenderingContext2D) {
     if (this.feed.length === 0) return;
-    const size = Math.round(this.arena.w * 0.0125);
+    const size = Math.round(this.arena.w * 0.014);
     const pad = size * 0.7;
     const lineH = size * 2.05;
-    const right = this.arena.w - size * 1.6;
+    const center = this.arena.w / 2;
 
     ctx.save();
-    ctx.textAlign = 'right';
+    ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.font = `800 ${size}px system-ui, sans-serif`;
 
-    for (let i = 0; i < this.feed.length; i++) {
+    for (let i = 0; i < Math.min(2, this.feed.length); i++) {
       const entry = this.feed[i];
       // Full strength until the last second, then out. A line that starts
       // fading the moment it appears is unreadable exactly when it matters.
       const fade = Math.min(1, entry.life / 1);
-      const y = size * 2.6 + i * lineH;
+      const y = this.arena.h * 0.34 + i * lineH;
       if (entry.w === undefined) entry.w = ctx.measureText(entry.text).width;
-      const w = entry.w;
+      const w = Math.min(entry.w, this.arena.w * 0.6);
 
       ctx.globalAlpha = fade * 0.55;
       ctx.fillStyle = '#04101c';
-      roundRect(ctx, right - w - pad * 1.4, y - lineH * 0.38, w + pad * 2, lineH * 0.76, size * 0.5);
+      roundRect(ctx, center - w / 2 - pad, y - lineH * 0.38, w + pad * 2, lineH * 0.76, size * 0.5);
       ctx.fill();
 
       ctx.globalAlpha = fade;
       ctx.fillStyle = TONE_COLOR[entry.tone];
-      ctx.fillText(entry.text, right, y);
+      ctx.fillText(entry.text, center, y, w);
     }
     ctx.restore();
   }
@@ -2731,7 +2950,7 @@ function easeIn(t: number): number {
  */
 function clampClaim(current: number, claimed: number, maxHp: number): number {
   const floor = Math.max(0, current - Math.max(BALANCE.MAX_TURN_DAMAGE, maxHp));
-  const ceiling = Math.min(maxHp, current + 20);
+  const ceiling = Math.min(maxHp, current + SPECIALS.heal.amount);
   return clamp(claimed, floor, ceiling);
 }
 

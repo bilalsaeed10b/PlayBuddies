@@ -36,6 +36,9 @@ jobs:
       - name: Build games
         run: npm run build:games
 
+      - name: Battle of Pirates regression tests
+        run: npm --prefix games/battle-of-pirates test
+
       - name: Typecheck
         run: npm run typecheck
 

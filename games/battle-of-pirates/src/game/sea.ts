@@ -1,9 +1,9 @@
 /**
  * The sea and everything painted on it.
  *
- * The sky, the sun, the clouds, the far islands and the body of the water do
- * not change for the whole match, so they are painted once into an offscreen
- * canvas and blitted with a single drawImage every frame. Fish Eat Fish paid
+ * Clouds, far islands and water texture are baked into transparent scenery.
+ * drawSky paints the illumination beneath it, including a sun that can really
+ * set behind the islands. Its gradients are tiny cached strips. Fish Eat Fish paid
  * for that lesson: a per-frame vector background is where the frame budget
  * goes, and none of it is animation anybody is looking at.
  *
@@ -21,6 +21,12 @@ import type { Rock } from '../types/game';
 /** Deterministic, so two players in a room see the same horizon. */
 const SEED = 0x5eaf00d;
 
+/**
+ * Transparent scenery, NOT a complete background. Render in world coordinates:
+ * drawSky(ctx, arena, nightAmount, q.fancy), then this bake, then waves,
+ * drawSpecialSky, rocks/ships, drawSpecialForeground. Keep the storm bake;
+ * the cinematic never mutates it and the original weather returns afterwards.
+ */
 export function bakeSea(arena: Arena, fancy: boolean, storm = false): HTMLCanvasElement | null {
   try {
     const canvas = document.createElement('canvas');
@@ -42,45 +48,122 @@ export function bakeSea(arena: Arena, fancy: boolean, storm = false): HTMLCanvas
   }
 }
 
-/** Sky and water only, for when the bake could not be made. */
-export function drawFallbackSea(ctx: CanvasRenderingContext2D, arena: Arena) {
-  const sky = ctx.createLinearGradient(0, 0, 0, arena.seaY);
-  sky.addColorStop(0, '#0b2a46');
-  sky.addColorStop(1, '#8fc7e8');
-  ctx.fillStyle = sky;
-  ctx.fillRect(0, 0, arena.w, arena.seaY);
-  ctx.fillStyle = '#12558a';
-  ctx.fillRect(0, arena.seaY, arena.w, arena.h - arena.seaY);
+/** Standalone fallback; accepts the same illumination as drawSky. */
+export function drawFallbackSea(ctx: CanvasRenderingContext2D, arena: Arena, nightAmount = 0, storm = false) {
+  drawSky(ctx, arena, nightAmount, false);
+  if (storm) {
+    ctx.save();
+    ctx.fillStyle = 'rgba(6, 18, 29, 0.65)';
+    ctx.fillRect(0, 0, arena.w, arena.h);
+    ctx.restore();
+  }
+}
+
+type ColorStop = [number, string];
+const DAY_SKY: ColorStop[] = [[0, '#071b33'], [0.34, '#14507f'], [0.68, '#4f9dc7'], [0.88, '#a9d8e8'], [1, '#ffd9a8']];
+const NIGHT_SKY: ColorStop[] = [[0, '#020819'], [0.45, '#07152f'], [0.8, '#123152'], [1, '#24506c']];
+const DAY_WATER: ColorStop[] = [[0, '#2f8fb8'], [0.18, '#1a6a96'], [0.62, '#0e4670'], [1, '#062744']];
+const NIGHT_WATER: ColorStop[] = [[0, '#10344c'], [0.18, '#0a253d'], [0.62, '#07192c'], [1, '#030e1d']];
+const SUN_ROAD: ColorStop[] = [[0, 'rgba(255, 220, 160, 0.42)'], [1, 'rgba(255, 200, 130, 0)']];
+
+// The cache is bounded, independent of arena size, and created only in a browser.
+let lightStrips: (HTMLCanvasElement | null)[] | null = null;
+let sunBloom: HTMLCanvasElement | null | undefined;
+
+function strip(stops: ColorStop[]): HTMLCanvasElement | null {
+  try {
+    const canvas = document.createElement('canvas');
+    canvas.width = 2;
+    canvas.height = 512;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+    const g = ctx.createLinearGradient(0, 0, 0, 512);
+    for (const [at, color] of stops) g.addColorStop(at, color);
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, 2, 512);
+    return canvas;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Sky AND water illumination below bakeSea's transparent scenery. nightAmount
+ * is 0 in daylight and 1 at night. No full-arena caches or per-frame gradients.
+ * At zero the original sky, sun, reflection and sea palette are retained.
+ */
+export function drawSky(ctx: CanvasRenderingContext2D, arena: Arena, nightAmount = 0, fancy = true) {
+  const night = Number.isFinite(nightAmount) ? clamp(nightAmount, 0, 1) : 0;
+  const { w, h, seaY } = arena;
+  if (!lightStrips) lightStrips = [DAY_SKY, NIGHT_SKY, DAY_WATER, NIGHT_WATER, SUN_ROAD].map(strip);
+  ctx.save();
+  const alpha = ctx.globalAlpha;
+  for (let i = 0; i < 4; i++) {
+    const water = i >= 2;
+    const isNight = i % 2 === 1;
+    if (isNight && night === 0) continue;
+    ctx.globalAlpha = alpha * (isNight ? night : 1);
+    const y = water ? seaY : 0;
+    const height = water ? h - seaY : seaY;
+    const texture = lightStrips[i];
+    if (texture) ctx.drawImage(texture, 0, y, w, height);
+    else {
+      ctx.fillStyle = water ? (isNight ? '#07192c' : '#12558a') : (isNight ? '#07152f' : '#14507f');
+      ctx.fillRect(0, y, w, height);
+    }
+  }
+  ctx.globalAlpha = alpha;
+  drawSun(ctx, arena, night, fancy);
+  const road = lightStrips[4];
+  if (road && night < 1) {
+    ctx.globalAlpha = alpha * (1 - night) ** 2;
+    ctx.beginPath();
+    ctx.moveTo(w * 0.66 - 26, seaY);
+    ctx.lineTo(w * 0.66 + 26, seaY);
+    ctx.lineTo(w * 0.66 + 230, h);
+    ctx.lineTo(w * 0.66 - 230, h);
+    ctx.closePath();
+    ctx.clip();
+    ctx.drawImage(road, 0, seaY, w, h - seaY);
+  }
+  ctx.restore();
+}
+
+/** Optional standalone sun; drawSky already calls this. Clip hides the disc
+ * geometrically below the horizon, while the scenery occludes it above it. */
+export function drawSun(ctx: CanvasRenderingContext2D, arena: Arena, nightAmount = 0, fancy = true) {
+  const night = Number.isFinite(nightAmount) ? clamp(nightAmount, 0, 1) : 0;
+  if (night === 1) return;
+  const { w, seaY } = arena;
+  const sunX = w * 0.66;
+  const radius = seaY * 0.075;
+  const sunY = seaY * 0.68 + night * (seaY * 0.32 + radius * 1.15);
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(0, 0, w, seaY);
+  ctx.clip();
+  if (fancy) {
+    if (sunBloom === undefined) sunBloom = radial(256, [
+      [0, 'rgba(255, 236, 178, 0.9)'], [0.3, 'rgba(255, 200, 130, 0.3)'], [1, 'rgba(255, 190, 120, 0)'],
+    ]);
+    if (sunBloom) {
+      const size = seaY * 1.24;
+      const alpha = ctx.globalAlpha;
+      ctx.globalAlpha *= 1 - night;
+      ctx.drawImage(sunBloom, sunX - size / 2, sunY - size / 2, size, size);
+      ctx.globalAlpha = alpha;
+    }
+  }
+  ctx.beginPath();
+  ctx.arc(sunX, sunY, radius, 0, Math.PI * 2);
+  ctx.fillStyle = night > 0.45 ? '#ffb775' : 'rgba(255, 250, 226, 0.95)';
+  ctx.fill();
+  ctx.restore();
 }
 
 function paint(ctx: CanvasRenderingContext2D, arena: Arena, fancy: boolean) {
   const rnd = mulberry32(SEED);
   const { w, seaY, h } = arena;
-
-  // -- sky ------------------------------------------------------------------
-  const sky = ctx.createLinearGradient(0, 0, 0, seaY);
-  sky.addColorStop(0, '#071b33');
-  sky.addColorStop(0.34, '#14507f');
-  sky.addColorStop(0.68, '#4f9dc7');
-  sky.addColorStop(0.88, '#a9d8e8');
-  sky.addColorStop(1, '#ffd9a8');
-  ctx.fillStyle = sky;
-  ctx.fillRect(0, 0, w, seaY);
-
-  // A low sun just off centre, so the two halves of the arena are not mirror
-  // images of each other and each side gets a different-looking sky.
-  const sunX = w * 0.66;
-  const sunY = seaY * 0.68;
-  const bloom = ctx.createRadialGradient(sunX, sunY, 0, sunX, sunY, seaY * 0.62);
-  bloom.addColorStop(0, 'rgba(255, 236, 178, 0.9)');
-  bloom.addColorStop(0.3, 'rgba(255, 200, 130, 0.3)');
-  bloom.addColorStop(1, 'rgba(255, 190, 120, 0)');
-  ctx.fillStyle = bloom;
-  ctx.fillRect(0, 0, w, seaY);
-  ctx.beginPath();
-  ctx.arc(sunX, sunY, seaY * 0.075, 0, Math.PI * 2);
-  ctx.fillStyle = 'rgba(255, 250, 226, 0.95)';
-  ctx.fill();
 
   // -- clouds ---------------------------------------------------------------
   for (let i = 0; i < 9; i++) {
@@ -99,28 +182,6 @@ function paint(ctx: CanvasRenderingContext2D, arena: Arena, fancy: boolean) {
   // idea that this is one fight in a much larger sea.
   farShip(ctx, w * 0.14, seaY - 16, 0.7);
   farShip(ctx, w * 0.86, seaY - 12, 0.5);
-
-  // -- the water ------------------------------------------------------------
-  const sea = ctx.createLinearGradient(0, seaY, 0, h);
-  sea.addColorStop(0, '#2f8fb8');
-  sea.addColorStop(0.18, '#1a6a96');
-  sea.addColorStop(0.62, '#0e4670');
-  sea.addColorStop(1, '#062744');
-  ctx.fillStyle = sea;
-  ctx.fillRect(0, seaY, w, h - seaY);
-
-  // Sun road: a widening band of reflected light running down the water.
-  const road = ctx.createLinearGradient(0, seaY, 0, h);
-  road.addColorStop(0, 'rgba(255, 220, 160, 0.42)');
-  road.addColorStop(1, 'rgba(255, 200, 130, 0)');
-  ctx.fillStyle = road;
-  ctx.beginPath();
-  ctx.moveTo(sunX - 26, seaY);
-  ctx.lineTo(sunX + 26, seaY);
-  ctx.lineTo(sunX + 230, h);
-  ctx.lineTo(sunX - 230, h);
-  ctx.closePath();
-  ctx.fill();
 
   // Static swell. Deeper water gets longer, lazier strokes, which is what
   // gives the flat fill any sense of distance at all.

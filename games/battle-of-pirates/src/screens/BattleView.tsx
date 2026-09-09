@@ -9,6 +9,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, Loader2, Ship as ShipIcon } from 'lucide-react';
 import AimPad, { Aim } from '../components/AimPad';
 import CardHand, { HAND_HEIGHT, HAND_HEIGHT_COMPACT } from '../components/CardHand';
+import SpecialControls from '../components/SpecialControls';
+import { startBattleClock } from '../engine/battleClock';
 import { BattleEngine, Seat } from '../engine/BattleEngine';
 import { Brain, chooseShot, newBrain } from '../engine/ai';
 import { BALANCE, CardId, TEAM_COLORS, angleOf, clamp, elevOf, elevRange } from '../game/rules';
@@ -35,6 +37,7 @@ export interface MatchConfig {
   /** Everyone else in the battle, online only. Empty offline. */
   peerUids: string[];
   isHost: boolean;
+  hostUid?: string;
   /** Two, four or six hulls. Index into this is a ship, everywhere. */
   seats: Seat[];
   /** Hulls driven from this device: one online, one or two on a couch. */
@@ -154,6 +157,10 @@ export default function BattleView({
     setWireGeneration((n) => n + 1);
   }, []);
   const [dragging, setDragging] = useState(false);
+  const [charges, setCharges] = useState<number[]>([]);
+  const [resyncing, setResyncing] = useState(false);
+  const [specialOpen, setSpecialOpen] = useState(false);
+  const specialOpenRef = useRef(false);
   /**
    * Whether the two rosters are showing names or just bars.
    *
@@ -228,7 +235,7 @@ export default function BattleView({
    * past it in one press.
    */
   const readKeyboard = useCallback((engine: BattleEngine, dt: number) => {
-    if (!engine.awaitingLocal) return;
+    if (!engine.awaitingLocal || specialOpenRef.current) return;
     const facing = engine.facing(engine.turn);
     const keys = held.current;
 
@@ -338,9 +345,6 @@ export default function BattleView({
 
     let disposed = false;
     let link: TurnLink | null = null;
-    let leave: ((e: PageTransitionEvent) => void) | undefined;
-    let cancelLeave: (() => void) | undefined;
-    let onVisible: (() => void) | undefined;
 
     void import('../net/turnLink')
       .then(({ TurnLink: Link }) => {
@@ -388,34 +392,9 @@ export default function BattleView({
           link.send({ t: 'hello', n: Date.now() });
         }
 
-        // A tab going into the browser's back/forward cache -- the screen
-        // locking, switching apps, backgrounding the browser -- fires this
-        // exactly like a real close. `persisted` was meant to tell the two
-        // apart, but a page holding an open Firestore listener is not
-        // bfcache-eligible in most browsers -- `persisted` comes back false
-        // for a phone dimming too, not just a real close, so that check alone
-        // still handed a still-very-present player's seat to a bot. Give the
-        // tab a real chance to come back instead: hold off on the bye,
-        // cancelled by `pageshow` or the tab going visible again, and only
-        // actually announce it once the tab hasn't returned in time.
-        let leaveTimer: number | undefined;
-        cancelLeave = () => {
-          if (leaveTimer !== undefined) {
-            window.clearTimeout(leaveTimer);
-            leaveTimer = undefined;
-          }
-        };
-        leave = (e) => {
-          if (e.persisted) return;
-          cancelLeave?.();
-          leaveTimer = window.setTimeout(() => link?.close(), 15000);
-        };
-        onVisible = () => {
-          if (document.visibilityState === 'visible') cancelLeave?.();
-        };
-        window.addEventListener('pagehide', leave);
-        window.addEventListener('pageshow', cancelLeave);
-        document.addEventListener('visibilitychange', onVisible);
+        // Switching apps is not leaving the battle. Keep the link alive; the
+        // clock requests fresh state on return, and host timeouts cover a
+        // device that really disappears. Only explicit exit closes the link.
       })
       .catch((err) => {
         // A stale build, not a dead connection: this tab has been open since
@@ -435,10 +414,6 @@ export default function BattleView({
 
     return () => {
       disposed = true;
-      cancelLeave?.();
-      if (leave) window.removeEventListener('pagehide', leave);
-      if (cancelLeave) window.removeEventListener('pageshow', cancelLeave);
-      if (onVisible) document.removeEventListener('visibilitychange', onVisible);
       link?.close(!retryingRef.current);
       retryingRef.current = false;
       linkRef.current = null;
@@ -494,6 +469,7 @@ export default function BattleView({
       // Only the host arbitrates a silent captain's turn -- see the engine's
       // own note on why two clients must never decide that independently.
       isHost: config.isHost,
+      hostUid: config.hostUid,
       onOver: (winner) => {
         setOver({ winner });
         // With a fleet, "did I win" is about the side I am sailing on, and the
@@ -549,18 +525,14 @@ export default function BattleView({
       selected: '' as string,
       clock: -1,
       hand: '',
+      charges: '',
+      resyncing: false,
     };
 
-    let raf = 0;
-    let last = performance.now();
     let skip = false;
 
-    const frame = (now: number) => {
-      raf = requestAnimationFrame(frame);
-      const dt = Math.min((now - last) / 1000, 0.25);
-      last = now;
-
-      governor.sample(dt);
+    const frame = ({ elapsedSeconds }: { elapsedSeconds: number }) => {
+      governor.sample(elapsedSeconds);
       const q = governor.quality;
       if (q.tier !== tier) {
         // A downgrade changes the backing-store size, so the canvas has to be
@@ -569,12 +541,10 @@ export default function BattleView({
         fit();
       }
 
-      readKeyboard(engine, dt);
       // Only "is a drag live"; whether that shows the trajectory arc at all is
       // the host's rule, checked inside the engine's own render.
-      engine.aiming = engine.awaitingLocal && (draggingRef.current || !coarseRef.current);
+      engine.aiming = engine.awaitingLocal && !specialOpenRef.current && (draggingRef.current || !coarseRef.current);
       engine.setBudget(q.particles);
-      engine.update(dt, decide);
 
       // Nothing on the water is moving during a quiet aim phase except the
       // swell, so the cheap tiers draw it at half rate. The simulation above
@@ -590,6 +560,15 @@ export default function BattleView({
       // string join like the others rather than two named locals -- there is
       // no hp0/hp1 to compare once a side can have three ships on it.
       const hpKey = engine.hp.join(',');
+      const chargeKey = engine.ships.map((ship) => ship.charge).join(',');
+      if (chargeKey !== shown.charges) {
+        shown.charges = chargeKey;
+        setCharges(engine.ships.map((ship) => ship.charge));
+      }
+      if (engine.resyncing !== shown.resyncing) {
+        shown.resyncing = engine.resyncing;
+        setResyncing(engine.resyncing);
+      }
 
       if (hpKey !== shown.hp) {
         shown.hp = hpKey;
@@ -630,10 +609,26 @@ export default function BattleView({
         setClock(nextClock);
       }
     };
-    raf = requestAnimationFrame(frame);
+    const battleClock = startBattleClock({
+      step: (dt) => {
+        if (!document.hidden) readKeyboard(engine, dt);
+        engine.update(dt, decide);
+      },
+      frame,
+      beforeResume: online ? () => {
+        held.current = {};
+        draggingRef.current = false;
+        engine.requestSync();
+        return 'reset';
+      } : undefined,
+      onError: (error) => {
+        log.info('loop:error', { message: String(error) });
+        setNotice('The battle paused unexpectedly. Please return to the lobby and rejoin.');
+      },
+    });
 
     return () => {
-      cancelAnimationFrame(raf);
+      battleClock.stop();
       window.removeEventListener('resize', fit);
       window.removeEventListener('orientationchange', fit);
       engineRef.current = null;
@@ -647,6 +642,7 @@ export default function BattleView({
 
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
+      if (specialOpenRef.current) return;
       const engine = engineRef.current;
       if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
       held.current[e.code] = true;
@@ -692,7 +688,7 @@ export default function BattleView({
 
   const onFire = useCallback((aim: Aim) => {
     const engine = engineRef.current;
-    if (!engine || !engine.awaitingLocal) return;
+    if (!engine || !engine.awaitingLocal || specialOpenRef.current) return;
     engine.fire({ angle: aim.angle, power: aim.power, card: engine.selected });
   }, []);
 
@@ -718,7 +714,7 @@ export default function BattleView({
   // -- render -----------------------------------------------------------------
 
   const myTurn = localShips.has(turn) && (phase === 'aim' || phase === 'deal');
-  const canAim = phase === 'aim' && myTurn && !over;
+  const canAim = phase === 'aim' && myTurn && !over && !resyncing;
   /** My side, for colouring the HUD , the first hull this device sails. */
   const myTeam: Team = config.seats[config.localShips[0] ?? 0]?.team ?? 0;
   const turnTeam: Team = config.seats[turn]?.team ?? 0;
@@ -732,7 +728,7 @@ export default function BattleView({
   // A seat handed to a bot keeps its owner's name, so this line has to read
   // properly for "Alice (adrift)" and for the solo seat, which is called "You".
   const shooter = config.seats[turn]?.name ?? 'Someone';
-  const turnLabel = over
+  const turnLabel = resyncing ? 'Rejoining the fleet…' : phase === 'special' ? `${config.seats[turn]?.name ?? 'Captain'} · special attack` : over
     ? ''
     : myTurn || shooter.toLowerCase() === 'you'
       ? config.localShips.length > 1
@@ -880,7 +876,7 @@ export default function BattleView({
       )}
 
       <AimPad
-        enabled={canAim}
+        enabled={canAim && !specialOpen}
         facing={facing}
         selectedCard={selected}
         bottomInset={showHand ? handHeight : 8}
@@ -902,9 +898,28 @@ export default function BattleView({
         <CardHand
           hand={hand}
           selected={selected}
-          disabled={phase !== 'aim'}
+          disabled={phase !== 'aim' || specialOpen || resyncing}
           compact={compact}
           onSelect={pickCard}
+        />
+      )}
+
+      {!over && localShips.size > 0 && (
+        <SpecialControls
+          charge={charges[myTurn ? turn : config.localShips[0]] ?? 0}
+          enabled={canAim}
+          ships={config.seats.map((seat, i) => ({ ...seat, hp: hp[i] ?? 0, maxHp: maxHp[i] ?? BALANCE.MAX_HP }))}
+          shooter={myTurn ? turn : config.localShips[0]}
+          onOpenChange={(open) => {
+            specialOpenRef.current = open;
+            setSpecialOpen(open);
+            held.current = {};
+            if (open) onDragChange(false);
+          }}
+          onUse={(kind, target) => {
+            audioService.unlock();
+            engineRef.current?.useSpecial(kind, target);
+          }}
         />
       )}
 
@@ -913,7 +928,7 @@ export default function BattleView({
           to sit directly behind it: the hand is z-20 and this was z-10 at the
           very same edge, so the hint was never actually visible whenever a hand
           was showing. */}
-      {!coarse && canAim && !dragging && (
+      {!coarse && canAim && !dragging && !specialOpen && (
         <div
           className="pointer-events-none absolute inset-x-0 z-10 flex justify-center"
           style={{ bottom: showHand ? handHeight + 8 : 4 }}

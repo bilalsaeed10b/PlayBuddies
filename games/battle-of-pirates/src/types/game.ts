@@ -1,4 +1,5 @@
 import type { CardId } from '../game/rules';
+import type { SpecialId } from '../game/specials';
 
 /** 0 is the ship on the left, 1 is the ship on the right. Never anything else. */
 export type Team = 0 | 1;
@@ -19,7 +20,7 @@ export type Control = 'local' | 'remote' | 'ai';
  * player is expected to act; without it the cards appeared already-dealt and
  * nobody noticed the hand had changed.
  */
-export type Phase = 'deal' | 'aim' | 'flight' | 'impact' | 'over';
+export type Phase = 'deal' | 'aim' | 'flight' | 'special' | 'impact' | 'over';
 
 export interface Shot {
   /** Radians. 0 points right, negative is up. */
@@ -52,6 +53,8 @@ export interface Ship {
    */
   hull: number;
   hp: number;
+  /** Successful cannon attacks banked toward a special ability (0–3). */
+  charge: number;
   /** This hull's full health, which is its class's share of BALANCE.MAX_HP. */
   maxHp: number;
   /** Where this hull would sit with no drift. */
@@ -184,7 +187,7 @@ export interface MatchRules {
    * lands.
    */
   aimArc: boolean;
-  /** Fire automatically when the turn clock runs out. */
+  /** Skip the turn when its 12-second aiming clock runs out. */
   turnTimer: boolean;
   mountain: MountainRule;
   /** Cards. Off means every shot is a plain round shot and the hand is hidden. */
@@ -303,6 +306,12 @@ export interface FirePacket {
   a: number;
   p: number;
   c: CardId;
+  /** One-based action number, shared with its resolved ShotPacket. */
+  tn?: number;
+  /** Shooter's fixed seat, independent of the sender (host also drives bots). */
+  who?: number;
+  sp?: SpecialId;
+  tg?: number;
   /** See ShotPacket.first -- carried here too so the earliest possible message can seed a late guest's session. */
   first?: Team;
   /** The host's rules, packed by `packRules`. Travels with `first`, for the same reason. */
@@ -332,6 +341,16 @@ export interface ShotPacket {
   a: number;
   p: number;
   c: CardId;
+  who?: number;
+  sp?: SpecialId;
+  tg?: number;
+  /** Meter state must survive a missed preview, reconnect, or catch-up. */
+  ch?: number[];
+  /** Aim time remaining and snapshot time, for background recovery. */
+  tc?: number;
+  at?: number;
+  /** Echo of a sync request, so a waking tab can recognize a fresh answer. */
+  ack?: number;
   /**
    * The fleet as the shot left it, one entry per ship in engine order: hull,
    * burning turns left, and where it drifted to.

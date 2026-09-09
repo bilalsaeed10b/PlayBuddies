@@ -189,9 +189,33 @@ is the powder.
 - **R7.7** The first touch of a battle requests fullscreen, because the
   Fullscreen API only grants a request that is handling a real user gesture.
   Skipped while embedded: PlayBuddies drives fullscreen for the whole frame.
-- **R7.8** A turn clock fires the shot on its own after 30 seconds, so an
+- **R7.8** A turn clock skips the turn after 12 seconds, so an
   online battle cannot be held hostage by someone who has walked away. It can
   be turned off.
+
+### Special abilities and fleet turns
+
+- Living ships take turns in fixed seat order, wrapping around and skipping sunk
+  ships. Team size never changes how often an individual captain acts.
+- Each damaging cannon attack earns one of three meter charges. Multiple pellets
+  and splash targets count as one successful attack. Misses preserve charge;
+  lingering burns and special abilities do not earn charge.
+- At three charges, choose Torpedo (25 damage to one chosen living enemy), Acid
+  Rain (10 damage to every living enemy), or Heal (25 HP to the acting ship,
+  capped at its hull's maximum). Each consumes all charge and the entire turn.
+- Torpedo visibly crosses the water with a wake and explodes at its target.
+  Heal uses expanding green rings and rising sparkles.
+- Acid Rain lasts six seconds: sunset, deep blue night, moon and enemy-side
+  storm clouds from 0–1.5s; green rain from 1.5–4.5s (damage once at 2.4s);
+  storm clearing, moon fading and sunrise from 4.5–6s. Even a winning attack
+  completes the sunrise before results appear.
+- Floating damage values appear over the damaged ship; general combat messages
+  are centred. Each quality tier gets two additional trajectory dots.
+- A wall-time fixed-step loop advances on background timer callbacks without
+  rendering. Browsers may suspend all execution; on return online clients ask
+  for fresh fleet state before accepting input or replaying old timeout debt.
+  Offline elapsed time is processed in bounded batches. Backgrounding alone
+  never closes the multiplayer link.
 
 ## 8. The bot
 
