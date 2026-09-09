@@ -572,15 +572,22 @@ function LobbyContent() {
   const startGame = async () => {
     if (!isHost || !lobby?.gameId || !everyoneReady) return;
     try {
+      const startPlayers = players.length > 0 ? players : Object.values(lobby.players || {});
+      const activeUids = new Set(startPlayers.map((p) => p.uid));
+      const roster: Record<string, LobbyPlayer | ReturnType<typeof deleteField>> = {};
+      for (const [uid, player] of Object.entries(lobby.players || {})) {
+        roster[`players.${uid}`] = activeUids.has(uid) ? player : deleteField();
+      }
       // `matchStarted` is the game's own go-signal; reset it so a rematch
       // doesn't start instantly from a previous round's flag.
       await updateDoc(doc(db, "lobbies", roomId), {
         status: "playing",
         matchStarted: false,
         collectedGems: {},
+        ...roster,
         // Frozen at start. Deriving it live would remount the iframe , and
         // discard the run in progress , the moment a friend joined.
-        soloMode: isSolo,
+        soloMode: startPlayers.length < (selectedGame?.minPlayers ?? 2),
       });
     } catch (e) {
       console.error("Error starting game:", e);

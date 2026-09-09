@@ -266,17 +266,16 @@ export default function App() {
    * match -- often two players, from a duel -- so a host who opened a fresh
    * room with three friends found the seats already decided one of them
    * would be watching, with nothing on screen to say so before Start. This
-   * raises it to the smallest count the room actually fits the moment
-   * somebody new joins, and never on its own lowers a count the host (or an
-   * earlier run of this same effect) already set -- so choosing fewer seats
-   * than the room on purpose, bots filling the rest, still works exactly as
-   * before for whoever wants it.
+   * sets it to the smallest count the room actually fits whenever the room
+   * changes. That goes both ways: if four people picked Quoridor and two leave
+   * before launch, the next match has to be a duel, not a four-seat board
+   * waiting on ghosts from the old roster.
    */
   useEffect(() => {
     if (!online || !isHost || !lobby) return;
     const roomSize = Object.keys(lobby.players ?? {}).length;
     const fits = PLAYER_CODES.find((n) => n >= roomSize) ?? PLAYER_CODES[PLAYER_CODES.length - 1];
-    if (fits > rules.players) setRules((r) => ({ ...r, players: fits }));
+    if (fits !== rules.players) setRules((r) => ({ ...r, players: fits }));
   }, [online, isHost, lobby, rules.players]);
 
   useEffect(() => {
