@@ -590,6 +590,7 @@ function LobbyContent() {
         gameId,
         matchStarted: false,
         matchRules: deleteField(),
+        matchSeed: deleteField(),
         battleTeams: deleteField(),
         ...reset,
       });
@@ -612,6 +613,7 @@ function LobbyContent() {
       await updateDoc(doc(db, "lobbies", roomId), {
         status: "playing",
         matchStarted: false,
+        matchSeed: deleteField(),
         collectedGems: {},
         ...roster,
         // Frozen at start. Deriving it live would remount the iframe , and

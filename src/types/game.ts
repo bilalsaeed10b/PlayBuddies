@@ -47,6 +47,8 @@ export interface Lobby {
   matchStarted?: boolean;
   /** Packed game-specific match rules, written by games that need everyone to share the same setup. */
   matchRules?: number;
+  /** Fresh per-match seed shared by every client, cleared before another game launches. */
+  matchSeed?: number;
   /** Battle of Pirates host-picked teams, cleared when the room changes games. */
   battleTeams?: Record<string, number>;
   /** Set when the match starts; the game runs local co-op instead of waiting for a peer. */

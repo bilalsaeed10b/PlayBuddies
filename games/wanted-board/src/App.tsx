@@ -93,6 +93,7 @@ export default function App() {
     players: Record<string, LobbyPerson>;
     matchStarted?: boolean;
     matchRules?: number;
+    matchSeed?: number;
   } | null>(null);
   const [lobbyError, setLobbyError] = useState<string | null>(null);
 
@@ -175,6 +176,7 @@ export default function App() {
             players: Record<string, LobbyPerson>;
             matchStarted?: boolean;
             matchRules?: number;
+            matchSeed?: number;
           };
           if (!data.players?.[uid]) {
             setLobbyError('You are not in this lobby.');
@@ -187,6 +189,8 @@ export default function App() {
             iAmHost: data.hostId === uid,
             players: Object.keys(data.players ?? {}).length,
             matchStarted: Boolean(data.matchStarted),
+            matchRules: data.matchRules,
+            matchSeed: data.matchSeed,
           });
           setLobby(data);
           // The host's terms, arriving on the one channel every client already
@@ -212,35 +216,33 @@ export default function App() {
    *
    * Sorted by uid rather than by arrival, because arrival order differs
    * between clients and the seat index is what the whole wire protocol is
-   * addressed by.
+   * addressed by. Keep the complete room here: slicing by a locally saved
+   * player count before the host starts is how real people became bot seats.
    */
   const people = useMemo(() => {
     return Object.values(lobby?.players ?? {})
       .sort((a, b) => a.uid.localeCompare(b.uid))
-      .slice(0, rules.players)
+      .slice(0, PLAYER_CODES[PLAYER_CODES.length - 1])
       .map((p) => ({ uid: p.uid, displayName: p.displayName || 'Player', skin: p.fishIndex }));
-  }, [lobby, rules.players]);
+  }, [lobby?.players]);
 
   const mySkin = uid ? lobby?.players?.[uid]?.fishIndex : undefined;
   const isHost = Boolean(uid && lobby && lobby.hostId === uid);
+  const stampedRules = typeof lobby?.matchRules === 'number' ? unpackRules(lobby.matchRules) : null;
+  const activeRules = lobby?.matchStarted && stampedRules ? stampedRules : rules;
 
   /**
    * The host's chosen player count follows the room, not the other way round.
    *
-   * `rules.players` used to be whatever this device remembered from its last
-   * game -- often two -- so a host who opened a fresh room with three friends
-   * found the seats already decided one of them would be watching, with
-   * nothing on screen to say so before Start. This raises it to the smallest
-   * count the room actually fits the moment somebody new joins, and never on
-   * its own lowers a count the host (or an earlier run of this same effect)
-   * already set -- so choosing fewer seats than the room on purpose, bots
-   * filling the rest, still works exactly as before for whoever wants it.
+   * This follows the room in both directions. A remembered four-player game
+   * must become a duel after two people leave; online matches never pad the
+   * connected crew with bots from an old setting.
    */
   useEffect(() => {
     if (!online || !isHost || !lobby) return;
     const roomSize = Object.keys(lobby.players ?? {}).length;
     const fits = PLAYER_CODES.find((n) => n >= roomSize) ?? PLAYER_CODES[PLAYER_CODES.length - 1];
-    if (fits > rules.players) setRules((r) => ({ ...r, players: fits }));
+    if (fits !== rules.players) setRules((r) => ({ ...r, players: fits }));
   }, [online, isHost, lobby, rules.players]);
 
   useEffect(() => {
@@ -281,18 +283,24 @@ export default function App() {
 
   const startMatch = useCallback(async () => {
     if (!isHost) return;
+    const players = PLAYER_CODES.find((n) => n >= people.length) ?? PLAYER_CODES[PLAYER_CODES.length - 1];
+    const startRules = { ...rules, players };
+    const matchSeed = randomSeed();
+    setRules(startRules);
+    setSession({ seed: matchSeed });
     try {
       const { db, doc, updateDoc } = await import('./firebase');
       // The rules ride along in the same write as the go-signal, so they land
       // in every guest's snapshot at the same instant `matchStarted` does.
       await updateDoc(doc(db, 'lobbies', handoff.room), {
         matchStarted: true,
-        matchRules: packRules(rules),
+        matchRules: packRules(startRules),
+        matchSeed,
       });
     } catch (e) {
       console.error('Could not start the game', e);
     }
-  }, [isHost, handoff.room, rules]);
+  }, [isHost, handoff.room, people.length, rules]);
 
   const award = useCallback((won: boolean, banked: number) => {
     setCoins((c) => c + (won ? 95 : 30) + Math.round(banked / 25));
@@ -309,10 +317,20 @@ export default function App() {
       .catch((e) => console.error('Could not reset the match flag', e));
   }, [online, isHost, handoff.room, rollSession]);
 
+  const rosterKey = people.map((person) => `${person.uid}:${person.skin ?? ''}`).join('|');
+  // While waiting, every roster update rebuilds the preview config. Once the
+  // host starts, the shared seed and packed rules become the immutable match
+  // identity, so a later presence write cannot replace seats mid-game.
+  const onlineMatchKey = lobby?.matchStarted
+    ? `started:${lobby.matchSeed ?? session.seed}:${lobby.matchRules ?? ''}`
+    : `waiting:${rosterKey}`;
   const matchConfig = useMemo(
-    () => (online && uid && !offlineMatch ? onlineConfig() : offlineConfig()),
+    () =>
+      online && uid && !offlineMatch
+        ? onlineConfig(activeRules, lobby?.matchSeed ?? session.seed)
+        : offlineConfig(),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [session.seed, offlineMatch, uid],
+    [session.seed, offlineMatch, uid, onlineMatchKey],
   );
 
   // -- into the game ----------------------------------------------------------
@@ -338,12 +356,12 @@ export default function App() {
     );
   }
 
-  function onlineConfig(): MatchConfig {
+  function onlineConfig(matchRules: MatchRules, matchSeed: number): MatchConfig {
     const crew = handoff.solo ? people.filter((p) => p.uid === uid) : people;
     const seats: Seat[] = [];
     const localSeats: number[] = [];
 
-    for (let i = 0; i < rules.players; i++) {
+    for (let i = 0; i < matchRules.players; i++) {
       const person = crew[i];
       if (person && person.uid === uid) {
         localSeats.push(i);
@@ -380,8 +398,8 @@ export default function App() {
       isHost,
       seats,
       localSeats,
-      seed: session.seed,
-      rules,
+      seed: matchSeed,
+      rules: matchRules,
     };
   }
 
