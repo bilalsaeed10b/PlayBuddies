@@ -96,6 +96,8 @@ interface LobbyPerson {
   isReady?: boolean;
 }
 
+type BattleTeams = Record<string, Team>;
+
 const randomSeed = () => (Math.random() * 0x7fffffff) | 0;
 const coinFlip = (): Team => (Math.random() < 0.5 ? 0 : 1);
 
@@ -110,6 +112,7 @@ export default function App() {
   const [lobby, setLobby] = useState<{
     hostId: string;
     players: Record<string, LobbyPerson>;
+    battleTeams?: BattleTeams;
     matchStarted?: boolean;
     matchRules?: number;
   } | null>(null);
@@ -247,6 +250,7 @@ export default function App() {
           const data = snap.data() as {
             hostId: string;
             players: Record<string, LobbyPerson>;
+            battleTeams?: BattleTeams;
             matchStarted?: boolean;
             matchRules?: number;
           };
@@ -317,7 +321,9 @@ export default function App() {
         // A player who has not touched the picker sails a Frigate, which is
         // the class every number in BALANCE was tuned against.
         hull: typeof p.role === 'number' ? p.role : 0,
-        team: (i % 2) as Team,
+        // A host's explicit placement wins. Alternating remains a stable,
+        // balanced default until someone opens team management.
+        team: lobby?.battleTeams?.[p.uid] === 1 ? 1 : lobby?.battleTeams?.[p.uid] === 0 ? 0 : (i % 2) as Team,
         photoURL: p.photoURL,
         isReady: Boolean(p.isReady),
       }));
@@ -423,6 +429,17 @@ export default function App() {
     [uid, handoff.room],
   );
 
+  /** Host-only team assignment, persisted before the match is started. */
+  const assignTeam = useCallback(async (targetUid: string, team: Team) => {
+    if (!isHost || !lobby?.players[targetUid]) return;
+    try {
+      const { db, doc, updateDoc } = await import('./firebase');
+      await updateDoc(doc(db, 'lobbies', handoff.room), { [`battleTeams.${targetUid}`]: team });
+    } catch (e) {
+      console.error('Could not assign that team', e);
+    }
+  }, [isHost, lobby?.players, handoff.room]);
+
   const startMatch = useCallback(async () => {
     if (!isHost) return;
     try {
@@ -526,45 +543,46 @@ export default function App() {
     const seats: Seat[] = [];
     const localShips: number[] = [];
 
-    // Every berth the rules call for gets filled, in the fixed side-alternating
-    // order every client derives the same way. A berth with nobody in it gets a
-    // bot, so a half-empty room is still an even fight rather than a walkover.
-    for (let i = 0; i < rules.players; i++) {
-      const team = (i % 2) as Team;
-      const person = crew[i];
-      if (person && person.uid === uid) {
-        localShips.push(i);
-        seats.push({
-          team,
-          id: uid ?? 'me',
-          name: handoff.displayName || 'You',
-          control: 'local',
-          aiLevel,
-          skin: mySkin ?? FREE_SHIPS[0],
-          hull: myHull,
-        });
-      } else if (person) {
-        seats.push({
-          team,
-          id: person.uid,
-          name: person.displayName,
-          control: 'remote',
-          aiLevel,
-          skin: person.skin ?? pickOtherShip(mySkin ?? FREE_SHIPS[0]),
-          hull: person.hull,
-        });
-      } else {
-        seats.push({
-          team,
-          id: `bot-${i}`,
-          name: `${TIERS[aiLevel].label} Bot`,
-          control: 'ai',
-          aiLevel,
-          skin: pickOtherShip(mySkin ?? FREE_SHIPS[0]),
-          // Derived from the seat number, not rolled: every client builds
-          // this same bot and they all have to build the same one.
-          hull: i % HULLS.length,
-        });
+    // Build each fleet separately. That keeps the anchors correct even when
+    // the host groups friends on one team rather than alternating the roster.
+    const perTeam = rules.players / 2;
+    for (const team of [0, 1] as const) {
+      const fleet = crew.filter((person) => person.team === team);
+      for (let slot = 0; slot < perTeam; slot++) {
+        const person = fleet[slot];
+        const seatIndex = seats.length;
+        if (person && person.uid === uid) {
+          localShips.push(seatIndex);
+          seats.push({
+            team,
+            id: uid ?? 'me',
+            name: handoff.displayName || 'You',
+            control: 'local',
+            aiLevel,
+            skin: mySkin ?? FREE_SHIPS[0],
+            hull: myHull,
+          });
+        } else if (person) {
+          seats.push({
+            team,
+            id: person.uid,
+            name: person.displayName,
+            control: 'remote',
+            aiLevel,
+            skin: person.skin ?? pickOtherShip(mySkin ?? FREE_SHIPS[0]),
+            hull: person.hull,
+          });
+        } else {
+          seats.push({
+            team,
+            id: `bot-${team}-${slot}`,
+            name: `${TIERS[aiLevel].label} Bot`,
+            control: 'ai',
+            aiLevel,
+            skin: pickOtherShip(mySkin ?? FREE_SHIPS[0]),
+            hull: seatIndex % HULLS.length,
+          });
+        }
       }
     }
 
@@ -710,6 +728,7 @@ export default function App() {
           isHost={isHost}
           onPick={pickOnline}
           onPickHull={pickHullOnline}
+          onAssignTeam={assignTeam}
           myHull={myHull}
           onStart={startMatch}
           onSettings={() => setShowSettings(true)}
@@ -1243,6 +1262,7 @@ function RoomScreen({
   isHost,
   onPick,
   onPickHull,
+  onAssignTeam,
   onStart,
   onSettings,
   onRules,
@@ -1270,6 +1290,7 @@ function RoomScreen({
   isHost: boolean;
   onPick: (index: number) => void;
   onPickHull: (index: number) => void;
+  onAssignTeam: (uid: string, team: Team) => void;
   onStart: () => void;
   onSettings: () => void;
   onRules: () => void;
@@ -1337,6 +1358,7 @@ function RoomScreen({
 
   /** Paint or class. Paint first, because it is the one with a price on it. */
   const [tab, setTab] = useState<'ship' | 'hull'>('ship');
+  const [showTeams, setShowTeams] = useState(false);
 
   if (error) {
     return (
@@ -1368,7 +1390,13 @@ function RoomScreen({
    * they had not chosen, and the shop screen was still open over the top of it.
    */
   const everyonePicked = people.every((p) => p.skin !== undefined && p.skin !== null);
-  const canStart = iAmReady && everyonePicked;
+  const fleetCapacity = rules.players / 2;
+  const teamCounts: Record<Team, number> = {
+    0: people.filter((p) => p.team === 0).length,
+    1: people.filter((p) => p.team === 1).length,
+  };
+  const teamsOverfull = teamCounts[0] > fleetCapacity || teamCounts[1] > fleetCapacity;
+  const canStart = iAmReady && everyonePicked && !teamsOverfull;
   const waitingFor = people.filter((p) => p.skin === undefined || p.skin === null).length;
 
   const header = (
@@ -1423,13 +1451,21 @@ function RoomScreen({
               : 'Waiting for the host...'}
         </p>
       )}
-      <div className="mt-2 grid grid-cols-2 gap-2">
+      <div className={`mt-2 grid gap-2 ${isHost ? 'grid-cols-3' : 'grid-cols-2'}`}>
         <button
           onClick={onRules}
           className="flex items-center justify-center gap-1.5 rounded-lg border border-white/20 bg-white/5 py-2 text-xs font-black text-white/70 transition-colors active:bg-white/15"
         >
           <ScrollText className="h-3.5 w-3.5" /> Rules
         </button>
+        {isHost && (
+          <button
+            onClick={() => setShowTeams(true)}
+            className="flex items-center justify-center gap-1.5 rounded-lg border border-white/20 bg-white/5 py-2 text-xs font-black text-white/70 transition-colors active:bg-white/15"
+          >
+            <Users className="h-3.5 w-3.5" /> Teams
+          </button>
+        )}
         <button
           onClick={onPlayOffline}
           className="rounded-lg border border-white/20 bg-white/5 py-2 text-xs font-black text-white/70 transition-colors active:bg-white/15"
@@ -1528,6 +1564,8 @@ function RoomScreen({
               ? 'Pick your own ship first.'
               : !everyonePicked
                 ? `Waiting on ${waitingFor} more to pick a ship.`
+                : teamsOverfull
+                  ? 'Move a captain: each fleet has room for only two.'
                 : emptyBerths > 0
                   ? `Bots will sail ${emptyBerths} of the ${rules.players} hulls.`
                   : 'Which side fires first is drawn at the start.'}
@@ -1551,6 +1589,14 @@ function RoomScreen({
         </span>
         <span className="px-3 text-[10px] font-semibold leading-tight text-white/45">{rulesSummary(rules)}</span>
       </button>
+      {isHost && (
+        <button
+          onClick={() => setShowTeams(true)}
+          className="mt-3 flex w-full items-center justify-center gap-2 rounded-2xl border border-sky-300/35 bg-sky-400/10 py-3 font-black text-sky-100 transition-colors hover:bg-sky-400/20"
+        >
+          <Users className="h-4 w-4" /> Manage teams · {teamCounts[0]} Crimson / {teamCounts[1]} Cobalt
+        </button>
+      )}
       <button
         onClick={onPlayOffline}
         className="mt-3 w-full rounded-2xl border border-white/20 bg-white/5 py-3 font-black text-white/60 transition-colors hover:bg-white/15"
@@ -1560,31 +1606,44 @@ function RoomScreen({
     </div>
   );
 
+  const teamManager = showTeams && (
+    <TeamManager
+      people={people}
+      capacity={fleetCapacity}
+      onAssign={onAssignTeam}
+      onClose={() => setShowTeams(false)}
+    />
+  );
+
   // A landscape phone is wide enough to build a row but short on the one
   // thing that matters here -- see `sideBySide` above. CTA and roster share
   // a single slim row instead of stacking, and the ship grid gets everything
   // below it rather than splitting a second row with the roster again.
   if (sideBySide) {
     return (
-      <div className="mx-auto flex h-full w-full max-w-6xl flex-col overflow-y-auto overscroll-contain gap-2 p-2.5">
-        {header}
-        <div className="flex shrink-0 gap-2">
-          <div className="panel min-w-0 flex-1 rounded-2xl p-2">{ctaButtons}</div>
-          <div className="panel flex w-32 shrink-0 flex-col rounded-2xl p-1.5">
-            <h3 className="mb-1 flex shrink-0 items-center gap-1 text-[8px] font-black uppercase tracking-wide text-white/50">
-              <Users className="h-2.5 w-2.5" /> {people.length} up
-            </h3>
-            {rosterChips}
+      <>
+        <div className="mx-auto flex h-full w-full max-w-6xl flex-col overflow-y-auto overscroll-contain gap-2 p-2.5">
+          {header}
+          <div className="flex shrink-0 gap-2">
+            <div className="panel min-w-0 flex-1 rounded-2xl p-2">{ctaButtons}</div>
+            <div className="panel flex w-32 shrink-0 flex-col rounded-2xl p-1.5">
+              <h3 className="mb-1 flex shrink-0 items-center gap-1 text-[8px] font-black uppercase tracking-wide text-white/50">
+                <Users className="h-2.5 w-2.5" /> {people.length} up
+              </h3>
+              {rosterChips}
+            </div>
           </div>
+          {shipGridPanel('flex-1')}
         </div>
-        {shipGridPanel('flex-1')}
-      </div>
+        {teamManager}
+      </>
     );
   }
 
   return (
-    <div className="mx-auto flex h-full w-full max-w-6xl flex-col overflow-y-auto overscroll-contain gap-2 p-2.5 sm:gap-4 sm:p-6">
-      {header}
+    <>
+      <div className="mx-auto flex h-full w-full max-w-6xl flex-col overflow-y-auto overscroll-contain gap-2 p-2.5 sm:gap-4 sm:p-6">
+        {header}
 
       {/* Loud on purpose, and the one thing this whole screen fights for
           height on that skips `short:` -- see `sideBySide` above for what
@@ -1617,10 +1676,10 @@ function RoomScreen({
           three cards at a time. */}
       <div className="panel shrink-0 rounded-2xl p-2.5 lg:hidden">{ctaButtons}</div>
 
-      <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[auto_minmax(0,1fr)] gap-2 sm:gap-4 lg:grid-cols-3 lg:grid-rows-[minmax(0,1fr)]">
-        {shipGridPanel('order-2 lg:order-1 lg:col-span-2')}
+        <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[auto_minmax(0,1fr)] gap-2 sm:gap-4 lg:grid-cols-3 lg:grid-rows-[minmax(0,1fr)]">
+          {shipGridPanel('order-2 lg:order-1 lg:col-span-2')}
 
-        <div className="order-1 flex min-h-0 flex-col gap-3 sm:gap-4 lg:order-2">
+          <div className="order-1 flex min-h-0 flex-col gap-3 sm:gap-4 lg:order-2">
           {/* A horizontal strip of avatar chips when height is tight, the
               roomy vertical card list when it isn't. The roster only needs to
               say who's on the water and what side -- it does not need a
@@ -1678,7 +1737,80 @@ function RoomScreen({
             )}
           </div>
 
-          {desktopCta}
+            {desktopCta}
+          </div>
+        </div>
+      </div>
+      {teamManager}
+    </>
+  );
+}
+
+/** Host-only pre-match crew board. Teams are locked into the engine at launch. */
+function TeamManager({
+  people,
+  capacity,
+  onAssign,
+  onClose,
+}: {
+  people: { uid: string; displayName: string; team: Team; photoURL?: string }[];
+  capacity: number;
+  onAssign: (uid: string, team: Team) => void;
+  onClose: () => void;
+}) {
+  useEscape(true, onClose);
+  const counts: Record<Team, number> = {
+    0: people.filter((p) => p.team === 0).length,
+    1: people.filter((p) => p.team === 1).length,
+  };
+
+  return (
+    <div {...scrimProps(onClose)} className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/75 p-3 backdrop-blur-sm">
+      <div className="panel w-full max-w-lg rounded-[2rem] p-4 sm:p-6" onClick={(event) => event.stopPropagation()}>
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h3 className="text-lg font-black">Manage teams</h3>
+            <p className="mt-1 text-xs font-semibold text-white/55">Place each captain before weighing anchor. Each fleet holds {capacity}.</p>
+          </div>
+          <button onClick={onClose} aria-label="Close team manager" className="rounded-xl p-2 text-white/65 hover:bg-white/10">
+            <ArrowLeft className="h-5 w-5" />
+          </button>
+        </div>
+
+        <div className="mt-4 space-y-2">
+          {people.map((person) => (
+            <div key={person.uid} className="flex items-center gap-2 rounded-2xl border border-white/10 bg-black/20 p-2">
+              <img
+                src={person.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${person.uid}`}
+                alt=""
+                className="h-9 w-9 shrink-0 rounded-xl object-cover"
+              />
+              <p className="min-w-0 flex-1 truncate text-sm font-bold">{person.displayName}</p>
+              {([0, 1] as const).map((team) => {
+                const selected = person.team === team;
+                const full = counts[team] >= capacity && !selected;
+                return (
+                  <button
+                    key={team}
+                    type="button"
+                    disabled={full}
+                    onClick={() => onAssign(person.uid, team)}
+                    className={`rounded-xl border px-2.5 py-2 text-[10px] font-black uppercase tracking-wide transition-colors disabled:cursor-not-allowed disabled:opacity-35 ${
+                      selected ? 'text-slate-950' : 'border-white/15 bg-white/5 text-white/60 hover:bg-white/10'
+                    }`}
+                    style={selected ? { borderColor: TEAM_COLORS[team].main, background: TEAM_COLORS[team].light } : undefined}
+                  >
+                    {TEAM_COLORS[team].name}
+                  </button>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+
+        <div className="mt-4 flex items-center justify-between rounded-xl bg-white/5 px-3 py-2 text-[11px] font-bold text-white/60">
+          <span style={{ color: TEAM_COLORS[0].light }}>Crimson {counts[0]}/{capacity}</span>
+          <span style={{ color: TEAM_COLORS[1].light }}>Cobalt {counts[1]}/{capacity}</span>
         </div>
       </div>
     </div>
