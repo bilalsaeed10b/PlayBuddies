@@ -10,6 +10,7 @@ import { ChevronLeft, ChevronRight, Loader2, Ship as ShipIcon } from 'lucide-rea
 import AimPad, { Aim } from '../components/AimPad';
 import CardHand, { HAND_HEIGHT, HAND_HEIGHT_COMPACT } from '../components/CardHand';
 import SpecialControls from '../components/SpecialControls';
+import TorpedoTargeter from '../components/TorpedoTargeter';
 import { startBattleClock } from '../engine/battleClock';
 import { BattleEngine, Seat } from '../engine/BattleEngine';
 import { Brain, chooseShot, newBrain } from '../engine/ai';
@@ -161,6 +162,7 @@ export default function BattleView({
   const [resyncing, setResyncing] = useState(false);
   const [specialOpen, setSpecialOpen] = useState(false);
   const specialOpenRef = useRef(false);
+  const [torpedoTargeting, setTorpedoTargeting] = useState(false);
   /**
    * Whether the two rosters are showing names or just bars.
    *
@@ -698,6 +700,31 @@ export default function BattleView({
     setSelected(card);
   }, []);
 
+  const cancelTorpedo = useCallback(() => {
+    specialOpenRef.current = false;
+    setSpecialOpen(false);
+    setTorpedoTargeting(false);
+  }, []);
+
+  const beginTorpedo = useCallback(() => {
+    specialOpenRef.current = true;
+    held.current = {};
+    onDragChange(false);
+    setSpecialOpen(true);
+    setTorpedoTargeting(true);
+  }, [onDragChange]);
+
+  const targetTorpedo = useCallback((clientX: number, clientY: number) => {
+    const engine = engineRef.current;
+    const canvas = canvasRef.current;
+    if (!engine || !canvas || !engine.awaitingLocal) return false;
+    const target = engine.pickEnemyAt(clientX, clientY, canvas.getBoundingClientRect(), engine.ships[engine.turn].team);
+    if (target === null || !engine.useSpecial('torpedo', target)) return false;
+    audioService.unlock();
+    cancelTorpedo();
+    return true;
+  }, [cancelTorpedo]);
+
   const playAgain = useCallback(() => {
     setOver(null);
     setNotice(null);
@@ -724,6 +751,10 @@ export default function BattleView({
   // is a strip of screen showing the player a choice they do not have. The pad
   // takes the space back instead.
   const showHand = myTurn && !over && (session?.rules.cards ?? true);
+
+  useEffect(() => {
+    if (torpedoTargeting && !canAim) cancelTorpedo();
+  }, [torpedoTargeting, canAim, cancelTorpedo]);
 
   // A seat handed to a bot keeps its owner's name, so this line has to read
   // properly for "Alice (adrift)" and for the solo seat, which is called "You".
@@ -894,6 +925,14 @@ export default function BattleView({
         }}
       />
 
+      {torpedoTargeting && canAim && (
+        <TorpedoTargeter
+          bottomInset={showHand ? handHeight : 8}
+          onTarget={(clientX, clientY) => targetTorpedo(clientX, clientY)}
+          onCancel={cancelTorpedo}
+        />
+      )}
+
       {showHand && (
         <CardHand
           hand={hand}
@@ -908,6 +947,7 @@ export default function BattleView({
         <SpecialControls
           charge={charges[myTurn ? turn : config.localShips[0]] ?? 0}
           enabled={canAim}
+          targeting={torpedoTargeting}
           ships={config.seats.map((seat, i) => ({ ...seat, hp: hp[i] ?? 0, maxHp: maxHp[i] ?? BALANCE.MAX_HP }))}
           shooter={myTurn ? turn : config.localShips[0]}
           onOpenChange={(open) => {
@@ -916,9 +956,11 @@ export default function BattleView({
             held.current = {};
             if (open) onDragChange(false);
           }}
-          onUse={(kind, target) => {
+          onBeginTorpedo={beginTorpedo}
+          onCancelTorpedo={cancelTorpedo}
+          onUse={(kind) => {
             audioService.unlock();
-            engineRef.current?.useSpecial(kind, target);
+            engineRef.current?.useSpecial(kind);
           }}
         />
       )}

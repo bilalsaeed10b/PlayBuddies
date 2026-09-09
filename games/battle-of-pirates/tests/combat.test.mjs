@@ -4,6 +4,8 @@ import { loadModule } from './loadModule.mjs';
 
 // Bundle the actual engine in memory: no test-only duplicate of combat rules.
 const { BattleEngine } = await loadModule(new URL('../src/engine/BattleEngine.ts', import.meta.url));
+const { CARDS, CARD_ORDER } = await loadModule(new URL('../src/game/rules.ts', import.meta.url));
+const { SPECIALS } = await loadModule(new URL('../src/game/specials.ts', import.meta.url));
 const rules = { players: 4, aimArc: true, cards: true, mountain: 'off', turnTimer: false, storm: false };
 function create(count = 4, overrides = {}) {
   return new BattleEngine({
@@ -58,6 +60,27 @@ test('normal cannon projectile collision earns charge and floating damage text',
   assert.equal(b.ships[0].charge, 1);
   assert.ok(b.damageTexts.some(t => t.text.startsWith('−')));
 });
+test('every ammunition type has identical range at the same angle and power', () => {
+  const b = create(2); aim(b);
+  b.aimAngle = -0.82; b.aimPower = 0.74;
+  const baseline = (() => { b.selected = 'round'; return b.previewArc(30); })();
+  for (const id of CARD_ORDER) {
+    assert.equal(CARDS[id].speed, 1, `${id} muzzle speed`);
+    assert.equal(CARDS[id].gravity, 1, `${id} gravity`);
+    b.selected = id;
+    assert.deepEqual(b.previewArc(30), baseline, `${id} centre trajectory`);
+  }
+});
+test('torpedo drag targeting accepts living enemies and rejects allies and empty water', () => {
+  const b = create();
+  b.dpr = 1; b.scale = 1; b.offX = 0; b.offY = 0;
+  const rect = { left: 0, top: 0 };
+  assert.equal(b.pickEnemyAt(b.ships[1].x, b.shipY(1), rect, 0), 1);
+  assert.equal(b.pickEnemyAt(b.ships[0].x, b.shipY(0), rect, 0), null);
+  assert.equal(b.pickEnemyAt(b.arena.w / 2, 40, rect, 0), null);
+  b.ships[1].hp = 0;
+  assert.equal(b.pickEnemyAt(b.ships[1].x, b.shipY(1), rect, 0), null);
+});
 test('torpedo damages only the selected enemy by 25 and consumes exactly one turn', () => {
   const b = create(); aim(b); grant(b);
   const before = b.hp;
@@ -66,9 +89,9 @@ test('torpedo damages only the selected enemy by 25 and consumes exactly one tur
   assert.equal(b.useSpecial('torpedo', 1), false);
   b.fire({ angle: 0, power: 1, card: 'round' });
   assert.equal(b.phase, 'special');
-  advance(b, 0.88); assert.deepEqual(b.hp, before);
-  advance(b, 0.05); assert.deepEqual(b.hp, before.map((hp, i) => i === 3 ? hp - 25 : hp));
-  advance(b, 1.1); assert.equal(b.turnNo, 1); assert.equal(b.turn, 1);
+  advance(b, SPECIALS.torpedo.impact - 0.02); assert.deepEqual(b.hp, before);
+  advance(b, 0.04); assert.deepEqual(b.hp, before.map((hp, i) => i === 3 ? hp - 25 : hp));
+  advance(b, SPECIALS.torpedo.duration - SPECIALS.torpedo.impact + 0.2); assert.equal(b.turnNo, 1); assert.equal(b.turn, 1);
 });
 test('acid rain hits every living enemy once, and keeps the full six-second cinematic', () => {
   const b = create(6); aim(b); grant(b); b.ships[5].hp = 0;

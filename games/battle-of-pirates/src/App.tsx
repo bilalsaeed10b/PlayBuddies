@@ -1969,7 +1969,7 @@ function RulesPanel({
     {
       key: 'cards',
       label: 'Cards',
-      hint: 'Three dealt a turn: chain, grape, mortar, firebomb, bore, patch. Off means round shot every time, and the battle is pure gunnery.',
+      hint: 'Three dealt a turn from round, chain, grape, mortar, firebomb, bore, repair, twin, broadside, and powder-keg attacks. Off means round shot every time.',
     },
     {
       key: 'turnTimer',

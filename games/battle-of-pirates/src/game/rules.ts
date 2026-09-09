@@ -380,7 +380,9 @@ export const TEAM_COLORS: Record<0 | 1, { name: string; main: string; light: str
 
 // ── cards ──────────────────────────────────────────────────────────────────
 
-export type CardId = 'round' | 'chain' | 'grape' | 'mortar' | 'firebomb' | 'patch' | 'bore';
+export type CardId =
+  | 'round' | 'chain' | 'grape' | 'mortar' | 'firebomb' | 'patch' | 'bore'
+  | 'twin' | 'broadside' | 'keg';
 
 export interface CardMeta {
   id: CardId;
@@ -408,25 +410,20 @@ export interface CardMeta {
 }
 
 /**
- * Seven cards, three dealt, one played, every turn.
+ * Ten cards, three dealt, one played, every turn.
  *
  * A hand of three is the smallest number that is still a decision, and it fits
  * across the bottom of a phone at a size a thumb can hit. Weighting the plain
  * round highest keeps the baseline shot common: the interesting cards are
  * interesting because they are not the default.
  *
- * `speed` is also, in effect, a range dial: at a fixed gravity and a fixed
- * launch angle, how far a ball goes scales with the square of its muzzle
- * velocity, so a card at 0.8x speed does not fly "a bit less far", it lands
- * at roughly two thirds the distance. That is what separates grapeshot from
- * mortar below from round shot -- three different fights at three different
- * ranges, not one card with a bigger number on it.
+ * Every attack uses the same muzzle speed and gravity. At the same angle and
+ * power every card therefore follows the same centre trajectory, so choosing
+ * ammunition never quietly changes the range the player just aimed for.
  */
 /**
- * Every cannonball hits equally hard -- `damage` is the same number on every
- * card except grape, chain and bore. What tells the rest apart is everything
- * else here: how many balls leave the barrel, how far they reach, and what
- * they do besides bruise a hull.
+ * The common shells share the same direct hit. Multi-ball and utility cards
+ * divide that damage across their payload, trading one large hit for coverage.
  */
 const POWER = 1.1;
 /** Flat per-pellet damage for grapeshot's five balls -- see the comment on `grape` below. */
@@ -452,37 +449,22 @@ export const CARDS: Record<CardId, CardMeta> = {
     linked: true,
   },
   /**
-   * A close-range shotgun, not a weaker round shot in aggregate -- five
-   * pellets at a flat 3 damage each still out-totals one round shot if most
-   * of them connect. At 0.78x speed -- nudged up when the water itself
-   * widened to 1850, so a full-power shot can still physically reach the far
-   * rail when the turn's drift has actually brought the two hulls close,
-   * rather than falling short even then -- it is still comfortably shorter
-   * than a half-power round shot manages. The five-pellet forgiveness only
-   * pays off once the range is genuinely closed.
+   * Five pellets at a flat 3 damage each. The centre pellet now has the same
+   * range as every other card; the wide fan still makes it strongest nearby.
    */
   grape: {
     id: 'grape', name: 'Grapeshot', glyph: '::', weight: 15,
-    blurb: 'A close-range fan of five. Needs the enemy properly near.',
-    shots: 5, spread: 0.15, damage: GRAPE_PELLET, blast: 0.55, gravity: 1, speed: 0.78,
+    blurb: 'A wide fan of five. Strongest when the enemy is near.',
+    shots: 5, spread: 0.15, damage: GRAPE_PELLET, blast: 0.55, gravity: 1, speed: 1,
   },
   /**
-   * The finisher, and the only card the mountain cannot make flinch. `elevRange`
-   * below locks it to a 45-to-90-degree barrel, below -- it cannot fire the flat
-   * shot at all, only a lob or a near-vertical drop -- so it never competes with
-   * round shot on the same trajectory. What used to pay for that restriction was
-   * range: the old mortar, unrestricted, still only just reached a stationary
-   * enemy at full power. Locked to the one angle band, it can afford to actually
-   * carry: at 1.1x speed its 45-degree ceiling clears the water with room to
-   * spare, and it still has real reach most of the way to 90, where it becomes a
-   * near-vertical drop for whatever has drifted in close. `gravity` stays high,
-   * so the drop itself is still the steepest in the deck; the payoff for
-   * threading the angle is a wider blast, not a bigger hit -- see `POWER`.
+   * A steep-only shell with a wide explosion. It shares the same launch power
+   * and gravity as the deck; its angle lock is what sends it over the mountain.
    */
   mortar: {
     id: 'mortar', name: 'Mortar', glyph: 'V', weight: 13,
     blurb: 'Steep shots only, forty-five degrees or more. Clears the mountain outright.',
-    shots: 1, spread: 0, damage: POWER, blast: 1.5, gravity: 1.4, speed: 1.1,
+    shots: 1, spread: 0, damage: POWER, blast: 1.5, gravity: 1, speed: 1,
   },
   firebomb: {
     id: 'firebomb', name: 'Firebomb', glyph: '*', weight: 11,
@@ -491,16 +473,13 @@ export const CARDS: Record<CardId, CardMeta> = {
   },
   /**
    * The reef's answer. Every other card either goes over a rock or stops at
-   * it; this is the one that does not care it is there. The faster, flatter
-   * flight is deliberate too -- a shot that visibly refuses to bend for the
-   * rock reads as a punch, not a lob. Flat 7 damage, not full power: the
-   * pierce is the point of the card, not a free full-power shot that also
-   * pierces.
+   * it; this is the one that does not care it is there. Flat 7 damage, not full
+   * power: the pierce is the point rather than a free full-power shot.
    */
   bore: {
     id: 'bore', name: 'Bore Shot', glyph: '>', weight: 9,
-    blurb: 'Fast, flat, and straight through rock.',
-    shots: 1, spread: 0, damage: FLAT_7, blast: 0.9, gravity: 0.85, speed: 1.3,
+    blurb: 'Punches straight through rock at the same range as every shot.',
+    shots: 1, spread: 0, damage: FLAT_7, blast: 0.9, gravity: 1, speed: 1,
     pierce: true,
   },
   patch: {
@@ -508,9 +487,26 @@ export const CARDS: Record<CardId, CardMeta> = {
     blurb: 'Plug the holes, then fire anyway. Heals 14.',
     shots: 1, spread: 0, damage: POWER, blast: 0.9, gravity: 1, speed: 1, heal: 14,
   },
+  twin: {
+    id: 'twin', name: 'Twin Shot', glyph: 'II', weight: 13,
+    blurb: 'Two separate cannonballs on a tight split. Land both for a heavy hit.',
+    shots: 2, spread: 0.035, damage: 0.68, blast: 0.8, gravity: 1, speed: 1,
+  },
+  broadside: {
+    id: 'broadside', name: 'Broadside', glyph: 'III', weight: 10,
+    blurb: 'Three cannonballs fan across the enemy deck.',
+    shots: 3, spread: 0.09, damage: 0.48, blast: 0.72, gravity: 1, speed: 1,
+  },
+  keg: {
+    id: 'keg', name: 'Powder Keg', glyph: '#', weight: 8,
+    blurb: 'A wide blast that punishes ships sailing close together.',
+    shots: 1, spread: 0, damage: 0.9, blast: 1.9, gravity: 1, speed: 1,
+  },
 };
 
-export const CARD_ORDER: CardId[] = ['round', 'chain', 'grape', 'mortar', 'firebomb', 'bore', 'patch'];
+export const CARD_ORDER: CardId[] = [
+  'round', 'chain', 'grape', 'mortar', 'firebomb', 'bore', 'patch', 'twin', 'broadside', 'keg',
+];
 
 export function clamp(n: number, lo: number, hi: number): number {
   return n < lo ? lo : n > hi ? hi : n;

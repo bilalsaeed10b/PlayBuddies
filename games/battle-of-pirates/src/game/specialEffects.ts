@@ -102,6 +102,7 @@ export function drawSpecialSky(ctx: CanvasRenderingContext2D, arena: Arena, effe
 
   ctx.globalAlpha = alpha;
   drawAcidClouds(ctx, arena, effect, q);
+  drawSkeletonPirate(ctx, arena, effect, q);
   if (effect.age >= SUNSET_END && effect.age < RAIN_END) {
     const rain = rainStrength(effect.age);
     // The denser veil sits behind the hulls; bright individual drops are in front.
@@ -112,6 +113,101 @@ export function drawSpecialSky(ctx: CanvasRenderingContext2D, arena: Arena, effe
       if (q.fancy) glow(ctx, art.green, target.x, target.y + 5, 380, 92, 0.5);
     }
   }
+  ctx.restore();
+}
+
+/** The storm's gleeful caller: a dancing skeleton beneath the enemy clouds. */
+function drawSkeletonPirate(ctx: CanvasRenderingContext2D, arena: Arena, effect: SpecialVisual, q: Quality) {
+  const appear = smooth((effect.age - 0.85) / 0.55);
+  const leave = 1 - smooth((effect.age - 4.45) / 0.65);
+  const strength = appear * leave;
+  if (strength <= 0) return;
+
+  const half = arena.w / 2;
+  const center = effect.enemyTeam === 0 ? half * 0.52 : half * 1.48;
+  const beat = effect.age * 5.4;
+  const scale = clamp(arena.seaY / 720, 0.78, 1.2) * (q.fancy ? 1 : 0.9);
+  const bob = Math.sin(beat) * 8;
+  const sway = Math.sin(beat * 0.72) * 0.09;
+
+  ctx.save();
+  clipEnemy(ctx, arena, effect.enemyTeam);
+  ctx.globalAlpha *= strength;
+  ctx.translate(center + Math.sin(beat * 0.42) * 18, arena.seaY * 0.31 + bob);
+  ctx.scale(scale, scale);
+  ctx.rotate(sway);
+
+  if (q.fancy) glow(ctx, sprites().green, 0, 18, 250, 250, 0.2 + Math.sin(beat) * 0.04);
+
+  const bone = '#f2ead0';
+  const shade = '#b9b49f';
+  const ink = '#15202a';
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+
+  // Dancing legs and boots.
+  ctx.strokeStyle = ink; ctx.lineWidth = 13;
+  ctx.beginPath();
+  ctx.moveTo(-15, 66); ctx.lineTo(-31, 103); ctx.lineTo(-55 + Math.sin(beat) * 10, 128);
+  ctx.moveTo(15, 66); ctx.lineTo(34, 100); ctx.lineTo(58 - Math.sin(beat) * 10, 119);
+  ctx.stroke();
+  ctx.strokeStyle = bone; ctx.lineWidth = 8; ctx.stroke();
+  ctx.strokeStyle = ink; ctx.lineWidth = 14;
+  ctx.beginPath(); ctx.moveTo(-61 + Math.sin(beat) * 10, 130); ctx.lineTo(-38 + Math.sin(beat) * 10, 130);
+  ctx.moveTo(49 - Math.sin(beat) * 10, 122); ctx.lineTo(70 - Math.sin(beat) * 10, 126); ctx.stroke();
+
+  // Spine, ribs, shoulders and pelvis.
+  ctx.strokeStyle = ink; ctx.lineWidth = 13;
+  ctx.beginPath(); ctx.moveTo(0, -31); ctx.lineTo(0, 69); ctx.moveTo(-39, -12); ctx.lineTo(39, -12); ctx.stroke();
+  ctx.strokeStyle = bone; ctx.lineWidth = 8; ctx.stroke();
+  ctx.fillStyle = bone; ctx.strokeStyle = ink; ctx.lineWidth = 5;
+  ctx.beginPath(); ctx.ellipse(0, 68, 27, 15, 0, 0, TAU); ctx.fill(); ctx.stroke();
+  for (let i = 0; i < 4; i++) {
+    const y = 3 + i * 13;
+    ctx.beginPath();
+    ctx.moveTo(-2, y); ctx.bezierCurveTo(-22, y - 9, -38, y + 3, -43 + i * 4, y + 13);
+    ctx.moveTo(2, y); ctx.bezierCurveTo(22, y - 9, 38, y + 3, 43 - i * 4, y + 13);
+    ctx.stroke();
+  }
+
+  // One arm pumps to the beat; the sword arm stays triumphantly raised.
+  const dance = Math.sin(beat) * 0.26;
+  ctx.strokeStyle = ink; ctx.lineWidth = 13;
+  ctx.beginPath(); ctx.moveTo(-36, -10); ctx.lineTo(-63, 18); ctx.lineTo(-78 + dance * 34, -5); ctx.stroke();
+  ctx.strokeStyle = bone; ctx.lineWidth = 8; ctx.stroke();
+  ctx.strokeStyle = ink; ctx.lineWidth = 13;
+  ctx.beginPath(); ctx.moveTo(36, -10); ctx.lineTo(58, -50); ctx.lineTo(68, -92); ctx.stroke();
+  ctx.strokeStyle = bone; ctx.lineWidth = 8; ctx.stroke();
+
+  // Curved cutlass and guard.
+  ctx.save(); ctx.translate(68, -92); ctx.rotate(-0.22 + Math.sin(beat * 0.5) * 0.05);
+  ctx.strokeStyle = '#111827'; ctx.lineWidth = 10;
+  ctx.beginPath(); ctx.moveTo(0, 10); ctx.quadraticCurveTo(20, -24, 12, -83); ctx.stroke();
+  ctx.strokeStyle = '#e8fbff'; ctx.lineWidth = 6; ctx.stroke();
+  ctx.strokeStyle = '#fbbf24'; ctx.lineWidth = 7;
+  ctx.beginPath(); ctx.moveTo(-12, 3); ctx.lineTo(12, 10); ctx.stroke();
+  ctx.restore();
+
+  // Skull, laughing jaw and eye sockets.
+  ctx.fillStyle = bone; ctx.strokeStyle = ink; ctx.lineWidth = 6;
+  ctx.beginPath(); ctx.arc(0, -55, 34, 0, TAU); ctx.fill(); ctx.stroke();
+  const jaw = 9 + (Math.sin(beat * 1.3) + 1) * 3;
+  ctx.beginPath(); ctx.roundRect(-23, -42, 46, 24 + jaw, 9); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = ink;
+  ctx.beginPath(); ctx.ellipse(-12, -61, 8, 11, -0.18, 0, TAU); ctx.ellipse(12, -61, 8, 11, 0.18, 0, TAU); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(0, -54); ctx.lineTo(-5, -44); ctx.lineTo(5, -44); ctx.closePath(); ctx.fill();
+  ctx.fillRect(-15, -34, 30, 8 + jaw * 0.35);
+  ctx.strokeStyle = shade; ctx.lineWidth = 2;
+  for (let x = -10; x <= 10; x += 7) { ctx.beginPath(); ctx.moveTo(x, -34); ctx.lineTo(x, -26); ctx.stroke(); }
+
+  // Red pirate bandanna, knot and dancing tails.
+  ctx.fillStyle = '#ef4444'; ctx.strokeStyle = '#7f1d1d'; ctx.lineWidth = 4;
+  ctx.beginPath(); ctx.arc(0, -68, 35, Math.PI, TAU); ctx.lineTo(34, -66); ctx.lineTo(-34, -66); ctx.closePath(); ctx.fill(); ctx.stroke();
+  ctx.fillRect(-34, -69, 68, 10);
+  ctx.beginPath(); ctx.arc(36, -64, 7, 0, TAU); ctx.fill(); ctx.stroke();
+  const tail = Math.sin(beat * 0.8) * 8;
+  ctx.beginPath(); ctx.moveTo(39, -61); ctx.quadraticCurveTo(60, -50 + tail, 67, -34); ctx.lineTo(55, -40); ctx.closePath(); ctx.fill(); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(37, -61); ctx.quadraticCurveTo(55, -70 - tail, 66, -58); ctx.lineTo(54, -56); ctx.closePath(); ctx.fill(); ctx.stroke();
   ctx.restore();
 }
 

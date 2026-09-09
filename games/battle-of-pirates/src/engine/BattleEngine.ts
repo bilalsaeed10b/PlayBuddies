@@ -2410,6 +2410,28 @@ export class BattleEngine {
     return { x: (px - this.offX) / this.scale, y: (py - this.offY) / this.scale };
   }
 
+  /** Find the living enemy beneath a screen pointer, with a thumb-sized margin. */
+  pickEnemyAt(clientX: number, clientY: number, rect: DOMRect, friendlyTeam: Team): number | null {
+    const point = this.toWorld(clientX, clientY, rect);
+    let picked: number | null = null;
+    let best = Infinity;
+    for (let i = 0; i < this.ships.length; i++) {
+      const ship = this.ships[i];
+      if (ship.hp <= 0 || ship.team === friendlyTeam) continue;
+      const box = this.hullBox(i);
+      const padX = 82;
+      const padTop = 118;
+      const padBottom = 54;
+      if (point.x < box.x0 - padX || point.x > box.x1 + padX ||
+          point.y < box.y0 - padTop || point.y > box.y1 + padBottom) continue;
+      const centerX = (box.x0 + box.x1) / 2;
+      const centerY = (box.y0 + box.y1) / 2;
+      const score = Math.hypot(point.x - centerX, point.y - centerY);
+      if (score < best) { best = score; picked = i; }
+    }
+    return picked;
+  }
+
   render(ctx: CanvasRenderingContext2D, q: Quality) {
     const { canvas } = ctx;
     ctx.setTransform(1, 0, 0, 1, 0, 0);

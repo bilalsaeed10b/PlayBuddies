@@ -1,4 +1,4 @@
-import { ArrowRight, Bomb, Circle, Flame, Grip, Link2, Wrench } from 'lucide-react';
+import { ArrowRight, Bomb, Circle, Flame, Grip, Hash, Layers3, Link2, Wrench } from 'lucide-react';
 import { CARDS, CardId } from '../game/rules';
 
 /**
@@ -21,6 +21,9 @@ const ICONS: Record<CardId, typeof Circle> = {
   firebomb: Flame,
   bore: ArrowRight,
   patch: Wrench,
+  twin: Layers3,
+  broadside: Grip,
+  keg: Hash,
 };
 
 export const HAND_HEIGHT = 104;
