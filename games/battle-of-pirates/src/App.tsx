@@ -432,13 +432,31 @@ export default function App() {
   /** Host-only team assignment, persisted before the match is started. */
   const assignTeam = useCallback(async (targetUid: string, team: Team) => {
     if (!isHost || !lobby?.players[targetUid]) return;
+    const ordered = Object.values(lobby.players)
+      .sort((a, b) => a.uid.localeCompare(b.uid))
+      .slice(0, rules.players)
+      .map((p, i) => ({
+        uid: p.uid,
+        team: lobby.battleTeams?.[p.uid] === 1 ? 1 : lobby.battleTeams?.[p.uid] === 0 ? 0 : (i % 2) as Team,
+      }));
+    const target = ordered.find((p) => p.uid === targetUid);
+    if (!target || target.team === team) return;
+
+    const next: Record<string, Team> = { [`battleTeams.${targetUid}`]: team };
+    const capacity = rules.players / 2;
+    const destination = ordered.filter((p) => p.team === team && p.uid !== targetUid);
+    if (destination.length >= capacity) {
+      const swap = destination[destination.length - 1];
+      next[`battleTeams.${swap.uid}`] = target.team;
+    }
+
     try {
       const { db, doc, updateDoc } = await import('./firebase');
-      await updateDoc(doc(db, 'lobbies', handoff.room), { [`battleTeams.${targetUid}`]: team });
+      await updateDoc(doc(db, 'lobbies', handoff.room), next);
     } catch (e) {
       console.error('Could not assign that team', e);
     }
-  }, [isHost, lobby?.players, handoff.room]);
+  }, [isHost, lobby?.players, lobby?.battleTeams, rules.players, handoff.room]);
 
   const startMatch = useCallback(async () => {
     if (!isHost) return;
@@ -787,7 +805,7 @@ function rulesSummary(rules: MatchRules): string {
     MOUNTAIN_LABEL[rules.mountain],
     rules.storm ? 'foul weather' : null,
     rules.cards ? 'cards on' : 'round shot only',
-    rules.turnTimer ? '12s turns' : 'no clock',
+    rules.turnTimer ? '15s turns' : 'no clock',
     rules.aimArc ? 'aim arc on' : 'no aim arc',
   ]
     .filter(Boolean)
@@ -1793,9 +1811,9 @@ function TeamManager({
                   <button
                     key={team}
                     type="button"
-                    disabled={full}
                     onClick={() => onAssign(person.uid, team)}
-                    className={`rounded-xl border px-2.5 py-2 text-[10px] font-black uppercase tracking-wide transition-colors disabled:cursor-not-allowed disabled:opacity-35 ${
+                    title={full ? `Swap into ${TEAM_COLORS[team].name}` : TEAM_COLORS[team].name}
+                    className={`rounded-xl border px-2.5 py-2 text-[10px] font-black uppercase tracking-wide transition-colors ${
                       selected ? 'text-slate-950' : 'border-white/15 bg-white/5 text-white/60 hover:bg-white/10'
                     }`}
                     style={selected ? { borderColor: TEAM_COLORS[team].main, background: TEAM_COLORS[team].light } : undefined}

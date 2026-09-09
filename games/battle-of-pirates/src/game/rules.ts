@@ -293,7 +293,7 @@ export const BALANCE = {
   ROCK_MARGIN: 780,
 
   /** Seconds a captain gets to aim before the turn passes them by. */
-  TURN_TIME: 12,
+  TURN_TIME: 15,
   /**
    * Extra slack before a silent captain's turn is skipped *for* them.
    *
