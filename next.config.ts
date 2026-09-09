@@ -13,6 +13,10 @@ const nextConfig: NextConfig = {
   serverExternalPackages: [],
   env: {
     NEXT_PUBLIC_BASE_PATH: basePath,
+    // Every Pages deployment receives a new commit SHA. Games run in a
+    // long-lived iframe, so stamp that SHA into its URL to prevent an older
+    // cached index.html from surviving a successful release.
+    NEXT_PUBLIC_BUILD_ID: process.env.GITHUB_SHA || "local",
   },
   allowedDevOrigins: [
     "192.168.100.52",

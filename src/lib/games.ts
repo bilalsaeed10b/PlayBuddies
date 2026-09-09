@@ -35,6 +35,7 @@ export function gameUrl(
   params: { room: string; displayName?: string; photoURL?: string; solo?: boolean },
 ): string {
   const q = new URLSearchParams({ room: params.room });
+  q.set("v", process.env.NEXT_PUBLIC_BUILD_ID || "local");
   if (params.displayName) q.set("displayName", params.displayName);
   if (params.photoURL) q.set("photoURL", params.photoURL);
   if (params.solo) q.set("mode", "single");
