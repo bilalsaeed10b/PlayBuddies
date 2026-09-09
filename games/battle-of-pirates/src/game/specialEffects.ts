@@ -118,7 +118,7 @@ export function drawSpecialSky(ctx: CanvasRenderingContext2D, arena: Arena, effe
 
 /** The storm's gleeful caller: a small pirate seated on the enemy cloud bank. */
 function drawSkeletonPirate(ctx: CanvasRenderingContext2D, arena: Arena, effect: SpecialVisual, q: Quality) {
-  const appear = smooth((effect.age - 0.85) / 0.55);
+  const appear = smooth((effect.age - 0.2) / 0.65);
   const leave = 1 - smooth((effect.age - 4.45) / 0.65);
   const strength = appear * leave;
   if (strength <= 0) return;
@@ -127,11 +127,15 @@ function drawSkeletonPirate(ctx: CanvasRenderingContext2D, arena: Arena, effect:
   const center = effect.enemyTeam === 0 ? half * 0.52 : half * 1.48;
   const beat = effect.age * 5.2;
   const scale = clamp(arena.seaY / 900, 0.52, 0.72) * (q.fancy ? 1 : 0.92);
+  const cloudAmount = smooth(effect.age / 1.15) * (1 - smooth((effect.age - RAIN_END) / 1.3));
+  const cloudDescent = (1 - cloudAmount) * -90;
 
   ctx.save();
   clipEnemy(ctx, arena, effect.enemyTeam);
   ctx.globalAlpha *= strength;
-  ctx.translate(center, arena.seaY * 0.2);
+  // Share the cloud bank's entrance motion, with the pelvis resting just
+  // above its upper edge instead of floating independently below it.
+  ctx.translate(center, cloudDescent + arena.seaY * 0.17);
   ctx.scale(scale, scale);
 
   if (q.fancy) glow(ctx, sprites().green, 0, 20, 210, 180, 0.16);

@@ -53,13 +53,13 @@ test('three successful cannon attacks charge; pellets, misses, burn and specials
 });
 test('multi-shot damage and special-meter rules are explicit per ammunition', () => {
   const cases = [
-    ['chain', 2, 3, 2],
-    ['twin', 2, 7, 1],
-    ['broadside', 3, 6, 1],
-    ['grape', 5, null, 1],
-    ['bore', 1, null, 1],
+    ['chain', 2, 3, 2, 2],
+    ['twin', 2, 7, 1, 2],
+    ['broadside', 3, 6, 1, 3],
+    ['grape', 5, null, 2, 2],
+    ['bore', 1, null, 1, 1],
   ];
-  for (const [card, balls, exactDamage, expectedCharge] of cases) {
+  for (const [card, balls, exactDamage, expectedCharge, directHits] of cases) {
     const b = create(2); aim(b);
     b.fire({ angle: -0.6, power: 0.5, card });
     assert.equal(b.projectiles.length, balls, `${card} ball count`);
@@ -67,7 +67,7 @@ test('multi-shot damage and special-meter rules are explicit per ammunition', ()
       assert.ok(b.projectiles.every((p) => p.damage === exactDamage), `${card} damage`);
     }
     const box = b.hullBox(1);
-    for (const projectile of b.projectiles) {
+    for (const projectile of b.projectiles.slice(0, directHits)) {
       projectile.x = box.x0 - 30;
       projectile.y = (box.y0 + box.y1) / 2;
       projectile.vx = 1000;
@@ -77,6 +77,16 @@ test('multi-shot damage and special-meter rules are explicit per ammunition', ()
     assert.equal(b.ships[0].charge, expectedCharge, `${card} meter gain`);
   }
   assert.equal(CARDS.broadside.name, 'Triple Shot');
+});
+test('blast damage hurts but does not charge the special meter', () => {
+  const b = create(2); aim(b);
+  b.fire({ angle: -0.6, power: 0.5, card: 'round' });
+  const projectile = b.projectiles[0];
+  const box = b.hullBox(1);
+  const before = b.ships[1].hp;
+  b.splashDamage((box.x0 + box.x1) / 2, (box.y0 + box.y1) / 2, projectile);
+  assert.ok(b.ships[1].hp < before);
+  assert.equal(b.ships[0].charge, 0);
 });
 test('normal cannon projectile collision earns charge and floating damage text', () => {
   const b = create(2); aim(b);

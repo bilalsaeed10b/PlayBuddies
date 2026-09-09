@@ -454,8 +454,9 @@ export const CARDS: Record<CardId, CardMeta> = {
    */
   grape: {
     id: 'grape', name: 'Grapeshot', glyph: '::', weight: 15,
-    blurb: 'A wide fan of five. Strongest when the enemy is near.',
+    blurb: 'A wide fan of five. Each direct hit charges your special.',
     shots: 5, spread: 0.15, damage: GRAPE_PELLET, blast: 0.55, gravity: 1, speed: 1,
+    chargePerProjectile: true,
   },
   /**
    * A steep-only shell with a wide explosion. It shares the same launch power

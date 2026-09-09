@@ -1735,7 +1735,6 @@ export class BattleEngine {
       const falloff = 1 - dist / p.blast;
       const dealt = BALANCE.BLAST * p.splash * falloff * falloff * (p.damage / BALANCE.DIRECT);
       if (dealt > 0.7) {
-        this.earnCharge(p);
         this.damage(i, dealt, x);
       }
     }
