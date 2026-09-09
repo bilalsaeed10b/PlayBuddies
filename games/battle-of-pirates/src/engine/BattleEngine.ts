@@ -969,7 +969,7 @@ export class BattleEngine {
         r: BALANCE.BALL_R * (card.shots > 2 ? 0.62 : 1),
         team: ship.team,
         from: shooter,
-        damage: BALANCE.DIRECT * card.damage * this.hullOf(shooter).damage,
+        damage: card.flatDamage ?? BALANCE.DIRECT * card.damage * this.hullOf(shooter).damage,
         blast: BALANCE.BLAST_R * card.blast * this.hullOf(shooter).blast,
         splash: this.hullOf(shooter).blast,
         gravity: BALANCE.GRAVITY * card.gravity,
@@ -977,6 +977,7 @@ export class BattleEngine {
         through: false,
         burn: card.burn ?? 0,
         alive: true,
+        meterEarned: false,
         age: 0,
         trail: [],
       });
@@ -1691,6 +1692,7 @@ export class BattleEngine {
         // hull is the one shot in the deck worth calling by name.
         if (p.through) this.tally.pierced = true;
       }
+      this.earnCharge(p);
       this.damage(struckShip, p.damage * mult, ix);
       if (p.burn > 0) {
         this.ships[struckShip].burn = p.burn + 1;
@@ -1732,7 +1734,10 @@ export class BattleEngine {
 
       const falloff = 1 - dist / p.blast;
       const dealt = BALANCE.BLAST * p.splash * falloff * falloff * (p.damage / BALANCE.DIRECT);
-      if (dealt > 0.7) this.damage(i, dealt, x);
+      if (dealt > 0.7) {
+        this.earnCharge(p);
+        this.damage(i, dealt, x);
+      }
     }
     if (closest < p.blast && this.tally) this.tally.grazed = true;
   }
@@ -1742,11 +1747,6 @@ export class BattleEngine {
     if (ship.hp <= 0 || amount <= 0) return;
     amount = Math.min(ship.hp, amount);
     ship.hp -= amount;
-    if (this.tally && !this.chargedThisShot && ship.team !== this.ships[this.tally.shooter].team) {
-      const shooter = this.ships[this.tally.shooter];
-      shooter.charge = Math.min(SPECIAL_HITS, shooter.charge + 1);
-      this.chargedThisShot = true;
-    }
     if (this.tally) {
       this.tally.damage += amount;
       // Checked here rather than by scanning the fleet afterwards, because
@@ -2408,6 +2408,59 @@ export class BattleEngine {
     const px = (clientX - rect.left) * this.dpr;
     const py = (clientY - rect.top) * this.dpr;
     return { x: (px - this.offX) / this.scale, y: (py - this.offY) / this.scale };
+  }
+
+  /** World point to a CSS-pixel screen point inside the displayed canvas. */
+  toClient(x: number, y: number, rect: DOMRect): { x: number; y: number } {
+    return {
+      x: rect.left + (this.offX + x * this.scale) / this.dpr,
+      y: rect.top + (this.offY + y * this.scale) / this.dpr,
+    };
+  }
+
+  /** The torpedo leaves the attacking hull at water level, facing the enemy. */
+  torpedoOrigin(rect: DOMRect): { x: number; y: number } {
+    const ship = this.ships[this.turn];
+    if (!ship) return this.toClient(this.arena.w / 2, this.arena.seaY, rect);
+    return this.toClient(ship.x + this.facing(this.turn) * 58, this.waterLevelFor(this.turn) + 8, rect);
+  }
+
+  /** Magnetically lock a torpedo reticle to the closest living enemy hull. */
+  snapEnemyAt(
+    clientX: number,
+    clientY: number,
+    rect: DOMRect,
+    friendlyTeam: Team,
+  ): { index: number; x: number; y: number } | null {
+    let snapped: { index: number; x: number; y: number } | null = null;
+    let best = Infinity;
+    // CSS pixels keep the finger-sized lock zone consistent on high-DPI phones.
+    const radius = 112;
+    for (let i = 0; i < this.ships.length; i++) {
+      const ship = this.ships[i];
+      if (ship.hp <= 0 || ship.team === friendlyTeam) continue;
+      const box = this.hullBox(i);
+      const point = this.toClient((box.x0 + box.x1) / 2, (box.y0 + box.y1) / 2, rect);
+      const distance = Math.hypot(clientX - point.x, clientY - point.y);
+      if (distance <= radius && distance < best) {
+        best = distance;
+        snapped = { index: i, ...point };
+      }
+    }
+    return snapped;
+  }
+
+  /** Award charge at the projectile boundary, where Chain's two balls remain distinct. */
+  private earnCharge(projectile: Projectile) {
+    const tally = this.tally;
+    if (!tally || projectile.meterEarned) return;
+    const card = CARDS[tally.card] ?? CARDS.round;
+    if (!card.chargePerProjectile && this.chargedThisShot) return;
+    const shooter = this.ships[tally.shooter];
+    if (!shooter) return;
+    shooter.charge = Math.min(SPECIAL_HITS, shooter.charge + 1);
+    projectile.meterEarned = true;
+    if (!card.chargePerProjectile) this.chargedThisShot = true;
   }
 
   /** Find the living enemy beneath a screen pointer, with a thumb-sized margin. */

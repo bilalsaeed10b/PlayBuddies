@@ -1969,7 +1969,7 @@ function RulesPanel({
     {
       key: 'cards',
       label: 'Cards',
-      hint: 'Three dealt a turn from round, chain, grape, mortar, firebomb, bore, repair, twin, broadside, and powder-keg attacks. Off means round shot every time.',
+      hint: 'Three dealt a turn from round, chain, grape, mortar, firebomb, bore, repair, twin, triple-shot, and powder-keg attacks. Off means round shot every time.',
     },
     {
       key: 'turnTimer',

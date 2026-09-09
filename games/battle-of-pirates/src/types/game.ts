@@ -124,6 +124,8 @@ export interface Projectile {
   through: boolean;
   burn: number;
   alive: boolean;
+  /** Prevents one projectile charging the special meter more than once. */
+  meterEarned: boolean;
   age: number;
   /** Ring buffer of past positions for the smoke trail. */
   trail: number[];

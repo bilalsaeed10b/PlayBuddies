@@ -396,6 +396,8 @@ export interface CardMeta {
   spread: number;
   /** Multipliers on the plain round. */
   damage: number;
+  /** Exact direct-hit damage, independent of the firing hull's damage bonus. */
+  flatDamage?: number;
   blast: number;
   gravity: number;
   speed: number;
@@ -407,6 +409,8 @@ export interface CardMeta {
   heal?: number;
   /** Its balls are joined by a drawn chain -- only meaningful at `shots: 2`. */
   linked?: boolean;
+  /** Each distinct projectile may fill a meter segment instead of one per attack. */
+  chargePerProjectile?: boolean;
 }
 
 /**
@@ -428,7 +432,7 @@ export interface CardMeta {
 const POWER = 1.1;
 /** Flat per-pellet damage for grapeshot's five balls -- see the comment on `grape` below. */
 const GRAPE_PELLET = 3 / BALANCE.DIRECT;
-/** Flat per-ball damage for chain shot and bore shot -- see their comments below. */
+/** Legacy damage ratio used by Bore Shot. */
 const FLAT_7 = 7 / BALANCE.DIRECT;
 
 export const CARDS: Record<CardId, CardMeta> = {
@@ -437,16 +441,12 @@ export const CARDS: Record<CardId, CardMeta> = {
     blurb: 'The honest one. Full powder, full range.',
     shots: 1, spread: 0, damage: POWER, blast: 1, gravity: 1, speed: 1,
   },
-  /**
-   * Two flat 7-damage balls rather than one full-power hit -- landing both is
-   * worth more than round shot, landing one is worth less, and which of those
-   * happens is what the chain between them is for.
-   */
+  /** Both balls can charge the special meter, but each can do so only once. */
   chain: {
     id: 'chain', name: 'Chain Shot', glyph: 'oo', weight: 16,
-    blurb: 'Two balls on a chain, same range as round shot. Both can bite.',
-    shots: 2, spread: 0.05, damage: FLAT_7, blast: 0.85, gravity: 1, speed: 1,
-    linked: true,
+    blurb: 'Two linked 3-damage balls. Each hit charges your special.',
+    shots: 2, spread: 0.05, damage: 1, flatDamage: 3, blast: 0.85, gravity: 1, speed: 1,
+    linked: true, chargePerProjectile: true,
   },
   /**
    * Five pellets at a flat 3 damage each. The centre pellet now has the same
@@ -489,13 +489,13 @@ export const CARDS: Record<CardId, CardMeta> = {
   },
   twin: {
     id: 'twin', name: 'Twin Shot', glyph: 'II', weight: 13,
-    blurb: 'Two separate cannonballs on a tight split. Land both for a heavy hit.',
-    shots: 2, spread: 0.035, damage: 0.68, blast: 0.8, gravity: 1, speed: 1,
+    blurb: 'Two 7-damage cannonballs. The attack charges your special once.',
+    shots: 2, spread: 0.035, damage: 1, flatDamage: 7, blast: 0.8, gravity: 1, speed: 1,
   },
   broadside: {
-    id: 'broadside', name: 'Broadside', glyph: 'III', weight: 10,
-    blurb: 'Three cannonballs fan across the enemy deck.',
-    shots: 3, spread: 0.09, damage: 0.48, blast: 0.72, gravity: 1, speed: 1,
+    id: 'broadside', name: 'Triple Shot', glyph: 'III', weight: 10,
+    blurb: 'Three 6-damage cannonballs. The attack charges your special once.',
+    shots: 3, spread: 0.09, damage: 1, flatDamage: 6, blast: 0.72, gravity: 1, speed: 1,
   },
   keg: {
     id: 'keg', name: 'Powder Keg', glyph: '#', weight: 8,

@@ -714,12 +714,22 @@ export default function BattleView({
     setTorpedoTargeting(true);
   }, [onDragChange]);
 
-  const targetTorpedo = useCallback((clientX: number, clientY: number) => {
+  const torpedoOrigin = useCallback(() => {
     const engine = engineRef.current;
     const canvas = canvasRef.current;
-    if (!engine || !canvas || !engine.awaitingLocal) return false;
-    const target = engine.pickEnemyAt(clientX, clientY, canvas.getBoundingClientRect(), engine.ships[engine.turn].team);
-    if (target === null || !engine.useSpecial('torpedo', target)) return false;
+    return engine && canvas ? engine.torpedoOrigin(canvas.getBoundingClientRect()) : null;
+  }, []);
+
+  const snapTorpedo = useCallback((clientX: number, clientY: number) => {
+    const engine = engineRef.current;
+    const canvas = canvasRef.current;
+    if (!engine || !canvas || !engine.awaitingLocal) return null;
+    return engine.snapEnemyAt(clientX, clientY, canvas.getBoundingClientRect(), engine.ships[engine.turn].team);
+  }, []);
+
+  const targetTorpedo = useCallback((target: number) => {
+    const engine = engineRef.current;
+    if (!engine || !engine.awaitingLocal || !engine.useSpecial('torpedo', target)) return false;
     audioService.unlock();
     cancelTorpedo();
     return true;
@@ -928,7 +938,9 @@ export default function BattleView({
       {torpedoTargeting && canAim && (
         <TorpedoTargeter
           bottomInset={showHand ? handHeight : 8}
-          onTarget={(clientX, clientY) => targetTorpedo(clientX, clientY)}
+          getOrigin={torpedoOrigin}
+          snapTarget={snapTorpedo}
+          onTarget={targetTorpedo}
           onCancel={cancelTorpedo}
         />
       )}

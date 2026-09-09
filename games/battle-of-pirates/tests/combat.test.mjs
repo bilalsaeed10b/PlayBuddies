@@ -42,6 +42,7 @@ test('three successful cannon attacks charge; pellets, misses, burn and specials
   const b = create(); aim(b);
   for (let n = 1; n <= 3; n++) {
     b.phase = 'aim'; b.fire({ angle: -0.6, power: 0.5, card: 'round' });
+    b.earnCharge(b.projectiles.at(-1));
     b.damage(1, 2, b.ships[0].x); b.damage(3, 2, b.ships[0].x);
     assert.equal(b.ships[0].charge, n);
   }
@@ -49,6 +50,33 @@ test('three successful cannon attacks charge; pellets, misses, burn and specials
   assert.equal(b.ships[0].charge, 3, 'miss does not erase banked hits');
   b.phase = 'aim'; assert.ok(b.useSpecial('acid-rain'));
   advance(b, 2.5); assert.equal(b.ships[0].charge, 0, 'special cannot recharge itself');
+});
+test('multi-shot damage and special-meter rules are explicit per ammunition', () => {
+  const cases = [
+    ['chain', 2, 3, 2],
+    ['twin', 2, 7, 1],
+    ['broadside', 3, 6, 1],
+    ['grape', 5, null, 1],
+    ['bore', 1, null, 1],
+  ];
+  for (const [card, balls, exactDamage, expectedCharge] of cases) {
+    const b = create(2); aim(b);
+    b.fire({ angle: -0.6, power: 0.5, card });
+    assert.equal(b.projectiles.length, balls, `${card} ball count`);
+    if (exactDamage !== null) {
+      assert.ok(b.projectiles.every((p) => p.damage === exactDamage), `${card} damage`);
+    }
+    const box = b.hullBox(1);
+    for (const projectile of b.projectiles) {
+      projectile.x = box.x0 - 30;
+      projectile.y = (box.y0 + box.y1) / 2;
+      projectile.vx = 1000;
+      projectile.vy = 0;
+    }
+    b.step(0.06);
+    assert.equal(b.ships[0].charge, expectedCharge, `${card} meter gain`);
+  }
+  assert.equal(CARDS.broadside.name, 'Triple Shot');
 });
 test('normal cannon projectile collision earns charge and floating damage text', () => {
   const b = create(2); aim(b);
@@ -76,6 +104,12 @@ test('torpedo drag targeting accepts living enemies and rejects allies and empty
   b.dpr = 1; b.scale = 1; b.offX = 0; b.offY = 0;
   const rect = { left: 0, top: 0 };
   assert.equal(b.pickEnemyAt(b.ships[1].x, b.shipY(1), rect, 0), 1);
+  const origin = b.torpedoOrigin(rect);
+  assert.ok(origin.x > b.ships[0].x, 'guide starts at the attacking hull toward its enemy');
+  const lock = b.snapEnemyAt(b.ships[1].x + 70, b.shipY(1), rect, 0);
+  assert.equal(lock?.index, 1);
+  assert.ok(Math.abs(lock.x - b.ships[1].x) < 30, 'reticle magnets to the hull centre');
+  assert.equal(b.snapEnemyAt(b.arena.w / 2, 40, rect, 0), null);
   assert.equal(b.pickEnemyAt(b.ships[0].x, b.shipY(0), rect, 0), null);
   assert.equal(b.pickEnemyAt(b.arena.w / 2, 40, rect, 0), null);
   b.ships[1].hp = 0;
