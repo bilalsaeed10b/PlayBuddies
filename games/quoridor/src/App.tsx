@@ -21,6 +21,8 @@ import { FREE_PAWNS, PAWNS, drawPawn } from './game/pawns';
 import useShortScreen from '@shared/ui/useShortScreen';
 import { DEFAULT_SIDES, layoutFor, wallsFor } from './game/rules';
 import type { SideMeta } from './game/rules';
+import { orderedRoomPlayers } from './game/roomRoster';
+import type { RoomPlayer as LobbyPerson } from './game/roomRoster';
 import { TIERS } from './engine/ai';
 import { audioService } from './services/audio';
 import { GameWallet, reportResult } from './platform/wallet';
@@ -65,17 +67,6 @@ const DEFAULT_SETTINGS: GameSettings = {
 };
 
 type View = 'menu' | 'pick' | 'room' | 'game' | 'offline_menu';
-
-interface LobbyPerson {
-  uid: string;
-  displayName: string;
-  /**
-   * The lobby's per-player slot. Fish Eat Fish named it, and every game since
-   * has reused it: the security rules name the writable fields one by one, so
-   * a new game inventing its own key would simply be refused.
-   */
-  fishIndex?: number | null;
-}
 
 const randomSeed = () => (Math.random() * 0x7fffffff) | 0;
 
@@ -256,23 +247,14 @@ export default function App() {
   /**
    * Who is playing, and in what order.
    *
-   * Sorted by uid so every client computes the identical answer from data it
-   * already has , arrival order would give two players different ideas about
-   * who sits at the bottom of the board. Anyone past the host's chosen player
-   * count is in the room but not in the game: Quoridor seats face each other
-   * across fixed edges, so a fifth person watches rather than making it a
-   * five-sided board.
+   * Keep all four possible players here. A guest does not know the host's
+   * player count until the start packet arrives, so slicing by the guest's
+   * saved local rules would turn real players into bots before that packet.
+   * `seatsFor(hostCount)` below is the only place that chooses active seats.
    */
   const people = useMemo(() => {
-    return Object.values(lobby?.players ?? {})
-      .sort((a, b) => a.uid.localeCompare(b.uid))
-      .slice(0, rules.players)
-      .map((p) => ({
-        uid: p.uid,
-        displayName: p.displayName || 'Player',
-        skin: p.fishIndex,
-      }));
-  }, [lobby, rules.players]);
+    return orderedRoomPlayers(lobby?.players ?? {});
+  }, [lobby?.players]);
 
   const mySkin = uid ? lobby?.players?.[uid]?.fishIndex : undefined;
   const isHost = Boolean(uid && lobby && lobby.hostId === uid);
@@ -1027,7 +1009,10 @@ function RoomScreen({
    * the shop was still open over the top of it.
    */
   const everyonePicked = people.every((p) => p.skin !== undefined && p.skin !== null);
-  const canStart = iAmReady && everyonePicked;
+  // Let the host's room-size effect finish raising a stale two-player setting
+  // before Start can publish the match flag.
+  const hasSeatForEveryone = people.length <= rules.players;
+  const canStart = iAmReady && everyonePicked && hasSeatForEveryone;
   const waitingFor = people.filter((p) => p.skin === undefined || p.skin === null).length;
 
   const seatLayout = layoutFor(rules);
@@ -1107,7 +1092,9 @@ function RoomScreen({
           <p className="text-center text-sm font-bold text-slate-500">
             {!iAmReady
               ? 'Pick a pawn to be ready.'
-              : !everyonePicked
+              : !hasSeatForEveryone
+                ? 'Preparing four player seats…'
+                : !everyonePicked
                 ? 'Waiting for everyone to pick…'
                 : 'Waiting for the host…'}
           </p>
@@ -1201,6 +1188,8 @@ function RoomScreen({
                 <p className="mt-2 text-center text-[11px] text-slate-500">
                   {!iAmReady
                     ? 'Pick your own pawn first.'
+                    : !hasSeatForEveryone
+                      ? 'Preparing four player seats.'
                     : !everyonePicked
                       ? `Waiting on ${waitingFor} more to pick.`
                       : emptySeats > 0

@@ -221,8 +221,8 @@ export default function MatchView({
       const roomSeat = seats[i];
       const boardSeat = engine.seats[i];
       if (boardSeat.control !== 'ai' || !boardSeat.id.startsWith('bot-')) continue;
-      if (roomSeat.control !== 'remote' || roomSeat.id.startsWith('bot-')) continue;
-      engine.correctSeat(i, roomSeat.id, roomSeat.name);
+      if (roomSeat.control === 'ai' || roomSeat.id.startsWith('bot-')) continue;
+      engine.correctSeat(i, roomSeat.id, roomSeat.name, roomSeat.control);
       setNotice(`${roomSeat.name} was here all along.`);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

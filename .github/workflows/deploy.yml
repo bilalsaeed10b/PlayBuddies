@@ -39,6 +39,9 @@ jobs:
       - name: Battle of Pirates regression tests
         run: npm --prefix games/battle-of-pirates test
 
+      - name: Quoridor regression tests
+        run: npm --prefix games/quoridor test
+
       - name: Typecheck
         run: npm run typecheck
 

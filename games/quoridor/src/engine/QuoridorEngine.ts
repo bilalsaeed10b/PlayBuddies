@@ -322,12 +322,12 @@ export class QuoridorEngine {
    * corrected together, or the seat is still nobody's as far as the network
    * is concerned even once it stops looking like a bot on screen.
    */
-  correctSeat(seat: number, id: string, name: string) {
+  correctSeat(seat: number, id: string, name: string, control: Exclude<Control, 'ai'>) {
     const s = this.seats[seat];
     if (!s) return;
     s.id = id;
     s.name = name;
-    s.control = 'remote';
+    s.control = control;
   }
 
   // -- geometry ---------------------------------------------------------------
