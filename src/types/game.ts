@@ -45,6 +45,10 @@ export interface Lobby {
   status: LobbyStatus;
   players: Record<string, LobbyPlayer>;
   matchStarted?: boolean;
+  /** Packed game-specific match rules, written by games that need everyone to share the same setup. */
+  matchRules?: number;
+  /** Battle of Pirates host-picked teams, cleared when the room changes games. */
+  battleTeams?: Record<string, number>;
   /** Set when the match starts; the game runs local co-op instead of waiting for a peer. */
   soloMode?: boolean;
   collectedGems?: Record<string, boolean>;

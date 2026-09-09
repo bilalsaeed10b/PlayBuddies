@@ -29,7 +29,7 @@ import { GameWallet, reportResult } from './platform/wallet';
 import MatchView from './screens/MatchView';
 import type { MatchConfig } from './screens/MatchView';
 import type { Seat } from './engine/QuoridorEngine';
-import { DEFAULT_RULES, PLAYER_CODES } from './types/game';
+import { DEFAULT_RULES, PLAYER_CODES, packRules, unpackRules } from './types/game';
 import { createLogger } from '@shared/log/logger';
 import type { GameSettings, MatchRules, PlayerCount } from './types/game';
 
@@ -96,6 +96,7 @@ export default function App() {
     hostId: string;
     players: Record<string, LobbyPerson>;
     matchStarted?: boolean;
+    matchRules?: number;
   } | null>(null);
   const [lobbyError, setLobbyError] = useState<string | null>(null);
 
@@ -220,6 +221,7 @@ export default function App() {
             hostId: string;
             players: Record<string, LobbyPerson>;
             matchStarted?: boolean;
+            matchRules?: number;
           };
           if (!data.players?.[uid]) {
             setLobbyError('You are not in this lobby.');
@@ -232,6 +234,7 @@ export default function App() {
             iAmHost: data.hostId === uid,
             players: Object.keys(data.players ?? {}).length,
             matchStarted: Boolean(data.matchStarted),
+            matchRules: data.matchRules,
           });
           setLobby(data);
         },
@@ -258,6 +261,8 @@ export default function App() {
 
   const mySkin = uid ? lobby?.players?.[uid]?.fishIndex : undefined;
   const isHost = Boolean(uid && lobby && lobby.hostId === uid);
+  const stampedRules = typeof lobby?.matchRules === 'number' ? unpackRules(lobby.matchRules) : null;
+  const activeRules = lobby?.matchStarted && stampedRules ? stampedRules : rules;
 
   /**
    * The host's chosen player count follows the room, not the other way round.
@@ -341,13 +346,18 @@ export default function App() {
 
   const startMatch = useCallback(async () => {
     if (!isHost) return;
+    const players = PLAYER_CODES.find((n) => n >= people.length) ?? PLAYER_CODES[PLAYER_CODES.length - 1];
+    const startRules = { ...rules, players, teams: players === 4 && rules.teams };
+    const nextSession = { seed: randomSeed(), first: Math.floor(Math.random() * startRules.players) };
+    setRules(startRules);
+    setSession(nextSession);
     try {
       const { db, doc, updateDoc } = await import('./firebase');
-      await updateDoc(doc(db, 'lobbies', handoff.room), { matchStarted: true });
+      await updateDoc(doc(db, 'lobbies', handoff.room), { matchStarted: true, matchRules: packRules(startRules) });
     } catch (e) {
       console.error('Could not start the game', e);
     }
-  }, [isHost, handoff.room]);
+  }, [isHost, people.length, rules, handoff.room]);
 
   const award = useCallback((won: boolean, movesTaken: number) => {
     // Something for turning up, more for crossing first, and a bonus for doing
@@ -450,7 +460,7 @@ export default function App() {
       return { seats, localSeats };
     };
 
-    const { seats, localSeats } = seatsFor(rules.players);
+    const { seats, localSeats } = seatsFor(activeRules.players);
 
     return {
       seatsFor,
@@ -464,8 +474,8 @@ export default function App() {
       localSeats,
       aiLevel: ONLINE_AI_LEVEL,
       seed: session.seed,
-      first: session.first,
-      rules,
+      first: Math.min(session.first, activeRules.players - 1),
+      rules: activeRules,
     };
   }
 

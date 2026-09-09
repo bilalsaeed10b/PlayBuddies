@@ -391,6 +391,29 @@ function LobbyContent() {
     return () => clearTimeout(timer);
   }, [lobby, presentUids, user, roomId]);
 
+  /**
+   * Keep the room document as fresh as the visible lobby.
+   *
+   * The UI already hides players whose presence socket is gone, but the games
+   * read the Firestore players map directly inside their iframes. If a stale
+   * entry stays in that map, the lobby can say "2 connected" while the game
+   * still seats four. The host trims those ghosts while waiting, before any
+   * game gets a chance to launch from them.
+   */
+  useEffect(() => {
+    if (!isHost || !lobby || lobby.status !== "waiting" || presentUids.size === 0) return;
+    const stale = Object.values(lobby.players || {}).filter(
+      (player) => player.uid !== user?.uid && !presentUids.has(player.uid),
+    );
+    if (stale.length === 0) return;
+
+    const updates: Record<string, ReturnType<typeof deleteField> | ReturnType<typeof serverTimestamp>> = {
+      updatedAt: serverTimestamp(),
+    };
+    for (const player of stale) updates[`players.${player.uid}`] = deleteField();
+    updateDoc(doc(db, "lobbies", roomId), updates).catch((e) => console.error("Could not prune stale players:", e));
+  }, [isHost, lobby, presentUids, user?.uid, roomId]);
+
   // Marks messages as seen for as long as the chat tab is the one showing.
   useEffect(() => {
     if (sidebarTab === "chat") seenChatCount.current = messages.length;
@@ -563,7 +586,13 @@ function LobbyContent() {
         reset[`players.${uid}.role`] = deleteField();
         reset[`players.${uid}.isReady`] = true;
       }
-      await updateDoc(doc(db, "lobbies", roomId), { gameId, ...reset });
+      await updateDoc(doc(db, "lobbies", roomId), {
+        gameId,
+        matchStarted: false,
+        matchRules: deleteField(),
+        battleTeams: deleteField(),
+        ...reset,
+      });
     } catch (e) {
       console.error("Error selecting game:", e);
     }
