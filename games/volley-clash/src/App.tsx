@@ -880,8 +880,12 @@ function RoomScreen({
           <button onClick={onSettings} className="panel rounded-2xl p-2.5">
             <SettingsIcon className="h-5 w-5" />
           </button>
-          {isHost && (
+          {isHost ? (
             <button onClick={askHostToEndGame} className="panel rounded-2xl p-2.5" title="End the match for everyone">
+              <LogOut className="h-5 w-5" />
+            </button>
+          ) : (
+            <button onClick={askToLeaveLobby} className="panel rounded-2xl p-2.5" title="Leave Lobby">
               <LogOut className="h-5 w-5" />
             </button>
           )}

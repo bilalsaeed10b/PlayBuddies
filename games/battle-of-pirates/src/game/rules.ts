@@ -430,6 +430,7 @@ export interface CardMeta {
  * divide that damage across their payload, trading one large hit for coverage.
  */
 const POWER = 1.1;
+const Low_POWER = 0.6;
 /** Flat per-pellet damage for grapeshot's five balls -- see the comment on `grape` below. */
 const GRAPE_PELLET = 3 / BALANCE.DIRECT;
 /** Legacy damage ratio used by Bore Shot. */
@@ -486,7 +487,7 @@ export const CARDS: Record<CardId, CardMeta> = {
   patch: {
     id: 'patch', name: 'Patch Kit', glyph: '+', weight: 10,
     blurb: 'Plug the holes, then fire anyway. Heals 14.',
-    shots: 1, spread: 0, damage: POWER, blast: 0.9, gravity: 1, speed: 1, heal: 14,
+    shots: 1, spread: 0, damage: Low_POWER, blast: 0.9, gravity: 1, speed: 1, heal: 14,
   },
   twin: {
     id: 'twin', name: 'Twin Shot', glyph: 'II', weight: 13,

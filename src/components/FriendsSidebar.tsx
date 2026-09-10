@@ -227,43 +227,92 @@ export default function FriendsSidebar() {
               )}
 
               <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                {tab === "friends" &&
-                  (friends.length === 0 ? (
-                    <EmptyState icon={<Users size={48} />} text="No friends yet." />
-                  ) : (
-                    friends.map((f) => (
-                      <div
-                        key={f.uid}
-                        className="glass p-3 rounded-2xl border border-white/5 flex items-center justify-between"
-                      >
-                        <div className="flex items-center gap-3 min-w-0">
-                          <div className="relative shrink-0">
-                            <Avatar uid={f.uid} src={f.photoURL} name={f.displayName} />
-                            <span
-                              className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-black ${
-                                onlineUids.has(f.uid) ? "bg-success" : "bg-white/30"
-                              }`}
-                              title={onlineUids.has(f.uid) ? "Online" : "Offline"}
-                            />
-                          </div>
-                          <div className="min-w-0">
-                            <p className="text-sm font-bold text-white truncate">{f.displayName}</p>
-                            <p className="text-[11px] text-text-muted">
-                              {onlineUids.has(f.uid) ? "Online" : "Offline"}
-                            </p>
-                          </div>
-                        </div>
+                {tab === "friends" && (
+                  <>
+                    {friends.length > 0 && (
+                      <div className="flex justify-end mb-2">
                         <button
-                          onClick={() => inviteFriend(f.uid)}
-                          disabled={sentTo === f.uid}
-                          className="bg-primary hover:bg-primary/80 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 transition-colors disabled:opacity-60 shrink-0"
-                          title="Invite to your lobby"
+                          onClick={async () => {
+                            if (!user) return;
+                            const room = normalizeRoomCode(new URLSearchParams(window.location.search).get("room") || "");
+                            if (!room) {
+                              setNotice("Join or create a lobby first, then invite.");
+                              setTimeout(() => setNotice(""), 3000);
+                              return;
+                            }
+                            let count = 0;
+                            for (const f of friends) {
+                              if (sentTo === f.uid) continue;
+                              try {
+                                await addDoc(collection(db, "invites"), {
+                                  targetId: f.uid,
+                                  fromUid: user.uid,
+                                  fromName: user.displayName || "A friend",
+                                  roomId: room,
+                                  ...inviteTimestamps(),
+                                });
+                                count++;
+                              } catch (e) {
+                                console.error("Invite error:", e);
+                              }
+                            }
+                            if (count > 0) {
+                              setNotice(`Invited ${count} friend${count > 1 ? "s" : ""}!`);
+                              setTimeout(() => setNotice(""), 2500);
+                            }
+                          }}
+                          className="text-xs font-bold bg-white/10 hover:bg-white/20 text-white px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1"
+                          title="Invite all friends"
                         >
-                          <MessageCircle size={14} /> {sentTo === f.uid ? "Sent" : "Invite"}
+                          <Users size={14} /> Invite All
                         </button>
                       </div>
-                    ))
-                  ))}
+                    )}
+                    {friends.length === 0 ? (
+                      <EmptyState icon={<Users size={48} />} text="No friends yet." />
+                    ) : (
+                      [...friends]
+                        .sort((a, b) => {
+                          const aOnline = onlineUids.has(a.uid);
+                          const bOnline = onlineUids.has(b.uid);
+                          if (aOnline === bOnline) return a.displayName.localeCompare(b.displayName);
+                          return aOnline ? -1 : 1;
+                        })
+                        .map((f) => (
+                          <div
+                            key={f.uid}
+                            className="glass p-3 rounded-2xl border border-white/5 flex items-center justify-between"
+                          >
+                            <div className="flex items-center gap-3 min-w-0">
+                              <div className="relative shrink-0">
+                                <Avatar uid={f.uid} src={f.photoURL} name={f.displayName} />
+                                <span
+                                  className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-black ${
+                                    onlineUids.has(f.uid) ? "bg-success" : "bg-white/30"
+                                  }`}
+                                  title={onlineUids.has(f.uid) ? "Online" : "Offline"}
+                                />
+                              </div>
+                              <div className="min-w-0">
+                                <p className="text-sm font-bold text-white truncate">{f.displayName}</p>
+                                <p className="text-[11px] text-text-muted">
+                                  {onlineUids.has(f.uid) ? "Online" : "Offline"}
+                                </p>
+                              </div>
+                            </div>
+                            <button
+                              onClick={() => inviteFriend(f.uid)}
+                              disabled={sentTo === f.uid}
+                              className="bg-primary hover:bg-primary/80 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 transition-colors disabled:opacity-60 shrink-0"
+                              title="Invite to your lobby"
+                            >
+                              <MessageCircle size={14} /> {sentTo === f.uid ? "Sent" : "Invite"}
+                            </button>
+                          </div>
+                        ))
+                    )}
+                  </>
+                )}
 
                 {tab === "requests" &&
                   (requests.length === 0 ? (

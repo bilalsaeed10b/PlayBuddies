@@ -214,6 +214,16 @@ export class GolfEngine {
     return this.course.par;
   }
 
+  get activeBallScreenPos(): { x: number; y: number } | null {
+    if (this.phase !== 'aim') return null;
+    const b = this.balls[this.turn];
+    if (!b) return null;
+    return {
+      x: b.x * this.view.scale + this.view.ox,
+      y: b.y * this.view.scale + this.view.oy,
+    };
+  }
+
   /**
    * A putt struck here, on this device.
    *

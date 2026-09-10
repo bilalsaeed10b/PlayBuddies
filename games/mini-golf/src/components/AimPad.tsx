@@ -152,6 +152,7 @@ export default function AimPad({
   onAim: (aim: Aim) => void;
   onFire: (aim: Aim) => void;
   onFirstTouch?: () => void;
+  getOrigin?: () => { x: number; y: number } | null;
 }) {
   const [drag, setDrag] = useState<Drag | null>(null);
   const pointer = useRef<number | null>(null);
@@ -280,40 +281,59 @@ export default function AimPad({
       onPointerUp={up}
       onPointerCancel={up}
     >
-      {drag && (
-        <svg className="pointer-events-none fixed inset-0 h-full w-full" aria-hidden>
-          <circle
-            cx={drag.ox}
-            cy={drag.oy}
-            r={reach.current}
-            fill="none"
-            stroke="rgba(255,255,255,0.14)"
-            strokeWidth={2}
-            strokeDasharray="3 5"
-          />
-          <PowerArc ox={drag.ox} oy={drag.oy} reach={reach.current} power={drag.power} />
-          <PowerLabel ox={drag.ox} oy={drag.oy} reach={reach.current} power={drag.power} />
-          <line
-            x1={drag.ox}
-            y1={drag.oy}
-            x2={drag.x}
-            y2={drag.y}
-            stroke="rgba(255,255,255,0.85)"
-            strokeWidth={4}
-            strokeLinecap="round"
-          />
-          <Arrow ox={drag.ox} oy={drag.oy} x={drag.x} y={drag.y} power={drag.power} reach={reach.current} />
-          <circle cx={drag.ox} cy={drag.oy} r={9} fill="rgba(255,255,255,0.9)" />
-          <circle
-            cx={drag.x}
-            cy={drag.y}
-            r={26}
-            fill="rgba(8,32,18,0.55)"
-            stroke="rgba(255,255,255,0.9)"
-            strokeWidth={3}
-          />
-        </svg>
-      )}
+      {drag && (() => {
+        const origin = getOrigin?.() || { x: drag.ox, y: drag.oy };
+        const visualX = origin.x - Math.cos(drag.angle) * drag.power * reach.current;
+        const visualY = origin.y - Math.sin(drag.angle) * drag.power * reach.current;
+        return (
+          <>
+            <svg className="pointer-events-none fixed inset-0 h-full w-full drop-shadow-md" aria-hidden>
+              <circle
+                cx={origin.x}
+                cy={origin.y}
+                r={reach.current}
+                fill="rgba(0,0,0,0.15)"
+                stroke="rgba(255,255,255,0.25)"
+                strokeWidth={1.5}
+                strokeDasharray="4 6"
+              />
+              <PowerArc ox={origin.x} oy={origin.y} reach={reach.current} power={drag.power} />
+              <PowerLabel ox={origin.x} oy={origin.y} reach={reach.current} power={drag.power} />
+              <line
+                x1={origin.x}
+                y1={origin.y}
+                x2={visualX}
+                y2={visualY}
+                stroke="rgba(255,255,255,0.7)"
+                strokeWidth={5}
+                strokeLinecap="round"
+                strokeDasharray="1 8"
+              />
+              <Arrow ox={origin.x} oy={origin.y} x={visualX} y={visualY} power={drag.power} reach={reach.current} />
+              <circle cx={origin.x} cy={origin.y} r={6} fill="rgba(255,255,255,0.8)" />
+              <circle
+                cx={visualX}
+                cy={visualY}
+                r={24}
+                fill="rgba(255,255,255,0.15)"
+                stroke="rgba(255,255,255,0.95)"
+                strokeWidth={3}
+              />
+              <circle cx={visualX} cy={visualY} r={10} fill="rgba(255,255,255,0.4)" />
+            </svg>
+            <div className="pointer-events-none absolute right-4 bottom-1/4 h-48 w-6 rounded-full border-2 border-white/30 bg-black/50 overflow-hidden shadow-lg shadow-black/30 backdrop-blur-sm">
+              <div
+                className="absolute bottom-0 w-full transition-all duration-75"
+                style={{
+                  height: `${drag.power * 100}%`,
+                  backgroundColor: drag.power > 0.86 ? '#fca5a5' : '#4ade80',
+                  boxShadow: drag.power > 0.86 ? '0 0 16px #fca5a5' : '0 0 10px #4ade80'
+                }}
+              />
+            </div>
+          </>
+        );
+      })()}
     </div>
   );
 }

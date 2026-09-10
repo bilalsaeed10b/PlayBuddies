@@ -22,11 +22,11 @@ export const PHYSICS = {
    * on the green , a shade less than the widest course, so crossing one in a
    * single putt is possible but never automatic.
    */
-  K_GREEN: 1.35,
-  K_ROUGH: 2.7,
-  K_SAND: 5.6,
+  K_GREEN: 0.8,
+  K_ROUGH: 1.6,
+  K_SAND: 3.2,
   /** Under this it has stopped, and holding on to the last hundredth of a unit per second just delays the turn. */
-  STOP: 3,
+  STOP: 2,
   /** How much speed survives a wall. */
   BOUNCE: 0.72,
   /** A block is a touch deader than the outer wall, so banking off scenery costs something. */

@@ -1048,12 +1048,21 @@ function RoomScreen({
           <button onClick={onSettings} aria-label="Settings" className="panel rounded-xl p-2">
             <SettingsIcon className="h-5 w-5" />
           </button>
-          {isHost && (
+          {isHost ? (
             <button
               onClick={askHostToEndGame}
               aria-label="End game"
               className="panel rounded-xl p-2"
               title="End the game for everyone"
+            >
+              <LogOut className="h-5 w-5" />
+            </button>
+          ) : (
+            <button
+              onClick={askToLeaveLobby}
+              aria-label="Leave game"
+              className="panel rounded-xl p-2"
+              title="Leave Lobby"
             >
               <LogOut className="h-5 w-5" />
             </button>

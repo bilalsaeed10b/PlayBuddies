@@ -760,6 +760,7 @@ export default function MatchView({
           enabled={myTurn && !over}
           onAim={onAim}
           onFire={onFire}
+          getOrigin={() => engineRef.current?.activeBallScreenPos ?? null}
           onFirstTouch={() => {
             audioService.unlock();
             // The Fullscreen API only grants a request handling a real user
