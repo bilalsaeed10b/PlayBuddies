@@ -13,6 +13,43 @@ export interface PlayingPerson {
   skin?: number | null;
 }
 
+export type Team = 0 | 1;
+
+/**
+ * A deterministic, balanced assignment for the humans currently in a 2v2 room.
+ * Saved host choices win until a side reaches its two-seat capacity; missing
+ * or stale values are then filled across the other side.
+ */
+export function balancedTeams(
+  people: PlayingPerson[],
+  saved: Record<string, number> = {},
+): Record<string, Team> {
+  const result: Record<string, Team> = {};
+  const counts = [0, 0];
+  for (let i = 0; i < people.length; i++) {
+    const requested: Team = saved[people[i].uid] === 1 ? 1 : saved[people[i].uid] === 0 ? 0 : (i % 2) as Team;
+    const team: Team = counts[requested] < 2 ? requested : ((1 - requested) as Team);
+    result[people[i].uid] = team;
+    counts[team]++;
+  }
+  return result;
+}
+
+/**
+ * Put Gold into seats 0/2 and Blue into 1/3, matching Quoridor's alternating
+ * turn order and the paired starting edges. Undefined slots are deliberate:
+ * in a three-human match the missing partner is filled by a bot on that team.
+ */
+export function teamSeatOrder(
+  people: PlayingPerson[],
+  saved: Record<string, number> = {},
+): Array<PlayingPerson | undefined> {
+  const assignment = balancedTeams(people, saved);
+  const gold = people.filter((person) => assignment[person.uid] === 0);
+  const blue = people.filter((person) => assignment[person.uid] === 1);
+  return [gold[0], blue[0], gold[1], blue[1]];
+}
+
 /**
  * Keep the complete room roster until the host's rules choose the active seats.
  *

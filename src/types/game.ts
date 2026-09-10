@@ -51,6 +51,8 @@ export interface Lobby {
   matchSeed?: number;
   /** Battle of Pirates host-picked teams, cleared when the room changes games. */
   battleTeams?: Record<string, number>;
+  /** Quoridor host-picked 2v2 teams, keyed by player uid. */
+  quoridorTeams?: Record<string, number>;
   /** Set when the match starts; the game runs local co-op instead of waiting for a peer. */
   soloMode?: boolean;
   collectedGems?: Record<string, boolean>;

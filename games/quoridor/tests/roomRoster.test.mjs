@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { loadModule } from './loadModule.mjs';
 
-const { orderedRoomPlayers } = await loadModule(
+const { balancedTeams, orderedRoomPlayers, teamSeatOrder } = await loadModule(
   new URL('../src/game/roomRoster.ts', import.meta.url),
 );
 
@@ -25,4 +25,17 @@ test('only people beyond Quoridor four-seat capacity become spectators', () => {
     ['e', 'c', 'a', 'd', 'b'].map((uid) => [uid, { uid, displayName: uid.toUpperCase() }]),
   );
   assert.deepEqual(orderedRoomPlayers(room).map((person) => person.uid), ['a', 'b', 'c', 'd']);
+});
+
+test('host team choices become the alternating 2v2 seat order', () => {
+  const people = ['a', 'b', 'c', 'd'].map((uid) => ({ uid, displayName: uid.toUpperCase() }));
+  const teams = { a: 1, b: 0, c: 1, d: 0 };
+  assert.deepEqual(teamSeatOrder(people, teams).map((person) => person?.uid), ['b', 'a', 'd', 'c']);
+});
+
+test('a three-human 2v2 leaves the missing partner on the correct team', () => {
+  const people = ['a', 'b', 'c'].map((uid) => ({ uid, displayName: uid.toUpperCase() }));
+  const teams = balancedTeams(people, { a: 1, b: 1, c: 1 });
+  assert.deepEqual(Object.values(teams).sort(), [0, 1, 1]);
+  assert.deepEqual(teamSeatOrder(people, teams).map((person) => person?.uid), ['c', 'a', undefined, 'b']);
 });

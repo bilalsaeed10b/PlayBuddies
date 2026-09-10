@@ -592,6 +592,7 @@ function LobbyContent() {
         matchRules: deleteField(),
         matchSeed: deleteField(),
         battleTeams: deleteField(),
+        quoridorTeams: deleteField(),
         ...reset,
       });
     } catch (e) {

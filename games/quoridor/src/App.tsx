@@ -19,10 +19,10 @@ import {
 import { askHostToEndGame, askToLeaveLobby, toggleFullscreen } from './fullscreen';
 import { FREE_PAWNS, PAWNS, drawPawn } from './game/pawns';
 import useShortScreen from '@shared/ui/useShortScreen';
-import { DEFAULT_SIDES, layoutFor, wallsFor } from './game/rules';
+import { DEFAULT_SIDES, TEAMS, layoutFor, wallsFor } from './game/rules';
 import type { SideMeta } from './game/rules';
-import { orderedRoomPlayers } from './game/roomRoster';
-import type { RoomPlayer as LobbyPerson } from './game/roomRoster';
+import { balancedTeams, orderedRoomPlayers, teamSeatOrder } from './game/roomRoster';
+import type { RoomPlayer as LobbyPerson, Team } from './game/roomRoster';
 import { TIERS } from './engine/ai';
 import { audioService } from './services/audio';
 import { GameWallet, reportResult } from './platform/wallet';
@@ -97,6 +97,7 @@ export default function App() {
     players: Record<string, LobbyPerson>;
     matchStarted?: boolean;
     matchRules?: number;
+    quoridorTeams?: Record<string, number>;
   } | null>(null);
   const [lobbyError, setLobbyError] = useState<string | null>(null);
 
@@ -222,6 +223,7 @@ export default function App() {
             players: Record<string, LobbyPerson>;
             matchStarted?: boolean;
             matchRules?: number;
+            quoridorTeams?: Record<string, number>;
           };
           if (!data.players?.[uid]) {
             setLobbyError('You are not in this lobby.');
@@ -235,6 +237,7 @@ export default function App() {
             players: Object.keys(data.players ?? {}).length,
             matchStarted: Boolean(data.matchStarted),
             matchRules: data.matchRules,
+            quoridorTeams: data.quoridorTeams,
           });
           setLobby(data);
         },
@@ -263,6 +266,10 @@ export default function App() {
   const isHost = Boolean(uid && lobby && lobby.hostId === uid);
   const stampedRules = typeof lobby?.matchRules === 'number' ? unpackRules(lobby.matchRules) : null;
   const activeRules = lobby?.matchStarted && stampedRules ? stampedRules : rules;
+  const teamAssignments = useMemo(
+    () => balancedTeams(people, lobby?.quoridorTeams),
+    [people, lobby?.quoridorTeams],
+  );
 
   /**
    * The host's chosen player count follows the room, not the other way round.
@@ -344,6 +351,30 @@ export default function App() {
     [uid, owned, buy, handoff.room],
   );
 
+  const assignTeam = useCallback(
+    async (targetUid: string, team: Team) => {
+      if (!isHost || !lobby) return;
+      const current = balancedTeams(people, lobby.quoridorTeams);
+      const previous = current[targetUid];
+      if (previous === undefined || previous === team) return;
+
+      const updates: Record<string, Team> = { [`quoridorTeams.${targetUid}`]: team };
+      const destination = people.filter((person) => person.uid !== targetUid && current[person.uid] === team);
+      if (destination.length >= 2) {
+        const swap = destination[destination.length - 1];
+        updates[`quoridorTeams.${swap.uid}`] = previous;
+      }
+
+      try {
+        const { db, doc, updateDoc } = await import('./firebase');
+        await updateDoc(doc(db, 'lobbies', handoff.room), updates);
+      } catch (e) {
+        console.error('Could not assign that team', e);
+      }
+    },
+    [isHost, lobby, people, handoff.room],
+  );
+
   const startMatch = useCallback(async () => {
     if (!isHost) return;
     const players = PLAYER_CODES.find((n) => n >= people.length) ?? PLAYER_CODES[PLAYER_CODES.length - 1];
@@ -353,11 +384,15 @@ export default function App() {
     setSession(nextSession);
     try {
       const { db, doc, updateDoc } = await import('./firebase');
-      await updateDoc(doc(db, 'lobbies', handoff.room), { matchStarted: true, matchRules: packRules(startRules) });
+      await updateDoc(doc(db, 'lobbies', handoff.room), {
+        matchStarted: true,
+        matchRules: packRules(startRules),
+        quoridorTeams: teamAssignments,
+      });
     } catch (e) {
       console.error('Could not start the game', e);
     }
-  }, [isHost, people.length, rules, handoff.room]);
+  }, [isHost, people.length, rules, teamAssignments, handoff.room]);
 
   const award = useCallback((won: boolean, movesTaken: number) => {
     // Something for turning up, more for crossing first, and a bonus for doing
@@ -419,7 +454,10 @@ export default function App() {
     // `mode=single` is the platform saying this player pressed its own Solo
     // button. It should mean bots even in the moment before the roster
     // settles, rather than a game that depends on how fast a snapshot arrived.
-    const crew = handoff.solo ? people.filter((p) => p.uid === uid) : people;
+    const roomCrew = handoff.solo ? people.filter((p) => p.uid === uid) : people;
+    const crew = activeRules.players === 4 && activeRules.teams
+      ? teamSeatOrder(roomCrew, teamAssignments)
+      : roomCrew;
 
     // Taken as a function of the player count rather than read off `rules`,
     // because a guest's `rules` is its own saved copy until the host's reach
@@ -466,7 +504,7 @@ export default function App() {
       seatsFor,
       roomId: handoff.room,
       uid,
-      peerUids: crew.filter((p) => p.uid !== uid).map((p) => p.uid),
+      peerUids: roomCrew.filter((p) => p.uid !== uid).map((p) => p.uid),
       isHost,
       seats,
       // Somebody who arrived after the seats filled up has no pawn; the board
@@ -582,7 +620,9 @@ export default function App() {
           coins={coins}
           isHost={isHost}
           rules={rules}
+          teamAssignments={teamAssignments}
           onPick={pickOnline}
+          onAssignTeam={assignTeam}
           onStart={startMatch}
           onSettings={() => setShowSettings(true)}
           onRules={() => setShowRules(true)}
@@ -956,7 +996,9 @@ function RoomScreen({
   coins,
   isHost,
   rules,
+  teamAssignments,
   onPick,
+  onAssignTeam,
   onStart,
   onSettings,
   onRules,
@@ -973,7 +1015,9 @@ function RoomScreen({
   coins: number;
   isHost: boolean;
   rules: MatchRules;
+  teamAssignments: Record<string, Team>;
   onPick: (index: number) => void;
+  onAssignTeam: (uid: string, team: Team) => void;
   onStart: () => void;
   onSettings: () => void;
   onRules: () => void;
@@ -1095,6 +1139,54 @@ function RoomScreen({
         </span>
       </button>
 
+      {rules.players === 4 && rules.teams && people.length > 2 && (
+        <div className="panel shrink-0 rounded-2xl p-3 sm:p-4">
+          <div className="mb-2 flex items-center justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-black uppercase tracking-wide">Choose 2v2 teams</h3>
+              <p className="text-[10px] font-semibold text-slate-500">
+                {isHost ? 'Tap Gold or Blue for each player.' : 'The host is arranging the teams.'}
+              </p>
+            </div>
+            <span className="rounded-full bg-slate-900/5 px-2.5 py-1 text-[10px] font-black uppercase text-slate-500">
+              {Object.values(teamAssignments).filter((team) => team === 0).length} /{' '}
+              {Object.values(teamAssignments).filter((team) => team === 1).length}
+            </span>
+          </div>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            {people.map((person) => (
+              <div key={person.uid} className="flex items-center gap-2 rounded-xl border border-black/10 bg-white/55 p-2">
+                <span className="min-w-0 flex-1 truncate text-xs font-bold">
+                  {person.displayName}{person.uid === uid ? ' · you' : ''}
+                </span>
+                {([0, 1] as const).map((team) => {
+                  const selected = teamAssignments[person.uid] === team;
+                  return (
+                    <button
+                      key={team}
+                      type="button"
+                      disabled={!isHost}
+                      onClick={() => onAssignTeam(person.uid, team)}
+                      className={`rounded-lg border px-2.5 py-1 text-[10px] font-black uppercase transition-transform enabled:active:scale-95 disabled:cursor-default ${
+                        selected ? 'text-white shadow-sm' : 'border-black/10 bg-white/70 text-slate-400'
+                      }`}
+                      style={selected ? { borderColor: TEAMS[team].dark, background: TEAMS[team].main } : undefined}
+                    >
+                      {TEAMS[team].name}
+                    </button>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+          {people.length === 3 && (
+            <p className="mt-2 text-center text-[10px] font-semibold text-slate-400">
+              A bot joins the team with one player.
+            </p>
+          )}
+        </div>
+      )}
+
       {/* On a phone the start button would otherwise sit below the fold, which
           is exactly what made it unreachable in the earlier games. */}
       <div className="panel shrink-0 rounded-2xl p-3 lg:hidden">
@@ -1159,18 +1251,23 @@ function RoomScreen({
               <Users className="h-4 w-4" /> At the board ({people.length})
             </h3>
             <div className="min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain pr-1">
-              {people.map((p, i) => (
-                <div
-                  key={p.uid}
-                  className="flex items-center gap-3 rounded-2xl border p-2.5"
-                  style={{
-                    borderColor: `${seatLayout.sides[i]?.main ?? '#94a3b8'}55`,
-                    background: `${seatLayout.sides[i]?.main ?? '#94a3b8'}14`,
-                  }}
-                >
+              {people.map((p, i) => {
+                const team = teamAssignments[p.uid] ?? ((i % 2) as Team);
+                const colour = rules.teams && rules.players === 4 ? TEAMS[team] : seatLayout.sides[i];
+                const teamOrdinal = people.slice(0, i).filter((person) => teamAssignments[person.uid] === team).length;
+                const portraitSeat = rules.teams && rules.players === 4 ? team + teamOrdinal * 2 : i;
+                return (
+                  <div
+                    key={p.uid}
+                    className="flex items-center gap-3 rounded-2xl border p-2.5"
+                    style={{
+                      borderColor: `${colour?.main ?? '#94a3b8'}55`,
+                      background: `${colour?.main ?? '#94a3b8'}14`,
+                    }}
+                  >
                   <div className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-white/70">
                     {p.skin !== undefined && p.skin !== null ? (
-                      <Portrait index={p.skin} seat={i} size={42} sides={seatLayout.sides} />
+                      <Portrait index={p.skin} seat={portraitSeat} size={42} sides={seatLayout.sides} />
                     ) : (
                       <Blocks className="h-5 w-5 text-slate-300" />
                     )}
@@ -1182,14 +1279,15 @@ function RoomScreen({
                     </p>
                     <p
                       className="text-[10px] font-black uppercase tracking-widest"
-                      style={{ color: seatLayout.sides[i]?.dark }}
+                      style={{ color: colour?.dark }}
                     >
-                      {seatLayout.sides[i]?.name}
+                      {rules.teams && rules.players === 4 ? `${TEAMS[team].name} team` : seatLayout.sides[i]?.name}
                       {p.uid === uid ? ' , you' : ''}
                     </p>
                   </div>
-                </div>
-              ))}
+                  </div>
+                );
+              })}
             </div>
           </div>
 
