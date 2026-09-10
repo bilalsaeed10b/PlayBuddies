@@ -98,6 +98,7 @@ export default function App() {
     players: Record<string, LobbyPerson>;
     matchStarted?: boolean;
     matchRules?: number;
+    matchSeed?: number;
   } | null>(null);
   const [lobbyError, setLobbyError] = useState<string | null>(null);
 
@@ -193,6 +194,7 @@ export default function App() {
             players: Record<string, LobbyPerson>;
             matchStarted?: boolean;
             matchRules?: number;
+            matchSeed?: number;
           };
           if (!data.players?.[uid]) {
             setLobbyError('You are not in this lobby.');
@@ -205,6 +207,8 @@ export default function App() {
             iAmHost: data.hostId === uid,
             players: Object.keys(data.players ?? {}).length,
             matchStarted: Boolean(data.matchStarted),
+            matchRules: data.matchRules,
+            matchSeed: data.matchSeed,
           });
           setLobby(data);
           // The host's terms, arriving on the one channel every client already
@@ -243,6 +247,8 @@ export default function App() {
 
   const mySkin = uid ? lobby?.players?.[uid]?.fishIndex : undefined;
   const isHost = Boolean(uid && lobby && lobby.hostId === uid);
+  const stampedRules = typeof lobby?.matchRules === 'number' ? unpackRules(lobby.matchRules) : null;
+  const activeRules = lobby?.matchStarted && stampedRules ? stampedRules : rules;
 
   // The host keeps `rules.players` in lockstep with who is actually in the
   // room. Nothing online reads it as a target to fill anymore, but Teams'
@@ -292,18 +298,34 @@ export default function App() {
 
   const startMatch = useCallback(async () => {
     if (!isHost) return;
+    const players = Math.max(
+      MIN_ONLINE_PLAYERS,
+      Math.min(PLAYER_COUNTS[PLAYER_COUNTS.length - 1], people.length || MIN_ONLINE_PLAYERS),
+    ) as PlayerCount;
+    const teamCount = Math.min(rules.teamCount, players);
+    let teamOf = Array.from({ length: players }, (_, seat) =>
+      Math.min(teamCount - 1, rules.teamOf[seat] ?? seat % teamCount),
+    );
+    if (rules.mode === 'teams' && !Array.from({ length: teamCount }, (_, team) => teamOf.includes(team)).every(Boolean)) {
+      teamOf = defaultTeams(players, teamCount);
+    }
+    const startRules: MatchRules = { ...rules, players, teamCount, teamOf };
+    const matchSeed = randomSeed();
+    setRules(startRules);
+    setSession({ seed: matchSeed });
     try {
       const { db, doc, updateDoc } = await import('./firebase');
       // The rules ride along in the same write as the go-signal, so they land
       // in every guest's snapshot at the same instant `matchStarted` does.
       await updateDoc(doc(db, 'lobbies', handoff.room), {
         matchStarted: true,
-        matchRules: packRules(rules),
+        matchRules: packRules(startRules),
+        matchSeed,
       });
     } catch (e) {
       log.error('match:start-failed', { message: String((e as Error)?.message ?? e) });
     }
-  }, [isHost, handoff.room, rules]);
+  }, [isHost, handoff.room, people.length, rules]);
 
   const award = useCallback((won: boolean, points: number) => {
     setCoins((c) => c + (won ? 90 : 25) + Math.round(points / 3));
@@ -322,10 +344,20 @@ export default function App() {
       .catch((e) => console.error('Could not reset the match flag', e));
   }, [online, isHost, handoff.room, rollSession]);
 
+  const rosterKey = people.map((person) => `${person.uid}:${person.skin ?? ''}`).join('|');
+  // Authentication usually resolves before the Firestore roster. Keep
+  // replacing that empty preview while the lobby is waiting; when Start lands,
+  // the shared seed and rules become the fixed identity of this match.
+  const onlineMatchKey = lobby?.matchStarted
+    ? `started:${lobby.matchSeed ?? session.seed}:${lobby.matchRules ?? ''}`
+    : `waiting:${rosterKey}`;
   const matchConfig = useMemo(
-    () => (online && uid && !offlineMatch ? onlineConfig() : offlineConfig()),
+    () =>
+      online && uid && !offlineMatch
+        ? onlineConfig(activeRules, lobby?.matchSeed ?? session.seed)
+        : offlineConfig(),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [session.seed, offlineMatch, uid],
+    [session.seed, offlineMatch, uid, onlineMatchKey],
   );
 
   // -- into the game ----------------------------------------------------------
@@ -351,7 +383,7 @@ export default function App() {
     );
   }
 
-  function onlineConfig(): MatchConfig {
+  function onlineConfig(matchRules: MatchRules, matchSeed: number): MatchConfig {
     const crew = handoff.solo ? people.filter((p) => p.uid === uid) : people;
     const seats: Seat[] = [];
     const localSeats: number[] = [];
@@ -387,8 +419,8 @@ export default function App() {
       isHost,
       seats,
       localSeats,
-      seed: session.seed,
-      rules,
+      seed: matchSeed,
+      rules: matchRules,
     };
   }
 
