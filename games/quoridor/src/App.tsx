@@ -79,9 +79,11 @@ const randomSeed = () => (Math.random() * 0x7fffffff) | 0;
  * PlayBuddies seats for a room: pick Architect once to test the offline game,
  * then go play a real match with friends, and the empty seats were suddenly
  * merciless too. Online bots are always Runner instead, independent of
- * whatever the offline picker is currently set to.
+ * whatever the offline picker is currently set to. Fill-in bots now use the
+ * first planning tier, strong enough to read ahead without becoming the
+ * punishing top rank.
  */
-const ONLINE_AI_LEVEL = 1;
+const ONLINE_AI_LEVEL = 3;
 
 export default function App() {
   const [handoff] = useState(readHandoff);
@@ -748,12 +750,12 @@ function Menu({
 
         <div className="space-y-2">
           <p className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-400">Bot rank</p>
-          <div className="flex gap-1 rounded-xl bg-slate-900/5 p-1">
+          <div className="grid grid-cols-2 gap-1 rounded-xl bg-slate-900/5 p-1 sm:grid-cols-3">
             {TIERS.map((tier, i) => (
               <button
                 key={tier.label}
                 onClick={() => onAiLevel(i)}
-                className={`flex-1 rounded-lg py-2 text-xs font-black uppercase tracking-wider transition-colors ${
+                className={`min-w-0 rounded-lg px-1 py-2 text-[10px] font-black uppercase tracking-wide transition-colors ${
                   aiLevel === i ? 'bg-slate-900 text-white' : 'text-slate-500'
                 }`}
               >
