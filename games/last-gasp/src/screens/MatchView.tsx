@@ -24,6 +24,7 @@ import { LastGaspEngine } from '../engine/LastGaspEngine';
 import type { RoundEvent, Seat } from '../engine/LastGaspEngine';
 import { botGuess, botVote, botWord, chainDelay, reactionDelay } from '../engine/ai';
 import { ALPHABET, BALANCE, PIECES, SEAT_COLORS, TEAM_COLORS } from '../game/rules';
+import { isEnglishWord } from '../game/words';
 import { audioService } from '../services/audio';
 import { cleanWord, packHistory, packRules, unpackHistory } from '../types/game';
 import type { Action, GameSettings, MatchRules, NetPacket } from '../types/game';
@@ -81,6 +82,7 @@ export default function MatchView({
 
   const [notice, setNotice] = useState<string | null>(null);
   const [wordInput, setWordInput] = useState('');
+  const [wordError, setWordError] = useState<string | null>(null);
   /** Which of this device's own seats is "at the keyboard" for guessing, when it is driving more than one. */
   const [activeLocal, setActiveLocal] = useState(0);
 
@@ -567,11 +569,19 @@ export default function MatchView({
 
   const submitWord = () => {
     const cleaned = cleanWord(wordInput);
-    if (cleaned.length < BALANCE.MIN_WORD_LEN) return;
+    if (cleaned.length < BALANCE.MIN_WORD_LEN) {
+      setWordError(`Use at least ${BALANCE.MIN_WORD_LEN} letters.`);
+      return;
+    }
+    if (!isEnglishWord(cleaned)) {
+      setWordError('Choose a word from the English word list.');
+      return;
+    }
     const seat = mySetter;
     if (seat === undefined) return;
     play({ t: 'word', s: seat, w: cleaned });
     setWordInput('');
+    setWordError(null);
   };
 
   const settingSeatName = () => {
@@ -582,7 +592,7 @@ export default function MatchView({
 
   const centerBlock = (
     <>
-      <Gallows pieces={engine.pieces} className="h-[22vh] max-h-52 min-h-24 w-auto shrink-0" />
+      <Gallows pieces={engine.pieces} className="h-[14vh] max-h-32 min-h-16 w-auto shrink-0" />
 
       <p className="text-[10px] font-black uppercase tracking-[0.25em] text-slate-500">
         {engine.pieces} / {PIECES} lines · {PIECES - engine.pieces} left
@@ -615,13 +625,13 @@ export default function MatchView({
         </div>
       ) : engine.phase === 'settingWord' ? (
         mySetter !== undefined ? (
-          <WordEntry value={wordInput} onChange={setWordInput} onSubmit={submitWord} label="Type the word everyone will guess" seconds={setClock} />
+          <WordEntry value={wordInput} onChange={(word) => { setWordInput(word); setWordError(null); }} onSubmit={submitWord} error={wordError} label="Type the word everyone will guess" seconds={setClock} />
         ) : (
           <WaitingCard text={`${settingSeatName()} is choosing a word…`} seconds={setClock} />
         )
       ) : engine.phase === 'suggesting' ? (
         mySetter !== undefined ? (
-          <WordEntry value={wordInput} onChange={setWordInput} onSubmit={submitWord} label="Suggest a word for your team" seconds={setClock} />
+          <WordEntry value={wordInput} onChange={(word) => { setWordInput(word); setWordError(null); }} onSubmit={submitWord} error={wordError} label="Suggest a word for your team" seconds={setClock} />
         ) : engine.teamOf(config.localSeats[0] ?? -1) === engine.settingTeam ? (
           <WaitingCard text="Waiting on your teammates' suggestions…" seconds={setClock} />
         ) : (
@@ -800,12 +810,14 @@ function WordEntry({
   value,
   onChange,
   onSubmit,
+  error,
   label,
   seconds,
 }: {
   value: string;
   onChange: (v: string) => void;
   onSubmit: () => void;
+  error: string | null;
   label: string;
   /** The clock only ever ran silently against the person actually typing , everyone else waiting on them saw it, they didn't. */
   seconds: number;
@@ -837,13 +849,15 @@ function WordEntry({
         <button
           type="button"
           onClick={onSubmit}
-          disabled={value.length < BALANCE.MIN_WORD_LEN}
+          disabled={value.length < BALANCE.MIN_WORD_LEN || !isEnglishWord(value)}
           className="flex shrink-0 items-center gap-1.5 rounded-xl bg-lime-500 px-4 font-black uppercase tracking-wide text-slate-950 disabled:opacity-40"
         >
           <Send className="h-4 w-4" /> Set
         </button>
       </div>
-      <p className="text-center text-[10px] font-bold text-slate-500">Nobody else can see this until it's guessed or the word ends.</p>
+      <p className={`text-center text-[10px] font-bold ${error ? 'text-rose-300' : 'text-slate-500'}`} aria-live="polite">
+        {error ?? "Use a word from the English word list. Nobody else can see it until it's guessed or the word ends."}
+      </p>
     </div>
   );
 }

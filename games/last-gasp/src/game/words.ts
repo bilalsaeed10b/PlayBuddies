@@ -83,6 +83,7 @@ export interface Answer {
 }
 
 let cache: Answer[] | null = null;
+let wordCache: Set<string> | null = null;
 
 /** The whole list, decoded on first use and kept for the session. */
 export function answers(): Answer[] {
@@ -99,3 +100,13 @@ export function answers(): Answer[] {
 }
 
 export const ANSWER_COUNT = () => answers().length;
+
+/**
+ * The words players may submit. Keeping this tied to the curated answer list
+ * gives the game a small, predictable English dictionary without accepting
+ * arbitrary letter strings as a "word".
+ */
+export function isEnglishWord(word: string): boolean {
+  if (!wordCache) wordCache = new Set(answers().map((answer) => answer.word));
+  return wordCache.has(word);
+}

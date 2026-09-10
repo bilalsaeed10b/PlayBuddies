@@ -20,6 +20,7 @@
  * what happened and animates the answer.
  */
 import { ALPHABET, BALANCE, PIECES, chainMultiplier, mulberry32, scoreFor } from '../game/rules';
+import { isEnglishWord } from '../game/words';
 import type { Action, Control, MatchRules, Phase, RoundHistory } from '../types/game';
 import { MAX_WORD_LEN, ROUND_CHOICES, cleanWord } from '../types/game';
 
@@ -262,6 +263,7 @@ export class LastGaspEngine {
     if (!this.canSetWord(seat)) return false;
     const word = cleanWord(raw);
     if (word.length < BALANCE.MIN_WORD_LEN || word.length > MAX_WORD_LEN) return false;
+    if (!isEnglishWord(word)) return false;
 
     if (this.phase === 'settingWord') {
       this.word = word;
