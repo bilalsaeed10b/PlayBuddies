@@ -70,6 +70,9 @@ export interface Brain {
   recent: number[];
   /** A lasting lane preference gives each advanced bot a recognisable style. */
   style?: number;
+  /** Stops a bot spending the whole opening repeating the same marginal wall idea. */
+  lastAction?: 'step' | 'wall';
+  wallsPlaced?: number;
 }
 
 export const newBrain = (): Brain => ({ recent: [] });
@@ -320,6 +323,7 @@ export function chooseMove(
   const winning = options.find((target) => layout.sides[seat].goal(rowOf(target), colOf(target)));
   if (winning !== undefined) {
     remember(brain, winning);
+    brain.lastAction = 'step';
     return encodeStep(winning);
   }
 
@@ -329,6 +333,7 @@ export function chooseMove(
       ? plannedStep(pos, seat, layout, tier, brain, rng)
       : direct >= 0 ? direct : options[0];
     remember(brain, step);
+    brain.lastAction = 'step';
     return encodeStep(step);
   };
 
@@ -338,6 +343,7 @@ export function chooseMove(
     const wander = options.filter((o) => !brain.recent.includes(o));
     const pick = (wander.length > 0 ? wander : options)[Math.floor(rng() * (wander.length || options.length))];
     remember(brain, pick);
+    brain.lastAction = 'step';
     return encodeStep(pick ?? options[0]);
   }
 
@@ -355,7 +361,22 @@ export function chooseMove(
   if (spendable <= 0 || behind < -tier.wallLead) return run();
 
   const wall = bestWall(pos, seat, layout, tier, myDist, leader.dist, rng);
-  if (wall && wall.gain > 0 && wall.gain >= tier.threshold - Math.min(Math.max(behind, 0), 2)) {
+  const urgent = leader.dist <= 2;
+  const advanced = tier.planningDepth > 0;
+  // Moving normally gains one race step. A wall that adds only one step to an
+  // opponent is therefore a tempo trade, not an advantage. Advanced bots may
+  // mix in one such setup wall for opening variety, but never build the same
+  // slow lock turn after turn unless the opponent is about to cross the line.
+  const requiredGain = urgent ? 1 : behind > 0 ? 1 : advanced ? 2 : tier.threshold;
+  const setupWall = advanced
+    && behind === 0
+    && (brain.wallsPlaced ?? 0) === 0
+    && wall?.gain === 1
+    && rng() < 0.35;
+  const repeatedMarginalWall = !urgent && brain.lastAction === 'wall' && wall?.gain === 1;
+  if (wall && !repeatedMarginalWall && (wall.gain >= requiredGain || setupWall)) {
+    brain.lastAction = 'wall';
+    brain.wallsPlaced = (brain.wallsPlaced ?? 0) + 1;
     return encodeWall(wall.o, wall.r, wall.c);
   }
   return run();

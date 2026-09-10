@@ -60,6 +60,15 @@ test('Grandmaster blocks an enemy that would win on its next step', () => {
   assert.ok(distanceToGoal(pos, 1, layout) > before);
 });
 
+test('advanced ranks do not repeat a one-step opening wall instead of racing', () => {
+  const layout = layoutFor({ players: 2, teams: false });
+  for (let level = 3; level < TIERS.length; level++) {
+    const brain = { recent: [], lastAction: 'step', wallsPlaced: 1 };
+    const move = chooseMove(emptyPosition(layout), 0, layout, level, brain, () => 0.02);
+    assert.equal(isWallMove(move), false, `${TIERS[level].label} repeated its marginal wall pattern`);
+  }
+});
+
 test('every bot rank produces a legal opening in duel and 2v2', () => {
   for (const rules of [
     { players: 2, teams: false },
