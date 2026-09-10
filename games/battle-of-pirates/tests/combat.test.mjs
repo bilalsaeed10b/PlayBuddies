@@ -142,7 +142,7 @@ test('acid rain hits every living enemy once, and keeps the full six-second cine
   const before = b.hp;
   assert.ok(b.useSpecial('acid-rain'));
   advance(b, 1.5); assert.deepEqual(b.hp, before);
-  advance(b, 1); assert.deepEqual(b.hp, before.map((hp, i) => i === 1 || i === 3 ? hp - 10 : hp));
+  advance(b, 1); assert.deepEqual(b.hp, before.map((hp, i) => i === 1 || i === 3 ? hp - 15 : hp));
   advance(b, 3.49); assert.equal(b.turnNo, 0);
   advance(b, 0.04); assert.equal(b.turnNo, 1);
   assert.equal(b.ships[0].charge, 0);
@@ -153,12 +153,12 @@ test('last enemy dying to acid rain waits for sunrise before results', () => {
   assert.equal(b.hp[1], 0); assert.equal(won, 0);
   advance(b, 0.2); assert.equal(won, 1); assert.equal(b.phase, 'over');
 });
-test('heal restores 25, caps at own maxHP, never revives, and consumes a turn', () => {
+test('heal restores 30, caps at own maxHP, never revives, and consumes a turn', () => {
   for (const missing of [10, 35]) {
     const b = create(); aim(b); grant(b, b.ships[0].maxHp - missing);
     const before = b.ships[0].hp;
     assert.ok(b.useSpecial('heal')); advance(b, 2.3);
-    assert.equal(b.ships[0].hp, Math.min(b.ships[0].maxHp, before + 25));
+    assert.equal(b.ships[0].hp, Math.min(b.ships[0].maxHp, before + 30));
     assert.equal(b.turnNo, 1); assert.equal(b.turn, 1);
     assert.equal(b.ships[0].charge, 0);
   }
@@ -211,16 +211,16 @@ test('late previews never fire for a different captain, duplicate outcomes never
   const { host, guest, run, messages } = pair();
   host.ships[0].charge = guest.ships[0].charge = 3;
   host.useSpecial('torpedo', 3); const preview = messages.find(([,p]) => p.t === 'fire')[1];
-  run(3); const before = snapshot(guest);
+  run(SPECIALS.torpedo.duration + 0.2); const before = snapshot(guest);
   guest.applyFire({ ...preview, n: 999 }, 'p0');
   guest.applyShot({ ...host.snapshot(), st: undefined, tn: 1, who: 0, n: 999 }, 'p0');
-  advance(guest, 1); assert.deepEqual(snapshot(guest), before); assert.equal(guest.phase, 'aim');
+  advance(guest, 1.5); assert.deepEqual(snapshot(guest), before); assert.equal(guest.phase, 'aim');
 });
 test('background sync discards partial animation and restores HP, charge, captain, and clock', () => {
   const { host, guest, run, deliver, messages } = pair();
   host.ships[0].charge = guest.ships[0].charge = 3;
   host.useSpecial('torpedo', 3); deliver(); advance(guest, 0.2);
-  advance(host, 3); messages.length = 0;
+  advance(host, 4.2); messages.length = 0;
   guest.requestSync(); assert.equal(guest.resyncing, true); deliver(); deliver();
   assert.equal(guest.resyncing, false);
   assert.equal(guest.special, null);
