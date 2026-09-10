@@ -49,21 +49,27 @@ export interface Tier {
   planningDepth: number;
   /** How many steps ahead it may be and still invest in a useful blocking wall. */
   wallLead: number;
+  /** Score range in which equally sound plans may be varied. */
+  variety: number;
+  /** How many route slots to inspect when anticipating the next enemy wall. */
+  replyWalls: number;
 }
 
 export const TIERS: readonly Tier[] = [
-  { label: 'Rookie', sloppiness: 0.55, threshold: 3, reserve: 0, lookahead: 3, planningDepth: 0, wallLead: 0 },
-  { label: 'Runner', sloppiness: 0.12, threshold: 2, reserve: 1, lookahead: 5, planningDepth: 0, wallLead: 0 },
-  { label: 'Architect', sloppiness: 0, threshold: 1, reserve: 2, lookahead: 8, planningDepth: 0, wallLead: 0 },
-  { label: 'Strategist', sloppiness: 0, threshold: 1, reserve: 2, lookahead: 12, planningDepth: 2, wallLead: 1 },
-  { label: 'Mastermind', sloppiness: 0, threshold: 1, reserve: 1, lookahead: 16, planningDepth: 3, wallLead: 2 },
-  { label: 'Grandmaster', sloppiness: 0, threshold: 1, reserve: 1, lookahead: 24, planningDepth: 4, wallLead: 3 },
+  { label: 'Rookie', sloppiness: 0.55, threshold: 3, reserve: 0, lookahead: 3, planningDepth: 0, wallLead: 0, variety: 0, replyWalls: 0 },
+  { label: 'Runner', sloppiness: 0.12, threshold: 2, reserve: 1, lookahead: 5, planningDepth: 0, wallLead: 0, variety: 0, replyWalls: 0 },
+  { label: 'Architect', sloppiness: 0, threshold: 1, reserve: 2, lookahead: 8, planningDepth: 0, wallLead: 0, variety: 0, replyWalls: 0 },
+  { label: 'Strategist', sloppiness: 0, threshold: 1, reserve: 2, lookahead: 12, planningDepth: 2, wallLead: 1, variety: 1.25, replyWalls: 0 },
+  { label: 'Mastermind', sloppiness: 0, threshold: 1, reserve: 1, lookahead: 18, planningDepth: 4, wallLead: 2, variety: 0.75, replyWalls: 8 },
+  { label: 'Grandmaster', sloppiness: 0, threshold: 0.5, reserve: 0, lookahead: 32, planningDepth: 6, wallLead: 4, variety: 0.3, replyWalls: 18 },
 ];
 
 /** Per-bot memory. Only enough to stop it repeating itself in an obvious way. */
 export interface Brain {
   /** Squares it has stood on lately, so a Rookie's dithering does not loop forever. */
   recent: number[];
+  /** A lasting lane preference gives each advanced bot a recognisable style. */
+  style?: number;
 }
 
 export const newBrain = (): Brain => ({ recent: [] });
@@ -219,9 +225,20 @@ function searchPawnMoves(
   return best;
 }
 
-function plannedStep(pos: Position, seat: number, layout: Layout, depth: number, brain: Brain): number {
+function plannedStep(
+  pos: Position,
+  seat: number,
+  layout: Layout,
+  tier: Tier,
+  brain: Brain,
+  rng: () => number,
+): number {
   const options = pawnMoves(pos, seat, layout);
-  let best = options[0] ?? pos.pawns[seat];
+  if (brain.style === undefined) brain.style = rng() * 2 - 1;
+  const home = layout.sides[seat].home;
+  const lateral = (square: number) => home === 'north' || home === 'south' ? colOf(square) : rowOf(square);
+  const centre = (layout.size - 1) / 2;
+  const scores: { target: number; score: number }[] = [];
   let bestScore = -Infinity;
   for (const target of options) {
     const next = clonePosition(pos);
@@ -229,14 +246,58 @@ function plannedStep(pos: Position, seat: number, layout: Layout, depth: number,
     const terminal = strategicScore(next, seat, layout);
     let score = Math.abs(terminal) >= 100_000
       ? terminal
-      : searchPawnMoves(next, (seat + 1) % layout.players, seat, layout, depth - 1, -Infinity, Infinity);
+      : searchPawnMoves(next, (seat + 1) % layout.players, seat, layout, tier.planningDepth - 1, -Infinity, Infinity);
+    if (tier.replyWalls > 0 && Math.abs(score) < 100_000) {
+      score = Math.min(score, worstEnemyReply(next, (seat + 1) % layout.players, seat, layout, tier.replyWalls));
+    }
     if (brain.recent.includes(target)) score -= 0.4;
-    if (score > bestScore) {
-      bestScore = score;
-      best = target;
+    // This only separates near-ties. It is deliberately far smaller than the
+    // value of gaining one route step, so personality never replaces tactics.
+    score += brain.style * ((lateral(target) - centre) / layout.size) * 0.22;
+    scores.push({ target, score });
+    bestScore = Math.max(bestScore, score);
+  }
+  const sound = scores.filter((option) => option.score >= bestScore - tier.variety);
+  return sound[Math.min(sound.length - 1, Math.floor(rng() * sound.length))]?.target
+    ?? options[0]
+    ?? pos.pawns[seat];
+}
+
+/** The strongest immediate pawn-or-wall answer available to the next enemy. */
+function worstEnemyReply(
+  pos: Position,
+  turn: number,
+  seat: number,
+  layout: Layout,
+  wallLimit: number,
+): number {
+  let worst = Infinity;
+  for (const target of pawnMoves(pos, turn, layout)) {
+    const reply = clonePosition(pos);
+    reply.pawns[turn] = target;
+    worst = Math.min(worst, strategicScore(reply, seat, layout));
+  }
+  if ((pos.stock[turn] ?? 0) <= 0) return worst;
+
+  const seen = new Set<number>();
+  let checked = 0;
+  for (let friendly = 0; friendly < layout.players && checked < wallLimit; friendly++) {
+    if (layout.teams ? teamOf(friendly) !== teamOf(seat) : friendly !== seat) continue;
+    const route = routeToGoal(pos, friendly, layout);
+    for (const slot of candidateSlots(route, pos.pawns[friendly], route.length, layout)) {
+      const key = wallCode(slot.o, slot.r, slot.c);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      if (!wallLegal(pos, turn, slot.o, slot.r, slot.c, layout)) continue;
+      const reply = clonePosition(pos);
+      const grid = slot.o === HORIZONTAL ? reply.h : reply.v;
+      grid[wallSlot(slot.r, slot.c)] = turn + 1;
+      reply.stock[turn]--;
+      worst = Math.min(worst, strategicScore(reply, seat, layout));
+      if (++checked >= wallLimit) break;
     }
   }
-  return best;
+  return worst === Infinity ? strategicScore(pos, seat, layout) : worst;
 }
 
 /**
@@ -256,11 +317,16 @@ export function chooseMove(
   const tier = TIERS[Math.max(0, Math.min(TIERS.length - 1, level))];
   const options = pawnMoves(pos, seat, layout);
   if (options.length === 0) return encodeStep(pos.pawns[seat]);
+  const winning = options.find((target) => layout.sides[seat].goal(rowOf(target), colOf(target)));
+  if (winning !== undefined) {
+    remember(brain, winning);
+    return encodeStep(winning);
+  }
 
   const run = () => {
     const direct = stepTowardGoal(pos, seat, layout);
     const step = tier.planningDepth > 0
-      ? plannedStep(pos, seat, layout, tier.planningDepth, brain)
+      ? plannedStep(pos, seat, layout, tier, brain, rng)
       : direct >= 0 ? direct : options[0];
     remember(brain, step);
     return encodeStep(step);
@@ -288,7 +354,7 @@ export function chooseMove(
   // walls while ahead is spending its own tempo to slow a race it is winning.
   if (spendable <= 0 || behind < -tier.wallLead) return run();
 
-  const wall = bestWall(pos, seat, leader.seat, layout, tier, myDist, leader.dist);
+  const wall = bestWall(pos, seat, layout, tier, myDist, leader.dist, rng);
   if (wall && wall.gain > 0 && wall.gain >= tier.threshold - Math.min(Math.max(behind, 0), 2)) {
     return encodeWall(wall.o, wall.r, wall.c);
   }
@@ -298,19 +364,32 @@ export function chooseMove(
 function bestWall(
   pos: Position,
   seat: number,
-  target: number,
   layout: Layout,
   tier: Tier,
   myDist: number,
   targetDist: number,
+  rng: () => number,
 ): { o: Orientation; r: number; c: number; gain: number } | null {
-  const route = routeToGoal(pos, target, layout);
-  if (route.length === 0) return null;
-
   const probe = clonePosition(pos);
-  let best: { o: Orientation; r: number; c: number; gain: number } | null = null;
+  const before = strategicScore(pos, seat, layout);
+  const candidates: { o: Orientation; r: number; c: number; gain: number; score: number }[] = [];
+  const seen = new Set<number>();
 
-  for (const slot of candidateSlots(route, pos.pawns[target], tier.lookahead, layout)) {
+  // In team games the farther enemy can become the leader after one wall, so
+  // advanced bots inspect every enemy route instead of tunnelling on one pawn.
+  const slots: { o: Orientation; r: number; c: number }[] = [];
+  for (let target = 0; target < layout.players; target++) {
+    if (layout.teams ? teamOf(target) === teamOf(seat) : target === seat) continue;
+    const route = routeToGoal(pos, target, layout);
+    for (const slot of candidateSlots(route, pos.pawns[target], tier.lookahead, layout)) {
+      const key = wallCode(slot.o, slot.r, slot.c);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      slots.push(slot);
+    }
+  }
+
+  for (const slot of slots) {
     if (!wallLegal(pos, seat, slot.o, slot.r, slot.c, layout)) continue;
 
     const grid = slot.o === HORIZONTAL ? probe.h : probe.v;
@@ -318,18 +397,24 @@ function bestWall(
     grid[i] = seat + 1;
     // Both measured per side, so a wall that lengthens the pawn we aimed at
     // but leaves its partner a clear run scores as the near-waste it is.
-    const theirs = sideDistance(probe, target, layout);
+    const theirs = leaderOf(probe, seat, layout).dist;
     const mine = sideDistance(probe, seat, layout);
-    grid[i] = 0;
 
-    if (theirs < 0 || mine < 0) continue;
+    if (theirs < 0 || mine < 0) {
+      grid[i] = 0;
+      continue;
+    }
     // What it costs them, less what it costs me. A wall that lengthens my own
     // route as much as theirs has bought nothing but a spent wall.
     const gain = theirs - targetDist - (mine - myDist);
-    if (!best || gain > best.gain) best = { ...slot, gain };
+    const score = gain + (strategicScore(probe, seat, layout) - before) / 24;
+    grid[i] = 0;
+    if (gain > 0) candidates.push({ ...slot, gain, score });
   }
-
-  return best;
+  if (candidates.length === 0) return null;
+  const bestScore = Math.max(...candidates.map((candidate) => candidate.score));
+  const sound = candidates.filter((candidate) => candidate.score >= bestScore - tier.variety);
+  return sound[Math.min(sound.length - 1, Math.floor(rng() * sound.length))] ?? null;
 }
 
 function remember(brain: Brain, square: number) {
