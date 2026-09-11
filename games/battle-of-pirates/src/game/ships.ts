@@ -245,6 +245,9 @@ export interface ShipDraw {
   /** Drives the flag flutter. Any monotonic clock will do. */
   clock: number;
   scale?: number;
+  /** Visual kickback, zero at rest and one immediately after firing. */
+  recoil?: number;
+  effects?: boolean;
 }
 
 export function drawShip(ctx: CanvasRenderingContext2D, d: ShipDraw) {
@@ -261,7 +264,8 @@ export function drawShip(ctx: CanvasRenderingContext2D, d: ShipDraw) {
   if (baked) ctx.drawImage(baked, -SPR.ox, -SPR.oy);
   else paintHull(ctx, skin, d.accent);
   drawFlag(ctx, skin, d.clock);
-  if (skin.ornament === 'eclipse') drawEclipse(ctx, d.clock);
+  if (skin.ornament === 'seraph' || skin.ornament === 'leviathan') paintOrnament(ctx, skin, d.clock);
+  if (d.effects !== false) drawPremiumEffects(ctx, skin, d.clock);
   ctx.restore();
 
   // The barrel is drawn unmirrored so a world-space aim angle can be handed
@@ -329,6 +333,7 @@ function drawCannon(ctx: CanvasRenderingContext2D, d: ShipDraw) {
   ctx.fill();
 
   ctx.rotate(d.aim ?? (d.facing > 0 ? -0.5 : Math.PI + 0.5));
+  ctx.translate(-12 * (d.recoil ?? 0), 0);
   ctx.fillStyle = barrelGradient(ctx);
   ctx.beginPath();
   ctx.moveTo(-14, -11);
@@ -426,11 +431,39 @@ function paintHull(ctx: CanvasRenderingContext2D, skin: ShipSkin, accent: string
   else rigSquare(ctx, skin, accent);
 
   paintBody(ctx, skin, accent);
-  if (skin.ornament) paintOrnament(ctx, skin);
+  if (skin.ornament) {
+    paintPremiumDetail(ctx, skin);
+    if (skin.ornament !== 'seraph' && skin.ornament !== 'leviathan') paintOrnament(ctx, skin);
+  }
+}
+
+/** Inlaid rails, bevelled gems and lit gunports stay in the cached artwork. */
+function paintPremiumDetail(ctx: CanvasRenderingContext2D, skin: ShipSkin) {
+  ctx.save();
+  ctx.strokeStyle = skin.trim; ctx.lineWidth = 2;
+  for (const y of [-33, -23]) {
+    ctx.beginPath(); ctx.moveTo(-87, y); ctx.quadraticCurveTo(0, y + 17, 87, y); ctx.stroke();
+  }
+  for (let x = -66; x <= 66; x += 22) {
+    ctx.fillStyle = skin.hullDark; ctx.fillRect(x - 6, -16, 12, 12);
+    ctx.fillStyle = skin.trim; ctx.fillRect(x - 3, -13, 6, 5);
+    ctx.fillStyle = '#ffffff'; ctx.globalAlpha = 0.6; ctx.fillRect(x - 3, -13, 6, 1); ctx.globalAlpha = 1;
+  }
+  const gem = (x: number, y: number, size: number) => {
+    ctx.fillStyle = skin.trim; ctx.beginPath(); ctx.moveTo(x, y - size); ctx.lineTo(x + size * 0.6, y);
+    ctx.lineTo(x, y + size); ctx.lineTo(x - size * 0.6, y); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#ffffff'; ctx.globalAlpha = 0.65;
+    ctx.beginPath(); ctx.moveTo(x, y - size); ctx.lineTo(x, y + size); ctx.lineTo(x - size * 0.6, y); ctx.fill(); ctx.globalAlpha = 1;
+  };
+  gem(-76, -43, 9); gem(77, -43, 9);
+  const seal = RIGS[skin.rig].emblem;
+  ctx.globalAlpha = 0.6;
+  ctx.beginPath(); ctx.arc(seal.x, seal.y, 27 * seal.scale, 0, Math.PI * 2); ctx.stroke();
+  ctx.restore();
 }
 
 /** Premium silhouette details are cached with the hull, including shop previews. */
-function paintOrnament(ctx: CanvasRenderingContext2D, skin: ShipSkin) {
+function paintOrnament(ctx: CanvasRenderingContext2D, skin: ShipSkin, clock = 0) {
   ctx.save();
   ctx.strokeStyle = skin.trim;
   ctx.fillStyle = skin.trim;
@@ -444,12 +477,15 @@ function paintOrnament(ctx: CanvasRenderingContext2D, skin: ShipSkin) {
     }
     ctx.beginPath(); ctx.moveTo(85, -30); ctx.quadraticCurveTo(140, -45, 115, -91);
     ctx.lineTo(142, -80); ctx.lineTo(153, -92); ctx.lineTo(147, -60); ctx.lineTo(113, -33); ctx.fill();
+    ctx.fillStyle = '#fff6cf'; ctx.beginPath(); ctx.arc(130, -76, 3, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = skin.hullDark; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(134, -65); ctx.lineTo(145, -68); ctx.stroke();
   } else if (skin.ornament === 'coral') {
     for (const side of [-1, 1]) {
       for (let i = 0; i < 4; i++) {
         const x = side * (72 + i * 8);
         ctx.beginPath(); ctx.moveTo(x, -25); ctx.bezierCurveTo(x - 15, -55, x + 17, -65, x + 8, -95 - i * 5); ctx.stroke();
         ctx.beginPath(); ctx.moveTo(x, -60); ctx.lineTo(x - 15, -77); ctx.stroke();
+        ctx.fillStyle = '#ffe0e9'; ctx.beginPath(); ctx.arc(x + 8, -95 - i * 5, 4, 0, Math.PI * 2); ctx.fill();
       }
     }
   } else if (skin.ornament === 'forge') {
@@ -463,16 +499,23 @@ function paintOrnament(ctx: CanvasRenderingContext2D, skin: ShipSkin) {
       ctx.beginPath(); ctx.arc(x + 4, -25, 2, 0, Math.PI * 2); ctx.fill();
     }
   } else if (skin.ornament === 'seraph') {
-    for (const side of [-1, 1]) for (let i = 0; i < 5; i++) {
+    for (const side of [-1, 1]) {
+      ctx.save(); ctx.translate(side * 66, -35); ctx.rotate(side * Math.sin(clock * 1.4) * 0.075); ctx.translate(-side * 66, 35);
+      for (let i = 0; i < 7; i++) {
       ctx.fillStyle = i % 2 ? '#bdd7f4' : '#f4f8ff';
       ctx.beginPath(); ctx.moveTo(side * 66, -35);
       ctx.quadraticCurveTo(side * (134 - i * 5), -55, side * (142 - i * 10), -122 + i * 12);
       ctx.quadraticCurveTo(side * 95, -65, side * 66, -35); ctx.fill();
+      ctx.strokeStyle = '#7c9dc5'; ctx.lineWidth = 1; ctx.stroke();
+      }
+      ctx.restore();
     }
   } else if (skin.ornament === 'leviathan') {
     for (const side of [-1, 1]) {
       ctx.lineWidth = 10;
-      ctx.beginPath(); ctx.moveTo(side * 65, 0); ctx.bezierCurveTo(side * 153, 15, side * 148, -105, side * 110, -65); ctx.stroke();
+      const sway = Math.sin(clock * 1.8 + side) * 11;
+      ctx.beginPath(); ctx.moveTo(side * 65, 0); ctx.bezierCurveTo(side * 153, 15, side * (148 + sway), -105, side * (110 + sway), -65); ctx.stroke();
+      ctx.strokeStyle = '#204e58'; ctx.lineWidth = 5; ctx.stroke(); ctx.strokeStyle = skin.trim;
       ctx.lineWidth = 3;
       for (let i = 0; i < 5; i++) { ctx.beginPath(); ctx.arc(side * (99 + i * 6), -10 - i * 9, 3, 0, Math.PI * 2); ctx.stroke(); }
     }
@@ -483,6 +526,41 @@ function paintOrnament(ctx: CanvasRenderingContext2D, skin: ShipSkin) {
     }
     ctx.strokeStyle = '#e9c1ff'; ctx.lineWidth = 2;
     for (const x of [-58, 48]) { ctx.beginPath(); ctx.moveTo(x, -172); ctx.lineTo(x + 10, -115); ctx.lineTo(x, -74); ctx.stroke(); }
+  }
+  ctx.restore();
+}
+
+/** Clock-driven effects use fixed geometry, without growing particle pools. */
+function drawPremiumEffects(ctx: CanvasRenderingContext2D, skin: ShipSkin, clock: number) {
+  if (skin.ornament === 'eclipse') drawEclipse(ctx, clock);
+  if (!['seraph', 'leviathan', 'eclipse'].includes(skin.ornament ?? '')) return;
+  ctx.save();
+  const celestial = skin.ornament === 'seraph';
+  const monster = skin.ornament === 'leviathan';
+  const color = celestial ? '#c8e5ff' : monster ? '#71ffcb' : '#dfa8ff';
+  ctx.strokeStyle = color; ctx.fillStyle = color;
+  for (let i = 0; i < 3; i++) {
+    const phase = (clock * 0.35 + i / 3) % 1;
+    ctx.save();
+    ctx.globalAlpha *= 1 - phase;
+    ctx.lineWidth = 1.5; ctx.beginPath(); ctx.ellipse(0, 19 + phase * 8, 75 + phase * 65, 6 + phase * 11, 0, 0, Math.PI * 2); ctx.stroke();
+    ctx.restore();
+  }
+  for (let i = 0; i < 10; i++) {
+    const phase = (clock * 0.24 + i * 0.137) % 1;
+    const x = Math.sin(i * 7.13 + clock * 0.4) * 115;
+    const y = 8 - phase * (celestial ? 210 : 95);
+    ctx.save(); ctx.globalAlpha *= Math.sin(phase * Math.PI) * 0.75;
+    if (monster) { ctx.beginPath(); ctx.arc(x, y, 2 + phase * 3, 0, Math.PI * 2); ctx.stroke(); }
+    else { ctx.translate(x, y); ctx.rotate(clock * 0.7 + i); ctx.fillRect(-1, -4, 2, 8); ctx.fillRect(-4, -1, 8, 2); }
+    ctx.restore();
+  }
+  if (celestial) {
+    ctx.globalAlpha *= 0.65; ctx.beginPath(); ctx.ellipse(-28, -249, 27, 7, Math.sin(clock) * 0.12, 0, Math.PI * 2); ctx.stroke();
+  }
+  if (monster) {
+    ctx.fillStyle = '#b7ffdd';
+    for (const x of [-43, 43]) { ctx.beginPath(); ctx.ellipse(x, -34, 9, 3 + Math.sin(clock * 0.9) ** 12 * 2, x < 0 ? 0.2 : -0.2, 0, Math.PI * 2); ctx.fill(); }
   }
   ctx.restore();
 }

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { scrimProps, useEscape } from '@shared/ui/dismiss';
 import useShortScreen from '@shared/ui/useShortScreen';
 import {
@@ -954,8 +954,9 @@ function Menu({
 
 /** A ship card, drawn with the same code the battle uses. */
 function Portrait({ index, size = 92 }: { index: number; size?: number }) {
-  const ref = useCallback(
-    (canvas: HTMLCanvasElement | null) => {
+  const ref = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+      const canvas = ref.current;
       if (!canvas) return;
       const dpr = Math.min(window.devicePixelRatio || 1, 2);
       canvas.width = size * dpr;
@@ -963,6 +964,11 @@ function Portrait({ index, size = 92 }: { index: number; size?: number }) {
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
       ctx.scale(dpr, dpr);
+      const animated = ['seraph', 'leviathan', 'eclipse'].includes(SHIPS[index]?.ornament ?? '');
+      let frame = 0;
+      let visible = false;
+      let previous = -Infinity;
+      const paint = (now: number) => {
       ctx.clearRect(0, 0, size, size);
       drawShip(ctx, {
         skin: index,
@@ -973,12 +979,25 @@ function Portrait({ index, size = 92 }: { index: number; size?: number }) {
         aim: -0.55,
         lean: -0.05,
         flash: 0,
-        clock: 0,
+        clock: now / 1000,
         scale: size / 390,
       });
-    },
-    [index, size],
-  );
+      };
+      paint(0);
+      if (!animated || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+      const tick = (now: number) => {
+        if (now - previous >= 50) { paint(now); previous = now; }
+        frame = requestAnimationFrame(tick);
+      };
+      const sync = () => {
+        cancelAnimationFrame(frame);
+        if (visible && !document.hidden) frame = requestAnimationFrame(tick);
+      };
+      const observer = new IntersectionObserver(([entry]) => { visible = entry.isIntersecting; sync(); });
+      observer.observe(canvas);
+      document.addEventListener('visibilitychange', sync);
+      return () => { observer.disconnect(); cancelAnimationFrame(frame); document.removeEventListener('visibilitychange', sync); };
+  }, [index, size]);
   return <canvas ref={ref} style={{ width: size, height: size }} />;
 }
 

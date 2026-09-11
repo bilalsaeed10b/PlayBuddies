@@ -147,6 +147,7 @@ interface Ring {
   max: number;
   life: number;
   width: number;
+  color?: string;
 }
 
 /** One floating number over a hull -- see `damageTexts` for why it exists. */
@@ -355,6 +356,8 @@ export class BattleEngine {
 
   private cfg: EngineConfig;
   private projectiles: Projectile[] = [];
+  private gunKick: number[] = [];
+  private muzzleBursts: { x: number; y: number; angle: number; life: number; color: string }[] = [];
   private particles: Particle[] = [];
   private pool: Particle[] = [];
   private rings: Ring[] = [];
@@ -996,6 +999,8 @@ export class BattleEngine {
 
     // The hull kicks away from the shot and rights itself.
     ship.lean += facing * -0.09;
+    this.gunKick[shooter] = 1;
+    this.muzzleBursts.push({ ...mouth, angle, life: 0.22, color: this.shotColor(this.projectiles[volleyStart]) });
     this.muzzleFlash(mouth.x, mouth.y, angle);
     this.shake = Math.max(this.shake, 6 + power * 8);
     this.phase = 'flight';
@@ -2022,7 +2027,7 @@ export class BattleEngine {
     const power = clamp(p.damage / BALANCE.DIRECT, 0.35, 1.7);
     const scale = p.blast / BALANCE.BLAST_R;
 
-    this.pushRing({ x, y, r: 8, max: 60 * scale + power * 60, life: 1, width: 7 * scale });
+    this.pushRing({ x, y, r: 8, max: 60 * scale + power * 60, life: 1, width: 7 * scale, color: this.shotColor(p) });
     this.shake = Math.min(34, this.shake + 9 * power);
 
     // Fireball.
@@ -2313,6 +2318,11 @@ export class BattleEngine {
   }
 
   private decay(dt: number) {
+    for (let i = 0; i < this.gunKick.length; i++) this.gunKick[i] = Math.max(0, (this.gunKick[i] ?? 0) - dt * 5);
+    for (let i = this.muzzleBursts.length - 1; i >= 0; i--) {
+      this.muzzleBursts[i].life -= dt;
+      if (this.muzzleBursts[i].life <= 0) this.muzzleBursts.splice(i, 1);
+    }
     this.shake = Math.max(0, this.shake - dt * 46);
     this.callLeft = Math.max(0, this.callLeft - dt);
     for (let i = this.feed.length - 1; i >= 0; i--) {
@@ -2590,6 +2600,8 @@ export class BattleEngine {
       lean: ship.lean,
       flash: ship.flash,
       clock: this.clock,
+      recoil: this.gunKick[i] ?? 0,
+      effects: q.fancy && !sunk,
     });
     ctx.restore();
 
@@ -2751,19 +2763,40 @@ export class BattleEngine {
     }
   }
 
+  private shotColor(p: Projectile | undefined): string {
+    if (!p) return '#ffd18a';
+    if (p.burn > 0) return '#ff9754';
+    if (p.pierce) return '#63e6ff';
+    if (p.link) return '#b7d3ed';
+    const ornament = SHIPS[this.ships[p.from]?.skin]?.ornament;
+    return ornament === 'seraph' ? '#b8dcff' : ornament === 'leviathan' ? '#6fffc1' : ornament === 'eclipse' ? '#dfa0ff' : '#ffd18a';
+  }
+
   private drawProjectiles(ctx: CanvasRenderingContext2D, q: Quality) {
     const fx = fxSprites();
+    for (const burst of this.muzzleBursts) {
+      const t = burst.life / 0.22;
+      ctx.save(); ctx.translate(burst.x, burst.y); ctx.rotate(burst.angle);
+      ctx.globalAlpha *= t; ctx.fillStyle = burst.color;
+      ctx.beginPath(); ctx.moveTo(-6, -8); ctx.lineTo(25, -18 * t); ctx.lineTo(18, -5);
+      ctx.lineTo(80 * t, 0); ctx.lineTo(18, 5); ctx.lineTo(25, 18 * t); ctx.lineTo(-6, 8); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#fff8e7'; ctx.beginPath(); ctx.ellipse(9, 0, 21 * t, 6 * t, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = burst.color; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.ellipse(24 * (1 - t), 0, 4 + (1 - t) * 9, 9 + (1 - t) * 25, 0, 0, Math.PI * 2); ctx.stroke(); ctx.restore();
+    }
     this.drawChains(ctx);
     for (const p of this.projectiles) {
       if (!p.alive) continue;
+      const color = this.shotColor(p);
 
       if (q.trails && p.trail.length > 4) {
         ctx.save();
         ctx.lineCap = 'round';
         for (let i = 2; i < p.trail.length; i += 2) {
           const t = i / p.trail.length;
-          ctx.strokeStyle = `rgba(226, 232, 240, ${t * 0.28})`;
-          ctx.lineWidth = p.r * 1.5 * t;
+          ctx.strokeStyle = color;
+          ctx.globalAlpha = t * 0.48;
+          ctx.lineWidth = p.r * 2.1 * t;
           ctx.beginPath();
           ctx.moveTo(p.trail[i - 2], p.trail[i - 1]);
           ctx.lineTo(p.trail[i], p.trail[i + 1]);
@@ -2783,6 +2816,15 @@ export class BattleEngine {
       ctx.beginPath();
       ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
       ctx.fill();
+      if (q.fancy) {
+        ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(Math.atan2(p.vy, p.vx));
+        ctx.strokeStyle = color; ctx.lineWidth = 1.7;
+        ctx.beginPath(); ctx.arc(0, 0, p.r + 1, -Math.PI * 0.6, Math.PI * 0.6); ctx.stroke();
+        if (p.pierce) {
+          ctx.rotate(p.age * 18); ctx.beginPath(); ctx.ellipse(0, 0, p.r * 1.8, p.r * 0.6, 0, 0, Math.PI * 2); ctx.stroke();
+        }
+        ctx.restore();
+      }
       ctx.fillStyle = 'rgba(255,255,255,0.42)';
       ctx.beginPath();
       ctx.arc(p.x - p.r * 0.32, p.y - p.r * 0.36, p.r * 0.34, 0, Math.PI * 2);
@@ -2841,11 +2883,14 @@ export class BattleEngine {
 
   private drawRings(ctx: CanvasRenderingContext2D) {
     for (const r of this.rings) {
-      ctx.strokeStyle = `rgba(255, 236, 190, ${Math.max(0, r.life) * 0.55})`;
+      ctx.save();
+      ctx.globalAlpha *= Math.max(0, r.life) * 0.55;
+      ctx.strokeStyle = r.color ?? '#ffecbe';
       ctx.lineWidth = r.width * Math.max(0.2, r.life);
       ctx.beginPath();
       ctx.arc(r.x, r.y, r.r, 0, Math.PI * 2);
       ctx.stroke();
+      ctx.restore();
     }
   }
 
