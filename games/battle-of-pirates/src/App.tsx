@@ -565,7 +565,16 @@ export default function App() {
     // the host groups friends on one team rather than alternating the roster.
     const perTeam = rules.players / 2;
     for (const team of [0, 1] as const) {
-      const fleet = crew.filter((person) => person.team === team);
+      const fleet = crew
+        .filter((person) => person.team === team)
+        .map((person) => {
+          let h = session.seed;
+          const str = person.uid || 'bot';
+          for (let i = 0; i < str.length; i++) h = Math.imul(31, h) + str.charCodeAt(i) | 0;
+          return { person, hash: h };
+        })
+        .sort((a, b) => (a.hash !== b.hash ? a.hash - b.hash : (a.person.uid || '').localeCompare(b.person.uid || '')))
+        .map((item) => item.person);
       for (let slot = 0; slot < perTeam; slot++) {
         const person = fleet[slot];
         const seatIndex = seats.length;
