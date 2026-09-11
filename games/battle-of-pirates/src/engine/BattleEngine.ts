@@ -1006,6 +1006,7 @@ export class BattleEngine {
         team: ship.team,
         from: shooter,
         damage: card.flatDamage ?? BALANCE.DIRECT * card.damage * this.hullOf(shooter).damage,
+        flatSplash: card.flatSplash,
         blast: BALANCE.BLAST_R * card.blast * this.hullOf(shooter).blast,
         splash: this.hullOf(shooter).blast,
         gravity: BALANCE.GRAVITY * card.gravity,
@@ -1745,7 +1746,7 @@ export class BattleEngine {
         if (this.tally) this.tally.burned = true;
       }
       this.explode(ix, iy, p, 'hull', this.waterLevelFor(struckShip));
-      this.splashDamage(ix, iy, p);
+      this.splashDamage(ix, iy, p, struckShip);
       return;
     }
 
@@ -1764,10 +1765,10 @@ export class BattleEngine {
   }
 
   /** Blast falls off to nothing at the edge, so a near miss still counts for something. */
-  private splashDamage(x: number, y: number, p: Projectile) {
+  private splashDamage(x: number, y: number, p: Projectile, ignoreShip?: number) {
     let closest = Infinity;
     for (let i = 0; i < this.ships.length; i++) {
-      if (this.ships[i].hp <= 0) continue;
+      if (i === ignoreShip || this.ships[i].hp <= 0) continue;
       // Friendly fire is off: a blast reaching a hull flying its own colours
       // never damages it, same as a direct hit above.
       if (this.ships[i].team === p.team) continue;
@@ -1779,7 +1780,9 @@ export class BattleEngine {
       if (dist >= p.blast) continue;
 
       const falloff = 1 - dist / p.blast;
-      const dealt = BALANCE.BLAST * p.splash * falloff * falloff * (p.damage / BALANCE.DIRECT);
+      const dealt = p.flatSplash !== undefined
+        ? p.flatSplash * falloff * falloff
+        : BALANCE.BLAST * p.splash * falloff * falloff * (p.damage / BALANCE.DIRECT);
       if (dealt > 0.7) {
         this.damage(i, dealt, x);
       }

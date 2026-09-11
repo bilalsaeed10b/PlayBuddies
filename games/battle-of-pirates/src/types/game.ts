@@ -99,6 +99,7 @@ export interface Projectile {
    */
   from: number;
   damage: number;
+  flatSplash?: number;
   blast: number;
   /**
    * Multiplier on the splash damage this ball does inside `blast`.
