@@ -16,11 +16,13 @@ import {
   HORIZONTAL,
   Position,
   VERTICAL,
+  applyMove,
   clonePosition,
   colOf,
   distanceToGoal,
   encodeStep,
   encodeWall,
+  isWallMove,
   pawnMoves,
   rowOf,
   routeToGoal,
@@ -303,6 +305,237 @@ function worstEnemyReply(
   return worst === Infinity ? strategicScore(pos, seat, layout) : worst;
 }
 
+interface SearchMove {
+  move: number;
+  /** Immediate score for move ordering; the tree still decides the real value. */
+  order: number;
+  /** Net route steps bought by a wall, or Infinity for a pawn move. */
+  wallGain: number;
+}
+
+interface SearchContext {
+  deadline: number;
+  nodes: number;
+  cache: Map<number, number>;
+}
+
+/** A compact state key for the Grandmaster's per-turn transposition table. */
+function positionKey(pos: Position, turn: number, depth: number): number {
+  let hash = 2166136261;
+  const add = (value: number) => {
+    hash ^= value + 1;
+    hash = Math.imul(hash, 16777619);
+  };
+  add(turn);
+  add(depth);
+  for (const pawn of pos.pawns) add(pawn);
+  for (const stock of pos.stock) add(stock);
+  for (let i = 0; i < pos.h.length; i++) {
+    if (pos.h[i]) {
+      add(i + 173);
+      add(pos.h[i]);
+    }
+    if (pos.v[i]) {
+      add(i + 349);
+      add(pos.v[i]);
+    }
+  }
+  return hash >>> 0;
+}
+
+/**
+ * Chess-engine style move generation: every pawn step plus the strongest
+ * legal walls touching an enemy's route. Keeping only the best wall candidates
+ * makes alpha-beta deep enough to matter without freezing a phone.
+ */
+function searchMoves(pos: Position, turn: number, layout: Layout, wallCap: number): SearchMove[] {
+  const out: SearchMove[] = [];
+  for (const target of pawnMoves(pos, turn, layout)) {
+    const next = clonePosition(pos);
+    next.pawns[turn] = target;
+    out.push({ move: encodeStep(target), order: strategicScore(next, turn, layout), wallGain: Infinity });
+  }
+  if ((pos.stock[turn] ?? 0) <= 0 || wallCap <= 0) return out;
+
+  const myDist = sideDistance(pos, turn, layout);
+  const threatDist = leaderOf(pos, turn, layout).dist;
+  const seen = new Set<number>();
+  const walls: SearchMove[] = [];
+  for (let target = 0; target < layout.players; target++) {
+    if (layout.teams ? teamOf(target) === teamOf(turn) : target === turn) continue;
+    const route = routeToGoal(pos, target, layout);
+    for (const slot of candidateSlots(route, pos.pawns[target], route.length, layout)) {
+      const code = wallCode(slot.o, slot.r, slot.c);
+      if (seen.has(code)) continue;
+      seen.add(code);
+      if (!wallLegal(pos, turn, slot.o, slot.r, slot.c, layout)) continue;
+      const next = clonePosition(pos);
+      const move = encodeWall(slot.o, slot.r, slot.c);
+      applyMove(next, turn, move);
+      const nextMine = sideDistance(next, turn, layout);
+      const nextThreat = leaderOf(next, turn, layout).dist;
+      const wallGain = nextThreat - threatDist - (nextMine - myDist);
+      walls.push({ move, order: strategicScore(next, turn, layout) + wallGain * 2, wallGain });
+    }
+  }
+  walls.sort((a, b) => b.order - a.order);
+  out.push(...walls.slice(0, wallCap));
+  return out;
+}
+
+function treeScore(
+  pos: Position,
+  turn: number,
+  perspective: number,
+  layout: Layout,
+  depth: number,
+  alpha: number,
+  beta: number,
+  context: SearchContext,
+): number | null {
+  if ((context.nodes++ & 31) === 0 && Date.now() >= context.deadline) return null;
+  const standing = strategicScore(pos, perspective, layout);
+  if (depth <= 0 || Math.abs(standing) >= 100_000) return standing;
+
+  const key = positionKey(pos, turn, depth);
+  const cached = context.cache.get(key);
+  if (cached !== undefined) return cached;
+
+  const friendly = layout.teams ? teamOf(turn) === teamOf(perspective) : turn === perspective;
+  const wallCap = depth >= 3 ? 5 : 8;
+  const actions = searchMoves(pos, turn, layout, wallCap);
+  if (actions.length === 0) return standing;
+  actions.sort((a, b) => friendly ? b.order - a.order : a.order - b.order);
+
+  let best = friendly ? -Infinity : Infinity;
+  let cut = false;
+  for (const action of actions) {
+    const next = clonePosition(pos);
+    applyMove(next, turn, action.move);
+    const value = treeScore(
+      next,
+      (turn + 1) % layout.players,
+      perspective,
+      layout,
+      depth - 1,
+      alpha,
+      beta,
+      context,
+    );
+    if (value === null) return null;
+    if (friendly) {
+      best = Math.max(best, value);
+      alpha = Math.max(alpha, best);
+    } else {
+      best = Math.min(best, value);
+      beta = Math.min(beta, best);
+    }
+    if (beta <= alpha) {
+      cut = true;
+      break;
+    }
+  }
+  // A cut node is a bound rather than an exact score, so only cache complete
+  // nodes. This keeps repeated positions fast without poisoning later branches.
+  if (!cut) context.cache.set(key, best);
+  return best;
+}
+
+function chooseGrandmasterMove(
+  pos: Position,
+  seat: number,
+  layout: Layout,
+  brain: Brain,
+  rng: () => number,
+): number {
+  const threat = leaderOf(pos, seat, layout);
+  const urgent = threat.dist <= 2;
+  const context: SearchContext = {
+    deadline: Date.now() + (layout.players === 2 ? 180 : 140),
+    nodes: 0,
+    cache: new Map(),
+  };
+  let actions = searchMoves(pos, seat, layout, 16);
+  // Once the opening setup is built, a wall must buy at least two route steps.
+  // Emergency blocks remain available regardless of their immediate gain.
+  if (!urgent && (brain.wallsPlaced ?? 0) > 0) {
+    const disciplined = actions.filter((action) => !isWallMove(action.move) || action.wallGain >= 2);
+    if (disciplined.length > 0) actions = disciplined;
+  }
+  if (actions.length === 0) return encodeStep(pos.pawns[seat]);
+
+  actions.sort((a, b) => b.order - a.order);
+  // Like a chess opening book: choose one of several sound setup walls before
+  // calculation takes over. Only the first bot move can use the book, and the
+  // root filter above prevents it turning that opening into a repeated lock.
+  const untouchedWalls = pos.stock.every((stock) => stock === layout.walls);
+  const pawnsNearHome = pos.pawns.every((pawn, player) => {
+    const start = layout.sides[player].start;
+    return Math.abs(rowOf(pawn) - rowOf(start)) + Math.abs(colOf(pawn) - colOf(start)) <= 1;
+  });
+  const freshOpening = brain.recent.length === 0
+    && (brain.wallsPlaced ?? 0) === 0
+    && untouchedWalls
+    && pawnsNearHome;
+  const bookWalls = freshOpening
+    ? actions.filter((action) => isWallMove(action.move) && action.wallGain >= 0).slice(0, 6)
+    : [];
+  if (bookWalls.length > 0 && rng() < 0.32) {
+    const chosen = bookWalls[Math.min(bookWalls.length - 1, Math.floor(rng() * bookWalls.length))];
+    brain.lastAction = 'wall';
+    brain.wallsPlaced = 1;
+    return chosen.move;
+  }
+  let completed: { move: number; score: number }[] = actions.map((action) => ({
+    move: action.move,
+    score: action.order,
+  }));
+
+  // Iterative deepening always leaves a complete answer available. On a fast
+  // machine it reaches four plies; on a phone it returns the last finished
+  // depth rather than stalling the match halfway through a calculation.
+  for (let depth = 2; depth <= 4; depth++) {
+    const round: { move: number; score: number }[] = [];
+    let finished = true;
+    for (const action of actions) {
+      const next = clonePosition(pos);
+      applyMove(next, seat, action.move);
+      const score = treeScore(
+        next,
+        (seat + 1) % layout.players,
+        seat,
+        layout,
+        depth - 1,
+        -Infinity,
+        Infinity,
+        context,
+      );
+      if (score === null) {
+        finished = false;
+        break;
+      }
+      round.push({ move: action.move, score });
+    }
+    if (!finished) break;
+    completed = round;
+    completed.sort((a, b) => b.score - a.score);
+    const order = new Map(completed.map((choice, i) => [choice.move, i]));
+    actions.sort((a, b) => (order.get(a.move) ?? 999) - (order.get(b.move) ?? 999));
+  }
+
+  const best = Math.max(...completed.map((choice) => choice.score));
+  const sound = completed.filter((choice) => choice.score >= best - 0.2);
+  const chosen = sound[Math.min(sound.length - 1, Math.floor(rng() * sound.length))] ?? completed[0];
+  if (isWallMove(chosen.move)) {
+    brain.lastAction = 'wall';
+    brain.wallsPlaced = (brain.wallsPlaced ?? 0) + 1;
+  } else {
+    brain.lastAction = 'step';
+    remember(brain, chosen.move);
+  }
+  return chosen.move;
+}
+
 /**
  * One move for one bot.
  *
@@ -326,6 +559,7 @@ export function chooseMove(
     brain.lastAction = 'step';
     return encodeStep(winning);
   }
+  if (level >= TIERS.length - 1) return chooseGrandmasterMove(pos, seat, layout, brain, rng);
 
   const run = () => {
     const direct = stepTowardGoal(pos, seat, layout);

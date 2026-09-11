@@ -47,6 +47,14 @@ test('Grandmaster always takes an available winning step', () => {
   assert.equal(moveLegal(pos, 0, move, layout), true);
 });
 
+test('Grandmaster opening book includes both a setup wall and a pawn race', () => {
+  const layout = layoutFor({ players: 2, teams: false });
+  const wall = chooseMove(emptyPosition(layout), 0, layout, TIERS.length - 1, newBrain(), () => 0.1);
+  const step = chooseMove(emptyPosition(layout), 0, layout, TIERS.length - 1, newBrain(), () => 0.9);
+  assert.equal(isWallMove(wall), true);
+  assert.equal(isWallMove(step), false);
+});
+
 test('Grandmaster blocks an enemy that would win on its next step', () => {
   const layout = layoutFor({ players: 2, teams: false });
   const pos = emptyPosition(layout);
