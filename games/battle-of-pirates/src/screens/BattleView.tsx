@@ -9,7 +9,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, Loader2, Ship as ShipIcon } from 'lucide-react';
 import AimPad, { Aim } from '../components/AimPad';
 import CardHand, { HAND_HEIGHT, HAND_HEIGHT_COMPACT } from '../components/CardHand';
-import SpecialControls from '../components/SpecialControls';
+import SpecialControls, { type SpecialKind } from '../components/SpecialControls';
 import TorpedoTargeter from '../components/TorpedoTargeter';
 import { startBattleClock } from '../engine/battleClock';
 import { BattleEngine, Seat } from '../engine/BattleEngine';

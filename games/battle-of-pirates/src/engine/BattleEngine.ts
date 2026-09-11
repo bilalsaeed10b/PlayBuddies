@@ -1036,7 +1036,8 @@ export class BattleEngine {
     this.gunKick[shooter] = 1;
     this.muzzleBursts.push({ ...mouth, angle, life: 0.22, color: this.shotColor(this.projectiles[volleyStart]) });
     this.muzzleFlash(mouth.x, mouth.y, angle);
-    this.shake = Math.max(this.shake, 6 + power * 8);
+    const heavyKick = card.id === 'keg' ? 8 : card.id === 'mortar' ? 5 : 0;
+    this.shake = Math.max(this.shake, 6 + power * 8 + heavyKick);
     this.phase = 'flight';
     this.cfg.onSfx?.('fire', power);
     this.cfg.onPhase?.(this.phase);
@@ -2072,7 +2073,16 @@ export class BattleEngine {
     const scale = p.blast / BALANCE.BLAST_R;
 
     this.pushRing({ x, y, r: 8, max: 60 * scale + power * 60, life: 1, width: 7 * scale, color: this.shotColor(p) });
-    this.shake = Math.min(34, this.shake + 9 * power);
+    this.shake = Math.min(34, this.shake + 9 * power + Math.min(10, Math.max(0, scale - 1) * 5));
+    if (p.burn > 0 && surface !== 'water') {
+      this.burst(10, 0, x, y, sinkY, (spark) => {
+        const angle = Math.random() * Math.PI * 2;
+        spark.vx = Math.cos(angle) * 180;
+        spark.vy = Math.sin(angle) * 120 - 90;
+        spark.max = 0.5 + Math.random() * 0.3; spark.life = spark.max;
+        spark.size = 28; spark.grow = 1.8;
+      });
+    }
 
     // Fireball.
     this.burst(11 * power, 0, x, y, sinkY, (q, t) => {
@@ -2843,6 +2853,42 @@ export class BattleEngine {
     for (const p of this.projectiles) {
       if (!p.alive) continue;
       const color = this.shotColor(p);
+      const ornament = SHIPS[this.ships[p.from]?.skin]?.ornament;
+
+      if (q.fancy && (p.burn > 0 || ornament === 'seraph' || ornament === 'leviathan' || ornament === 'eclipse')) {
+        ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(Math.atan2(p.vy, p.vx));
+        // A short, clock-driven wake keeps the silhouettes distinct without
+        // adding particles to the simulation or changing projectile physics.
+        if (p.burn > 0) {
+          for (let layer = 0; layer < 3; layer++) {
+            const length = p.r * (5 - layer) * (1 + Math.sin(p.age * 43 + layer) * 0.13);
+            const width = p.r * (1.2 - layer * 0.25);
+            ctx.fillStyle = ['#ff5722', '#ffb52e', '#fff4b8'][layer];
+            ctx.globalAlpha = 0.65 + layer * 0.1;
+            ctx.beginPath(); ctx.moveTo(p.r, 0);
+            ctx.quadraticCurveTo(-p.r, -width * 2, -length, Math.sin(p.age * 31) * width);
+            ctx.quadraticCurveTo(-p.r * 2, width * 2, p.r, 0); ctx.fill();
+          }
+        }
+        ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineWidth = 1.5;
+        for (let j = 0; j < 7; j++) {
+          const phase = (p.age * 2.2 + j / 7) % 1;
+          const x = -p.r * (2 + phase * 10);
+          const y = Math.sin(phase * 8 + p.age * 5) * p.r * (0.3 + phase);
+          ctx.globalAlpha = (1 - phase) * 0.8;
+          if (ornament === 'seraph') {
+            ctx.fillRect(x - 1, y - 4, 2, 8); ctx.fillRect(x - 4, y - 1, 8, 2);
+          } else if (ornament === 'leviathan') {
+            ctx.beginPath(); ctx.arc(x, y, 2 + phase * 4, 0, Math.PI * 2); ctx.stroke();
+          } else if (ornament === 'eclipse') {
+            ctx.beginPath(); ctx.ellipse(x, y, 2, p.r * (0.5 + phase), phase * 2, 0, Math.PI * 2); ctx.stroke();
+          }
+          if (p.burn > 0) {
+            ctx.fillStyle = '#ffd27d'; ctx.fillRect(x, y + Math.sin(j * 3 + p.age * 8) * 9, 3, 2); ctx.fillStyle = color;
+          }
+        }
+        ctx.restore();
+      }
 
       if (q.trails && p.trail.length > 4) {
         ctx.save();
