@@ -144,6 +144,19 @@ function AnimatedOrbs() {
 }
 
 
+export function handleLoginError(error: unknown) {
+  console.error("Login Error:", error);
+  const err = error as { code?: string; message?: string };
+  if (err?.code === "auth/unauthorized-domain") {
+    alert(
+      `Firebase Auth: Domain "${window.location.hostname}" is not authorized.\n\n` +
+      `To fix this:\n` +
+      `1. Open Firebase Console -> Authentication -> Settings -> Authorized domains\n` +
+      `2. Click "Add domain" and enter: ${window.location.hostname}`
+    );
+  }
+}
+
 function Navbar() {
   const [scrolled, setScrolled] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -157,18 +170,7 @@ function Navbar() {
     return () => window.removeEventListener("scroll", handleScroll);
   }, []);
 
-function handleLoginError(error: unknown) {
-  console.error("Login Error:", error);
-  const err = error as { code?: string; message?: string };
-  if (err?.code === "auth/unauthorized-domain") {
-    alert(
-      `Firebase Auth: Domain "${window.location.hostname}" is not authorized.\n\n` +
-      `To fix this:\n` +
-      `1. Open Firebase Console -> Authentication -> Settings -> Authorized domains\n` +
-      `2. Click "Add domain" and enter: ${window.location.hostname}`
-    );
-  }
-}
+
 
   const handleAuth = async () => {
     if (user) {
