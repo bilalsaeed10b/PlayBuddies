@@ -822,6 +822,9 @@ function WordEntry({
   /** The clock only ever ran silently against the person actually typing , everyone else waiting on them saw it, they didn't. */
   seconds: number;
 }) {
+  const isInvalidWord = value.length >= BALANCE.MIN_WORD_LEN && !isEnglishWord(value);
+  const feedback = error ?? (isInvalidWord ? 'That is not an approved English word.' : null);
+
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-center gap-2">
@@ -844,19 +847,21 @@ function WordEntry({
           onKeyDown={(e) => e.key === 'Enter' && onSubmit()}
           placeholder="Type it here…"
           aria-label={label}
-          className="min-w-0 flex-1 rounded-xl border-2 border-slate-500/60 bg-slate-100 px-3 py-3 text-center text-lg font-black uppercase tracking-[0.2em] text-slate-900 placeholder:text-sm placeholder:font-bold placeholder:tracking-normal placeholder:text-slate-400 focus:border-lime-400 focus:outline-none"
+          className={`min-w-0 flex-1 rounded-xl border-2 bg-slate-100 px-3 py-3 text-center text-lg font-black uppercase tracking-[0.2em] text-slate-900 placeholder:text-sm placeholder:font-bold placeholder:tracking-normal placeholder:text-slate-400 focus:outline-none ${
+            isInvalidWord ? 'border-rose-400 focus:border-rose-400' : 'border-slate-500/60 focus:border-lime-400'
+          }`}
         />
         <button
           type="button"
           onClick={onSubmit}
-          disabled={value.length < BALANCE.MIN_WORD_LEN || !isEnglishWord(value)}
+          disabled={value.length < BALANCE.MIN_WORD_LEN || isInvalidWord}
           className="flex shrink-0 items-center gap-1.5 rounded-xl bg-lime-500 px-4 font-black uppercase tracking-wide text-slate-950 disabled:opacity-40"
         >
           <Send className="h-4 w-4" /> Set
         </button>
       </div>
-      <p className={`text-center text-[10px] font-bold ${error ? 'text-rose-300' : 'text-slate-500'}`} aria-live="polite">
-        {error ?? "Use a word from the English word list. Nobody else can see it until it's guessed or the word ends."}
+      <p className={`text-center text-[10px] font-bold ${feedback ? 'text-rose-300' : 'text-slate-500'}`} aria-live="polite">
+        {feedback ?? "Use a word from the English word list. Nobody else can see it until it's guessed or the word ends."}
       </p>
     </div>
   );

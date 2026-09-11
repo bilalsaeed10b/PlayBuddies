@@ -19,6 +19,8 @@ const nextConfig: NextConfig = {
     NEXT_PUBLIC_BUILD_ID: process.env.GITHUB_SHA || "local",
   },
   allowedDevOrigins: [
+    "192.168.18.19",
+    "192.168.18.19:3000",
     "192.168.100.52",
     "192.168.100.52:3000",
     "192.168.100.243",

@@ -260,6 +260,14 @@ export default function App() {
     if (n !== rules.players) setRules((r) => ({ ...r, players: n as PlayerCount }));
   }, [online, isHost, people.length, rules.players]);
 
+  // A two-player "Teams" match is just a one-person team on each side and
+  // adds the suggestion/vote flow without adding a teammate. Keep it FFA
+  // until there is a third person at the table, including after someone leaves.
+  useEffect(() => {
+    if (!online || !isHost || people.length > 2 || rules.mode !== 'teams') return;
+    setRules((r) => (r.mode === 'teams' ? { ...r, mode: 'ffa' } : r));
+  }, [online, isHost, people.length, rules.mode]);
+
   useEffect(() => {
     if (!online || offlineMatch) return;
     if (lobby?.matchStarted && mySkin !== undefined && mySkin !== null) setView('game');
@@ -302,14 +310,15 @@ export default function App() {
       MIN_ONLINE_PLAYERS,
       Math.min(PLAYER_COUNTS[PLAYER_COUNTS.length - 1], people.length || MIN_ONLINE_PLAYERS),
     ) as PlayerCount;
+    const mode = players > 2 ? rules.mode : 'ffa';
     const teamCount = Math.min(rules.teamCount, players);
     let teamOf = Array.from({ length: players }, (_, seat) =>
       Math.min(teamCount - 1, rules.teamOf[seat] ?? seat % teamCount),
     );
-    if (rules.mode === 'teams' && !Array.from({ length: teamCount }, (_, team) => teamOf.includes(team)).every(Boolean)) {
+    if (mode === 'teams' && !Array.from({ length: teamCount }, (_, team) => teamOf.includes(team)).every(Boolean)) {
       teamOf = defaultTeams(players, teamCount);
     }
-    const startRules: MatchRules = { ...rules, players, teamCount, teamOf };
+    const startRules: MatchRules = { ...rules, mode, players, teamCount, teamOf };
     const matchSeed = randomSeed();
     setRules(startRules);
     setSession({ seed: matchSeed });
@@ -630,10 +639,10 @@ function Menu({
         <Gallows pieces={PIECES} className="h-24 short:h-10 w-auto opacity-80" />
         <div>
           <p className="text-[10px] font-black uppercase tracking-[0.4em] text-slate-500 short:hidden">One line left</p>
-          <h1 className="text-5xl font-black leading-none tracking-tighter text-slate-50 sm:text-6xl short:text-2xl">
-            HANG
+          <h1 className="text-3xl font-black leading-none tracking-tighter text-slate-50 sm:text-5xl short:text-2xl">
+            THE LAST
             <br />
-            MAN
+            GASP
           </h1>
           <p className="mt-1 text-xs font-black uppercase tracking-[0.24em] text-lime-400 short:hidden">
             Don't draw it
@@ -686,7 +695,7 @@ function Menu({
             <p className="text-sm font-black uppercase tracking-wide text-lime-200">
               First time? Read this
             </p>
-            <p className="text-[11px] font-bold text-lime-300/70 short:hidden">It is not the hangman you know.</p>
+            <p className="text-[11px] font-bold text-lime-300/70 short:hidden">It is not the word game you know.</p>
           </div>
         </button>
       </div>
@@ -1039,6 +1048,7 @@ function ModeAndTeams({
   // The real roster, not `rules.players` , there is no bot fill to pad up to
   // anymore, so a team chip only ever exists for someone actually in the room.
   const slots = people.length;
+  const teamsAvailable = slots > 2;
 
   return (
     <div className="panel shrink-0 space-y-2.5 rounded-2xl p-2.5">
@@ -1048,8 +1058,11 @@ function ModeAndTeams({
           {(['ffa', 'teams'] as Mode[]).map((m) => (
             <button
               key={m}
-              disabled={!editable}
-              onClick={() => onChange({ ...rules, mode: m, teamOf: m === 'teams' ? defaultTeams(rules.players, rules.teamCount) : rules.teamOf })}
+              disabled={!editable || (m === 'teams' && !teamsAvailable)}
+              onClick={() => {
+                if (m === 'teams' && !teamsAvailable) return;
+                onChange({ ...rules, mode: m, teamOf: m === 'teams' ? defaultTeams(rules.players, rules.teamCount) : rules.teamOf });
+              }}
               className={`rounded-md px-2.5 py-1 text-[10px] font-black uppercase tracking-wide disabled:opacity-60 ${
                 rules.mode === m ? 'bg-slate-100 text-slate-900' : 'text-slate-400'
               }`}
@@ -1061,9 +1074,14 @@ function ModeAndTeams({
       </div>
 
       {rules.mode === 'ffa' ? (
-        <p className="text-[10px] leading-snug text-slate-500">
-          One person sets a word each round. Everybody else races to crack it , anyone can call any letter, any time.
-        </p>
+        <div className="space-y-1">
+          <p className="text-[10px] leading-snug text-slate-500">
+            One person sets a word each round. Everybody else races to crack it , anyone can call any letter, any time.
+          </p>
+          {!teamsAvailable && (
+            <p className="text-[10px] font-bold text-slate-600">Teams unlock when a third player joins.</p>
+          )}
+        </div>
       ) : (
         <>
           <div className="flex items-center justify-between gap-2">
