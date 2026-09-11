@@ -2765,11 +2765,22 @@ export class BattleEngine {
 
   private shotColor(p: Projectile | undefined): string {
     if (!p) return '#ffd18a';
+    // Premium paint follows the firing ship even on incendiary, bore or chain shots.
+    const skin = SHIPS[this.ships[p.from]?.skin];
+    if (skin?.ornament) {
+      switch (skin.ornament) {
+        case 'dragon': return '#ef5369';
+        case 'coral': return '#5eead4';
+        case 'forge': return '#ffac54';
+        case 'seraph': return '#b8dcff';
+        case 'leviathan': return '#6fffc1';
+        case 'eclipse': return '#dfa0ff';
+      }
+    }
     if (p.burn > 0) return '#ff9754';
     if (p.pierce) return '#63e6ff';
     if (p.link) return '#b7d3ed';
-    const ornament = SHIPS[this.ships[p.from]?.skin]?.ornament;
-    return ornament === 'seraph' ? '#b8dcff' : ornament === 'leviathan' ? '#6fffc1' : ornament === 'eclipse' ? '#dfa0ff' : '#ffd18a';
+    return '#ffd18a';
   }
 
   private drawProjectiles(ctx: CanvasRenderingContext2D, q: Quality) {
