@@ -245,7 +245,7 @@ export const BALANCE = {
    * clamp to have an opinion about.
    */
   MAX_TURN_DAMAGE: 100,
-  BURN_PER_TURN: 7,
+  BURN_PER_TURN: 3,
 
   /** Trimmed down from the first pass at this: a smaller silhouette is a harder one to land on. */
   HULL_W: 200,
@@ -455,8 +455,8 @@ export const CARDS: Record<CardId, CardMeta> = {
    */
   grape: {
     id: 'grape', name: 'Grapeshot', glyph: '::', weight: 15,
-    blurb: 'A wide fan of five. Each direct hit charges your special.',
-    shots: 5, spread: 0.15, damage: GRAPE_PELLET, blast: 0.55, gravity: 1, speed: 1,
+    blurb: 'A fan of five. Each direct hit charges your special.',
+    shots: 5, spread: 0.08, damage: GRAPE_PELLET, blast: 0.55, gravity: 1, speed: 1,
     chargePerProjectile: true,
   },
   /**
@@ -470,8 +470,8 @@ export const CARDS: Record<CardId, CardMeta> = {
   },
   firebomb: {
     id: 'firebomb', name: 'Firebomb', glyph: '*', weight: 11,
-    blurb: 'Lights the deck at full range. Burns for three of their turns.',
-    shots: 1, spread: 0, damage: POWER, blast: 1.15, gravity: 1, speed: 1, burn: 3,
+    blurb: 'Lights the deck at full range. Burns for four of their turns.',
+    shots: 1, spread: 0, damage: 1, flatDamage: 7, blast: 1.15, gravity: 1, speed: 1, burn: 4,
   },
   /**
    * The reef's answer. Every other card either goes over a rock or stops at
@@ -491,8 +491,8 @@ export const CARDS: Record<CardId, CardMeta> = {
   },
   twin: {
     id: 'twin', name: 'Twin Shot', glyph: 'II', weight: 13,
-    blurb: 'Two 7-damage cannonballs. The attack charges your special once.',
-    shots: 2, spread: 0.035, damage: 1, flatDamage: 7, blast: 0.8, gravity: 1, speed: 1,
+    blurb: 'Two 8-damage cannonballs. The attack charges your special once.',
+    shots: 2, spread: 0.02, damage: 1, flatDamage: 8, blast: 0.8, gravity: 1, speed: 1,
   },
   broadside: {
     id: 'broadside', name: 'Triple Shot', glyph: 'III', weight: 10,

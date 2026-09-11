@@ -54,7 +54,7 @@ test('three successful cannon attacks charge; pellets, misses, burn and specials
 test('multi-shot damage and special-meter rules are explicit per ammunition', () => {
   const cases = [
     ['chain', 2, 3, 2, 2],
-    ['twin', 2, 7, 1, 2],
+    ['twin', 2, 8, 1, 2],
     ['broadside', 3, 6, 1, 3],
     ['grape', 5, null, 2, 2],
     ['bore', 1, null, 1, 1],
