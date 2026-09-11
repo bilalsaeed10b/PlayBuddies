@@ -57,12 +57,17 @@ export interface MatchRules {
    * Either partner reaching their own far side takes it for both.
    */
   teams: boolean;
+  /**
+   * The difficulty level of fill-in bots.
+   */
+  aiLevel?: number;
 }
 
 export const DEFAULT_RULES: MatchRules = {
   players: 2,
   turnTimer: false,
   teams: false,
+  aiLevel: 3,
 };
 
 export const TURN_SECONDS = 30;
@@ -88,16 +93,19 @@ export function packRules(rules: MatchRules): number {
   return (
     Math.max(0, PLAYER_CODES.indexOf(rules.players)) |
     (rules.turnTimer ? 2 : 0) |
-    (rules.teams ? 4 : 0)
+    (rules.teams ? 4 : 0) |
+    (((rules.aiLevel ?? 3) + 1) << 3)
   );
 }
 
 export function unpackRules(bits: number | undefined): MatchRules {
   if (typeof bits !== 'number' || !Number.isFinite(bits)) return DEFAULT_RULES;
+  const aiRaw = (bits >> 3) & 7;
   return {
     players: PLAYER_CODES[bits & 1] ?? DEFAULT_RULES.players,
     turnTimer: (bits & 2) !== 0,
     teams: (bits & 4) !== 0,
+    aiLevel: aiRaw === 0 ? 3 : aiRaw - 1,
   };
 }
 

@@ -70,20 +70,7 @@ type View = 'menu' | 'pick' | 'room' | 'game' | 'offline_menu';
 
 const randomSeed = () => (Math.random() * 0x7fffffff) | 0;
 
-/**
- * The bot rank for any seat this device fills automatically in an online game.
- *
- * The tier picker in the Menu is only ever reached offline, so `aiLevel`
- * there is really "how hard should the *practice* bot be" , a preference for
- * solo and couch play. Online, the same state used to leak into every bot
- * PlayBuddies seats for a room: pick Architect once to test the offline game,
- * then go play a real match with friends, and the empty seats were suddenly
- * merciless too. Online bots are always Runner instead, independent of
- * whatever the offline picker is currently set to. Fill-in bots now use the
- * first planning tier, strong enough to read ahead without becoming the
- * punishing top rank.
- */
-const ONLINE_AI_LEVEL = 3;
+
 
 export default function App() {
   const [handoff] = useState(readHandoff);
@@ -476,7 +463,7 @@ export default function App() {
             id: uid ?? 'me',
             name: handoff.displayName || 'You',
             control: 'local',
-            aiLevel: ONLINE_AI_LEVEL,
+            aiLevel: activeRules.aiLevel ?? 3,
             skin: mySkin ?? FREE_PAWNS[0],
           });
         } else if (person) {
@@ -484,15 +471,15 @@ export default function App() {
             id: person.uid,
             name: person.displayName,
             control: 'remote',
-            aiLevel: ONLINE_AI_LEVEL,
+            aiLevel: activeRules.aiLevel ?? 3,
             skin: person.skin ?? otherPawn(mySkin ?? FREE_PAWNS[0]),
           });
         } else {
           seats.push({
             id: `bot-${i}`,
-            name: `${TIERS[ONLINE_AI_LEVEL].label} Bot`,
+            name: `${TIERS[activeRules.aiLevel ?? 3].label} Bot`,
             control: 'ai',
-            aiLevel: ONLINE_AI_LEVEL,
+            aiLevel: activeRules.aiLevel ?? 3,
             skin: otherPawn(mySkin ?? FREE_PAWNS[0]),
           });
         }
@@ -512,7 +499,7 @@ export default function App() {
       // Somebody who arrived after the seats filled up has no pawn; the board
       // still draws, they simply have nothing to move.
       localSeats,
-      aiLevel: ONLINE_AI_LEVEL,
+      aiLevel: activeRules.aiLevel ?? 3,
       seed: session.seed,
       first: Math.min(session.first, activeRules.players - 1),
       rules: activeRules,
@@ -1533,6 +1520,29 @@ function RulesPanel({
             className="h-6 w-6 shrink-0 accent-amber-500 disabled:opacity-50"
           />
         </label>
+
+        <div className="space-y-2">
+          <p className="text-sm font-bold">
+            Bot Level
+            <span className="block text-[11px] font-normal text-slate-500">
+              How smart the bots will be when filling empty seats.
+            </span>
+          </p>
+          <div className="grid grid-cols-2 gap-1 rounded-xl bg-slate-900/5 p-1 sm:grid-cols-3">
+            {TIERS.map((tier, i) => (
+              <button
+                key={tier.label}
+                disabled={!editable}
+                onClick={() => onChange({ ...rules, aiLevel: i })}
+                className={`min-w-0 rounded-lg px-1 py-2 text-[10px] font-black uppercase tracking-wide transition-colors disabled:opacity-50 ${
+                  (rules.aiLevel ?? 3) === i ? 'bg-amber-400 text-slate-900' : 'text-slate-500 hover:bg-white'
+                }`}
+              >
+                {tier.label}
+              </button>
+            ))}
+          </div>
+        </div>
 
         <div className="rounded-2xl bg-slate-900/5 p-3 text-xs leading-relaxed text-slate-500">
           <p className="mb-1 font-black uppercase tracking-[0.15em] text-slate-400">Always true</p>
