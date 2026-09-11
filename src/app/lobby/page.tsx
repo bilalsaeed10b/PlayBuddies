@@ -67,6 +67,13 @@ const CHAT_COOLDOWN_MS = 1000;
  */
 const HOST_MIGRATION_GRACE_MS = 6000;
 
+/**
+ * Tracks pending leave operations to survive React Strict Mode unmount/remount.
+ * If a component remounts for the same user/room before the timeout fires,
+ * the leave is cancelled.
+ */
+const pendingLeaves = new Map<string, NodeJS.Timeout>();
+
 function LobbyContent() {
   const searchParams = useSearchParams();
   const roomId = normalizeRoomCode(searchParams.get("room") || "");
@@ -263,8 +270,13 @@ function LobbyContent() {
     // would read identically to being kicked and bounce a player who is
     // mid-join right back out.
     let wasMember = false;
+    const leaveKey = `${user.uid}:${roomId}`;
 
     const join = async () => {
+      if (pendingLeaves.has(leaveKey)) {
+        clearTimeout(pendingLeaves.get(leaveKey));
+        pendingLeaves.delete(leaveKey);
+      }
       const profile: LobbyPlayer = {
         uid: user.uid,
         displayName: user.displayName || "Player",
@@ -357,9 +369,11 @@ function LobbyContent() {
       cancelled = true;
       unsubRoom();
       unsubChat();
-      // Best-effort leave. If it doesn't land, presence still removes the
-      // player from everyone's roster.
-      updateDoc(roomRef, { [`players.${user.uid}`]: deleteField() }).catch(() => {});
+      // Best-effort leave with a delay to survive Strict Mode double-mounts.
+      pendingLeaves.set(leaveKey, setTimeout(() => {
+        updateDoc(roomRef, { [`players.${user.uid}`]: deleteField() }).catch(() => {});
+        pendingLeaves.delete(leaveKey);
+      }, 2000));
     };
   }, [user, roomId]);
 
