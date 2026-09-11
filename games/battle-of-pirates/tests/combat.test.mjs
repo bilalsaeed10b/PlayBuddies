@@ -116,10 +116,10 @@ test('torpedo drag targeting accepts living enemies and rejects allies and empty
   assert.equal(b.pickEnemyAt(b.ships[1].x, b.shipY(1), rect, 0), 1);
   const origin = b.torpedoOrigin(rect);
   assert.ok(origin.x > b.ships[0].x, 'guide starts at the attacking hull toward its enemy');
-  const lock = b.snapEnemyAt(b.ships[1].x + 70, b.shipY(1), rect, 0);
+  const lock = b.snapEnemyAt(b.ships[1].x + 70, b.shipY(1), rect, 1);
   assert.equal(lock?.index, 1);
   assert.ok(Math.abs(lock.x - b.ships[1].x) < 30, 'reticle magnets to the hull centre');
-  assert.equal(b.snapEnemyAt(b.arena.w / 2, 40, rect, 0), null);
+  assert.equal(b.snapEnemyAt(b.arena.w / 2, 40, rect, 1), null);
   assert.equal(b.pickEnemyAt(b.ships[0].x, b.shipY(0), rect, 0), null);
   assert.equal(b.pickEnemyAt(b.arena.w / 2, 40, rect, 0), null);
   b.ships[1].hp = 0;
@@ -153,18 +153,18 @@ test('last enemy dying to acid rain waits for sunrise before results', () => {
   assert.equal(b.hp[1], 0); assert.equal(won, 0);
   advance(b, 0.2); assert.equal(won, 1); assert.equal(b.phase, 'over');
 });
-test('heal restores 30, caps at own maxHP, never revives, and consumes a turn', () => {
+test('heal restores 20/25, caps at own maxHP, never revives, and consumes a turn', () => {
   for (const missing of [10, 35]) {
     const b = create(); aim(b); grant(b, b.ships[0].maxHp - missing);
     const before = b.ships[0].hp;
-    assert.ok(b.useSpecial('heal')); advance(b, 2.3);
-    assert.equal(b.ships[0].hp, Math.min(b.ships[0].maxHp, before + 30));
+    assert.ok(b.useSpecial('heal', 0)); advance(b, 2.3);
+    assert.equal(b.ships[0].hp, Math.min(b.ships[0].maxHp, before + 20));
     assert.equal(b.turnNo, 1); assert.equal(b.turn, 1);
     assert.equal(b.ships[0].charge, 0);
   }
   const b = create(); aim(b); grant(b);
-  assert.equal(b.useSpecial('heal'), false); assert.equal(b.ships[0].charge, 3);
-  b.ships[0].hp = 0; assert.equal(b.useSpecial('heal'), false);
+  assert.equal(b.useSpecial('heal', 0), false); assert.equal(b.ships[0].charge, 3);
+  b.ships[0].hp = 0; assert.equal(b.useSpecial('heal', 0), false);
 });
 test('invalid special, friendly/dead targets, insufficient charge, remote turns cannot spend a meter', () => {
   const b = create(); aim(b);
@@ -200,8 +200,8 @@ function pair() {
 for (const kind of ['torpedo', 'acid-rain', 'heal']) {
   for (const dropPreview of [false, true]) test(`${kind} multiplayer outcome agrees ${dropPreview ? 'without preview' : 'with preview'}`, () => {
     const { host, guest, run } = pair();
-    for (const b of [host, guest]) { b.ships[0].charge = 3; b.ships[0].hp = 60; }
-    assert.ok(host.useSpecial(kind, 3));
+    for (const b of [host, guest]) { b.ships[0].charge = 3; b.ships[0].hp = 60; b.ships[2].hp = 60; }
+    assert.ok(host.useSpecial(kind, kind === 'heal' ? 2 : 3));
     run(14, p => !(dropPreview && p.t === 'fire'));
     assert.deepEqual(snapshot(guest), snapshot(host));
     assert.equal(host.turnNo, 1);

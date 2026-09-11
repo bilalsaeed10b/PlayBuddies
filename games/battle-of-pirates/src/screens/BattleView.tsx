@@ -162,7 +162,7 @@ export default function BattleView({
   const [resyncing, setResyncing] = useState(false);
   const [specialOpen, setSpecialOpen] = useState(false);
   const specialOpenRef = useRef(false);
-  const [torpedoTargeting, setTorpedoTargeting] = useState(false);
+  const [targetingSpecial, setTargetingSpecial] = useState<SpecialKind | null>(null);
   /**
    * Whether the two rosters are showing names or just bars.
    *
@@ -701,17 +701,19 @@ export default function BattleView({
   }, []);
 
   const cancelTorpedo = useCallback(() => {
-    specialOpenRef.current = false;
-    setSpecialOpen(false);
-    setTorpedoTargeting(false);
-  }, []);
-
-  const beginTorpedo = useCallback(() => {
+  const beginTargeting = useCallback((kind: SpecialKind) => {
     specialOpenRef.current = true;
     held.current = {};
     onDragChange(false);
     setSpecialOpen(true);
-    setTorpedoTargeting(true);
+    setTargetingSpecial(kind);
+  }, [onDragChange]);
+
+  const cancelTargeting = useCallback(() => {
+    specialOpenRef.current = false;
+    setSpecialOpen(false);
+    setTargetingSpecial(null);
+    onDragChange(false);
   }, [onDragChange]);
 
   const torpedoOrigin = useCallback(() => {
@@ -720,20 +722,21 @@ export default function BattleView({
     return engine && canvas ? engine.torpedoOrigin(canvas.getBoundingClientRect()) : null;
   }, []);
 
-  const snapTorpedo = useCallback((clientX: number, clientY: number) => {
+  const snapTarget = useCallback((clientX: number, clientY: number) => {
     const engine = engineRef.current;
     const canvas = canvasRef.current;
-    if (!engine || !canvas || !engine.awaitingLocal) return null;
-    return engine.snapEnemyAt(clientX, clientY, canvas.getBoundingClientRect(), engine.ships[engine.turn].team);
-  }, []);
+    if (!engine || !canvas || !engine.awaitingLocal || !targetingSpecial) return null;
+    const targetTeam = targetingSpecial === 'heal' ? engine.ships[engine.turn].team : 1 - engine.ships[engine.turn].team;
+    return engine.snapEnemyAt(clientX, clientY, canvas.getBoundingClientRect(), targetTeam as Team);
+  }, [targetingSpecial]);
 
-  const targetTorpedo = useCallback((target: number) => {
+  const targetSpecial = useCallback((target: number) => {
     const engine = engineRef.current;
-    if (!engine || !engine.awaitingLocal || !engine.useSpecial('torpedo', target)) return false;
+    if (!engine || !engine.awaitingLocal || !targetingSpecial || !engine.useSpecial(targetingSpecial, target)) return false;
     audioService.unlock();
-    cancelTorpedo();
+    cancelTargeting();
     return true;
-  }, [cancelTorpedo]);
+  }, [cancelTargeting, targetingSpecial]);
 
   const playAgain = useCallback(() => {
     setOver(null);
@@ -763,8 +766,8 @@ export default function BattleView({
   const showHand = myTurn && !over && (session?.rules.cards ?? true);
 
   useEffect(() => {
-    if (torpedoTargeting && !canAim) cancelTorpedo();
-  }, [torpedoTargeting, canAim, cancelTorpedo]);
+    if (targetingSpecial && !canAim) cancelTargeting();
+  }, [targetingSpecial, canAim, cancelTargeting]);
 
   // A seat handed to a bot keeps its owner's name, so this line has to read
   // properly for "Alice (adrift)" and for the solo seat, which is called "You".
@@ -935,13 +938,13 @@ export default function BattleView({
         }}
       />
 
-      {torpedoTargeting && canAim && (
+      {targetingSpecial && canAim && (
         <TorpedoTargeter
           bottomInset={showHand ? handHeight : 8}
           getOrigin={torpedoOrigin}
-          snapTarget={snapTorpedo}
-          onTarget={targetTorpedo}
-          onCancel={cancelTorpedo}
+          snapTarget={snapTarget}
+          onTarget={targetSpecial}
+          onCancel={cancelTargeting}
         />
       )}
 
@@ -959,7 +962,7 @@ export default function BattleView({
         <SpecialControls
           charge={charges[myTurn ? turn : config.localShips[0]] ?? 0}
           enabled={canAim}
-          targeting={torpedoTargeting}
+          targeting={!!targetingSpecial}
           ships={config.seats.map((seat, i) => ({ ...seat, hp: hp[i] ?? 0, maxHp: maxHp[i] ?? BALANCE.MAX_HP }))}
           shooter={myTurn ? turn : config.localShips[0]}
           onOpenChange={(open) => {
@@ -968,8 +971,8 @@ export default function BattleView({
             held.current = {};
             if (open) onDragChange(false);
           }}
-          onBeginTorpedo={beginTorpedo}
-          onCancelTorpedo={cancelTorpedo}
+          onBeginTargeting={beginTargeting}
+          onCancelTargeting={cancelTargeting}
           onUse={(kind) => {
             audioService.unlock();
             engineRef.current?.useSpecial(kind);

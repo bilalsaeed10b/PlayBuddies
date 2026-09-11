@@ -502,7 +502,7 @@ export const CARDS: Record<CardId, CardMeta> = {
   keg: {
     id: 'keg', name: 'Powder Keg', glyph: '#', weight: 8,
     blurb: 'A wide blast that punishes ships sailing close together.',
-    shots: 1, spread: 0, damage: 0.9, blast: 1.9, gravity: 1, speed: 1,
+    shots: 1, spread: 0, damage: 1, flatDamage: 9, blast: 1.9, gravity: 1, speed: 1,
   },
 };
 

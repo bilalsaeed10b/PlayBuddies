@@ -10,15 +10,15 @@ export interface SpecialControlsProps {
   ships: { id: string; name: string; team: 0 | 1; hp: number; maxHp: number }[];
   shooter: number;
   onUse: (kind: SpecialKind) => void;
-  onBeginTorpedo: () => void;
-  onCancelTorpedo: () => void;
+  onBeginTargeting: (kind: SpecialKind) => void;
+  onCancelTargeting: () => void;
   onOpenChange?: (open: boolean) => void;
 }
 
 const OPTIONS = [
   { id: 'torpedo', name: 'Torpedo', amount: '25 damage', scope: 'Drag onto one ship', Icon: Crosshair },
   { id: 'acid-rain', name: 'Acid Rain', amount: '10 damage', scope: 'Every enemy', Icon: CloudRain },
-  { id: 'heal', name: 'Heal', amount: '+25 HP', scope: 'Your ship', Icon: Heart },
+  { id: 'heal', name: 'Heal', amount: '20-25 HP', scope: 'Any friendly ship', Icon: Heart },
 ] as const;
 
 const focusRing = 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-200 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950';
@@ -31,8 +31,8 @@ export default function SpecialControls({
   ships,
   shooter,
   onUse,
-  onBeginTorpedo,
-  onCancelTorpedo,
+  onBeginTargeting,
+  onCancelTargeting,
   onOpenChange,
 }: SpecialControlsProps) {
   const id = useId();
@@ -42,7 +42,7 @@ export default function SpecialControls({
   const charges = Math.max(0, Math.min(3, Math.floor(Number.isFinite(charge) ? charge : 0)));
   const ship = ships[shooter];
   const enemies = ships.filter((enemy) => enemy.hp > 0 && ship && enemy.team !== ship.team);
-  const healing = ship ? Math.max(0, Math.min(25, ship.maxHp - ship.hp)) : 0;
+  const teamHealing = ship ? ships.some(s => s.team === ship.team && s.hp > 0 && s.hp < s.maxHp) : false;
   const ready = charges === 3;
   const canOpen = enabled && ready && Boolean(ship && ship.hp > 0);
 
@@ -73,7 +73,7 @@ export default function SpecialControls({
   const choose = (kind: SpecialKind) => {
     if (!canOpen) return;
     close();
-    if (kind === 'torpedo') onBeginTorpedo();
+    if (kind === 'torpedo' || kind === 'heal') onBeginTargeting(kind);
     else onUse(kind);
   };
 
@@ -103,7 +103,7 @@ export default function SpecialControls({
           </div>
           <div className="grid grid-cols-3 gap-1.5">
             {OPTIONS.map(({ id: option, name, amount, scope, Icon }) => {
-              const unavailable = option === 'heal' ? healing <= 0 : enemies.length === 0;
+              const unavailable = option === 'heal' ? !teamHealing : enemies.length === 0;
               return (
                 <button
                   key={option}
@@ -115,7 +115,7 @@ export default function SpecialControls({
                   <Icon aria-hidden="true" className={`mb-1 h-5 w-5 ${option === 'heal' ? 'text-emerald-300' : option === 'acid-rain' ? 'text-lime-300' : 'text-sky-300'}`} />
                   <span className="text-[11px] font-black leading-4 text-white">{name}</span>
                   <span className="text-[10px] font-bold leading-4 text-amber-200">{amount}</span>
-                  <span className="text-[9px] leading-3 text-white/55">{option === 'heal' && healing <= 0 ? 'HP full' : scope}</span>
+                  <span className="text-[9px] leading-3 text-white/55">{option === 'heal' && !teamHealing ? 'Team HP full' : scope}</span>
                 </button>
               );
             })}
@@ -130,7 +130,7 @@ export default function SpecialControls({
         aria-controls={`${id}-picker`}
         aria-disabled={targeting ? false : !canOpen}
         onClick={() => {
-          if (targeting) { onCancelTorpedo(); return; }
+          if (targeting) { onCancelTargeting(); return; }
           if (!canOpen) return;
           const next = !open;
           setOpen(next);
@@ -147,7 +147,7 @@ export default function SpecialControls({
         {targeting ? <Crosshair aria-hidden="true" className="h-4 w-4 shrink-0 text-sky-300" /> : <Sparkles aria-hidden="true" className={`h-4 w-4 shrink-0 ${ready ? 'text-amber-300' : 'text-slate-400'}`} />}
         <span className="min-w-0 flex-1">
           <span className="block whitespace-nowrap text-[11px] font-black leading-4">
-            {targeting ? 'Torpedo target' : ready ? 'Special ready' : 'Special attack'}
+            {targeting ? 'Cancel targeting' : ready ? 'Special ready' : 'Special attack'}
           </span>
           {targeting ? (
             <span className="block text-[9px] leading-3 text-sky-200/70">Tap to cancel</span>

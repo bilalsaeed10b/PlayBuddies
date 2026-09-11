@@ -847,12 +847,17 @@ export class BattleEngine {
     if (!isSpecial(kind) || (this.phase !== 'aim' && this.phase !== 'deal') ||
         ship.hp <= 0 || ship.charge < SPECIAL_HITS) return false;
     const enemies = this.afloat((1 - ship.team) as Team);
+    const allies = this.afloat(ship.team);
     if (kind === 'torpedo' && (!Number.isInteger(target) || !enemies.includes(target!))) return false;
-    if (kind === 'heal' && ship.hp >= ship.maxHp) return false;
+    if (kind === 'heal') {
+      if (!Number.isInteger(target) || !allies.includes(target!)) return false;
+      const targetShip = this.ships[target!];
+      if (targetShip.hp >= targetShip.maxHp) return false;
+    }
     if (kind !== 'heal' && enemies.length === 0) return false;
-    const indices = kind === 'heal' ? [this.turn] : kind === 'torpedo' ? [target!] : enemies;
+    const indices = kind === 'heal' ? [target!] : kind === 'torpedo' ? [target!] : enemies;
     ship.charge = 0;
-    this.lastSpecial = { kind, ...(kind === 'torpedo' ? { target } : {}) };
+    this.lastSpecial = { kind, ...(kind === 'torpedo' || kind === 'heal' ? { target } : {}) };
     this.lastShot = { angle: ship.lastAim.angle, power: ship.lastAim.power, card: 'round' };
     this.burnBefore = this.ships.map((s) => s.burn);
     this.tally = null;
@@ -867,7 +872,7 @@ export class BattleEngine {
     if (this.firedPreviewThisShot) {
       this.cfg.onLocalShot!({
         t: 'fire', n: ++this.localSeq, s: this.cfg.seed, tn: this.turnNo + 1, who: this.turn,
-        a: 0, p: 0, c: 'round', sp: kind, ...(kind === 'torpedo' ? { tg: target } : {}),
+        a: 0, p: 0, c: 'round', sp: kind, ...(kind === 'torpedo' || kind === 'heal' ? { tg: target } : {}),
       });
     }
     this.phase = 'special';
@@ -891,10 +896,12 @@ export class BattleEngine {
       effect.applied = true;
       const source = this.ships[effect.shooter];
       if (effect.kind === 'heal') {
-        const healed = Math.min(ability.amount, source.maxHp - source.hp);
-        source.hp += healed;
-        this.spawnDamageText(source.x, this.shipY(effect.shooter) - 100, healed, '#86efac', '+');
-        this.logLine(`${source.name} healed ${Math.round(healed)}`, 'hit');
+        const target = this.ships[effect.indices[0]];
+        const abilityAmount = effect.indices[0] === effect.shooter ? 20 : 25;
+        const healed = Math.min(abilityAmount, target.maxHp - target.hp);
+        target.hp += healed;
+        this.spawnDamageText(target.x, this.shipY(effect.indices[0]) - 100, healed, '#86efac', '+');
+        this.logLine(`${source.name} healed ${effect.indices[0] === effect.shooter ? 'themselves' : target.name} for ${Math.round(healed)}`, 'hit');
         this.cfg.onHp?.(this.hp);
       } else {
         for (const i of effect.indices) {
@@ -1558,8 +1565,15 @@ export class BattleEngine {
         if (this.botTimer <= 0) {
           if (ship.charge >= SPECIAL_HITS) {
             const enemies = this.afloat((1 - ship.team) as Team);
-            const target = enemies.reduce((best, i) => this.ships[i].hp < this.ships[best].hp ? i : best, enemies[0]);
-            const kind: SpecialId = ship.maxHp - ship.hp >= 25 ? 'heal' : enemies.length >= 3 ? 'acid-rain' : 'torpedo';
+            const targetEnemy = enemies.reduce((best, i) => this.ships[i].hp < this.ships[best].hp ? i : best, enemies[0]);
+            let kind: SpecialId = 'torpedo';
+            let target = targetEnemy;
+            if (ship.maxHp - ship.hp >= 25) {
+              kind = 'heal';
+              target = this.turn;
+            } else if (enemies.length >= 3) {
+              kind = 'acid-rain';
+            }
             if (this.startSpecial(kind, target)) return;
           }
           this.fire(decide(this.turn));
@@ -1731,6 +1745,7 @@ export class BattleEngine {
         if (this.tally) this.tally.burned = true;
       }
       this.explode(ix, iy, p, 'hull', this.waterLevelFor(struckShip));
+      this.splashDamage(ix, iy, p);
       return;
     }
 
@@ -2460,12 +2475,12 @@ export class BattleEngine {
     return this.toClient(ship.x + this.facing(this.turn) * 58, this.waterLevelFor(this.turn) + 8, rect);
   }
 
-  /** Magnetically lock a torpedo reticle to the closest living enemy hull. */
+  /** Magnetically lock a reticle to the closest hull on the target team. */
   snapEnemyAt(
     clientX: number,
     clientY: number,
     rect: DOMRect,
-    friendlyTeam: Team,
+    targetTeam: Team,
   ): { index: number; x: number; y: number } | null {
     let snapped: { index: number; x: number; y: number } | null = null;
     let best = Infinity;
@@ -2473,7 +2488,7 @@ export class BattleEngine {
     const radius = 112;
     for (let i = 0; i < this.ships.length; i++) {
       const ship = this.ships[i];
-      if (ship.hp <= 0 || ship.team === friendlyTeam) continue;
+      if (ship.hp <= 0 || ship.team !== targetTeam) continue;
       const box = this.hullBox(i);
       const point = this.toClient((box.x0 + box.x1) / 2, (box.y0 + box.y1) / 2, rect);
       const distance = Math.hypot(clientX - point.x, clientY - point.y);
