@@ -36,7 +36,7 @@ test('round robin skips sunk seats and wraps in 3v3', () => {
   const b = create(6); b.ships[1].hp = 0; b.ships[4].hp = 0;
   let cursor = 0; const seen = [];
   for (let i = 0; i < 8; i++) { seen.push(cursor); cursor = b.nextTurn(cursor); }
-  assert.deepEqual(seen, [0, 2, 3, 5, 0, 2, 3, 5]);
+  assert.deepEqual(seen, [0, 3, 2, 5, 0, 3, 2, 5]);
 });
 test('three successful cannon attacks charge; pellets, misses, burn and specials do not double-charge', () => {
   const b = create(); aim(b);

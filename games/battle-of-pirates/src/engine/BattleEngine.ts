@@ -571,15 +571,41 @@ export class BattleEngine {
   /**
    * Who fires after this hull.
    *
-   * Every living seat gets one turn per circuit, regardless of fleet size.
-   * Seat order is fixed at match start; sinking only removes a seat from it.
+   * Teams alternate: after a seat on team 0 fires, the next turn goes to
+   * team 1's next living seat, and vice versa.  When one team has more
+   * living ships (e.g. 2v3 after a sinking), the larger team naturally
+   * receives extra turns at the tail of each round -- which is the turn
+   * advantage the bigger crew deserves rather than a strict one-for-one
+   * lockstep.
+   *
+   * The round is built by zipping both teams' living rosters: T0[0], T1[0],
+   * T0[1], T1[1], ... with any remainder from the larger team appended.
+   * `from` is located in this round and the next entry (wrapping) is returned.
    */
   private nextTurn(from: number): number {
-    for (let offset = 1; offset <= this.ships.length; offset++) {
-      const next = (from + offset) % this.ships.length;
-      if (this.ships[next].hp > 0) return next;
+    // Collect living seats per team, in seat-index order.
+    const t0: number[] = [];
+    const t1: number[] = [];
+    for (let i = 0; i < this.ships.length; i++) {
+      if (this.ships[i].hp > 0) {
+        if (this.ships[i].team === 0) t0.push(i);
+        else t1.push(i);
+      }
     }
-    return from;
+
+    // Build the interleaved round: zip, then append any remainder.
+    const round: number[] = [];
+    const len = Math.max(t0.length, t1.length);
+    for (let i = 0; i < len; i++) {
+      if (i < t0.length) round.push(t0[i]);
+      if (i < t1.length) round.push(t1[i]);
+    }
+
+    if (round.length === 0) return from;
+
+    const pos = round.indexOf(from);
+    if (pos < 0) return round[0];
+    return round[(pos + 1) % round.length];
   }
 
   /**
