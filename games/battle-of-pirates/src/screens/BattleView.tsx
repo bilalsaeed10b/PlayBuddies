@@ -700,7 +700,6 @@ export default function BattleView({
     setSelected(card);
   }, []);
 
-  const cancelTorpedo = useCallback(() => {
   const beginTargeting = useCallback((kind: SpecialKind) => {
     specialOpenRef.current = true;
     held.current = {};
