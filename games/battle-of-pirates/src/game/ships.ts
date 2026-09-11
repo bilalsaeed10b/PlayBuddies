@@ -1,5 +1,5 @@
 /**
- * The ships: eight hulls, three free, the rest bought with the coins the rest
+ * The ships: fourteen hulls, three free, the rest bought with the coins the rest
  * of PlayBuddies pays out.
  *
  * They are skins and nothing else. Not one of them fires further, turns faster
@@ -26,8 +26,8 @@
  * Each hull is baked into an offscreen sprite the first time it is asked for
  * and blitted afterwards. A galleon is thirty-odd paths, and painting thirty
  * paths twice a frame is exactly the kind of thing that turns a cheap phone
- * into a slideshow. Only the cannon barrel and the flag are drawn live,
- * because only they move.
+ * into a slideshow. The cannon, flag and Eclipse Monarch's small celestial
+ * effect are drawn live; premium silhouette details stay in the cached sprite.
  */
 import { BALANCE, clamp } from './rules';
 
@@ -59,6 +59,7 @@ export interface ShipSkin {
    * light -- a glowing ship is hit exactly as easily as a plain one.
    */
   glow?: string;
+  ornament?: 'dragon' | 'coral' | 'forge' | 'seraph' | 'leviathan' | 'eclipse';
 }
 
 export const SHIPS: ShipSkin[] = [
@@ -113,6 +114,42 @@ export const SHIPS: ShipSkin[] = [
     hull: '#2b4a45', hullDark: '#152b28', trim: '#6ee7b7', deck: '#4a6f68',
     sail: '#d6fff2', sailShade: '#9fd8c6', flag: '#34d399', emblem: 'skull',
     glow: '#34d399',
+  },
+  {
+    name: 'Dragon Emperor', blurb: 'Crimson battened sails, gilded dragon horns and an imperial prow.', price: 1200,
+    rig: 'junk', shape: 'sharp', ornament: 'dragon',
+    hull: '#701c31', hullDark: '#280b19', trim: '#ffd17a', deck: '#a96040',
+    sail: '#b83345', sailShade: '#591329', flag: '#ffd17a', emblem: 'star', glow: '#f59e0b',
+  },
+  {
+    name: 'Coral Sovereign', blurb: 'A living reef of rose coral and turquoise crystal sails.', price: 1350,
+    rig: 'lateen', shape: 'round', ornament: 'coral',
+    hull: '#126b71', hullDark: '#083339', trim: '#ffb6bd', deck: '#348b89',
+    sail: '#b7fff3', sailShade: '#45bab8', flag: '#fb7185', emblem: 'moon', glow: '#2dd4bf',
+  },
+  {
+    name: 'Iron Inferno', blurb: 'An armoured furnace ship with brass plating and twin smokestacks.', price: 1500,
+    rig: 'square', shape: 'blocky', ornament: 'forge',
+    hull: '#434854', hullDark: '#151822', trim: '#ffac54', deck: '#6a4b3b',
+    sail: '#342f39', sailShade: '#17151e', flag: '#ff683d', emblem: 'cross', glow: '#f97316',
+  },
+  {
+    name: 'Celestial Swan', blurb: 'Ivory wings, sapphire silk and a silver-plated racing hull.', price: 1650,
+    rig: 'clipper', shape: 'sharp', ornament: 'seraph',
+    hull: '#ddeaf5', hullDark: '#617997', trim: '#fff0b9', deck: '#91a7bb',
+    sail: '#879ff5', sailShade: '#425cad', flag: '#fef3c7', emblem: 'star', glow: '#a5b4fc',
+  },
+  {
+    name: 'Leviathan King', blurb: 'A sea-monster flagship crowned with emerald spines and curling tentacles.', price: 1850,
+    rig: 'tattered', shape: 'blocky', ornament: 'leviathan',
+    hull: '#203752', hullDark: '#0b1529', trim: '#78f0b7', deck: '#355267',
+    sail: '#497b83', sailShade: '#203a51', flag: '#6ee7b7', emblem: 'skull', glow: '#34d399',
+  },
+  {
+    name: 'Eclipse Monarch', blurb: 'The ultimate flagship. A revolving celestial crown, pulsing eclipse and drifting stardust.', price: 2000,
+    rig: 'galleon', shape: 'sharp', ornament: 'eclipse',
+    hull: '#30204d', hullDark: '#110c23', trim: '#ffda8b', deck: '#60416e',
+    sail: '#5c398b', sailShade: '#24153f', flag: '#f0abfc', emblem: 'moon', glow: '#c084fc',
   },
 ];
 
@@ -224,6 +261,7 @@ export function drawShip(ctx: CanvasRenderingContext2D, d: ShipDraw) {
   if (baked) ctx.drawImage(baked, -SPR.ox, -SPR.oy);
   else paintHull(ctx, skin, d.accent);
   drawFlag(ctx, skin, d.clock);
+  if (skin.ornament === 'eclipse') drawEclipse(ctx, d.clock);
   ctx.restore();
 
   // The barrel is drawn unmirrored so a world-space aim angle can be handed
@@ -388,6 +426,87 @@ function paintHull(ctx: CanvasRenderingContext2D, skin: ShipSkin, accent: string
   else rigSquare(ctx, skin, accent);
 
   paintBody(ctx, skin, accent);
+  if (skin.ornament) paintOrnament(ctx, skin);
+}
+
+/** Premium silhouette details are cached with the hull, including shop previews. */
+function paintOrnament(ctx: CanvasRenderingContext2D, skin: ShipSkin) {
+  ctx.save();
+  ctx.strokeStyle = skin.trim;
+  ctx.fillStyle = skin.trim;
+  ctx.lineWidth = 4;
+  ctx.lineJoin = 'round';
+  if (skin.ornament === 'dragon') {
+    for (let i = 0; i < 7; i++) {
+      const x = -85 + i * 24;
+      ctx.beginPath(); ctx.moveTo(x, -38); ctx.lineTo(x + 5, -60 - i * 2);
+      ctx.lineTo(x + 19, -38); ctx.fill();
+    }
+    ctx.beginPath(); ctx.moveTo(85, -30); ctx.quadraticCurveTo(140, -45, 115, -91);
+    ctx.lineTo(142, -80); ctx.lineTo(153, -92); ctx.lineTo(147, -60); ctx.lineTo(113, -33); ctx.fill();
+  } else if (skin.ornament === 'coral') {
+    for (const side of [-1, 1]) {
+      for (let i = 0; i < 4; i++) {
+        const x = side * (72 + i * 8);
+        ctx.beginPath(); ctx.moveTo(x, -25); ctx.bezierCurveTo(x - 15, -55, x + 17, -65, x + 8, -95 - i * 5); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(x, -60); ctx.lineTo(x - 15, -77); ctx.stroke();
+      }
+    }
+  } else if (skin.ornament === 'forge') {
+    for (const x of [-73, 55]) {
+      ctx.fillStyle = skin.hullDark; ctx.fillRect(x, -120, 20, 73);
+      ctx.fillStyle = skin.trim; ctx.fillRect(x - 4, -125, 28, 9);
+      ctx.fillStyle = '#ff793f'; ctx.fillRect(x + 4, -105, 12, 18);
+    }
+    for (let x = -70; x < 90; x += 28) {
+      ctx.strokeRect(x, -30, 23, 25);
+      ctx.beginPath(); ctx.arc(x + 4, -25, 2, 0, Math.PI * 2); ctx.fill();
+    }
+  } else if (skin.ornament === 'seraph') {
+    for (const side of [-1, 1]) for (let i = 0; i < 5; i++) {
+      ctx.fillStyle = i % 2 ? '#bdd7f4' : '#f4f8ff';
+      ctx.beginPath(); ctx.moveTo(side * 66, -35);
+      ctx.quadraticCurveTo(side * (134 - i * 5), -55, side * (142 - i * 10), -122 + i * 12);
+      ctx.quadraticCurveTo(side * 95, -65, side * 66, -35); ctx.fill();
+    }
+  } else if (skin.ornament === 'leviathan') {
+    for (const side of [-1, 1]) {
+      ctx.lineWidth = 10;
+      ctx.beginPath(); ctx.moveTo(side * 65, 0); ctx.bezierCurveTo(side * 153, 15, side * 148, -105, side * 110, -65); ctx.stroke();
+      ctx.lineWidth = 3;
+      for (let i = 0; i < 5; i++) { ctx.beginPath(); ctx.arc(side * (99 + i * 6), -10 - i * 9, 3, 0, Math.PI * 2); ctx.stroke(); }
+    }
+  } else {
+    for (let i = 0; i < 7; i++) {
+      const x = -65 + i * 21;
+      ctx.beginPath(); ctx.moveTo(x, -37); ctx.lineTo(x + 7, -62 - (i % 2) * 10); ctx.lineTo(x + 15, -37); ctx.fill();
+    }
+    ctx.strokeStyle = '#e9c1ff'; ctx.lineWidth = 2;
+    for (const x of [-58, 48]) { ctx.beginPath(); ctx.moveTo(x, -172); ctx.lineTo(x + 10, -115); ctx.lineTo(x, -74); ctx.stroke(); }
+  }
+  ctx.restore();
+}
+
+/** Small fixed particle count: no allocations or random emissions per frame. */
+function drawEclipse(ctx: CanvasRenderingContext2D, clock: number) {
+  ctx.save();
+  ctx.translate(-8, -128);
+  const pulse = 0.7 + Math.sin(clock * 2) * 0.15;
+  ctx.strokeStyle = '#ffdc95'; ctx.lineWidth = 3;
+  ctx.globalAlpha *= pulse;
+  ctx.beginPath(); ctx.arc(0, 0, 25, 0, Math.PI * 2); ctx.stroke();
+  ctx.fillStyle = '#140d29'; ctx.beginPath(); ctx.arc(-4, -3, 21, 0, Math.PI * 2); ctx.fill();
+  ctx.rotate(clock * 0.35);
+  ctx.strokeStyle = '#e9b5ff';
+  ctx.beginPath(); ctx.ellipse(0, 0, 41, 14, 0, 0, Math.PI * 2); ctx.stroke();
+  for (let i = 0; i < 12; i++) {
+    const a = i * Math.PI / 6 + clock * 0.18;
+    const radius = 43 + (i % 3) * 9;
+    const x = Math.cos(a) * radius, y = Math.sin(a) * radius;
+    ctx.fillStyle = i % 2 ? '#fde68a' : '#e9d5ff';
+    ctx.fillRect(x - 1.5, y - 3, 3, 6); ctx.fillRect(x - 3, y - 1.5, 6, 3);
+  }
+  ctx.restore();
 }
 
 // -- the rigs ---------------------------------------------------------------
