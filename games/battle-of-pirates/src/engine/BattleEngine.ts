@@ -1131,9 +1131,19 @@ export class BattleEngine {
     // fallen behind, so anything not ahead of us is simply noise.
     if (packet.st) {
       if (packet.tn === undefined) return;
-      // Kept whether it is ahead of us or behind. A beacon behind us is the
-      // more interesting of the two: it means this client has run *ahead* of
-      // the host, which is exactly the divergence that used to be invisible.
+      // A regular state beacon belongs to the host alone. Letting every
+      // listener's stale local view count as an authority was the source of
+      // brief phantom specials and a live aim turn suddenly changing hands.
+      // A peer may still answer an explicit sync request, but only to bring a
+      // genuinely behind client forward.
+      const hostBeacon = from === this.cfg.hostUid;
+      const syncReply = packet.ack !== undefined;
+      if (!hostBeacon && !syncReply) return;
+      // Same-turn snapshots cannot contain a new action. The resolved action
+      // packet is the one and only source of meter, captain and timer changes
+      // during an active turn; otherwise a delayed five-second beacon can
+      // briefly repaint an old charge value over the current player state.
+      if (packet.tn <= this.turnNo) return;
       if (!this.beaconIn || packet.n > this.beaconIn.n) this.beaconIn = packet;
       return;
     }
@@ -1549,12 +1559,6 @@ export class BattleEngine {
           this.beaconT = BALANCE.BEACON;
           this.cfg.onLocalShot(this.snapshot());
         }
-      }
-
-      // The host's word on the turn we are both already on: not a turn to
-      // play, just numbers to agree with.
-      if (this.beaconIn && (this.beaconIn.tn ?? -1) === this.turnNo) {
-        if (this.reconcile(this.beaconIn)) return;
       }
 
       // How long the host and this client have been telling different stories.

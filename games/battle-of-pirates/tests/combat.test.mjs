@@ -5,6 +5,7 @@ import { loadModule } from './loadModule.mjs';
 // Bundle the actual engine in memory: no test-only duplicate of combat rules.
 const { BattleEngine } = await loadModule(new URL('../src/engine/BattleEngine.ts', import.meta.url));
 const { CARDS, CARD_ORDER } = await loadModule(new URL('../src/game/rules.ts', import.meta.url));
+const { HULLS } = await loadModule(new URL('../src/game/hulls.ts', import.meta.url));
 const { SPECIALS } = await loadModule(new URL('../src/game/specials.ts', import.meta.url));
 const rules = { players: 4, aimArc: true, cards: true, mountain: 'off', turnTimer: false, storm: false };
 function create(count = 4, overrides = {}) {
@@ -84,7 +85,7 @@ test('multi-shot damage and special-meter rules are explicit per ammunition', ()
     b.fire({ angle: -0.6, power: 0.5, card });
     assert.equal(b.projectiles.length, balls, `${card} ball count`);
     if (exactDamage !== null) {
-      assert.ok(b.projectiles.every((p) => p.damage === exactDamage), `${card} damage`);
+      assert.ok(b.projectiles.every((p) => p.damage === exactDamage * HULLS[0].damage), `${card} damage`);
     }
     const box = b.hullBox(1);
     for (const projectile of b.projectiles.slice(0, directHits)) {
@@ -253,6 +254,23 @@ test('fresh sync ack required; stale beacons cannot unlock a waking captain', ()
   guest.requestSync(); guest.applyShot(host.snapshot(), 'p0');
   assert.equal(guest.resyncing, true);
   deliver(); deliver(); assert.equal(guest.resyncing, false);
+});
+test('a same-turn beacon cannot steal an active helm or restore an old special meter', () => {
+  const { host, guest } = pair();
+  guest.turn = 1;
+  guest.phase = 'aim';
+  guest.turnClock = 8;
+  guest.ships[1].control = 'local';
+  guest.ships[1].charge = 0;
+  host.ships[1].charge = 3;
+
+  // This is an old periodic host snapshot from before the guest spent its
+  // meter. It describes the same turn, so it carries no new action.
+  guest.applyShot(host.snapshot(), 'p0');
+  guest.update(0);
+  assert.equal(guest.turn, 1);
+  assert.equal(guest.turnClock, 8);
+  assert.equal(guest.ships[1].charge, 0);
 });
 test('host alone drives online bots, broadcasting their special outcome', () => {
   const { host, guest, run } = pair();

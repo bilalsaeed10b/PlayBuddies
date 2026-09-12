@@ -426,6 +426,7 @@ export interface CardMeta {
 /**
  * The common shells share the same direct hit. Multi-ball and utility cards
  * divide that damage across their payload, trading one large hit for coverage.
+ */
 export const CARDS: Record<CardId, CardMeta> = {
   round: {
     id: 'round', name: 'Round Shot', glyph: 'O', weight: 30,
