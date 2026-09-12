@@ -1,6 +1,6 @@
 import type { CardId } from '../game/rules';
 import type { SpecialId } from '../game/specials';
-import { WEATHER, weatherFor, wetWeather, type WeatherKind } from '../game/weather';
+import { WEATHER, weatherFor, wetWeather, type WeatherChoice } from '../game/weather';
 
 /** 0 is the ship on the left, 1 is the ship on the right. Never anything else. */
 export type Team = 0 | 1;
@@ -100,6 +100,8 @@ export interface Projectile {
    */
   from: number;
   damage: number;
+  /** This ball was rolled as a direct critical hit by the firing hull. */
+  critical?: boolean;
   flatSplash?: number;
   blast: number;
   /**
@@ -199,7 +201,7 @@ export interface MatchRules {
   players: PlayerCount;
   /** Legacy rain flag. Weather is cosmetic and never changes shot trajectories. */
   storm: boolean;
-  weather?: WeatherKind;
+  weather?: WeatherChoice;
 }
 
 export const DEFAULT_RULES: MatchRules = {
@@ -209,6 +211,7 @@ export const DEFAULT_RULES: MatchRules = {
   cards: true,
   players: 2,
   storm: false,
+  weather: 'random',
 };
 
 const MOUNTAIN_CODES: MountainRule[] = ['off', 'breakable', 'solid'];
@@ -237,7 +240,7 @@ export function packRules(rules: MatchRules): number {
     (rules.cards ? 16 : 0) |
     (Math.max(0, PLAYER_CODES.indexOf(rules.players)) << 5) |
     (wetWeather(weatherFor(rules)) ? 128 : 0) |
-    (rules.weather ? (Math.max(0, WEATHER.findIndex(w => w.id === rules.weather)) + 1) << 8 : 0)
+    ((rules.weather === 'random' ? 6 : rules.weather ? Math.max(0, WEATHER.findIndex(w => w.id === rules.weather)) + 1 : 0) << 8)
   );
 }
 
@@ -250,8 +253,10 @@ export function unpackRules(bits: number | undefined): MatchRules {
     cards: (bits & 16) !== 0,
     players: PLAYER_CODES[(bits >> 5) & 3] ?? DEFAULT_RULES.players,
     storm: (bits & 128) !== 0,
-    ...(((bits >> 8) & 7) > 0 && WEATHER[((bits >> 8) & 7) - 1]
-      ? { weather: WEATHER[((bits >> 8) & 7) - 1].id } : {}),
+    ...(((bits >> 8) & 7) === 6
+      ? { weather: 'random' as const }
+      : ((bits >> 8) & 7) > 0 && WEATHER[((bits >> 8) & 7) - 1]
+        ? { weather: WEATHER[((bits >> 8) & 7) - 1].id } : {}),
   };
 }
 
@@ -362,6 +367,8 @@ export interface ShotPacket {
   hp: number[];
   f: number[];
   d: number[];
+  /** Each captain's current formation slot. Sent so a reconnect sees rotations immediately. */
+  sl?: number[];
   /**
    * The mountain's hull, one entry per rock (in practice always one).
    *

@@ -20,7 +20,7 @@ import {
 } from 'lucide-react';
 import { askHostToEndGame, askToLeaveLobby, toggleFullscreen } from './fullscreen';
 import { FREE_SHIPS, SHIPS, drawShip } from './game/ships';
-import { WEATHER, weatherFor, wetWeather } from './game/weather';
+import { WEATHER_CHOICES, weatherFor, wetWeather } from './game/weather';
 import { HULLS } from './game/hulls';
 import { BALANCE, CARDS, CARD_ORDER, TEAM_COLORS } from './game/rules';
 import { TIERS } from './engine/ai';
@@ -813,7 +813,7 @@ function rulesSummary(rules: MatchRules): string {
   return [
     `${formatSides(rules.players)} · ${rules.players} ships`,
     MOUNTAIN_LABEL[rules.mountain],
-    WEATHER.find(w => w.id === weatherFor(rules))?.name,
+    rules.weather === 'random' ? 'random weather' : WEATHER_CHOICES.find(w => w.id === weatherFor(rules))?.name,
     rules.cards ? 'cards on' : 'round shot only',
     rules.turnTimer ? `${BALANCE.TURN_TIME}s turns` : 'no clock',
     rules.aimArc ? 'aim arc on' : 'no aim arc',
@@ -1083,14 +1083,8 @@ function ShipGrid({
 }
 
 /**
- * The four hulls, as cards.
- *
- * Deliberately shows the trade rather than the numbers. "Made of matchwood"
- * is what a player actually needs to know about a Sloop; "0.8x MAX_HP" is
- * what the engine needs, and a bar chart of four stats nobody can compare
- * across four cards on a phone is neither. The bars are there for the shape
- * of the thing -- tall hull, wide target, roams a long way -- not to be read
- * to two significant figures.
+ * The four battle roles, as cards. Each says exactly what changes in a match
+ * instead of hiding the decision behind a wall of unexplained stat bars.
  */
 function HullGrid({
   selected,
@@ -1121,19 +1115,11 @@ function HullGrid({
               <span className="truncate text-sm font-black">{hull.name}</span>
               {isSelected && <Check className="h-3.5 w-3.5 shrink-0 text-amber-300" />}
             </div>
-            {/* The bars stay -- they are the actual difference between hulls.
-                The prose describing them is the part a sideways phone can do
-                without. */}
             <p className="text-[10px] leading-snug text-white/55 short:hidden">{hull.blurb}</p>
-            <div className="space-y-1">
-              <HullBar label="Hull" value={hull.hp} />
-              <HullBar label="Guns" value={hull.damage} />
-              {/* Inverted on purpose: a narrow silhouette is the good end of
-                  this stat, and a bar that grew as the ship got easier to hit
-                  read as an upgrade at a glance. */}
-              <HullBar label="Cover" value={2 - hull.width} />
-              <HullBar label="Roam" value={hull.drift} />
-              <HullBar label="Blast" value={hull.blast} />
+            <div className="flex flex-wrap gap-1 short:hidden">
+              {hull.perks.map((perk) => (
+                <span key={perk} className="rounded-md bg-sky-300/10 px-1.5 py-1 text-[9px] font-bold text-sky-100/80">{perk}</span>
+              ))}
             </div>
             <p className="text-[9px] font-black uppercase tracking-wider text-rose-300/80">
               {hull.cost}
@@ -1146,26 +1132,6 @@ function HullGrid({
           </button>
         );
       })}
-    </div>
-  );
-}
-
-/** One stat, as a bar centred on the Frigate's 1.0 so a trade reads as a trade. */
-function HullBar({ label, value }: { label: string; value: number }) {
-  // 0.55 to 1.65 is the full range any class uses; mapped so the baseline
-  // sits at roughly half and both directions off it are visible.
-  const share = Math.max(4, Math.min(100, ((value - 0.5) / 1.2) * 100));
-  return (
-    <div className="flex items-center gap-1.5">
-      <span className="w-9 shrink-0 text-[8px] font-black uppercase tracking-wider text-white/35">
-        {label}
-      </span>
-      <span className="h-1 flex-1 overflow-hidden rounded-full bg-white/10">
-        <span
-          className={`block h-full rounded-full ${value > 1 ? 'bg-emerald-400/70' : value < 1 ? 'bg-rose-400/60' : 'bg-white/40'}`}
-          style={{ width: `${share}%` }}
-        />
-      </span>
     </div>
   );
 }
@@ -2246,12 +2212,12 @@ function RulesPanel({
 
         <div className="space-y-2">
           <p className="text-sm font-bold">Weather</p>
-          <p className="text-[11px] text-white/50">Set the mood for both fleets. Rain falls straight down; weather does not change your aim.</p>
+          <p className="text-[11px] text-white/50">Random is the default: a new sky rolls in each round. Rain falls straight down; weather does not change your aim.</p>
           <div className="grid grid-cols-2 gap-2">
-            {WEATHER.map(option => (
-              <button key={option.id} disabled={!editable} aria-pressed={weatherFor(rules) === option.id}
-                onClick={() => onChange({ ...rules, weather: option.id, storm: wetWeather(option.id) })}
-                className={`rounded-xl border px-3 py-2 text-left text-xs font-bold disabled:opacity-50 ${weatherFor(rules) === option.id ? 'border-sky-300 bg-sky-300/15 text-sky-100' : 'border-white/15 bg-white/5 text-white/65'}`}>
+            {WEATHER_CHOICES.map(option => (
+              <button key={option.id} disabled={!editable} aria-pressed={rules.weather === option.id || (!rules.weather && weatherFor(rules) === option.id)}
+                onClick={() => onChange({ ...rules, weather: option.id, storm: option.id === 'random' ? false : wetWeather(option.id) })}
+                className={`rounded-xl border px-3 py-2 text-left text-xs font-bold disabled:opacity-50 ${rules.weather === option.id || (!rules.weather && weatherFor(rules) === option.id) ? 'border-sky-300 bg-sky-300/15 text-sky-100' : 'border-white/15 bg-white/5 text-white/65'}`}>
                 {option.name}<span className="mt-1 block text-[10px] font-normal opacity-70">{option.hint}</span>
               </button>
             ))}

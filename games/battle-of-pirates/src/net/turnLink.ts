@@ -25,8 +25,16 @@ export class TurnLink {
   private closed = false;
   private ready: Promise<void>;
   private write: ((packet: NetPacket) => Promise<void>) | null = null;
+  /** Fire and outcome can be created close together; preserve their write order. */
+  private writeTail: Promise<void> = Promise.resolve();
   /** Written before the connection is live; sent as soon as it is. */
   private queued: NetPacket | null = null;
+  /**
+   * Firestore exposes one latest document per captain. Keep the recent action
+   * sequence inside that document too, so a delayed mobile listener receives
+   * the preview and outcome instead of only whichever write won the race.
+   */
+  private recent: NetPacket[] = [];
 
   constructor(
     private room: string,
@@ -64,8 +72,16 @@ export class TurnLink {
 
       this.write = async (packet: NetPacket) => {
         // setDoc, not update: the document may not exist yet, and each turn
-        // completely replaces the last one anyway.
-        await setDoc(mine, this.stamp ? { ...this.stamp, ...packet } : packet);
+        // completely replaces the last one anyway. The compact tail keeps
+        // action packets replayable if the listener wakes a beat late.
+        const isAction = packet.t === 'fire' || packet.t === 'shot';
+        if (isAction) {
+          this.recent = [...this.recent, packet].slice(-4);
+        }
+        const envelope = isAction && this.recent.length > 1 ? { q: this.recent } : {};
+        const payload = this.stamp ? { ...this.stamp, ...packet, ...envelope } : { ...packet, ...envelope };
+        this.writeTail = this.writeTail.catch(() => {}).then(() => setDoc(mine, payload));
+        await this.writeTail;
       };
 
       // Clear whatever the previous match left behind before anyone can read
@@ -78,7 +94,7 @@ export class TurnLink {
           onSnapshot(
             doc(db, 'lobbies', this.room, 'updates', peer),
             (snap) => {
-              const data = snap.data() as NetPacket | undefined;
+              const data = snap.data() as (NetPacket & { q?: NetPacket[] }) | undefined;
               // Who sent it matters once there are more than two of us: a
               // `bye` has to name the hull it is abandoning, and it cannot be
               // inferred from "the other one" any more.
@@ -90,15 +106,22 @@ export class TurnLink {
               // had a turn. Only droppable once both ends stamp the seed; an
               // unstamped `bye` from an older build is taken at face value, as
               // it always was.
-              if (
-                data.t === 'bye' &&
-                this.matchSeed !== 0 &&
-                typeof data.s === 'number' &&
-                data.s !== this.matchSeed
-              ) {
-                return;
+              // A history is meaningful only for an action write. Control
+              // packets such as a reconnect hello or farewell must arrive as
+              // themselves instead of replaying an older outcome.
+              const packets =
+                (data.t === 'fire' || data.t === 'shot') && Array.isArray(data.q) && data.q.length > 0
+                  ? data.q
+                  : [data];
+              for (const packet of packets) {
+                if (
+                  packet.t === 'bye' &&
+                  this.matchSeed !== 0 &&
+                  typeof packet.s === 'number' &&
+                  packet.s !== this.matchSeed
+                ) continue;
+                this.onPacket(packet, peer);
               }
-              this.onPacket(data, peer);
             },
             (err) => {
               console.error('[turnLink] lost the wire to', peer, err);

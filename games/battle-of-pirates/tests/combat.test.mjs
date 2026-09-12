@@ -38,6 +38,26 @@ test('round robin skips sunk seats and wraps in 3v3', () => {
   for (let i = 0; i < 8; i++) { seen.push(cursor); cursor = b.nextTurn(cursor); }
   assert.deepEqual(seen, [0, 3, 2, 5, 0, 3, 2, 5]);
 });
+test('living teammates rotate formation after every full fleet cycle', () => {
+  for (const first of [0, 1]) {
+    const b = create(4, { first });
+    const initial = b.ships.map((ship) => ship.slot);
+    for (let turn = 0; turn < 4; turn++) {
+      aim(b); b.skipTurn(); advance(b, 0.36);
+    }
+    assert.deepEqual(b.ships.map((ship) => ship.slot), [initial[2], initial[3], initial[0], initial[1]]);
+  }
+});
+test('a direct hit deals the same damage to a sail and hull', () => {
+  const strike = (boxFor) => {
+    const b = create(2); aim(b); b.fire({ angle: -0.6, power: 0.5, card: 'round' });
+    const p = b.projectiles[0]; const box = boxFor(b, 1);
+    p.x = box.x0 - 30; p.y = (box.y0 + box.y1) / 2; p.vx = 1000; p.vy = 0;
+    b.step(0.06);
+    return b.ships[1].maxHp - b.ships[1].hp;
+  };
+  assert.equal(strike((b, i) => b.hullBox(i)), strike((b, i) => b.rigBox(i)));
+});
 test('three successful cannon attacks charge; pellets, misses, burn and specials do not double-charge', () => {
   const b = create(); aim(b);
   for (let n = 1; n <= 3; n++) {

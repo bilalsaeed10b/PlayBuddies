@@ -21,7 +21,7 @@
 import { fxSprites, bakeSea, drawSky, drawFallbackSea, drawRock, drawWaves, drawWeather, rockRadius } from '../game/sea';
 import { SHIPS, drawFlag, drawShip } from '../game/ships';
 import { HULLS, hullAt } from '../game/hulls';
-import { weatherFor, wetWeather, THUNDER_PERIOD, THUNDER_SOUND } from '../game/weather';
+import { weatherForRound, wetWeather, THUNDER_PERIOD, THUNDER_SOUND, type WeatherKind } from '../game/weather';
 import type { HullClass } from '../game/hulls';
 import {
   BALANCE,
@@ -169,8 +169,8 @@ const RING_CAP = 14;
 const WRECK_SETTLE = 1.3;
 /** Barrel length, so the ball leaves the muzzle rather than the deck. */
 const BARREL = 58;
-/** A rigging hit is real but glancing. */
-const RIG_MULT = 0.55;
+/** A solid cannonball hurts the same whether it finds planking or sail. */
+const RIG_MULT = 1;
 
 interface Box {
   x0: number;
@@ -366,6 +366,8 @@ export class BattleEngine {
    */
   private damageTexts: DamageText[] = [];
   private backdrop: HTMLCanvasElement | null = null;
+  /** The sky used to bake `backdrop`; random weather only rebuilds between rounds. */
+  private backdropWeather: WeatherKind | null = null;
   private acc = 0;
   private clock = 0;
   private shake = 0;
@@ -576,6 +578,15 @@ export class BattleEngine {
    * `from` is located in this round and the next entry (wrapping) is returned.
    */
   private nextTurn(from: number): number {
+    const round = this.livingRound();
+    if (round.length === 0) return from;
+    const pos = round.indexOf(from);
+    if (pos < 0) return round[0];
+    return round[(pos + 1) % round.length];
+  }
+
+  /** The current full turn cycle, interleaved so teams still alternate. */
+  private livingRound(): number[] {
     // Collect living seats per team, in seat-index order.
     const t0: number[] = [];
     const t1: number[] = [];
@@ -594,11 +605,46 @@ export class BattleEngine {
       if (i < t1.length) round.push(t1[i]);
     }
 
-    if (round.length === 0) return from;
+    return round;
+  }
 
-    const pos = round.indexOf(from);
-    if (pos < 0) return round[0];
-    return round[(pos + 1) % round.length];
+  /** Rotate living teammates when the full fleet cycle wraps. */
+  private rotateFormationIfRoundEnded() {
+    const round = this.livingRound();
+    // `turnNo` is shared by every peer. It keeps a first-team-two match from
+    // waiting for seat zero before it rotates, and naturally shortens a round
+    // after a ship sinks.
+    if (round.length < 3 || this.turnNo === 0 || this.turnNo % round.length !== 0) return;
+    for (const team of [0, 1] as Team[]) {
+      const fleet = this.afloat(team);
+      if (fleet.length < 2) continue;
+      const slots = fleet.map(i => this.ships[i].slot);
+      for (let i = 0; i < fleet.length; i++) {
+        const ship = this.ships[fleet[i]];
+        ship.slot = slots[(i + 1) % slots.length];
+        ship.anchorX = this.arena.anchor[team][ship.slot] ?? ship.anchorX;
+        ship.x = ship.anchorX;
+      }
+    }
+    this.drawOrder = this.ships.map((_, i) => i).sort((a, b) => this.waterLevelFor(a) - this.waterLevelFor(b));
+    this.logLine('fleets rotate formation', 'hit');
+  }
+
+  private restoreFormation(slots: number[] | undefined) {
+    if (!slots) return;
+    for (let i = 0; i < this.ships.length; i++) {
+      const slot = Math.round(slots[i]);
+      const anchors = this.arena.anchor[this.ships[i].team];
+      if (!Number.isFinite(slot) || anchors[slot] === undefined) continue;
+      this.ships[i].slot = slot;
+      this.ships[i].anchorX = anchors[slot];
+    }
+    this.drawOrder = this.ships.map((_, i) => i).sort((a, b) => this.waterLevelFor(a) - this.waterLevelFor(b));
+  }
+
+  /** The shown weather changes only on a complete fleet cycle, never mid-shot. */
+  get weather(): WeatherKind {
+    return weatherForRound(this.cfg.rules, this.cfg.seed, Math.floor(this.turnNo / Math.max(1, this.ships.length)));
   }
 
   /**
@@ -974,12 +1020,16 @@ export class BattleEngine {
     const speed = (BALANCE.MIN_SPEED + (this.arena.maxSpeed - BALANCE.MIN_SPEED) * power) * card.speed;
     const mouth = this.muzzle(shooter, angle);
     const volleyStart = this.projectiles.length;
+    const hull = this.hullOf(shooter);
+    // A seeded roll keeps the same critical balls on every replayed shot.
+    const criticalRoll = this.rngFor(this.turnNo * 211 + shooter * 37 + 17011);
 
     for (let i = 0; i < card.shots; i++) {
       // Fanned symmetrically about the aim, so a single-shot card is dead on
       // and a five-pellet card still centres where the player pointed.
       const offset = card.shots === 1 ? 0 : (i - (card.shots - 1) / 2) * card.spread;
       const a = angle + offset;
+      const critical = hull.critChance > 0 && criticalRoll() < hull.critChance;
       this.projectiles.push({
         x: mouth.x,
         y: mouth.y,
@@ -988,7 +1038,8 @@ export class BattleEngine {
         r: BALANCE.BALL_R * (card.shots > 2 ? 0.62 : 1),
         team: ship.team,
         from: shooter,
-        damage: card.flatDamage ?? BALANCE.DIRECT * card.damage * this.hullOf(shooter).damage,
+        damage: (card.flatDamage ?? BALANCE.DIRECT * card.damage * hull.damage) * (critical ? hull.critDamage : 1),
+        critical,
         flatSplash: card.flatSplash,
         blast: BALANCE.BLAST_R * card.blast * this.hullOf(shooter).blast,
         splash: this.hullOf(shooter).blast,
@@ -1187,6 +1238,7 @@ export class BattleEngine {
    */
   private reconcile(beacon: ShotPacket) {
     this.restoreCharge(beacon.ch);
+    this.restoreFormation(beacon.sl);
     let moved = false;
     for (let i = 0; i < this.ships.length; i++) {
       if (beacon.hp[i] !== undefined) {
@@ -1238,6 +1290,7 @@ export class BattleEngine {
       at: Date.now(),
       f: this.ships.map((s) => s.burn),
       d: this.ships.map((s) => Math.round(s.x)),
+      sl: this.ships.map((s) => s.slot),
       rk: this.rocks.map((r) => Math.round(r.hp)),
       o: this.turn,
     };
@@ -1302,6 +1355,7 @@ export class BattleEngine {
     if (!ahead) return false;
     this.clearAction();
     this.restoreCharge(ahead.ch);
+    this.restoreFormation(ahead.sl);
     if (ahead === this.beaconIn) {
       this.beaconIn = null;
       this.offT = 0;
@@ -1316,6 +1370,7 @@ export class BattleEngine {
       if (ahead.rk[i] !== undefined) this.rocks[i].hp = clamp(ahead.rk[i], 0, BALANCE.ROCK_HP);
     }
 
+    const skippedTurns = (ahead.tn ?? this.turnNo + 1) - this.turnNo;
     this.turnNo = ahead.tn ?? this.turnNo + 1;
     this.turn = this.aliveTurn(clamp(Math.round(ahead.o), 0, this.ships.length - 1));
     this.dropThrough(this.turnNo);
@@ -1327,7 +1382,10 @@ export class BattleEngine {
     this.offT = 0;
     this.skipping = false;
 
-    this.logLine('caught up with the fleet', 'miss');
+    // A single recent outcome is a routine delayed listener delivery, not a
+    // connection problem worth throwing in the player's face. The wire keeps
+    // a short action tail now; only a genuine multi-turn recovery is surfaced.
+    if (skippedTurns > 1) this.logLine('caught up with the fleet', 'miss');
     this.cfg.onHp?.(this.hp);
     if (this.afloat(0).length === 0 || this.afloat(1).length === 0) {
       this.finish();
@@ -1437,7 +1495,7 @@ export class BattleEngine {
     }
     const previousClock = this.clock;
     this.clock += dt;
-    if (weatherFor(this.cfg.rules) === 'thunder' && this.phase !== 'over'
+    if (this.weather === 'thunder' && this.phase !== 'over'
       && Math.floor((this.clock - THUNDER_SOUND) / THUNDER_PERIOD) > Math.floor((previousClock - THUNDER_SOUND) / THUNDER_PERIOD)
       && dt <= 0.25 && (typeof document === 'undefined' || !document.hidden)) {
       this.cfg.onSfx?.('thunder');
@@ -1726,7 +1784,7 @@ export class BattleEngine {
         if (p.through) this.tally.pierced = true;
       }
       this.earnCharge(p);
-      this.damage(struckShip, p.damage * mult, ix);
+      this.damage(struckShip, p.damage * mult, ix, p.critical);
       if (p.burn > 0) {
         this.ships[struckShip].burn = p.burn + 1;
         this.burnFrom[struckShip] = p.from;
@@ -1777,7 +1835,7 @@ export class BattleEngine {
     if (closest < p.blast && this.tally) this.tally.grazed = true;
   }
 
-  private damage(i: number, amount: number, fromX: number) {
+  private damage(i: number, amount: number, fromX: number, critical = false) {
     const ship = this.ships[i];
     if (ship.hp <= 0 || amount <= 0) return;
     amount = Math.min(ship.hp, amount);
@@ -1791,9 +1849,13 @@ export class BattleEngine {
     }
     ship.flash = Math.min(1, ship.flash + amount / 30);
     ship.lean += (fromX < ship.x ? 1 : -1) * Math.min(0.12, amount / 260);
-    this.shake = Math.min(34, this.shake + amount * 0.4);
+    this.shake = Math.min(34, this.shake + amount * (critical ? 0.62 : 0.4));
     this.cfg.onSfx?.('hull', clamp(amount / BALANCE.DIRECT, 0.2, 1));
-    this.spawnDamageText(ship.x, this.shipY(i) - 60, amount);
+    this.spawnDamageText(ship.x, this.shipY(i) - 60, amount, critical ? '#fb7185' : undefined, critical ? 'CRIT −' : '−');
+    if (critical) {
+      this.shout('critical hit!', 'big');
+      this.logLine(`${this.shipName(i)} took a critical hit`, 'big');
+    }
     this.cfg.onHp?.(this.hp);
   }
 
@@ -1872,6 +1934,7 @@ export class BattleEngine {
 
     if (packet) {
       this.restoreCharge(packet.ch);
+      this.restoreFormation(packet.sl);
       // Trust here is social, not cryptographic: these are friends in a room,
       // and a static site has no server to be the authority. But a single turn
       // still cannot take more than a turn's worth of hull off, so a tampered
@@ -1906,6 +1969,7 @@ export class BattleEngine {
       const shooter = this.turn;
       this.turnNo = next;
       this.turn = this.nextTurn(shooter);
+      this.rotateFormationIfRoundEnded();
 
       // Humans publish their own actions; the host publishes bot actions.
       // Only the host may also skip a silent remote captain. Duplicate skips
@@ -1935,6 +1999,7 @@ export class BattleEngine {
           ch: this.ships.map((s) => s.charge),
           f: this.ships.map((s) => s.burn),
           d: this.ships.map((s) => Math.round(s.x)),
+          sl: this.ships.map((s) => s.slot),
           rk: this.rocks.map((r) => Math.round(r.hp)),
           o: this.turn,
           ...(skipped ? { sk: 1 as const } : {}),
@@ -2409,10 +2474,6 @@ export class BattleEngine {
     const localSeaY = this.waterLevelFor(this.turn);
     for (let i = 0; i < dots * perDot; i++) {
       vy += BALANCE.GRAVITY * card.gravity * dt;
-      // The gale bends the guide exactly as much as it bends the ball. Without
-      // this the one aid the game gives a player pointed confidently at a
-      // place the shot could not reach -- and it did it only in a storm,
-      // which is precisely when the guide is being leaned on hardest.
       vx += this.gust * dt;
       x += vx * dt;
       y += vy * dt;
@@ -2449,7 +2510,8 @@ export class BattleEngine {
     // height with a different scale, which a height check alone would miss.
     this.bg = null;
 
-    if (!this.backdrop) this.backdrop = bakeSea(this.arena, q.fancy, wetWeather(weatherFor(this.cfg.rules)));
+    this.backdrop = null;
+    this.backdropWeather = null;
   }
 
   /** Screen point to world point, so a drag can be measured in world units. */
@@ -2537,6 +2599,8 @@ export class BattleEngine {
   render(ctx: CanvasRenderingContext2D, q: Quality) {
     const { canvas } = ctx;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
+    const weather = this.weather;
+    const storm = wetWeather(weather);
 
     // Letterbox bars, painted as sky above the horizon and sea below it
     // rather than a flat colour, so a wide desktop window reads as more sky
@@ -2561,13 +2625,16 @@ export class BattleEngine {
     }
     ctx.fillStyle = this.bg;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
+    this.drawLetterboxScenery(ctx, canvas, weather);
 
     const sx = this.shake ? (Math.random() - 0.5) * this.shake : 0;
     const sy = this.shake ? (Math.random() - 0.5) * this.shake : 0;
     ctx.setTransform(this.scale, 0, 0, this.scale, this.offX + sx * this.scale, this.offY + sy * this.scale);
 
-    const weather = weatherFor(this.cfg.rules);
-    const storm = wetWeather(weather);
+    if (!this.backdrop || this.backdropWeather !== weather) {
+      this.backdrop = bakeSea(this.arena, q.fancy, storm);
+      this.backdropWeather = weather;
+    }
     const night = Math.max(specialNightAmount(this.special), weather === 'snow' ? 0.35 : weather === 'mist' ? 0.16 : 0);
     if (this.backdrop) {
       drawSky(ctx, this.arena, night, q.fancy);
@@ -2601,6 +2668,52 @@ export class BattleEngine {
     this.drawOffscreenMarkers(ctx);
     this.drawCall(ctx);
     this.drawFeed(ctx);
+  }
+
+  /**
+   * The arena keeps its aspect ratio so aiming never stretches. Rather than
+   * leaving the resulting letterbox as flat paint, extend the same sky and
+   * water into it with a handful of cheap cloud and wave strokes.
+   */
+  private drawLetterboxScenery(ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement, weather: WeatherKind) {
+    const top = Math.max(0, Math.floor(this.offY));
+    const bottom = Math.min(canvas.height, Math.ceil(this.offY + this.arena.h * this.scale));
+    const w = canvas.width;
+    ctx.save();
+    if (top > 6) {
+      ctx.beginPath(); ctx.rect(0, 0, w, top); ctx.clip();
+      ctx.fillStyle = weather === 'thunder' ? 'rgba(20,37,66,0.36)' : 'rgba(204,232,247,0.08)';
+      for (let i = 0; i < 5; i++) {
+        const x = ((i * 0.23 + this.clock * 0.003) % 1) * w;
+        const y = top * (0.22 + (i % 3) * 0.23);
+        ctx.beginPath(); ctx.ellipse(x, y, w * 0.1, 20 + (i % 2) * 12, 0, 0, Math.PI * 2); ctx.fill();
+      }
+      if (weather === 'rain' || weather === 'thunder') {
+        ctx.strokeStyle = 'rgba(190,226,245,0.32)'; ctx.lineWidth = Math.max(1, this.dpr);
+        ctx.beginPath();
+        for (let i = 0; i < 42; i++) {
+          const x = (i * 97 + 41) % w;
+          const y = (i * 53 + this.clock * 180) % Math.max(1, top);
+          ctx.moveTo(x, y); ctx.lineTo(x, y + 20);
+        }
+        ctx.stroke();
+      }
+    }
+    if (bottom < canvas.height - 6) {
+      ctx.beginPath(); ctx.rect(0, bottom, w, canvas.height - bottom); ctx.clip();
+      ctx.strokeStyle = weather === 'snow' ? 'rgba(181,226,246,0.24)' : 'rgba(151,220,239,0.25)';
+      ctx.lineWidth = Math.max(1, this.dpr * 1.15);
+      for (let row = 0; row < 9; row++) {
+        const y = bottom + 18 + row * 22;
+        ctx.beginPath();
+        for (let x = 0; x <= w + 40; x += 50) {
+          const yy = y + Math.sin(x * 0.017 + this.clock * 1.25 + row) * 4;
+          if (x === 0) ctx.moveTo(x, yy); else ctx.lineTo(x, yy);
+        }
+        ctx.stroke();
+      }
+    }
+    ctx.restore();
   }
 
   private drawOneShip(ctx: CanvasRenderingContext2D, i: number, q: Quality) {
@@ -2998,7 +3111,7 @@ export class BattleEngine {
   }
 
   private drawGuide(ctx: CanvasRenderingContext2D, q: Quality) {
-    const arc = this.previewArc(q.aimDots);
+    const arc = this.previewArc(q.aimDots + this.hullOf(this.turn).aimDots);
     const color = TEAM_COLORS[this.ships[this.turn].team].light;
     ctx.save();
     for (let i = 0; i < arc.length; i++) {
