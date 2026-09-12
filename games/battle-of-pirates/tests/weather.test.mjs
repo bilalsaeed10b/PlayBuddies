@@ -64,7 +64,7 @@ test('rain falls vertically and the cached rain field follows changing arena siz
     const arena = arenaFor(fleet);
     const segments = [];
     let from;
-    const ctx = { globalAlpha: 1, save() {}, restore() {}, beginPath() {}, stroke() {}, ellipse() {}, rect() {}, clip() {},
+    const ctx = { globalAlpha: 1, save() {}, restore() {}, beginPath() {}, stroke() {}, fill() {}, fillRect() {}, ellipse() {}, rect() {}, clip() {},
       moveTo(x, y) { from = [x, y]; }, lineTo(x, y) { segments.push([...from, x, y]); } };
     drawWeather(ctx, arena, 3.2, 'rain', 35);
     assert.equal(segments.length, 35);

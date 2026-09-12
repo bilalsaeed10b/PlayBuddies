@@ -1038,11 +1038,10 @@ export class BattleEngine {
         r: BALANCE.BALL_R * (card.shots > 2 ? 0.62 : 1),
         team: ship.team,
         from: shooter,
-        damage: (card.flatDamage ?? BALANCE.DIRECT * card.damage * hull.damage) * (critical ? hull.critDamage : 1),
+        damage: (card.damage * hull.damage) * (critical ? hull.critDamage : 1),
         critical,
-        flatSplash: card.flatSplash,
+        splashDamage: card.splashDamage * this.hullOf(shooter).blast,
         blast: BALANCE.BLAST_R * card.blast * this.hullOf(shooter).blast,
-        splash: this.hullOf(shooter).blast,
         gravity: BALANCE.GRAVITY * card.gravity,
         pierce: Boolean(card.pierce),
         through: false,
@@ -1825,9 +1824,7 @@ export class BattleEngine {
       if (dist >= p.blast) continue;
 
       const falloff = 1 - dist / p.blast;
-      const dealt = p.flatSplash !== undefined
-        ? p.flatSplash * falloff * falloff
-        : BALANCE.BLAST * p.splash * falloff * falloff * (p.damage / BALANCE.DIRECT);
+      const dealt = p.splashDamage * falloff * falloff;
       if (dealt > 0.7) {
         this.damage(i, dealt, x);
       }

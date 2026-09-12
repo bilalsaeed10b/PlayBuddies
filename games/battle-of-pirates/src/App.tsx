@@ -761,6 +761,7 @@ export default function App() {
           onStart={startMatch}
           onSettings={() => setShowSettings(true)}
           onRules={() => setShowRules(true)}
+          onStats={() => setShowStats(true)}
           rules={rules}
           onFullscreen={() => toggleFullscreen(document.documentElement, !document.fullscreenElement)}
           onPlayOffline={() => {
@@ -1083,8 +1084,8 @@ function ShipGrid({
 }
 
 /**
- * The four battle roles, as cards. Each says exactly what changes in a match
- * instead of hiding the decision behind a wall of unexplained stat bars.
+ * The four battle roles, as cards. The bars make their strengths readable at
+ * a glance while the short description explains the unusual mechanic.
  */
 function HullGrid({
   selected,
@@ -1116,11 +1117,7 @@ function HullGrid({
               {isSelected && <Check className="h-3.5 w-3.5 shrink-0 text-amber-300" />}
             </div>
             <p className="text-[10px] leading-snug text-white/55 short:hidden">{hull.blurb}</p>
-            <div className="flex flex-wrap gap-1 short:hidden">
-              {hull.perks.map((perk) => (
-                <span key={perk} className="rounded-md bg-sky-300/10 px-1.5 py-1 text-[9px] font-bold text-sky-100/80">{perk}</span>
-              ))}
-            </div>
+            <HullMeters hull={hull} />
             <p className="text-[9px] font-black uppercase tracking-wider text-rose-300/80">
               {hull.cost}
             </p>
@@ -1279,6 +1276,7 @@ function RoomScreen({
   onStart,
   onSettings,
   onRules,
+  onStats,
   rules,
   onFullscreen,
   onPlayOffline,
@@ -1307,6 +1305,7 @@ function RoomScreen({
   onStart: () => void;
   onSettings: () => void;
   onRules: () => void;
+  onStats: () => void;
   rules: MatchRules;
   onFullscreen: () => void;
   onPlayOffline: () => void;
@@ -1422,6 +1421,9 @@ function RoomScreen({
         </p>
       </div>
       <div className="flex shrink-0 items-center gap-2">
+        <button onClick={onStats} className="panel flex items-center gap-2 rounded-2xl px-3 py-2 text-xs font-black text-sky-200" title="Captain statistics">
+          <Trophy className="h-4 w-4 text-amber-300" /> Stats
+        </button>
         <div className="panel flex items-center gap-2 rounded-2xl px-3 py-2 font-bold text-amber-300">
           <Coins className="h-4 w-4" /> {coins}
         </div>
@@ -1759,6 +1761,35 @@ function RoomScreen({
   );
 }
 
+/** Visual role profile. Values are relative to the strongest available role. */
+function HullMeters({ hull }: { hull: typeof HULLS[number] }) {
+  const meters = [
+    { label: 'Hull', value: hull.hp / 1.35, color: 'bg-emerald-400' },
+    { label: 'Guns', value: hull.damage / 1.18, color: 'bg-amber-400' },
+    { label: 'Evasion', value: (1.22 - hull.width) / 0.28, color: 'bg-sky-400' },
+    { label: 'Speed', value: hull.drift / 1.08, color: 'bg-violet-400' },
+    { label: 'Critical', value: hull.critChance / 0.32, color: 'bg-rose-400' },
+    { label: 'Aim', value: hull.aimDots / 4, color: 'bg-cyan-300' },
+  ];
+  return (
+    <div className="grid grid-cols-2 gap-x-2 gap-y-1.5 short:hidden">
+      {meters.map((meter) => {
+        const level = Math.max(0, Math.min(1, meter.value));
+        return (
+          <div key={meter.label} title={`${meter.label}: ${Math.round(level * 5)} of 5`}>
+            <div className="mb-0.5 flex justify-between text-[8px] font-black uppercase tracking-wider text-white/45">
+              <span>{meter.label}</span><span>{'●'.repeat(Math.max(1, Math.round(level * 5)))}</span>
+            </div>
+            <span className="block h-1.5 overflow-hidden rounded-full bg-white/10">
+              <span className={`block h-full rounded-full ${meter.color}`} style={{ width: `${Math.max(5, level * 100)}%` }} />
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 /** Host-only pre-match crew board. Teams are locked into the engine at launch. */
 function TeamManager({
   people,
@@ -1953,6 +1984,11 @@ function StatsPanel({
     { label: 'Damage dealt', value: String(Math.round(stats.damage)) },
     { label: 'Best run', value: stats.bestStreak > 0 ? `${stats.bestStreak} in a row` : ',' },
   ];
+  const profile = [
+    { label: 'Win rate', value: winRate, tone: 'bg-emerald-400', detail: `${stats.wins} victories` },
+    { label: 'Shot accuracy', value: acc, tone: 'bg-amber-400', detail: `${stats.hits} turns landed` },
+    { label: 'Iron on target', value: ballAcc, tone: 'bg-sky-400', detail: `${stats.ballsLanded} cannonballs hit` },
+  ];
 
   // Escape closes it too. See @shared/ui/dismiss.
   useEscape(true, onClose);
@@ -1992,6 +2028,23 @@ function StatsPanel({
                 sub={fav ? `${fav.n} fired` : undefined}
                 tone="sky"
               />
+            </div>
+
+            <div className="rounded-2xl bg-black/25 p-4">
+              <p className="mb-3 text-[11px] font-black uppercase tracking-[0.2em] text-white/45">Captain profile</p>
+              <div className="space-y-3">
+                {profile.map((metric) => (
+                  <div key={metric.label}>
+                    <div className="mb-1 flex items-baseline justify-between gap-3 text-[11px] font-bold">
+                      <span className="text-white/70">{metric.label}</span>
+                      <span className="tabular-nums text-white">{metric.value}% <span className="font-medium text-white/40">· {metric.detail}</span></span>
+                    </div>
+                    <span className="block h-2 overflow-hidden rounded-full bg-white/10">
+                      <span className={`block h-full rounded-full ${metric.tone}`} style={{ width: `${Math.max(metric.value > 0 ? 4 : 0, metric.value)}%` }} />
+                    </span>
+                  </div>
+                ))}
+              </div>
             </div>
 
             <div className="space-y-1 rounded-2xl bg-black/25 p-4">

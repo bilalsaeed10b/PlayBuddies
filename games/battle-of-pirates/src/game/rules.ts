@@ -219,8 +219,6 @@ export const BALANCE = {
   DIRECT: 22,
   /** Splash reach. A near miss in the water still rattles the hull. */
   BLAST_R: 140,
-  /** Splash damage at zero distance, falling linearly to nothing at BLAST_R. */
-  BLAST: 15,
   /**
    * Ceiling on any single resolution, used to clamp what a peer claims.
    *
@@ -394,11 +392,10 @@ export interface CardMeta {
   /** Projectiles fired, and how wide they fan out, in radians. */
   shots: number;
   spread: number;
-  /** Multipliers on the plain round. */
+  /** Exact direct-hit damage. */
   damage: number;
-  /** Exact direct-hit damage, independent of the firing hull's damage bonus. */
-  flatDamage?: number;
-  flatSplash?: number;
+  /** Exact maximum splash damage at the epicenter. */
+  splashDamage: number;
   blast: number;
   gravity: number;
   speed: number;
@@ -429,25 +426,17 @@ export interface CardMeta {
 /**
  * The common shells share the same direct hit. Multi-ball and utility cards
  * divide that damage across their payload, trading one large hit for coverage.
- */
-const POWER = 1.1;
-const Low_POWER = 0.6;
-/** Flat per-pellet damage for grapeshot's five balls -- see the comment on `grape` below. */
-const GRAPE_PELLET = 3 / BALANCE.DIRECT;
-/** Legacy damage ratio used by Bore Shot. */
-const FLAT_7 = 7 / BALANCE.DIRECT;
-
 export const CARDS: Record<CardId, CardMeta> = {
   round: {
     id: 'round', name: 'Round Shot', glyph: 'O', weight: 30,
     blurb: 'The honest one. Full powder, full range.',
-    shots: 1, spread: 0, damage: POWER, blast: 1, gravity: 1, speed: 1,
+    shots: 1, spread: 0, damage: 24, splashDamage: 15, blast: 1, gravity: 1, speed: 1,
   },
   /** Both balls can charge the special meter, but each can do so only once. */
   chain: {
     id: 'chain', name: 'Chain Shot', glyph: 'oo', weight: 16,
     blurb: 'Two linked 3-damage balls. Each hit charges your special.',
-    shots: 2, spread: 0.05, damage: 1, flatDamage: 3, blast: 0.85, gravity: 1, speed: 1,
+    shots: 2, spread: 0.05, damage: 3, splashDamage: 2, blast: 0.85, gravity: 1, speed: 1,
     linked: true, chargePerProjectile: true,
   },
   /**
@@ -457,7 +446,7 @@ export const CARDS: Record<CardId, CardMeta> = {
   grape: {
     id: 'grape', name: 'Grapeshot', glyph: '::', weight: 15,
     blurb: 'A fan of five. Each direct hit charges your special.',
-    shots: 5, spread: 0.08, damage: GRAPE_PELLET, blast: 0.55, gravity: 1, speed: 1,
+    shots: 5, spread: 0.08, damage: 3, splashDamage: 2, blast: 0.55, gravity: 1, speed: 1,
     chargePerProjectile: true,
   },
   /**
@@ -467,12 +456,12 @@ export const CARDS: Record<CardId, CardMeta> = {
   mortar: {
     id: 'mortar', name: 'Mortar', glyph: 'V', weight: 13,
     blurb: 'Steep shots only, forty-five degrees or more. Clears the mountain outright.',
-    shots: 1, spread: 0, damage: POWER, blast: 1.5, gravity: 1, speed: 1,
+    shots: 1, spread: 0, damage: 24, splashDamage: 17, blast: 1.5, gravity: 1, speed: 1,
   },
   firebomb: {
     id: 'firebomb', name: 'Firebomb', glyph: '*', weight: 11,
     blurb: 'Lights the deck at full range. Burns for four of their turns.',
-    shots: 1, spread: 0, damage: 1, flatDamage: 7, blast: 1.15, gravity: 1, speed: 1, burn: 4,
+    shots: 1, spread: 0, damage: 7, splashDamage: 5, blast: 1.15, gravity: 1, speed: 1, burn: 4,
   },
   /**
    * The reef's answer. Every other card either goes over a rock or stops at
@@ -482,28 +471,28 @@ export const CARDS: Record<CardId, CardMeta> = {
   bore: {
     id: 'bore', name: 'Bore Shot', glyph: '>', weight: 9,
     blurb: 'Punches straight through rock at the same range as every shot.',
-    shots: 1, spread: 0, damage: FLAT_7, blast: 0.9, gravity: 1, speed: 1,
+    shots: 1, spread: 0, damage: 7, splashDamage: 5, blast: 0.9, gravity: 1, speed: 1,
     pierce: true,
   },
   patch: {
     id: 'patch', name: 'Patch Kit', glyph: '+', weight: 10,
     blurb: 'Plug the holes, then fire anyway. Heals 14.',
-    shots: 1, spread: 0, damage: Low_POWER, blast: 0.9, gravity: 1, speed: 1, heal: 14,
+    shots: 1, spread: 0, damage: 13, splashDamage: 9, blast: 0.9, gravity: 1, speed: 1, heal: 14,
   },
   twin: {
     id: 'twin', name: 'Twin Shot', glyph: 'II', weight: 13,
     blurb: 'Two 8-damage cannonballs. The attack charges your special once.',
-    shots: 2, spread: 0.02, damage: 1, flatDamage: 8, blast: 0.8, gravity: 1, speed: 1,
+    shots: 2, spread: 0.02, damage: 8, splashDamage: 5, blast: 0.8, gravity: 1, speed: 1,
   },
   broadside: {
     id: 'broadside', name: 'Triple Shot', glyph: 'III', weight: 10,
     blurb: 'Three 6-damage cannonballs. The attack charges your special once.',
-    shots: 3, spread: 0.09, damage: 1, flatDamage: 6, blast: 0.72, gravity: 1, speed: 1,
+    shots: 3, spread: 0.09, damage: 6, splashDamage: 4, blast: 0.72, gravity: 1, speed: 1,
   },
   keg: {
     id: 'keg', name: 'Powder Keg', glyph: '#', weight: 8,
     blurb: 'A wide blast that punishes ships sailing close together.',
-    shots: 1, spread: 0, damage: 1, flatDamage: 9, flatSplash: 9, blast: 3.0, gravity: 1, speed: 1,
+    shots: 1, spread: 0, damage: 9, splashDamage: 9, blast: 3.0, gravity: 1, speed: 1,
   },
 };
 

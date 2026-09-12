@@ -102,20 +102,9 @@ export interface Projectile {
   damage: number;
   /** This ball was rolled as a direct critical hit by the firing hull. */
   critical?: boolean;
-  flatSplash?: number;
   blast: number;
-  /**
-   * Multiplier on the splash damage this ball does inside `blast`.
-   *
-   * Separate from the radius, because widening the ring alone is worth
-   * almost nothing: splash falls off with the square of the distance from a
-   * base of 15 against a 24-point direct hit, so the outer half of any blast
-   * radius does under four damage however far out it reaches. Measured, a
-   * Bomb Ketch given a 2.3x radius and nothing else went from 44% to 47% in
-   * a 3v3 -- the ring was reaching the neighbouring hull and then doing
-   * nothing worth having when it got there.
-   */
-  splash: number;
+  /** Absolute splash damage at the epicenter. */
+  splashDamage: number;
   gravity: number;
   pierce: boolean;
   /**

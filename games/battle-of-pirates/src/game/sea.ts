@@ -432,6 +432,7 @@ export function drawWeather(
   ctx.beginPath();
   ctx.rect(0, 0, w, h);
   ctx.clip();
+  drawWeatherAtmosphere(ctx, arena, clock, kind, count);
   if (kind === 'mist' || kind === 'snow') {
     ctx.fillStyle = kind === 'mist' ? 'rgba(185,213,220,0.06)' : 'rgba(135,190,236,0.08)';
     ctx.fillRect(0, 0, w, h);
@@ -486,6 +487,45 @@ export function drawWeather(
       ctx.beginPath(); ctx.moveTo(x, arena.seaY * 0.14); ctx.lineTo(x - 28, arena.seaY * 0.25);
       ctx.lineTo(x + 14, arena.seaY * 0.24); ctx.lineTo(x - 30, arena.seaY * 0.44); ctx.stroke();
     }
+  }
+  ctx.restore();
+}
+
+/**
+ * Broad, low-cost weather layers that sit behind ships and rain. They use a
+ * handful of filled shapes rather than filters or particle objects, so even a
+ * six-ship fight keeps its frame budget for the actual battle.
+ */
+function drawWeatherAtmosphere(
+  ctx: CanvasRenderingContext2D,
+  arena: Arena,
+  clock: number,
+  kind: WeatherKind,
+  count: number,
+) {
+  const { w, seaY } = arena;
+  ctx.save();
+  if (kind === 'rain' || kind === 'thunder') {
+    const storm = kind === 'thunder';
+    const clouds = count < 70 ? 4 : 7;
+    ctx.globalAlpha *= storm ? 0.72 : 0.45;
+    for (let i = 0; i < clouds; i++) {
+      const drift = ((i * 0.19 + clock * (storm ? 0.006 : 0.003)) % 1.2) * w - w * 0.1;
+      const y = seaY * (0.12 + (i % 3) * 0.11);
+      puff(ctx, drift, y, 0.8 + (i % 3) * 0.22, storm ? 'rgba(13, 24, 43, 0.9)' : 'rgba(47, 73, 91, 0.72)');
+    }
+    ctx.globalAlpha *= 0.7;
+    ctx.fillStyle = storm ? 'rgba(34, 61, 92, 0.17)' : 'rgba(87, 128, 148, 0.11)';
+    ctx.fillRect(0, seaY * 0.45, w, seaY * 0.3);
+  } else if (kind === 'mist') {
+    ctx.globalAlpha *= 0.5;
+    for (let i = 0; i < 5; i++) {
+      const x = ((i * 0.27 - clock * 0.005) % 1.25) * w + w * 0.1;
+      puff(ctx, x, seaY * (0.7 + (i % 2) * 0.09), 1.25, 'rgba(214, 237, 238, 0.16)');
+    }
+  } else if (kind === 'snow') {
+    ctx.fillStyle = 'rgba(184, 220, 255, 0.08)';
+    ctx.fillRect(0, 0, w, seaY);
   }
   ctx.restore();
 }
