@@ -13,7 +13,8 @@ import { useLobbyPresence, useFriendsOnline } from "@/hooks/usePresence";
 import { normalizeRoomCode, isValidRoomCode, LOBBY_TTL_MS, inviteTimestamps } from "@/lib/rooms";
 import { FRIEND_CODE_LENGTH, findByFriendCode, sendFriendRequest } from "@/lib/friends";
 import { rememberLobby, forgetLobby } from "@/lib/lastLobby";
-import { cleanWallet, EMPTY_WALLET, readWallet, recordMatch, writeWallet, type Wallet } from "@/lib/wallet";
+import { cleanWallet, readWallet, recordMatch, writeWallet } from "@/lib/wallet";
+import { gameSelectionUpdate } from "@/lib/lobbySettings";
 import type { Lobby, LobbyMessage, LobbyPlayer } from "@/types/game";
 import {
   doc,
@@ -28,6 +29,7 @@ import {
   orderBy,
   limit,
   deleteField,
+  runTransaction,
 } from "firebase/firestore";
 import {
   Users,
@@ -66,13 +68,13 @@ const CHAT_COOLDOWN_MS = 1000;
  * match simply breaking under them for no reason.
  */
 const HOST_MIGRATION_GRACE_MS = 6000;
+const HOST_LEASE_MS = 30_000;
 
 /**
  * Tracks pending leave operations to survive React Strict Mode unmount/remount.
  * If a component remounts for the same user/room before the timeout fires,
  * the leave is cancelled.
  */
-const pendingLeaves = new Map<string, NodeJS.Timeout>();
 
 function LobbyContent() {
   const searchParams = useSearchParams();
@@ -141,8 +143,7 @@ function LobbyContent() {
    * built during render, so a repaint there is not free, it is a reload of the
    * running game.
    */
-  const walletRef = useRef<Wallet>(EMPTY_WALLET);
-  const walletLoaded = useRef(false);
+  const walletSession = useRef<{ accountId: string; gameId: string; requestId: string } | null>(null);
 
   const presentUids = useLobbyPresence(roomId);
   // Always on, not just while the invite modal is open , the crew list also
@@ -270,17 +271,11 @@ function LobbyContent() {
     // would read identically to being kicked and bounce a player who is
     // mid-join right back out.
     let wasMember = false;
-    const leaveKey = `${user.uid}:${roomId}`;
-
     const join = async () => {
-      if (pendingLeaves.has(leaveKey)) {
-        clearTimeout(pendingLeaves.get(leaveKey));
-        pendingLeaves.delete(leaveKey);
-      }
       const profile: LobbyPlayer = {
         uid: user.uid,
-        displayName: user.displayName || "Player",
-        photoURL: user.photoURL || "",
+        displayName: (user.displayName || "Player").slice(0, 60),
+        photoURL: (user.photoURL || "").slice(0, 500),
         isReady: true,
         joinedAt: Date.now(),
       };
@@ -296,6 +291,7 @@ function LobbyContent() {
             gameId: null,
             players: { [user.uid]: profile },
             createdAt: serverTimestamp(),
+            hostSeenAt: serverTimestamp(),
             expiresAt: new Date(Date.now() + LOBBY_TTL_MS),
           });
           return;
@@ -312,10 +308,14 @@ function LobbyContent() {
           return;
         }
 
-        await updateDoc(roomRef, {
-          [`players.${user.uid}`]: profile,
-          updatedAt: serverTimestamp(),
-        });
+        // A second tab or reload must retain the player's current readiness
+        // and selected cosmetics instead of overwriting their existing slot.
+        if (!existing[user.uid]) {
+          await updateDoc(roomRef, {
+            [`players.${user.uid}`]: profile,
+            updatedAt: serverTimestamp(),
+          });
+        }
       } catch (e) {
         console.error("Error joining room:", e);
         if (!cancelled) setLookupFailed(true);
@@ -369,19 +369,21 @@ function LobbyContent() {
       cancelled = true;
       unsubRoom();
       unsubChat();
-      // Best-effort leave with a delay to survive Strict Mode double-mounts.
-      pendingLeaves.set(leaveKey, setTimeout(() => {
-        updateDoc(roomRef, { [`players.${user.uid}`]: deleteField() }).catch(() => {});
-        pendingLeaves.delete(leaveKey);
-      }, 2000));
+      // Presence owns connection lifetime. Removing a shared player slot here
+      // would evict the same user from every other open tab.
     };
   }, [user, roomId]);
 
+  // Keep a server-authoritative lease while the host is connected.
+  useEffect(() => {
+    if (!isHost || !user || !roomId) return;
+    const beat = () => updateDoc(doc(db, "lobbies", roomId), { hostSeenAt: serverTimestamp() }).catch(() => {});
+    beat();
+    const timer = window.setInterval(beat, 10_000);
+    return () => window.clearInterval(timer);
+  }, [isHost, user, roomId]);
+
   // ── Host migration ────────────────────────────────────────────────────────
-  // If the host's presence drops and *stays* dropped, the longest-present
-  // remaining player claims the room. Without this a host leaving stranded
-  // everyone permanently. With no grace period, it also fired on a presence
-  // blip that recovered on its own a moment later , see HOST_MIGRATION_GRACE_MS.
   useEffect(() => {
     if (!lobby || !user || presentUids.size === 0) return;
     if (lobby.hostId === user.uid) return;
@@ -393,12 +395,24 @@ function LobbyContent() {
 
     if (candidates[0]?.uid !== user.uid) return;
 
-    // Cancelled by this effect's own cleanup the moment `presentUids` changes
-    // again , including the moment it changes because the host came back.
     const timer = setTimeout(() => {
-      updateDoc(doc(db, "lobbies", roomId), {
-        hostId: user.uid,
-        [`players.${lobby.hostId}`]: deleteField(),
+      runTransaction(db, async (transaction) => {
+        const ref = doc(db, "lobbies", roomId);
+        const snap = await transaction.get(ref);
+        if (!snap.exists()) return;
+        const room = snap.data() as Lobby;
+        if (room.hostId !== lobby.hostId || !room.players?.[user.uid]) return;
+        const timestampMillis = (value: unknown) =>
+          value && typeof value === "object" && "toMillis" in value && typeof (value as { toMillis?: unknown }).toMillis === "function"
+            ? (value as { toMillis: () => number }).toMillis()
+            : 0;
+        const lastSeen = timestampMillis(room.hostSeenAt) || timestampMillis(room.createdAt);
+        if (Date.now() - lastSeen <= HOST_LEASE_MS) return;
+        transaction.update(ref, {
+          hostId: user.uid,
+          hostSeenAt: serverTimestamp(),
+          [`players.${room.hostId}`]: deleteField(),
+        });
       }).catch((e) => console.error("Host migration failed", e));
     }, HOST_MIGRATION_GRACE_MS);
 
@@ -449,33 +463,26 @@ function LobbyContent() {
    * frame that has not run its scripts yet has nothing listening, and "wait a
    * moment and hope" is not a handshake.
    */
-  const sendWallet = useCallback(async () => {
+  const sendWallet = useCallback(async (request: { gameId?: unknown; requestId?: unknown }) => {
     const frame = gameFrameRef.current?.contentWindow;
-    if (!frame) return;
-    if (user && !walletLoaded.current) {
-      try {
-        walletRef.current = await readWallet(user.uid);
-        walletLoaded.current = true;
-      } catch (err) {
-        console.error("Could not read the wallet:", err);
-      }
+    const gameId = typeof request.gameId === "string" ? request.gameId : "";
+    const requestId = typeof request.requestId === "string" ? request.requestId : "";
+    if (!frame || !user || !gameId || gameId !== lobby?.gameId || !requestId || requestId.length > 100) return;
+    if (walletSession.current?.requestId === requestId && walletSession.current.accountId === user.uid) return;
+    try {
+      const wallet = await readWallet(user.uid);
+      if (useAuthStore.getState().user?.uid !== user.uid || gameFrameRef.current?.contentWindow !== frame) return;
+      walletSession.current = { accountId: user.uid, gameId, requestId };
+      frame.postMessage({
+        source: "playbuddies-host", type: "wallet", accountId: user.uid, gameId, requestId,
+        coins: wallet.coins[gameId] ?? 0, unlocks: wallet.unlocks[gameId] ?? [],
+      }, window.location.origin);
+    } catch (err) {
+      console.error("Could not read the wallet:", err);
     }
-    frame.postMessage(
-      {
-        source: "playbuddies-host",
-        type: "wallet",
-        coins: walletRef.current.coins,
-        unlocks: walletRef.current.unlocks,
-      },
-      "*",
-    );
-  }, [user]);
+  }, [user, lobby?.gameId]);
 
-  // A different account gets a different purse, so drop the cached one.
-  useEffect(() => {
-    walletLoaded.current = false;
-    walletRef.current = EMPTY_WALLET;
-  }, [user?.uid]);
+  useEffect(() => { walletSession.current = null; }, [user?.uid, lobby?.gameId]);
 
   /**
    * Everything a game says to the page it is embedded in.
@@ -510,6 +517,7 @@ function LobbyContent() {
       const data = e.data;
       if (!data || data.source !== "playbuddies-game") return;
       if (e.source !== gameFrameRef.current?.contentWindow) return;
+      if (e.origin !== window.location.origin) return;
 
       if (data.type === "fullscreen") {
         setIsPseudoFull(Boolean(data.value));
@@ -528,15 +536,16 @@ function LobbyContent() {
       }
 
       if (data.type === "wallet-request") {
-        void sendWallet();
+        void sendWallet(data);
         return;
       }
 
       if (data.type === "wallet-save") {
-        if (!user) return;
-        const next = cleanWallet({ coins: data.coins, unlocks: data.unlocks });
-        walletRef.current = next;
-        void writeWallet(user.uid, next).catch((err) =>
+        const session = walletSession.current;
+        if (!user || !session || data.accountId !== user.uid || session.accountId !== user.uid || data.gameId !== session.gameId || data.gameId !== lobby?.gameId || data.requestId !== session.requestId) return;
+        const gameId = session.gameId;
+        const next = cleanWallet({ coins: { [gameId]: data.coins }, unlocks: { [gameId]: data.unlocks } });
+        void writeWallet(user.uid, gameId, next).catch((err) =>
           console.error("Could not save the wallet:", err),
         );
         return;
@@ -557,7 +566,7 @@ function LobbyContent() {
     // function identity changed.
     // router is intentionally omitted — Next.js router identity is stable.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user, sendWallet, clearStats]);
+  }, [user, sendWallet, clearStats, lobby?.gameId]);
 
   const copyLink = () => {
     navigator.clipboard.writeText(window.location.href).catch(() => {});
@@ -580,35 +589,10 @@ function LobbyContent() {
   const selectGame = async (gameId: string) => {
     if (!isHost) return;
     try {
-      // `fishIndex`/`role` are the small per-player schema every game shares
-      // (see the security rules), so a face picked in one game was still
-      // sitting in the doc when the next game's picker read it -- showing up
-      // there as somebody else's fish already locked in, in whatever
-      // unrelated skin happens to share that index. Games differ entirely on
-      // what index N means, so a value from the last game is never valid for
-      // the next one and has to be cleared here, the one place a game change
-      // actually happens, rather than in every game.
-      //
-      // isReady is reset to true, not cleared. Ready is opt-out everywhere
-      // else in this file (see join()) -- deleting it here made it read as
-      // falsy instead, so every game switch silently un-readied the whole
-      // room with nothing on screen explaining why the host suddenly could
-      // not start.
-      const reset: Record<string, ReturnType<typeof deleteField> | true> = {};
-      for (const uid of Object.keys(lobby?.players ?? {})) {
-        reset[`players.${uid}.fishIndex`] = deleteField();
-        reset[`players.${uid}.role`] = deleteField();
-        reset[`players.${uid}.isReady`] = true;
-      }
-      await updateDoc(doc(db, "lobbies", roomId), {
-        gameId,
-        matchStarted: false,
-        matchRules: deleteField(),
-        matchSeed: deleteField(),
-        battleTeams: deleteField(),
-        quoridorTeams: deleteField(),
-        ...reset,
-      });
+      await updateDoc(
+        doc(db, "lobbies", roomId),
+        gameSelectionUpdate(gameId, Object.keys(lobby?.players ?? {})),
+      );
     } catch (e) {
       console.error("Error selecting game:", e);
     }
@@ -1259,6 +1243,7 @@ function LobbyContent() {
             >
               <iframe
                 id="game-iframe"
+                key={`${user?.uid ?? "guest"}:${lobby.gameId}`}
                 ref={gameFrameRef}
                 allowFullScreen
                 src={gameUrl(lobby.gameId, {

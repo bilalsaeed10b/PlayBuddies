@@ -88,17 +88,16 @@ function dirSize(dir) {
 
 if (!fs.existsSync(GAMES_DIR)) fail('games/ directory not found');
 
-const ids = fs
+const allIds = fs
   .readdirSync(GAMES_DIR, { withFileTypes: true })
   .filter((e) => e.isDirectory() && !e.name.startsWith('.'))
-  .map((e) => e.name)
-  .filter((id) => (only ? id === only : true));
+  .map((e) => e.name);
 
-if (only && ids.length === 0) fail(`no game named "${only}" in games/`);
+if (only && !allIds.includes(only)) fail(`no game named "${only}" in games/`);
 
 const registry = [];
 
-for (const id of ids) {
+for (const id of allIds) {
   const dir = path.join(GAMES_DIR, id);
   const meta = readManifest(dir, id);
   if (!meta) {
@@ -106,7 +105,9 @@ for (const id of ids) {
     continue;
   }
 
-  if (registryOnly) {
+  // A one-game build is a fast local iteration path, but the generated catalog
+  // must always describe every game or a later app build hides the others.
+  if (registryOnly || (only && id !== only)) {
     registry.push(meta);
     continue;
   }
@@ -118,6 +119,8 @@ for (const id of ids) {
       log(`installing deps for ${id}…`);
       execSync('npm install', { cwd: dir, stdio: 'inherit' });
     }
+    log(`typechecking ${id}…`);
+    execSync('npx tsc --noEmit', { cwd: dir, stdio: 'inherit' });
     log(`building ${id}…`);
     // base=./ keeps the bundle working under any basePath, including the
     // /PlayBuddies/ prefix GitHub Pages serves from.

@@ -11,7 +11,7 @@ export default function PrivacyPage() {
   return (
     <LegalPage
       title="Privacy"
-      updated="21 August 2026"
+      updated="13 September 2026"
       intro="PlayBuddies is a free hobby project. It is not funded by advertising and it does not make money from anyone who visits, so there is no reason for it to gather anything about you beyond what it takes to sign you in and put you in a room with your friends."
     >
       <Section title="The short version">
@@ -51,13 +51,13 @@ export default function PrivacyPage() {
             <>
               <strong className="text-white">Lobby membership.</strong> While you
               are in a room, the room knows you are in it and which game is
-              selected. Rooms are temporary and are cleared once they expire.
+              selected. Expired rooms cannot be reused; records may remain until
+              they are deleted.
             </>,
             <>
-              <strong className="text-white">An online flag.</strong> A single
-              true or false value while a PlayBuddies tab is open, so friends can
-              see who is around. It is removed the moment the tab closes or the
-              connection drops.
+              <strong className="text-white">Online presence.</strong> Each open
+              tab has its own connection marker, so friends can see who is around.
+              The marker is removed when Firebase detects that connection closed.
             </>,
             <>
               <strong className="text-white">Games played and games won.</strong>{" "}
@@ -67,6 +67,11 @@ export default function PrivacyPage() {
               <strong className="text-white">Coins and unlocked items.</strong>{" "}
               The in-game currency you earn and the cosmetic items you have
               bought with it.
+            </>,
+            <>
+              <strong className="text-white">Lobby chat and invitations.</strong>{" "}
+              Messages include your name, account ID, message and sending time.
+              Invitations store the sender, recipient, room and expiry time.
             </>,
           ]}
         />
@@ -84,8 +89,7 @@ export default function PrivacyPage() {
             "Analytics. No page view counts, no session recordings, no heatmaps, no visitor statistics.",
             "Your location, your contacts, your browsing history or anything else on your device.",
             "Payment details. Nothing on PlayBuddies is for sale, so there is nothing to pay with.",
-            "Messages. There is no chat feature, so there are no chat logs.",
-            "Anything at all about visitors who never sign in. Browse the site without signing in and no record of you is created.",
+            "A PlayBuddies account record for visitors who never sign in. Hosting providers may process ordinary request and connection logs.",
           ]}
         />
       </Section>
@@ -93,18 +97,19 @@ export default function PrivacyPage() {
       <Section title="Things kept in your own browser">
         <p>
           A few small values are saved in your browser rather than on a server.
-          Game settings such as volume, the last room you were in, and a local
-          copy of your coin balance. They never leave your device. Clearing your
-          browser data removes them.
+          Game settings such as volume and the last room you visited are saved
+          locally. Standalone games save coins and unlocks locally; signed-in
+          lobby games save them to your Firebase account for use on another device.
+          Clearing browser data removes local values, not account data.
         </p>
       </Section>
 
       <Section title="Getting rid of your data">
         <p>
-          Signing out ends your session and clears the online flag straight away.
-          If you want the account itself deleted along with everything listed
-          above, ask and it will be removed. There is no waiting period and no
-          form to fill in.
+          Signing out ends this browser session. Its presence connection is
+          removed when Firebase detects the disconnect, while other open sessions
+          may remain online. Signing out does not delete account data. Account
+          deletion is a manual request and the site has no automatic deletion flow.
         </p>
       </Section>
 

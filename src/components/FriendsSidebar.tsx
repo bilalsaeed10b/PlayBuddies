@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState, startTransition } from "react";
 import { usePathname } from "next/navigation";
-import { doc, getDoc, addDoc, collection } from "firebase/firestore";
+import { doc, onSnapshot, addDoc, collection } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useAuthStore } from "@/store/useAuthStore";
 import { useGameplayStore } from "@/store/useGameplayStore";
@@ -45,7 +45,8 @@ export default function FriendsSidebar() {
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<FriendProfile[]>([]);
   const [searchState, setSearchState] = useState<"idle" | "searching" | "empty">("idle");
-  const [myCode, setMyCode] = useState<string>("");
+  const [codeProfile, setCodeProfile] = useState({ uid: "", code: "" });
+  const myCode = codeProfile.uid === user?.uid ? codeProfile.code : "";
   const [sentTo, setSentTo] = useState<string | null>(null);
   const [notice, setNotice] = useState<string>("");
 
@@ -60,13 +61,11 @@ export default function FriendsSidebar() {
   const onlineUids = useFriendsOnline(friendUids);
 
   useEffect(() => {
-    if (!user || !isOpen || myCode) return;
-    getDoc(doc(db, "profiles", user.uid))
-      .then((snap) => {
-        if (snap.exists()) setMyCode(snap.data().friendCode || "");
-      })
-      .catch((e) => console.error("Could not load friend code", e));
-  }, [user, isOpen, myCode]);
+    if (!user || !isOpen) return;
+    return onSnapshot(doc(db, "profiles", user.uid), (snap) => {
+      setCodeProfile({ uid: user.uid, code: snap.data()?.friendCode || "" });
+    }, (e) => console.error("Could not load friend code", e));
+  }, [user, isOpen]);
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();

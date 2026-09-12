@@ -9,7 +9,8 @@ import { FRIEND_CODE_LENGTH, generateFriendCode } from "@/lib/rooms";
 import { useOnlinePresence } from "@/hooks/usePresence";
 
 const SYNC_TTL_MS = 24 * 60 * 60 * 1000;
-const syncKey = (uid: string) => `pb_profile_sync_v1_${uid}`;
+// Bump this whenever the profile schema needs to be rechecked for every user.
+const syncKey = (uid: string) => `pb_profile_sync_v2_${uid}`;
 
 /**
  * Records that this browser has already reconciled the signed-in user's

@@ -9,6 +9,7 @@ import { auth, db } from "@/lib/firebase";
 import { signOut } from "firebase/auth";
 import { doc, getDoc, setDoc, updateDoc, serverTimestamp } from "firebase/firestore";
 import { getRememberedLobby, forgetLobby } from "@/lib/lastLobby";
+import { gameSelectionUpdate } from "@/lib/lobbySettings";
 import { PLAYABLE_GAMES, gameAccent, playerCountLabel } from "@/lib/games";
 import GameThumb from "@/components/GameThumb";
 import AuthGuard from "@/components/AuthGuard";
@@ -67,7 +68,7 @@ export default function DashboardPage() {
     const fetchStats = async () => {
       try {
         const snap = await getDoc(doc(db, "users", user.uid));
-        if (cancelled || !snap.exists()) return;
+        if (cancelled || !snap.exists() || useAuthStore.getState().user?.uid !== user.uid) return;
         const data = snap.data();
         const games = data.stats?.gamesPlayed || 0;
         const freshStats = { gamesPlayed: games };
@@ -114,7 +115,10 @@ export default function DashboardPage() {
         const snap = await getDoc(doc(db, "lobbies", remembered));
         if (snap.exists() && snap.data().status !== "completed") {
           if (gameId && snap.data().hostId === user.uid) {
-            await updateDoc(doc(db, "lobbies", remembered), { gameId });
+            await updateDoc(
+              doc(db, "lobbies", remembered),
+              gameSelectionUpdate(gameId, Object.keys(snap.data().players || {})),
+            );
           }
           router.push(`/lobby?room=${remembered}`);
           return;
@@ -138,12 +142,13 @@ export default function DashboardPage() {
         players: {
           [user.uid]: {
             uid: user.uid,
-            displayName: user.displayName || "Player",
-            photoURL: user.photoURL || "",
+            displayName: (user.displayName || "Player").slice(0, 60),
+            photoURL: (user.photoURL || "").slice(0, 500),
             isReady: false,
           },
         },
         createdAt: serverTimestamp(),
+        hostSeenAt: serverTimestamp(),
         expiresAt: new Date(Date.now() + LOBBY_TTL_MS),
       });
       router.push(`/lobby?room=${roomId}`);

@@ -85,6 +85,7 @@ export class LastGaspEngine {
   pieces = 0;
   phase: Phase = 'settingWord';
   winner: number | null = null;
+  winningTeam: number | null = null;
 
   /** The current word. Empty until it has actually been set , see the wire-protocol note on secrecy. */
   word = '';
@@ -211,6 +212,7 @@ export class LastGaspEngine {
     this.history = [];
     this.phase = this.rules.mode === 'teams' ? 'suggesting' : 'settingWord';
     this.winner = null;
+    this.winningTeam = null;
     this.setterSeat = 0;
     this.settingTeam = 0;
     this.resetRound();
@@ -390,7 +392,10 @@ export class LastGaspEngine {
         p.total += p.round;
         p.round = 0;
       }
-      this.winner = this.standings()[0]?.seat ?? null;
+      this.winningTeam = this.rules.mode === 'teams' ? this.teamStandings()[0]?.team ?? null : null;
+      this.winner = this.standings().find((row) =>
+        this.winningTeam === null || this.teamOf(row.seat) === this.winningTeam,
+      )?.seat ?? null;
     }
   }
 
@@ -406,6 +411,12 @@ export class LastGaspEngine {
     return this.players
       .map((p, seat) => ({ seat, total: p.total, round: p.round }))
       .sort((a, b) => b.total - a.total || b.round - a.round || a.seat - b.seat);
+  }
+
+  didWin(seat: number): boolean {
+    return this.phase === 'over' && (this.winningTeam !== null
+      ? this.teamOf(seat) === this.winningTeam
+      : this.winner === seat);
   }
 
   /** Per-team totals, best first , only meaningful in Teams. */

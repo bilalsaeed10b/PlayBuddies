@@ -135,7 +135,8 @@ service cloud.firestore {
 
     // ─── Friend connections ───
     match /connections/{connId} {
-      allow get: if signedIn() && request.auth.uid in resource.data.participants;
+      allow get: if signedIn() && (!exists(/databases/$(database)/documents/connections/$(connId))
+                     || request.auth.uid in resource.data.participants);
       allow list: if signedIn();
 
       allow create: if signedIn()
@@ -192,31 +193,33 @@ service cloud.firestore {
         return signedIn() && request.auth.uid in resource.data.players;
       }
 
-      /**
-       * True when the write only touches this caller's own slot in the map.
-       *
-       * The per-field entries exist because games write into their own player
-       * record: `role` picks fire or water, `fishIndex` picks a fish. A game
-       * can therefore never touch another player's slot, or anything outside
-       * the players map.
-       */
       function touchesOnlyOwnPlayerSlot() {
-        return touched().hasOnly([
-          'players.' + request.auth.uid,
-          'players.' + request.auth.uid + '.isReady',
-          'players.' + request.auth.uid + '.role',
-          'players.' + request.auth.uid + '.fishIndex',
-          'updatedAt'
-        ]);
+        let uid = request.auth.uid;
+        let next = incoming().players;
+        let own = next.get(uid, {});
+        return touched().hasOnly(['players', 'updatedAt'])
+               && next is map
+               && next.diff(resource.data.players).affectedKeys().hasOnly([uid])
+               && (!(uid in next) || (
+                 own.keys().hasOnly(['uid', 'displayName', 'photoURL', 'isReady', 'joinedAt', 'role', 'fishIndex'])
+                 && own.uid == uid
+                 && own.displayName is string && own.displayName.size() <= 60
+                 && own.photoURL is string && own.photoURL.size() <= 500
+                 && own.isReady is bool
+               ));
       }
 
-      /**
-       * Shared in-match state any participant may advance — collecting a gem is
-       * a legitimate action by either player. Deliberately narrow: it cannot
-       * touch hostId, players, status or gameId.
-       */
-      function touchesOnlyGameplayState() {
-        return touched().hasOnly(['collectedGems', 'level', 'matchStarted', 'updatedAt']);
+      function canClaimHost() {
+        let previous = resource.data.hostId;
+        let lastSeen = resource.data.get('hostSeenAt', resource.data.createdAt);
+        return isMember()
+               && lastSeen is timestamp
+               && request.time > lastSeen + duration.value(30, 's')
+               && touched().hasOnly(['hostId', 'hostSeenAt', 'players'])
+               && incoming().hostId == request.auth.uid
+               && incoming().hostSeenAt == request.time
+               && !(previous in incoming().players)
+               && incoming().players.diff(resource.data.players).affectedKeys().hasOnly([previous]);
       }
 
       // A room code is a capability: knowing it lets you read the room. But
@@ -230,26 +233,16 @@ service cloud.firestore {
 
       allow create: if signedIn()
                     && incoming().hostId == request.auth.uid
+                    && incoming().hostSeenAt == request.time
                     && incoming().players.size() <= 8
                     && incoming().status in ['waiting', 'playing', 'completed'];
 
-      allow update: if
-        // The host controls game selection and match state.
-        (isLobbyHost() && incoming().players.size() <= 8)
-        ||
-        // Everyone else may only join, leave, or ready-up — themselves.
-        (signedIn()
-         && touchesOnlyOwnPlayerSlot()
-         && incoming().players.size() <= 8)
-        ||
-        // In-match progress, writable by anyone actually in the room.
-        (isMember() && touchesOnlyGameplayState())
-        ||
-        // Host migration: a member may claim an abandoned room. The old host is
-        // removed in the same write, so this cannot hijack a live one.
-        (isMember()
-         && touched().hasOnly(['hostId', 'players.' + resource.data.hostId])
-         && incoming().hostId == request.auth.uid);
+      allow update: if incoming().players is map && incoming().players.size() <= 8 && (
+        (isLobbyHost()
+         && (!touched().hasAny(['hostSeenAt']) || incoming().hostSeenAt == request.time))
+        || (signedIn() && touchesOnlyOwnPlayerSlot())
+        || canClaimHost()
+      );
 
       allow delete: if isLobbyHost();
 

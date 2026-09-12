@@ -101,12 +101,12 @@ export function answers(): Answer[] {
 
 export const ANSWER_COUNT = () => answers().length;
 
-/**
- * The words players may submit. Keeping this tied to the curated answer list
- * gives the game a small, predictable English dictionary without accepting
- * arbitrary letter strings as a "word".
- */
-export function isEnglishWord(word: string): boolean {
-  if (!wordCache) wordCache = new Set(answers().map((answer) => answer.word));
+/** Full offline English dictionary for player-supplied words. */
+import dictionary from '../../node_modules/word-list/words.txt?raw';
+
+export function isEnglishWord(raw: string): boolean {
+  const word = raw.trim().toUpperCase();
+  if (!/^[A-Z]{3,18}$/.test(word)) return false;
+  if (!wordCache) wordCache = new Set(dictionary.split(/\r?\n/).map((entry) => entry.toUpperCase()));
   return wordCache.has(word);
 }

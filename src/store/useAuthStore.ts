@@ -22,7 +22,11 @@ export const useAuthStore = create<AuthState>((set) => ({
   loading: true,
   stats: null,
   statsFetchedAt: 0,
-  setUser: (user) => set({ user }),
+  setUser: (user) => set((state) =>
+    state.user?.uid === user?.uid
+      ? { user }
+      : { user, stats: null, statsFetchedAt: 0 },
+  ),
   setLoading: (loading) => set({ loading }),
   setStats: (stats) => set({ stats, statsFetchedAt: Date.now() }),
   clearStats: () => set({ stats: null, statsFetchedAt: 0 }),

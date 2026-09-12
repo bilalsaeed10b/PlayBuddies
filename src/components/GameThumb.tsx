@@ -16,6 +16,9 @@ export default function GameThumb({
   size?: number;
 }) {
   return (
+    // The static export publishes these pre-sized files directly; next/image
+    // would require an unavailable optimization server at runtime.
+    // eslint-disable-next-line @next/next/no-img-element
     <img
       src={gameThumbnail(game)}
       alt={game.name}

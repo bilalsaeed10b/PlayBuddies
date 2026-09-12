@@ -56,9 +56,10 @@ export interface Lobby {
   /** Set when the match starts; the game runs local co-op instead of waiting for a peer. */
   soloMode?: boolean;
   collectedGems?: Record<string, boolean>;
-  level?: number;
-  createdAt?: unknown;
-  expiresAt?: unknown;
+    level?: number;
+    createdAt?: unknown;
+    hostSeenAt?: unknown;
+    expiresAt?: unknown;
 }
 
 export interface LobbyMessage {

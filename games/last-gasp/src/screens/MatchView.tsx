@@ -225,7 +225,7 @@ export default function MatchView({
         const claimed = packet.a;
         const action: Action =
           claimed.t === 'word'
-            ? { t: 'word', s: seat, w: cleanWord(claimed.w) }
+            ? { t: 'word', s: seat, w: claimed.w }
             : claimed.t === 'vote'
               ? { t: 'vote', s: seat, pick: claimed.pick }
               : claimed.t === 'guess'
@@ -492,7 +492,7 @@ export default function MatchView({
   useEffect(() => {
     if (engine.phase !== 'over') return;
     const mine = config.localSeats[0] ?? 0;
-    const won = engine.winner !== null && localSet.has(engine.winner);
+    const won = [...localSet].some((seat) => engine.didWin(seat));
     audioService.playEnd(won);
     onResult(won, engine.players[mine]?.total ?? 0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -760,10 +760,12 @@ export default function MatchView({
           <div className="max-h-[88dvh] w-full max-w-sm overflow-y-auto overscroll-contain space-y-4 rounded-[2rem] border-2 border-slate-600/60 bg-slate-900 p-6 text-center">
             <Trophy className="mx-auto h-11 w-11 text-amber-400" />
             <h2 className="text-3xl font-black leading-none text-slate-50">
-              {engine.winner !== null && localSet.has(engine.winner) ? 'You won it' : 'They won it'}
+              {[...localSet].some((seat) => engine.didWin(seat)) ? 'You won it' : 'They won it'}
             </h2>
             <p className="text-sm font-bold text-slate-400">
-              {config.seats[engine.winner ?? 0]?.name} finished on {engine.players[engine.winner ?? 0]?.total ?? 0}.
+              {engine.winningTeam !== null
+                ? `${teamNameFor(engine.winningTeam)} finished on ${teamStandings[0]?.total ?? 0}.`
+                : `${config.seats[engine.winner ?? 0]?.name} finished on ${engine.players[engine.winner ?? 0]?.total ?? 0}.`}
             </p>
 
             {teams && (
@@ -843,7 +845,7 @@ function WordEntry({
         <input
           autoFocus
           value={value}
-          onChange={(e) => onChange(cleanWord(e.target.value))}
+          onChange={(e) => onChange(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && onSubmit()}
           placeholder="Type it here…"
           aria-label={label}

@@ -1,4 +1,4 @@
-import { doc, getDoc, increment, updateDoc } from "firebase/firestore";
+import { doc, FieldPath, getDoc, increment, updateDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 
 /**
@@ -71,15 +71,16 @@ export function cleanWallet(raw: { coins?: unknown; unlocks?: unknown }): Wallet
 
 export async function readWallet(uid: string): Promise<Wallet> {
   const snap = await getDoc(doc(db, "users", uid));
-  if (!snap.exists()) return EMPTY_WALLET;
+  if (!snap.exists()) throw new Error("Wallet account record has not been initialized yet");
   return cleanWallet(snap.data() as { coins?: unknown; unlocks?: unknown });
 }
 
-export async function writeWallet(uid: string, wallet: Wallet): Promise<void> {
-  await updateDoc(doc(db, "users", uid), {
-    coins: wallet.coins,
-    unlocks: wallet.unlocks,
-  });
+export async function writeWallet(uid: string, gameId: string, wallet: Wallet): Promise<void> {
+  await updateDoc(
+    doc(db, "users", uid),
+    new FieldPath("coins", gameId), wallet.coins[gameId] ?? 0,
+    new FieldPath("unlocks", gameId), wallet.unlocks[gameId] ?? [],
+  );
 }
 
 /**

@@ -107,11 +107,11 @@ export const MAX_WORD_LEN = 18;
  * A word attempt, reduced to something safe to store, replay and draw.
  *
  * This string is the one piece of free text in the whole protocol , every
- * other field is a number , so it is stripped to A-Z here, on the way in,
- * rather than trusted anywhere downstream.
+ * other field is a number. Invalid characters are rejected by validation,
+ * rather than silently stripped into a different valid word.
  */
 export function cleanWord(raw: string): string {
-  return raw.toUpperCase().replace(/[^A-Z]/g, '').slice(0, MAX_WORD_LEN);
+  return raw.trim().toUpperCase();
 }
 
 /**

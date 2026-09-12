@@ -6,9 +6,8 @@ import { collection, query, where, onSnapshot, doc, deleteDoc } from "firebase/f
 import { useAuthStore } from "@/store/useAuthStore";
 import { motion, AnimatePresence } from "framer-motion";
 import { useRouter } from "next/navigation";
+import { inviteExpiry } from "@/lib/invites";
 import { MessageCircle, X, Check } from "lucide-react";
-
-const INVITE_TTL_MS = 60_000;
 
 interface Invite {
   id: string;
@@ -16,6 +15,7 @@ interface Invite {
   fromName: string;
   roomId: string;
   createdAt: number;
+  expiresAt: number;
 }
 
 export default function InviteListener() {
@@ -37,8 +37,9 @@ export default function InviteListener() {
 
         snapshot.forEach((docSnap) => {
           const data = docSnap.data();
-          const createdAt = data.createdAt ?? data.timestamp ?? 0;
-          if (now - createdAt > INVITE_TTL_MS) {
+          const createdAt = typeof data.createdAt === "number" ? data.createdAt : 0;
+          const expiresAt = inviteExpiry(data);
+          if (!expiresAt || now >= expiresAt) {
             // Recipient-side cleanup. Invites for users who never sign in again
             // are swept by the scheduled cleanup, not from here.
             deleteDoc(doc(db, "invites", docSnap.id)).catch(() => {});
@@ -49,6 +50,7 @@ export default function InviteListener() {
               fromName: data.fromName || "A friend",
               roomId: data.roomId,
               createdAt,
+              expiresAt,
             });
           }
         });
@@ -67,7 +69,7 @@ export default function InviteListener() {
     if (invites.length === 0) return;
     const timer = setInterval(() => {
       const now = Date.now();
-      setInvites((prev) => prev.filter((i) => now - i.createdAt <= INVITE_TTL_MS));
+      setInvites((prev) => prev.filter((i) => now < i.expiresAt));
     }, 5000);
     return () => clearInterval(timer);
   }, [invites.length]);

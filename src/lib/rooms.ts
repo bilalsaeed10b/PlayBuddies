@@ -53,7 +53,8 @@ export function inviteTimestamps() {
   return { createdAt: now, expiresAt: new Date(now + INVITE_TTL_MS) };
 }
 
-export const FRIEND_CODE_LENGTH = 6;
+/** Friend codes have a larger namespace than six-character room codes. */
+export const FRIEND_CODE_LENGTH = 8;
 
 /**
  * A 6-character friend code, always exactly that length.

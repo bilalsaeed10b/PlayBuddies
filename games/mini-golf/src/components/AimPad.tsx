@@ -146,6 +146,7 @@ export default function AimPad({
   onAim,
   onFire,
   onFirstTouch,
+  getOrigin,
 }: {
   enabled: boolean;
   /** Called on every move. Cheap on purpose: it writes straight into the engine. */
