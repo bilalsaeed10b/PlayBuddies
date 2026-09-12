@@ -431,13 +431,13 @@ export const CARDS: Record<CardId, CardMeta> = {
   round: {
     id: 'round', name: 'Round Shot', glyph: 'O', weight: 30,
     blurb: 'The honest one. Full powder, full range.',
-    shots: 1, spread: 0, damage: 24, splashDamage: 15, blast: 1, gravity: 1, speed: 1,
+    shots: 1, spread: 0, damage: 12, splashDamage: 6, blast: 1, gravity: 1, speed: 1,
   },
   /** Both balls can charge the special meter, but each can do so only once. */
   chain: {
     id: 'chain', name: 'Chain Shot', glyph: 'oo', weight: 16,
     blurb: 'Two linked 3-damage balls. Each hit charges your special.',
-    shots: 2, spread: 0.05, damage: 3, splashDamage: 2, blast: 0.85, gravity: 1, speed: 1,
+    shots: 2, spread: 0.05, damage: 4, splashDamage: 2, blast: 0.85, gravity: 1, speed: 1,
     linked: true, chargePerProjectile: true,
   },
   /**
@@ -447,7 +447,7 @@ export const CARDS: Record<CardId, CardMeta> = {
   grape: {
     id: 'grape', name: 'Grapeshot', glyph: '::', weight: 15,
     blurb: 'A fan of five. Each direct hit charges your special.',
-    shots: 5, spread: 0.08, damage: 3, splashDamage: 2, blast: 0.55, gravity: 1, speed: 1,
+    shots: 5, spread: 0.07, damage: 2, splashDamage: 1, blast: 0.55, gravity: 1, speed: 1,
     chargePerProjectile: true,
   },
   /**
@@ -457,12 +457,12 @@ export const CARDS: Record<CardId, CardMeta> = {
   mortar: {
     id: 'mortar', name: 'Mortar', glyph: 'V', weight: 13,
     blurb: 'Steep shots only, forty-five degrees or more. Clears the mountain outright.',
-    shots: 1, spread: 0, damage: 24, splashDamage: 17, blast: 1.5, gravity: 1, speed: 1,
+    shots: 1, spread: 0, damage: 10, splashDamage: 8, blast: 1.5, gravity: 1, speed: 1,
   },
   firebomb: {
     id: 'firebomb', name: 'Firebomb', glyph: '*', weight: 11,
     blurb: 'Lights the deck at full range. Burns for four of their turns.',
-    shots: 1, spread: 0, damage: 7, splashDamage: 5, blast: 1.15, gravity: 1, speed: 1, burn: 4,
+    shots: 1, spread: 0, damage: 6, splashDamage: 5, blast: 1.15, gravity: 1, speed: 1, burn: 4,
   },
   /**
    * The reef's answer. Every other card either goes over a rock or stops at
@@ -472,13 +472,13 @@ export const CARDS: Record<CardId, CardMeta> = {
   bore: {
     id: 'bore', name: 'Bore Shot', glyph: '>', weight: 9,
     blurb: 'Punches straight through rock at the same range as every shot.',
-    shots: 1, spread: 0, damage: 7, splashDamage: 5, blast: 0.9, gravity: 1, speed: 1,
+    shots: 1, spread: 0, damage: 4, splashDamage: 4, blast: 0.9, gravity: 1, speed: 1,
     pierce: true,
   },
   patch: {
     id: 'patch', name: 'Patch Kit', glyph: '+', weight: 10,
     blurb: 'Plug the holes, then fire anyway. Heals 14.',
-    shots: 1, spread: 0, damage: 13, splashDamage: 9, blast: 0.9, gravity: 1, speed: 1, heal: 14,
+    shots: 1, spread: 0, damage: 5, splashDamage: 4, blast: 0.9, gravity: 1, speed: 1, heal: 12,
   },
   twin: {
     id: 'twin', name: 'Twin Shot', glyph: 'II', weight: 13,
@@ -493,7 +493,7 @@ export const CARDS: Record<CardId, CardMeta> = {
   keg: {
     id: 'keg', name: 'Powder Keg', glyph: '#', weight: 8,
     blurb: 'A wide blast that punishes ships sailing close together.',
-    shots: 1, spread: 0, damage: 9, splashDamage: 9, blast: 3.0, gravity: 1, speed: 1,
+    shots: 1, spread: 0, damage: 9, splashDamage: 9, blast: 3, gravity: 1, speed: 1,
   },
 };
 

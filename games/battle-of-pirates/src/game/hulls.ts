@@ -3,7 +3,7 @@
  * before a match, so no shop purchase ever buys an advantage.
  */
 export interface HullClass {
-  id: 'shooter' | 'tank' | 'critical' | 'aimer';
+  id: 'shooter' | 'tank' | 'critical' | 'aimer' | 'balanced';
   name: string;
   blurb: string;
   cost: string;
@@ -58,6 +58,15 @@ export const HULLS: HullClass[] = [
     perks: ['+4 aiming-guide points', 'Precise, balanced hull'],
     hp: 1, width: 0.98, drift: 0.94, blast: 0.95, damage: 0.95,
     critChance: 0, critDamage: 1, aimDots: 4,
+  },
+  {
+    id: 'balanced',
+    name: 'Balanced',
+    blurb: 'A reliable all-rounder with no weak hull, gun or targeting stat to exploit.',
+    cost: 'No extreme specialty',
+    perks: ['Even hull and cannon strength', 'Steady blast and handling'],
+    hp: 1, width: 1, drift: 1, blast: 1, damage: 1,
+    critChance: 0.08, critDamage: 1.25, aimDots: 1,
   },
 ];
 

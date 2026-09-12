@@ -1089,6 +1089,11 @@ export class BattleEngine {
     if (packet.s !== this.cfg.seed) return;
     if (packet.tn !== undefined && packet.tn <= this.turnNo) return;
     if (packet.who !== undefined && !this.validSender(packet.who, from)) return;
+    // A preview belongs to the captain currently at the helm. Letting a
+    // delayed or split-client preview replace it is enough to make two
+    // screens start animating two different turns, even if the resolved shot
+    // that follows is eventually rejected.
+    if (packet.tn === this.turnNo + 1 && packet.who !== undefined && packet.who !== this.turn) return;
     if (packet.n <= (this.remoteFireSeq.get(from) ?? 0)) return;
     this.remoteFireSeq.set(from, packet.n);
     this.pendingFire = packet;
@@ -1153,6 +1158,11 @@ export class BattleEngine {
       // behind asked and everyone ahead answered -- so this is a quiet drop,
       // not an error.
       if (packet.tn <= this.turnNo) return;
+      // A turn resolving immediately after the one we know must come from
+      // the captain whose helm is live locally. This catches an old client
+      // with a stale seat map before it can put a valid-but-wrong packet in
+      // the queue and strand every player waiting on a different captain.
+      if (packet.tn === this.turnNo + 1 && packet.who !== undefined && packet.who !== this.turn) return;
       const at = this.remoteTurns.findIndex((p) => p.tn === packet.tn);
       if (at >= 0) this.remoteTurns[at] = packet;
       else this.remoteTurns.push(packet);

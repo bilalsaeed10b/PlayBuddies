@@ -99,6 +99,19 @@ interface LobbyPerson {
 
 type BattleTeams = Record<string, Team>;
 
+/**
+ * The host freezes this exact crew into the lobby with the start signal.
+ * Every device builds its engine from it, rather than from a lobby snapshot
+ * that can still be catching up as the battle view opens.
+ */
+interface BattleCaptain {
+  uid: string;
+  displayName: string;
+  skin: number;
+  hull: number;
+  team: Team;
+}
+
 const randomSeed = () => (Math.random() * 0x7fffffff) | 0;
 const coinFlip = (): Team => (Math.random() < 0.5 ? 0 : 1);
 
@@ -114,6 +127,9 @@ export default function App() {
     hostId: string;
     players: Record<string, LobbyPerson>;
     battleTeams?: BattleTeams;
+    battleRoster?: BattleCaptain[];
+    battleSeed?: number;
+    battleFirst?: Team;
     matchStarted?: boolean;
     matchRules?: number;
   } | null>(null);
@@ -252,6 +268,9 @@ export default function App() {
             hostId: string;
             players: Record<string, LobbyPerson>;
             battleTeams?: BattleTeams;
+            battleRoster?: BattleCaptain[];
+            battleSeed?: number;
+            battleFirst?: Team;
             matchStarted?: boolean;
             matchRules?: number;
           };
@@ -359,10 +378,22 @@ export default function App() {
     // end it. This guard is also what stops an unrelated lobby update from
     // bouncing a couch battle straight back to the room.
     if (!online || offlineMatch) return;
-    if (lobby?.matchStarted && mySkin !== undefined && mySkin !== null) setView('game');
+    // `battleRoster` is written with `matchStarted` in the host's one atomic
+    // write. Waiting for it prevents four devices from opening a 4-player
+    // battle with four different, half-arrived lobby rosters.
+    if (
+      lobby?.matchStarted &&
+      Array.isArray(lobby.battleRoster) &&
+      lobby.battleRoster.some((captain) => captain.uid === uid) &&
+      typeof lobby.battleSeed === 'number' &&
+      (lobby.battleFirst === 0 || lobby.battleFirst === 1)
+    ) {
+      setSession({ seed: lobby.battleSeed, first: lobby.battleFirst });
+      setView('game');
+    }
     else if (view === 'game') setView('room');
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lobby?.matchStarted, mySkin, online, offlineMatch]);
+  }, [lobby?.matchStarted, lobby?.battleRoster, lobby?.battleSeed, lobby?.battleFirst, uid, online, offlineMatch]);
 
   /**
    * A fresh seed and a fresh coin toss for every match.
@@ -463,17 +494,34 @@ export default function App() {
     if (!isHost) return;
     try {
       const { db, doc, updateDoc } = await import('./firebase');
+      const opening = { seed: randomSeed(), first: coinFlip() };
+      const roster: BattleCaptain[] = people.map((person) => ({
+        uid: person.uid,
+        displayName: person.displayName,
+        skin: person.skin ?? FREE_SHIPS[0],
+        hull: person.hull,
+        team: person.team,
+      }));
+      // The host changes session before the lobby write resolves, so its own
+      // engine and the roster document share the same opening terms too.
+      setSession(opening);
       // `matchRules` rides along with the go-signal in the same write, so it
       // lands in every guest's next snapshot at the same instant `matchStarted`
       // does -- there is no room for a guest to flip to the game view on a
       // `rules.players` that hasn't been corrected yet (see the lobby
       // snapshot handler above).
-      log.info('host:start-match', { players: rules.players, packed: packRules(rules) });
-      await updateDoc(doc(db, 'lobbies', handoff.room), { matchStarted: true, matchRules: packRules(rules) });
+      log.info('host:start-match', { players: rules.players, packed: packRules(rules), roster: roster.map((p) => p.uid) });
+      await updateDoc(doc(db, 'lobbies', handoff.room), {
+        matchStarted: true,
+        matchRules: packRules(rules),
+        battleRoster: roster,
+        battleSeed: opening.seed,
+        battleFirst: opening.first,
+      });
     } catch (e) {
       console.error('Could not start the battle', e);
     }
-  }, [isHost, handoff.room, rules]);
+  }, [isHost, handoff.room, people, rules]);
 
   const award = useCallback((won: boolean, hpLeft: number, record: MatchRecord) => {
     // Something for turning up, more for winning, and a bonus for coming
@@ -525,7 +573,7 @@ export default function App() {
   const battleConfig = useMemo(
     () => (online && uid && !offlineMatch ? onlineConfig() : offlineConfig()),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [session.seed, offlineMatch, uid, view],
+    [session.seed, session.first, offlineMatch, uid, view],
   );
 
   if (view === 'game') {
@@ -558,13 +606,30 @@ export default function App() {
     // button. It should mean bots even in the moment before the roster
     // settles, rather than a battle that depends on how fast a snapshot
     // arrived.
-    const crew = handoff.solo ? people.filter((p) => p.uid === uid) : people;
+    // The room continues receiving presence, skin and ready writes while a
+    // battle runs. None of those may change the match's identity. In
+    // particular, four clients must never turn a slightly different live
+    // Firestore snapshot into four different seat indexes. The host's launch
+    // packet above is the single, immutable source of truth for this match.
+    const frozenCrew: BattleCaptain[] = lobby?.matchStarted && Array.isArray(lobby.battleRoster)
+      ? lobby.battleRoster
+      : people.map((person) => ({
+        uid: person.uid,
+        displayName: person.displayName,
+        skin: person.skin ?? FREE_SHIPS[0],
+        hull: person.hull,
+        team: person.team,
+      }));
+    const matchRules = lobby?.matchStarted && typeof lobby.matchRules === 'number'
+      ? unpackRules(lobby.matchRules)
+      : rules;
+    const crew = handoff.solo ? frozenCrew.filter((p) => p.uid === uid) : frozenCrew;
     const seats: Seat[] = [];
     const localShips: number[] = [];
 
     // Build each fleet separately. That keeps the anchors correct even when
     // the host groups friends on one team rather than alternating the roster.
-    const perTeam = rules.players / 2;
+    const perTeam = matchRules.players / 2;
     for (const team of [0, 1] as const) {
       const fleet = crew
         .filter((person) => person.team === team)
@@ -583,12 +648,12 @@ export default function App() {
           localShips.push(seatIndex);
           seats.push({
             team,
-            id: uid ?? 'me',
-            name: handoff.displayName || 'You',
+            id: person.uid,
+            name: person.displayName,
             control: 'local',
             aiLevel,
-            skin: mySkin ?? FREE_SHIPS[0],
-            hull: myHull,
+            skin: person.skin,
+            hull: person.hull,
           });
         } else if (person) {
           seats.push({
@@ -597,17 +662,21 @@ export default function App() {
             name: person.displayName,
             control: 'remote',
             aiLevel,
-            skin: person.skin ?? pickOtherShip(mySkin ?? FREE_SHIPS[0]),
+            skin: person.skin,
             hull: person.hull,
           });
         } else {
+          // Bots also need deterministic cosmetics. A random roll here does
+          // not alter combat, but it makes a mismatched roster much harder to
+          // diagnose and gives different clients different visual fleets.
+          const botSkin = FREE_SHIPS[Math.abs(session.seed + team * 19 + slot * 37) % FREE_SHIPS.length] ?? FREE_SHIPS[0];
           seats.push({
             team,
             id: `bot-${team}-${slot}`,
             name: `${TIERS[aiLevel].label} Bot`,
             control: 'ai',
             aiLevel,
-            skin: pickOtherShip(mySkin ?? FREE_SHIPS[0]),
+            skin: botSkin,
             hull: seatIndex % HULLS.length,
           });
         }
@@ -620,9 +689,10 @@ export default function App() {
     // array than the host did. Logged every time this runs so that mismatch
     // is visible across two tabs' logs without having to reproduce it live.
     log.info('seats:built', {
-      rulesPlayers: rules.players,
+      rulesPlayers: matchRules.players,
       peopleCount: people.length,
       crewCount: crew.length,
+      frozen: frozenCrew === lobby?.battleRoster,
       peerUids,
       seatCount: seats.length,
       seats: seats.map((s) => ({ team: s.team, id: s.id, control: s.control })),
@@ -643,7 +713,7 @@ export default function App() {
       aiLevel,
       seed: session.seed,
       first: session.first,
-      rules,
+      rules: matchRules,
     };
   }
 
@@ -1084,7 +1154,7 @@ function ShipGrid({
 }
 
 /**
- * The four battle roles, as cards. The bars make their strengths readable at
+ * The battle roles, as cards. The bars make their strengths readable at
  * a glance while the short description explains the unusual mechanic.
  */
 function HullGrid({
@@ -1766,8 +1836,6 @@ function HullMeters({ hull }: { hull: typeof HULLS[number] }) {
   const meters = [
     { label: 'Hull', value: hull.hp / 1.35, color: 'bg-emerald-400' },
     { label: 'Guns', value: hull.damage / 1.18, color: 'bg-amber-400' },
-    { label: 'Evasion', value: (1.22 - hull.width) / 0.28, color: 'bg-sky-400' },
-    { label: 'Speed', value: hull.drift / 1.08, color: 'bg-violet-400' },
     { label: 'Critical', value: hull.critChance / 0.32, color: 'bg-rose-400' },
     { label: 'Aim', value: hull.aimDots / 4, color: 'bg-cyan-300' },
   ];

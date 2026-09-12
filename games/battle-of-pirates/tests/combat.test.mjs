@@ -74,7 +74,7 @@ test('three successful cannon attacks charge; pellets, misses, burn and specials
 });
 test('multi-shot damage and special-meter rules are explicit per ammunition', () => {
   const cases = [
-    ['chain', 2, 3, 2, 2],
+    ['chain', 2, 4, 2, 2],
     ['twin', 2, 8, 1, 2],
     ['broadside', 3, 6, 1, 3],
     ['grape', 5, null, 2, 2],
@@ -271,6 +271,18 @@ test('a same-turn beacon cannot steal an active helm or restore an old special m
   assert.equal(guest.turn, 1);
   assert.equal(guest.turnClock, 8);
   assert.equal(guest.ships[1].charge, 0);
+});
+test('a valid captain cannot preview or resolve another captain\'s live turn', () => {
+  const { guest } = pair();
+  assert.equal(guest.turn, 0);
+
+  // `p1` is a real member of the fleet, so sender validation alone accepts
+  // it. It is nevertheless p0's turn; accepting this is how split seat maps
+  // used to leave each device waiting for a different captain.
+  guest.applyFire({ t: 'fire', n: 71, s: guest.cfg.seed, tn: 1, who: 1, a: -0.8, p: 0.5, c: 'round' }, 'p1');
+  assert.equal(guest.pendingFire, null);
+  guest.applyShot({ ...guest.snapshot(), st: undefined, n: 72, tn: 1, who: 1 }, 'p1');
+  assert.equal(guest.remoteTurns.length, 0);
 });
 test('host alone drives online bots, broadcasting their special outcome', () => {
   const { host, guest, run } = pair();

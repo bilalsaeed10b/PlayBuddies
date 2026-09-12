@@ -6,6 +6,7 @@ const RULES_PATH = path.join(process.cwd(), 'games', 'battle-of-pirates', 'src',
 const SPECIALS_PATH = path.join(process.cwd(), 'games', 'battle-of-pirates', 'src', 'game', 'specials.ts');
 
 const CARD_IDS = ['round', 'chain', 'grape', 'mortar', 'firebomb', 'bore', 'patch', 'twin', 'broadside', 'keg'];
+const CARD_KEYS = ['weight', 'spread', 'damage', 'splashDamage', 'blast', 'gravity', 'speed'];
 
 function parseRules() {
   const content = fs.readFileSync(RULES_PATH, 'utf-8');
@@ -23,10 +24,14 @@ function parseRules() {
   };
   
   for (const id of CARD_IDS) {
-    cards[`${id}_damage`] = getCardVal(id, 'damage');
-    cards[`${id}_splashDamage`] = getCardVal(id, 'splashDamage');
+    for (const key of CARD_KEYS) {
+      cards[`${id}_${key}`] = getCardVal(id, key);
+    }
     if (id === 'patch') {
       cards[`${id}_heal`] = getCardVal(id, 'heal');
+    }
+    if (id === 'firebomb') {
+      cards[`${id}_burn`] = getCardVal(id, 'burn');
     }
   }
   
@@ -50,10 +55,12 @@ function updateRules(data) {
   };
 
   for (const id of CARD_IDS) {
-    setCardVal(id, 'damage', data.cards?.[`${id}_damage`]);
-    setCardVal(id, 'splashDamage', data.cards?.[`${id}_splashDamage`]);
+    for (const key of CARD_KEYS) {
+      setCardVal(id, key, data.cards?.[`${id}_${key}`]);
+    }
+    setCardVal('patch', 'heal', data.cards?.['patch_heal']);
+    setCardVal('firebomb', 'burn', data.cards?.['firebomb_burn']);
   }
-  setCardVal('patch', 'heal', data.cards?.['patch_heal']);
 
   if (data.specials?.torpedo) {
     specialsContent = specialsContent.replace(/(torpedo:\s*\{[^}]*amount:\s*)([\d.]+)/, `$1${data.specials.torpedo}`);
@@ -72,12 +79,21 @@ function updateRules(data) {
 const server = http.createServer((req, res) => {
   if (req.method === 'GET' && req.url === '/') {
     const data = parseRules();
-    
-    // Generate card HTML blocks
+
     const cardNames = {
       round: 'Round Shot', chain: 'Chain Shot', grape: 'Grapeshot', mortar: 'Mortar',
       firebomb: 'Firebomb', bore: 'Bore Shot', patch: 'Patch Kit', twin: 'Twin Shot',
       broadside: 'Triple Shot', keg: 'Powder Keg'
+    };
+
+    const LABELS = {
+      weight: 'Spawn Weight (Chance)',
+      spread: 'Spread (Radians)',
+      damage: 'Direct Hit Damage',
+      splashDamage: 'Splash Dmg (Epicenter)',
+      blast: 'Blast Radius Multiplier',
+      gravity: 'Gravity Multiplier',
+      speed: 'Speed Multiplier'
     };
     
     let cardsHtml = '';
@@ -85,19 +101,24 @@ const server = http.createServer((req, res) => {
       cardsHtml += `
         <div class="card-box">
           <h3>${cardNames[id]}</h3>
-          <div class="form-group">
-            <label>Direct Hit Damage</label>
-            <input type="number" step="0.1" name="cards.${id}_damage" value="${data.cards[`${id}_damage`] || ''}" />
+          <div class="props-grid">
+            ${CARD_KEYS.map(key => `
+              <div class="form-group">
+                <label>${LABELS[key]}</label>
+                <input type="number" step="0.01" name="cards.${id}_${key}" value="${data.cards[`${id}_${key}`] ?? ''}" />
+              </div>
+            `).join('')}
+            ${id === 'patch' ? `
+              <div class="form-group">
+                <label>Heal Amount</label>
+                <input type="number" step="0.1" name="cards.patch_heal" value="${data.cards.patch_heal ?? ''}" />
+              </div>` : ''}
+            ${id === 'firebomb' ? `
+              <div class="form-group">
+                <label>Burn Duration (Turns)</label>
+                <input type="number" step="1" name="cards.firebomb_burn" value="${data.cards.firebomb_burn ?? ''}" />
+              </div>` : ''}
           </div>
-          <div class="form-group">
-            <label>Splash Damage (Epicenter)</label>
-            <input type="number" step="0.1" name="cards.${id}_splashDamage" value="${data.cards[`${id}_splashDamage`] || ''}" />
-          </div>
-          ${id === 'patch' ? `
-          <div class="form-group">
-            <label>Heal Amount</label>
-            <input type="number" step="0.1" name="cards.patch_heal" value="${data.cards.patch_heal || ''}" />
-          </div>` : ''}
         </div>
       `;
     }
@@ -130,25 +151,28 @@ const server = http.createServer((req, res) => {
             --btn-bg: #10b981;
             --btn-hover: #059669;
           }
-          
-          body { font-family: system-ui, sans-serif; background: var(--bg); color: var(--text); padding: 2rem; max-width: 900px; margin: 0 auto; transition: background 0.3s, color 0.3s; }
+
+          body { font-family: system-ui, sans-serif; background: var(--bg); color: var(--text); padding: 2rem; max-width: 1100px; margin: 0 auto; transition: background 0.3s, color 0.3s; }
           .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem; }
           h1 { color: var(--primary); margin: 0; }
-          
+
           .theme-toggle { background: var(--card-bg); color: var(--text); border: 1px solid var(--border); padding: 0.5rem 1rem; border-radius: 0.5rem; cursor: pointer; }
           
-          .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.5rem; margin-bottom: 2rem; }
+          .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 1.5rem; margin-bottom: 2rem; }
           .card-box { background: var(--card-bg); padding: 1.5rem; border-radius: 0.75rem; border: 1px solid var(--border); transition: background 0.3s; }
-          .card-box h3 { margin-top: 0; color: var(--secondary); border-bottom: 1px solid var(--border); padding-bottom: 0.5rem; }
-          .form-group { margin-bottom: 1rem; display: flex; align-items: center; justify-content: space-between; }
-          label { font-weight: 600; font-size: 0.9rem; }
-          input { background: var(--input-bg); border: 1px solid var(--border); color: var(--text); padding: 0.5rem; border-radius: 0.25rem; width: 80px; text-align: right; transition: background 0.3s; }
+          .card-box h3 { margin-top: 0; color: var(--secondary); border-bottom: 1px solid var(--border); padding-bottom: 0.5rem; margin-bottom: 1rem; }
+
+          .props-grid { display: grid; grid-template-columns: 1fr; gap: 0.5rem; }
+          .form-group { display: flex; align-items: center; justify-content: space-between; font-size: 0.85rem; }
+          label { font-weight: 600; color: var(--text); opacity: 0.9; }
+          input { background: var(--input-bg); border: 1px solid var(--border); color: var(--text); padding: 0.35rem 0.5rem; border-radius: 0.25rem; width: 70px; text-align: right; transition: background 0.3s; }
+          input:focus { outline: none; border-color: var(--primary); }
           
           .section-title { font-size: 1.5rem; color: var(--primary); margin: 2rem 0 1rem; border-bottom: 2px solid var(--border); padding-bottom: 0.5rem; }
           
           .btn-container { text-align: center; position: sticky; bottom: 1rem; margin-top: 2rem; }
           button.save-btn { background: var(--btn-bg); color: white; border: none; padding: 1rem 3rem; font-size: 1.2rem; font-weight: bold; border-radius: 0.5rem; cursor: pointer; transition: background 0.2s; box-shadow: 0 4px 15px rgba(0,0,0,0.3); }
-          button.save-btn:hover { background: var(--btn-hover); }
+          button.save-btn:hover { background: var(--btn-hover); transform: translateY(-1px); }
           .toast { position: fixed; top: 1rem; right: 1rem; background: var(--btn-bg); color: white; padding: 1rem 2rem; border-radius: 0.5rem; display: none; font-weight: bold; z-index: 100; box-shadow: 0 4px 6px rgba(0,0,0,0.2); }
         </style>
       </head>
@@ -171,17 +195,19 @@ const server = http.createServer((req, res) => {
           <div class="grid">
             <div class="card-box">
               <h3>Specials Meter</h3>
-              <div class="form-group">
-                <label>Torpedo Damage</label>
-                <input type="number" name="specials.torpedo" value="${data.specials.torpedo}" />
-              </div>
-              <div class="form-group">
-                <label>Acid Rain Damage</label>
-                <input type="number" name="specials.acidRain" value="${data.specials.acidRain}" />
-              </div>
-              <div class="form-group">
-                <label>Heal Amount</label>
-                <input type="number" name="specials.heal" value="${data.specials.heal}" />
+              <div class="props-grid">
+                <div class="form-group">
+                  <label>Torpedo Damage</label>
+                  <input type="number" name="specials.torpedo" value="${data.specials.torpedo}" />
+                </div>
+                <div class="form-group">
+                  <label>Acid Rain Damage</label>
+                  <input type="number" name="specials.acidRain" value="${data.specials.acidRain}" />
+                </div>
+                <div class="form-group">
+                  <label>Heal Amount</label>
+                  <input type="number" name="specials.heal" value="${data.specials.heal}" />
+                </div>
               </div>
             </div>
           </div>
@@ -192,7 +218,6 @@ const server = http.createServer((req, res) => {
         </form>
 
         <script>
-          // Theme toggling
           const html = document.documentElement;
           const themeToggle = document.getElementById('themeToggle');
           if (localStorage.getItem('theme') === 'light') html.classList.add('light-mode');
@@ -202,20 +227,17 @@ const server = http.createServer((req, res) => {
             localStorage.setItem('theme', html.classList.contains('light-mode') ? 'light' : 'dark');
           });
 
-          // Form submission
           document.getElementById('balanceForm').addEventListener('submit', async (e) => {
             e.preventDefault();
             const formData = new FormData(e.target);
             const data = { cards: {}, specials: {} };
             
             for (let [key, value] of formData.entries()) {
-              if (!value) continue;
+              if (value === '') continue;
               if (key.startsWith('cards.')) {
                 data.cards[key.split('.')[1]] = Number(value);
               } else if (key.startsWith('specials.')) {
                 data.specials[key.split('.')[1]] = Number(value);
-              } else {
-                data[key] = Number(value);
               }
             }
 
