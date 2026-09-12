@@ -1,5 +1,6 @@
 import type { CardId } from '../game/rules';
 import type { SpecialId } from '../game/specials';
+import { WEATHER, weatherFor, wetWeather, type WeatherKind } from '../game/weather';
 
 /** 0 is the ship on the left, 1 is the ship on the right. Never anything else. */
 export type Team = 0 | 1;
@@ -196,15 +197,9 @@ export interface MatchRules {
   /** Cards. Off means every shot is a plain round shot and the hand is hidden. */
   cards: boolean;
   players: PlayerCount;
-  /**
-   * Foul weather: a crosswind that changes every turn, and a heavier sea.
-   *
-   * A match rule and not a preference, for the same reason `obstacles` had to
-   * become one -- a host sailing through a gale and a guest on flat water
-   * would compute two different flights from the same shot and disagree about
-   * every one of them. See the note on GameSettings.
-   */
+  /** Legacy rain flag. Weather is cosmetic and never changes shot trajectories. */
   storm: boolean;
+  weather?: WeatherKind;
 }
 
 export const DEFAULT_RULES: MatchRules = {
@@ -241,7 +236,8 @@ export function packRules(rules: MatchRules): number {
     (Math.max(0, MOUNTAIN_CODES.indexOf(rules.mountain)) << 2) |
     (rules.cards ? 16 : 0) |
     (Math.max(0, PLAYER_CODES.indexOf(rules.players)) << 5) |
-    (rules.storm ? 128 : 0)
+    (wetWeather(weatherFor(rules)) ? 128 : 0) |
+    (rules.weather ? (Math.max(0, WEATHER.findIndex(w => w.id === rules.weather)) + 1) << 8 : 0)
   );
 }
 
@@ -254,6 +250,8 @@ export function unpackRules(bits: number | undefined): MatchRules {
     cards: (bits & 16) !== 0,
     players: PLAYER_CODES[(bits >> 5) & 3] ?? DEFAULT_RULES.players,
     storm: (bits & 128) !== 0,
+    ...(((bits >> 8) & 7) > 0 && WEATHER[((bits >> 8) & 7) - 1]
+      ? { weather: WEATHER[((bits >> 8) & 7) - 1].id } : {}),
   };
 }
 

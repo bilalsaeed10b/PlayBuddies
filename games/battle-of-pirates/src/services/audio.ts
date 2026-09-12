@@ -175,6 +175,13 @@ class AudioService {
     source.start(t, Math.random() * 1.5, dur + 0.05);
   }
 
+  /** Distant rolling thunder, routed through the normal effects volume. */
+  playThunder() {
+    this.hiss(1.6, 0.18, 260, 45);
+    this.hiss(1.1, 0.09, 180, 40, 'lowpass', 0.25);
+    this.tone('sine', 55, 24, 1.4, 0.12);
+  }
+
   /** The cannon. `power` is the charge that went into it, 0 to 1. */
   playFire(power: number) {
     const p = Math.max(0.2, Math.min(1, power));

@@ -455,6 +455,7 @@ export default function BattleView({
         else if (kind === 'deal') audioService.playDeal();
         else if (kind === 'burn') audioService.playBurn();
         else if (kind === 'sink') audioService.playSink();
+        else if (kind === 'thunder') audioService.playThunder();
       },
       onLocalShot: online
         ? (packet) => {

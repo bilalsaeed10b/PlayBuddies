@@ -261,6 +261,7 @@ export function drawShip(ctx: CanvasRenderingContext2D, d: ShipDraw) {
   const baked = sprite(d.skin, d.accent);
   ctx.save();
   if (d.facing < 0) ctx.scale(-1, 1);
+  if (d.effects !== false) drawAura(ctx, skin, d.clock);
   if (baked) ctx.drawImage(baked, -SPR.ox, -SPR.oy);
   else paintHull(ctx, skin, d.accent);
   drawFlag(ctx, skin, d.clock);
@@ -527,6 +528,33 @@ function paintOrnament(ctx: CanvasRenderingContext2D, skin: ShipSkin, clock = 0)
     ctx.strokeStyle = '#e9c1ff'; ctx.lineWidth = 2;
     for (const x of [-58, 48]) { ctx.beginPath(); ctx.moveTo(x, -172); ctx.lineTo(x + 10, -115); ctx.lineTo(x, -74); ctx.stroke(); }
   }
+  ctx.restore();
+}
+
+const auraSprites = new Map<string, HTMLCanvasElement | null>();
+/** One 128px gradient per premium aura, reused at every scale and every frame. */
+function drawAura(ctx: CanvasRenderingContext2D, skin: ShipSkin, clock: number) {
+  const color = skin.ornament === 'seraph' ? '#aacfff' : skin.ornament === 'leviathan' ? '#45edac' : skin.ornament === 'eclipse' ? '#bc7cff' : null;
+  if (!color) return;
+  if (!auraSprites.has(color)) {
+    try {
+      const canvas = document.createElement('canvas'); canvas.width = canvas.height = 128;
+      const paint = canvas.getContext('2d');
+      if (!paint) auraSprites.set(color, null);
+      else {
+        const glow = paint.createRadialGradient(64, 64, 0, 64, 64, 64);
+        glow.addColorStop(0, color + '75'); glow.addColorStop(0.45, color + '45'); glow.addColorStop(1, color + '00');
+        paint.fillStyle = glow; paint.fillRect(0, 0, 128, 128); auraSprites.set(color, canvas);
+      }
+    } catch { auraSprites.set(color, null); }
+  }
+  ctx.save();
+  const pulse = 1 + Math.sin(clock * 1.35) * 0.06;
+  const aura = auraSprites.get(color);
+  if (aura) ctx.drawImage(aura, -155 * pulse, -135 - 150 * pulse, 310 * pulse, 300 * pulse);
+  ctx.strokeStyle = color; ctx.lineWidth = 1.3;
+  ctx.globalAlpha *= 0.2 + Math.sin(clock * 1.1) * 0.06;
+  ctx.beginPath(); ctx.ellipse(0, -118, 127 * pulse, 147 * pulse, 0, 0, Math.PI * 2); ctx.stroke();
   ctx.restore();
 }
 

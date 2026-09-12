@@ -20,8 +20,9 @@ import {
 } from 'lucide-react';
 import { askHostToEndGame, askToLeaveLobby, toggleFullscreen } from './fullscreen';
 import { FREE_SHIPS, SHIPS, drawShip } from './game/ships';
+import { WEATHER, weatherFor, wetWeather } from './game/weather';
 import { HULLS } from './game/hulls';
-import { CARDS, CARD_ORDER, TEAM_COLORS } from './game/rules';
+import { BALANCE, CARDS, CARD_ORDER, TEAM_COLORS } from './game/rules';
 import { TIERS } from './engine/ai';
 import { audioService } from './services/audio';
 import { GameWallet, reportResult } from './platform/wallet';
@@ -812,9 +813,9 @@ function rulesSummary(rules: MatchRules): string {
   return [
     `${formatSides(rules.players)} · ${rules.players} ships`,
     MOUNTAIN_LABEL[rules.mountain],
-    rules.storm ? 'foul weather' : null,
+    WEATHER.find(w => w.id === weatherFor(rules))?.name,
     rules.cards ? 'cards on' : 'round shot only',
-    rules.turnTimer ? '15s turns' : 'no clock',
+    rules.turnTimer ? `${BALANCE.TURN_TIME}s turns` : 'no clock',
     rules.aimArc ? 'aim arc on' : 'no aim arc',
   ]
     .filter(Boolean)
@@ -1704,7 +1705,7 @@ function RoomScreen({
         <ScrollText className="h-6 w-6 shrink-0 text-amber-300" />
         <div className="min-w-0 flex-1">
           <p className="text-sm font-black uppercase tracking-wide text-amber-200">
-            {isHost ? 'New here? Read the rules' : 'How wind and cards work'}
+            {isHost ? 'New here? Read the rules' : 'How weather and cards work'}
           </p>
           <p className="text-[11px] font-bold text-amber-300/70">Worth 30 seconds before the first shot.</p>
         </div>
@@ -2138,12 +2139,7 @@ function RulesPanel({
   onChange: (r: MatchRules) => void;
   onClose: () => void;
 }) {
-  const toggles: { key: 'storm' | 'cards' | 'turnTimer' | 'aimArc'; label: string; hint: string }[] = [
-    {
-      key: 'storm',
-      label: 'Foul weather',
-      hint: 'A crosswind that changes every turn and is drawn across the top of the water , read the barbs and lean the shot into it. The sea shoves the hulls about harder between turns too.',
-    },
+  const toggles: { key: 'cards' | 'turnTimer' | 'aimArc'; label: string; hint: string }[] = [
     {
       key: 'cards',
       label: 'Cards',
@@ -2152,7 +2148,7 @@ function RulesPanel({
     {
       key: 'turnTimer',
       label: 'Turn clock',
-      hint: 'Twelve seconds to aim, then the turn passes you by -- no shot, no second chance. Off lets a turn take as long as it takes.',
+      hint: `${BALANCE.TURN_TIME} seconds to aim, then the turn passes you by -- no shot, no second chance. Off lets a turn take as long as it takes.`,
     },
     {
       key: 'aimArc',
@@ -2246,6 +2242,20 @@ function RulesPanel({
                 ? 'Crumbles after ten hits, so the lane opens up late in a long battle.'
                 : 'Never crumbles. The lane over the top is the only lane there is.'}
           </p>
+        </div>
+
+        <div className="space-y-2">
+          <p className="text-sm font-bold">Weather</p>
+          <p className="text-[11px] text-white/50">Set the mood for both fleets. Rain falls straight down; weather does not change your aim.</p>
+          <div className="grid grid-cols-2 gap-2">
+            {WEATHER.map(option => (
+              <button key={option.id} disabled={!editable} aria-pressed={weatherFor(rules) === option.id}
+                onClick={() => onChange({ ...rules, weather: option.id, storm: wetWeather(option.id) })}
+                className={`rounded-xl border px-3 py-2 text-left text-xs font-bold disabled:opacity-50 ${weatherFor(rules) === option.id ? 'border-sky-300 bg-sky-300/15 text-sky-100' : 'border-white/15 bg-white/5 text-white/65'}`}>
+                {option.name}<span className="mt-1 block text-[10px] font-normal opacity-70">{option.hint}</span>
+              </button>
+            ))}
+          </div>
         </div>
 
         {toggles.map(({ key, label, hint }) => (

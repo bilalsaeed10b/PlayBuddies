@@ -17,6 +17,7 @@
  */
 import { Arena, BALANCE, clamp, mulberry32 } from './rules';
 import type { Rock } from '../types/game';
+import { thunderEnvelope, THUNDER_PERIOD, type WeatherKind } from './weather';
 
 /** Deterministic, so two players in a room see the same horizon. */
 const SEED = 0x5eaf00d;
@@ -390,6 +391,8 @@ function foulWeather(ctx: CanvasRenderingContext2D, arena: Arena) {
  */
 let rainField: Float32Array | null = null;
 let rainCount = 0;
+let rainWidth = 0;
+let rainHeight = 0;
 
 /** Four numbers per drop: fall speed, streak length, column, start offset. */
 const RAIN_STRIDE = 4;
@@ -408,41 +411,82 @@ function buildRain(count: number, w: number, h: number) {
   }
   rainField = field;
   rainCount = count;
+  rainWidth = w;
+  rainHeight = h;
 }
 
 export function drawWeather(
   ctx: CanvasRenderingContext2D,
   arena: Arena,
   clock: number,
-  gust: number,
+  kind: WeatherKind,
   count: number,
 ) {
-  if (count <= 0) return;
+  if (count <= 0 || kind === 'clear') return;
   const { w, h } = arena;
-  if (!rainField || rainCount !== count) buildRain(count, w, h);
+  if (!rainField || rainCount !== count || rainWidth !== w || rainHeight !== h) buildRain(count, w, h);
   const field = rainField as Float32Array;
 
-  // Rain leans with the wind, and hard: near-vertical rain in a gale that is
-  // visibly pushing the shot sideways looks like two different weathers.
-  const lean = clamp(gust / 210, -1, 1) * 0.55;
   const span = h + 200;
   ctx.save();
+  ctx.beginPath();
+  ctx.rect(0, 0, w, h);
+  ctx.clip();
+  if (kind === 'mist' || kind === 'snow') {
+    ctx.fillStyle = kind === 'mist' ? 'rgba(185,213,220,0.06)' : 'rgba(135,190,236,0.08)';
+    ctx.fillRect(0, 0, w, h);
+    if (kind === 'mist') {
+      // Broad translucent ellipses stay behind the fleet; no costly blur filter.
+      ctx.fillStyle = 'rgba(207,228,231,0.065)';
+      for (let i = 0; i < 6; i++) {
+        ctx.beginPath(); ctx.ellipse(w * (i / 5) + Math.sin(clock * 0.09 + i) * 80,
+          arena.seaY * (0.75 + (i % 3) * 0.08), w * 0.28, 48 + (i % 3) * 18, 0, 0, Math.PI * 2); ctx.fill();
+      }
+      ctx.restore(); return;
+    }
+  }
   ctx.strokeStyle = 'rgba(196, 224, 236, 0.3)';
   ctx.lineWidth = 2;
   ctx.lineCap = 'round';
   ctx.beginPath();
   for (let i = 0; i < count; i++) {
-    const speed = field[i * RAIN_STRIDE];
+    const snow = kind === 'snow';
+    const speed = field[i * RAIN_STRIDE] * (snow ? 0.055 : kind === 'thunder' ? 1.15 : 1);
     const len = field[i * RAIN_STRIDE + 1];
     const x0 = field[i * RAIN_STRIDE + 2];
     // Wrapped rather than respawned, so a drop leaving the bottom is the
     // same drop arriving at the top and the field never thins out.
     const y = ((field[i * RAIN_STRIDE + 3] + clock * speed) % span) - 100;
-    const x = (x0 + y * lean + w) % w;
-    ctx.moveTo(x, y);
-    ctx.lineTo(x - len * lean, y + len);
+    const x = x0;
+    if (snow) {
+      const radius = 2 + (i % 3);
+      ctx.moveTo(x + radius, y); ctx.arc(x, y, radius, 0, Math.PI * 2);
+    } else { ctx.moveTo(x, y); ctx.lineTo(x, y + len); }
   }
-  ctx.stroke();
+  if (kind === 'snow') { ctx.fillStyle = 'rgba(231,245,255,0.6)'; ctx.fill(); } else ctx.stroke();
+  if (kind === 'rain' || kind === 'thunder') {
+    ctx.strokeStyle = 'rgba(175,220,238,0.22)'; ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    for (let i = 0; i < Math.min(18, count / 4); i++) {
+      const phase = (clock * 1.3 + i * 0.17) % 1;
+      const x = field[i * RAIN_STRIDE + 2];
+      const y = arena.seaY + 8 + (i * 47) % Math.max(1, h - arena.seaY - 12);
+      ctx.moveTo(x + 4 + phase * 12, y); ctx.ellipse(x, y, 4 + phase * 12, 1 + phase * 3, 0, 0, Math.PI * 2);
+    }
+    ctx.stroke();
+  }
+  if (kind === 'thunder') {
+    const flash = thunderEnvelope(clock);
+    if (flash > 0) {
+      const cycle = Math.floor(clock / THUNDER_PERIOD);
+      const x = w * (0.2 + (cycle % 3) * 0.27);
+      ctx.globalAlpha *= flash;
+      ctx.fillStyle = 'rgba(184,215,255,0.08)'; ctx.fillRect(0, 0, w, arena.seaY);
+      ctx.strokeStyle = '#b9dfff'; ctx.lineWidth = 3; ctx.lineJoin = 'round';
+      ctx.beginPath(); ctx.moveTo(x, arena.seaY * 0.14); ctx.lineTo(x - 28, arena.seaY * 0.25);
+      ctx.lineTo(x + 14, arena.seaY * 0.24); ctx.lineTo(x - 30, arena.seaY * 0.44); ctx.stroke();
+    }
+  }
   ctx.restore();
 }
 

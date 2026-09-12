@@ -21,12 +21,12 @@
 import { fxSprites, bakeSea, drawSky, drawFallbackSea, drawRock, drawWaves, drawWeather, rockRadius } from '../game/sea';
 import { SHIPS, drawFlag, drawShip } from '../game/ships';
 import { HULLS, hullAt } from '../game/hulls';
+import { weatherFor, wetWeather, THUNDER_PERIOD, THUNDER_SOUND } from '../game/weather';
 import type { HullClass } from '../game/hulls';
 import {
   BALANCE,
   CARDS,
   CardId,
-  STORM,
   TEAM_COLORS,
   angleOf,
   arenaFor,
@@ -68,7 +68,7 @@ export interface Seat {
   hull: number;
 }
 
-export type Sfx = 'fire' | 'hull' | 'splash' | 'rock' | 'deal' | 'burn' | 'sink';
+export type Sfx = 'fire' | 'hull' | 'splash' | 'rock' | 'deal' | 'burn' | 'sink' | 'thunder';
 
 export interface EngineConfig {
   /** Two, four or six hulls, evenly split. Order fixes the anchors and the turn order. */
@@ -294,14 +294,7 @@ export class BattleEngine {
   /** Consecutive turns this hull has landed a shot. Reset by a miss. */
   streak: number[] = [];
 
-  /**
-   * This turn's crosswind, in world px/s². Zero unless the storm rule is on.
-   *
-   * Drawn from the turn's own seeded stream rather than rolled live, so the
-   * host, every guest, and a device that only just inherited a bot's wheel
-   * all push the same ball the same way. Read by the HUD as well as by the
-   * physics -- an invisible wind is just the game missing for you.
-   */
+  /** Wind acceleration shared with the aim solver. All weather keeps it zero. */
   gust = 0;
 
   /** What the shot currently in the air has done so far. Null between turns. */
@@ -781,19 +774,9 @@ export class BattleEngine {
 
   private beginTurn() {
     const rnd = this.rngFor(this.turnNo + 1);
-    // Its own stream, not this turn's deal: the hand is only drawn when the
-    // cards rule is on, and a wind that changed depending on whether cards
-    // were enabled would be a rule silently reaching into another one.
-    if (this.cfg.rules.storm) {
-      const g = this.rngFor(this.turnNo + 4001);
-      // Never a dead calm -- a storm turn with no wind reads as the feature
-      // being broken rather than as luck. The sign is a coin flip, the
-      // strength lands between a third and full.
-      const strength = 0.34 + g() * 0.66;
-      this.gust = (g() < 0.5 ? -1 : 1) * STORM.GUST * strength;
-    } else {
-      this.gust = 0;
-    }
+    // Weather is scenery. Keeping this zero also gives bots and aim previews
+    // the exact same wind-free trajectory as the cannon simulation.
+    this.gust = 0;
     // Cards off is a real mode, not a hidden hand: everyone fires the plain
     // round shot every turn, so the battle is aim and range and nothing else.
     // Skipping the deal leaves this turn's generator untouched, which costs
@@ -1452,7 +1435,13 @@ export class BattleEngine {
       this.offT = BALANCE.BEACON * 2;
       if (this.catchUp()) return;
     }
+    const previousClock = this.clock;
     this.clock += dt;
+    if (weatherFor(this.cfg.rules) === 'thunder' && this.phase !== 'over'
+      && Math.floor((this.clock - THUNDER_SOUND) / THUNDER_PERIOD) > Math.floor((previousClock - THUNDER_SOUND) / THUNDER_PERIOD)
+      && dt <= 0.25 && (typeof document === 'undefined' || !document.hidden)) {
+      this.cfg.onSfx?.('thunder');
+    }
     this.settleBob();
     this.acc += Math.min(dt, 0.25);
 
@@ -1615,9 +1604,6 @@ export class BattleEngine {
       if (!p.alive) continue;
       p.age += dt;
       p.vy += p.gravity * dt;
-      // The gale pushes a ball for as long as it is in the air, so a lofted
-      // shot is moved much further than a flat one -- which is the whole
-      // reason a crosswind is interesting rather than a flat offset.
       p.vx += this.gust * dt;
 
       const nx = p.x + p.vx * dt;
@@ -1628,7 +1614,7 @@ export class BattleEngine {
       if (!p.alive) continue;
       p.x = nx;
       p.y = ny;
-      if (p.trail.length > 30) p.trail.splice(0, 2);
+      if (p.trail.length >= 48) p.trail.splice(0, 2);
       p.trail.push(nx, ny);
 
       // Off the sides is a miss, not an explosion. Above is fine: gravity
@@ -1986,7 +1972,7 @@ export class BattleEngine {
 
   private drift(i: number, rnd: () => number): number {
     const step =
-      this.arena.driftStep * (this.cfg.rules.storm ? STORM.DRIFT : 1) * this.hullOf(i).drift;
+      this.arena.driftStep * this.hullOf(i).drift;
     return this.clampDrift(i, this.ships[i].x + (rnd() * 2 - 1) * step);
   }
 
@@ -2463,7 +2449,7 @@ export class BattleEngine {
     // height with a different scale, which a height check alone would miss.
     this.bg = null;
 
-    if (!this.backdrop) this.backdrop = bakeSea(this.arena, q.fancy, this.cfg.rules.storm);
+    if (!this.backdrop) this.backdrop = bakeSea(this.arena, q.fancy, wetWeather(weatherFor(this.cfg.rules)));
   }
 
   /** Screen point to world point, so a drag can be measured in world units. */
@@ -2580,18 +2566,19 @@ export class BattleEngine {
     const sy = this.shake ? (Math.random() - 0.5) * this.shake : 0;
     ctx.setTransform(this.scale, 0, 0, this.scale, this.offX + sx * this.scale, this.offY + sy * this.scale);
 
-    const night = specialNightAmount(this.special);
+    const weather = weatherFor(this.cfg.rules);
+    const storm = wetWeather(weather);
+    const night = Math.max(specialNightAmount(this.special), weather === 'snow' ? 0.35 : weather === 'mist' ? 0.16 : 0);
     if (this.backdrop) {
       drawSky(ctx, this.arena, night, q.fancy);
       ctx.drawImage(this.backdrop, 0, 0);
-    } else drawFallbackSea(ctx, this.arena, night, this.cfg.rules.storm);
+    } else drawFallbackSea(ctx, this.arena, night, storm);
 
-    const storm = this.cfg.rules.storm;
     drawWaves(ctx, this.arena, this.clock, storm ? q.waves + 2 : q.waves, storm ? 1.7 : 1);
     // Behind the ships on purpose. Rain in front of the hulls turns a six-ship
     // fleet action into a smear on the cheap phones this has to run on, and
     // the hulls are the one thing that must stay readable in a gale.
-    if (storm) drawWeather(ctx, this.arena, this.clock, this.gust, Math.round(120 * q.particles));
+    if (weather !== 'clear') drawWeather(ctx, this.arena, this.clock, weather, Math.round((weather === 'thunder' ? 160 : weather === 'snow' ? 72 : 100) * q.particles));
     if (this.special) drawSpecialSky(ctx, this.arena, this.special, q);
 
     for (const rock of this.rocks) if (rock.hp > 0) drawRock(ctx, rock);
@@ -2612,7 +2599,6 @@ export class BattleEngine {
     // host's call, and it applies to both fleets or neither.
     if (this.cfg.rules.aimArc && this.aiming && this.awaitingLocal) this.drawGuide(ctx, q);
     this.drawOffscreenMarkers(ctx);
-    this.drawGust(ctx);
     this.drawCall(ctx);
     this.drawFeed(ctx);
   }
@@ -2890,6 +2876,13 @@ export class BattleEngine {
         ctx.restore();
       }
 
+      // A cheap single-stroke trail is still visible on low-end devices.
+      if (!q.trails && p.trail.length > 4) {
+        ctx.save(); ctx.strokeStyle = color; ctx.globalAlpha *= 0.45; ctx.lineWidth = p.r * 0.8;
+        ctx.beginPath(); ctx.moveTo(p.trail[0], p.trail[1]);
+        for (let i = 4; i < p.trail.length; i += 4) ctx.lineTo(p.trail[i], p.trail[i + 1]);
+        ctx.lineTo(p.x, p.y); ctx.stroke(); ctx.restore();
+      }
       if (q.trails && p.trail.length > 4) {
         ctx.save();
         ctx.lineCap = 'round';
@@ -2902,6 +2895,15 @@ export class BattleEngine {
           ctx.moveTo(p.trail[i - 2], p.trail[i - 1]);
           ctx.lineTo(p.trail[i], p.trail[i + 1]);
           ctx.stroke();
+          if (q.fancy && p.burn > 0 && i % 6 === 0) {
+            // Flame and smoke follow sampled flight positions, including bends
+            // in the arc, instead of being detached from the projectile path.
+            const size = p.r * (2 + t * 2.5);
+            ctx.globalAlpha = t * 0.7;
+            if (fx.fire) ctx.drawImage(fx.fire, p.trail[i] - size / 2, p.trail[i + 1] - size / 2, size, size);
+            ctx.globalAlpha = (1 - t) * 0.3;
+            if (fx.smoke) ctx.drawImage(fx.smoke, p.trail[i] - size, p.trail[i + 1] - size * 0.6, size * 2, size * 1.5);
+          }
         }
         ctx.restore();
       }
@@ -2913,7 +2915,7 @@ export class BattleEngine {
         ctx.globalAlpha = 1;
       }
 
-      ctx.fillStyle = '#12161d';
+      ctx.fillStyle = p.burn > 0 ? '#ffb747' : '#12161d';
       ctx.beginPath();
       ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
       ctx.fill();
@@ -3039,67 +3041,6 @@ export class BattleEngine {
     const y = this.arena.h * 0.26 - (1 - t) * 26;
     ctx.strokeText(this.call.toUpperCase(), this.arena.w / 2, y);
     ctx.fillText(this.call.toUpperCase(), this.arena.w / 2, y);
-    ctx.restore();
-  }
-
-  /**
-   * This turn's crosswind, top centre.
-   *
-   * A wind nobody can see is not a mechanic, it is the game missing for you
-   * -- so this is deliberately the plainest thing on the screen: which way,
-   * and how hard, and nothing else. Barbs rather than a number, because what
-   * a player actually has to do with it is lean the shot, and three barbs
-   * pointing left says that faster than "142" does.
-   */
-  private drawGust(ctx: CanvasRenderingContext2D) {
-    if (!this.cfg.rules.storm) return;
-    const strength = Math.abs(this.gust) / STORM.GUST;
-    const dir = this.gust < 0 ? -1 : 1;
-    const cx = this.arena.w / 2;
-    const y = 62;
-    const len = 90 + strength * 120;
-
-    ctx.save();
-    ctx.globalAlpha = 0.9;
-    ctx.strokeStyle = '#bae6fd';
-    ctx.fillStyle = '#bae6fd';
-    ctx.lineWidth = 7;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-
-    // The shaft, drawn from the centre out the way the wind is blowing.
-    ctx.beginPath();
-    ctx.moveTo(cx - (len / 2) * dir, y);
-    ctx.lineTo(cx + (len / 2) * dir, y);
-    ctx.stroke();
-
-    // Head.
-    const tip = cx + (len / 2) * dir;
-    ctx.beginPath();
-    ctx.moveTo(tip + 22 * dir, y);
-    ctx.lineTo(tip - 10 * dir, y - 17);
-    ctx.lineTo(tip - 10 * dir, y + 17);
-    ctx.closePath();
-    ctx.fill();
-
-    // One barb per third of full strength, so the reading is countable
-    // rather than a length to be eyeballed against nothing.
-    const barbs = 1 + Math.min(2, Math.floor(strength * 3));
-    ctx.lineWidth = 5;
-    for (let i = 0; i < barbs; i++) {
-      const bx = cx - (len / 2) * dir + i * 26 * dir;
-      ctx.beginPath();
-      ctx.moveTo(bx, y - 15);
-      ctx.lineTo(bx + 14 * dir, y);
-      ctx.lineTo(bx, y + 15);
-      ctx.stroke();
-    }
-
-    ctx.globalAlpha = 0.75;
-    ctx.font = '800 24px system-ui, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('GALE', cx, y - 40);
     ctx.restore();
   }
 
