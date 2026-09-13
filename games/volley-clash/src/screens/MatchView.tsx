@@ -371,10 +371,10 @@ export default function MatchView({
         if (inputs.has(id)) continue;
         inputs.set(id, (heardAt.current.get(id) ?? 0) > quietAt ? input : NO_INPUT);
       }
-      // Host only. A guest hears about everyone else through the host's
-      // snapshots, never directly, so silence from a peer says nothing at all
-      // about whether that player is still there , and acting on it would hand
-      // the host's own character to a bot while the match ran perfectly.
+      // Host only. Guests may hear other bodies directly for smoother drawing,
+      // but the room host still owns disconnect decisions. Acting on peer
+      // silence elsewhere could hand a healthy player to a bot simply because
+      // their direct path is using the host-snapshot fallback.
       if (online && engine.isHost) {
         for (const seat of seats) {
           if (seat.control !== 'remote') continue;
@@ -593,8 +593,10 @@ export default function MatchView({
                 engine.applySnapshot(msg as Snapshot, lagOf(msg));
                 break;
               case 'b':
-                // A guest's own account of itself. The input rides along so the
-                // host can keep simulating it between packets.
+                // A guest's own account of itself. The host consumes it for
+                // collision authority; other guests consume the same one-hop
+                // packet for smooth visuals. The input rides along so every
+                // receiver can keep simulating it between packets.
                 if (isStale(heardSeq.current.get(from), msg.n)) break;
                 heardSeq.current.set(from, msg.n);
                 heardAt.current.set(from, performance.now());

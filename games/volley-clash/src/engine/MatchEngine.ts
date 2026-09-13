@@ -316,6 +316,17 @@ export class MatchEngine {
   private peerLag = new Map<string, number>();
 
   /**
+   * Last time this guest heard a body directly from that body's owner.
+   *
+   * Host snapshots still carry every body and remain the fallback. While the
+   * direct stream is flowing, however, its one-hop position is newer than the
+   * host's two-hop copy and must be the only stream correcting that player.
+   */
+  private ownerBodyAt = new Map<string, number>();
+  /** Host tick of the latest serve reset applied on a guest. */
+  private snapshotResetTick = 0;
+
+  /**
    * Where the ball has been, on the host, for the last fraction of a second.
    *
    * This is what makes a guest's contact judged against the ball *they* saw
@@ -1046,6 +1057,7 @@ export class MatchEngine {
     this.host = true;
     this.target.ball = null;
     this.target.fix.clear();
+    this.ownerBodyAt.clear();
   }
 
   /**
@@ -1061,6 +1073,7 @@ export class MatchEngine {
     this.host = false;
     this.target.ball = null;
     this.target.fix.clear();
+    this.ownerBodyAt.clear();
   }
 
   snapshot(): Snapshot {
@@ -1149,7 +1162,12 @@ export class MatchEngine {
     // toward there: the two simulations are not drifting apart, they are
     // starting again, and easing would drag every character across the sand.
     const restart = wasPhase !== 'serve' && s.ph === 'serve';
+    if (restart) {
+      this.snapshotResetTick = s.n;
+      this.ownerBodyAt.clear();
+    }
     const drift = Math.min(lag, BALANCE.MAX_EXTRAP);
+    const receivedAt = localNow();
 
     for (const [id, d] of Object.entries(s.p)) {
       const local = this.players.find((q) => q.id === id);
@@ -1183,7 +1201,12 @@ export class MatchEngine {
         local.hitCd = 0;
         local.facing = target.facing;
         this.target.fix.delete(id);
-      } else {
+      } else if (receivedAt - (this.ownerBodyAt.get(id) ?? -Infinity) > BALANCE.OWNER_BODY_FRESH * 1000) {
+        // Another guest's own packet reaches us in one hop. The host's copy
+        // has made an extra stop and is older even when both connections are
+        // healthy, so do not let it pull the character backwards while the
+        // owner's stream is alive. If that stream stops, this branch resumes
+        // after OWNER_BODY_FRESH and snapshots take over automatically.
         if (local.control !== 'local') {
           local.vy = target.vy;
           local.onGround = target.onGround;
@@ -1233,24 +1256,29 @@ export class MatchEngine {
   }
 
   /**
-   * A guest's own account of where it is. Host side.
+   * A guest's own account of where it is.
    *
    * Taken at face value, within reason. The alternative , deriving the position
    * from the input bitmask and hoping the two simulations agree , is a round
    * trip of error on the one body whose owner is watching it most closely, and
    * it is what made a guest's character feel like it was wading.
    *
+   * The host consumes it for authoritative collision checks. Other guests use
+   * the same one-hop packet to draw that player without waiting for a relayed
+   * host snapshot; this is the same ownership model that keeps Fish Eat Fish
+   * smooth. Ball, score, phase and power-ups remain host-authoritative.
+   *
    * `tick` is the last snapshot that guest had applied when it spoke. A claim
-   * made before the court was reset predates the reset and is discarded, or the
-   * guest would drag itself back to where it stood during the last rally.
+   * made before the court was reset predates the reset and is discarded, or
+   * the guest would drag itself back to where it stood during the last rally.
    */
   applyBody(id: string, d: BodyPacket, tick: number, lag = 0) {
-    if (!this.host) return;
     const p = this.players.find((q) => q.id === id);
     if (!p || p.control !== 'remote') return;
-    if (tick < this.resetTick) return;
+    if (tick < (this.host ? this.resetTick : this.snapshotResetTick)) return;
     this.lastLag = lag;
     this.peerLag.set(id, lag);
+    if (!this.host) this.ownerBodyAt.set(id, localNow());
 
     const target: TargetBody = {
       x: d[0],
@@ -1302,7 +1330,7 @@ export class MatchEngine {
       p.vx = t.vx;
       p.vy = t.vy;
       this.target.fix.delete(p.id);
-    } else if (gap > (mine ? BALANCE.OWN_TOLERANCE : BALANCE.BODY_TOLERANCE)) {
+    } else if (!mine && gap > BALANCE.BODY_TOLERANCE) {
       this.target.fix.set(p.id, { x: dx, y: dy });
     } else {
       this.target.fix.delete(p.id);
@@ -1314,6 +1342,7 @@ export class MatchEngine {
     this.target.fix.delete(id);
     this.netInputs.delete(id);
     this.peerLag.delete(id);
+    this.ownerBodyAt.delete(id);
   }
 
   /**
@@ -1366,12 +1395,10 @@ export class MatchEngine {
         this.target.fix.delete(id);
         continue;
       }
-      // Your own body is paid back far more slowly than anyone else's. A
-      // correction you can feel under your own thumb reads as the game fighting
-      // you, which in a competitive match is worse than being slightly wrong.
-      const rate = p.control === 'local' ? ease * 0.35 : ease;
-      const dx = owed.x * rate;
-      const dy = owed.y * rate;
+      // Only bodies owned by another machine accrue a smooth correction. A
+      // local body remains immediately responsive under its player's controls.
+      const dx = owed.x * ease;
+      const dy = owed.y * ease;
       p.x += dx;
       p.y += dy;
       owed.x -= dx;

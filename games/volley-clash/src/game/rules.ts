@@ -55,7 +55,7 @@ export const BALANCE = {
    * Uncapped, a charged spike off a dashing player moves further in one step
    * than the ball is wide, and the floor test misses it entirely.
    */
-  BALL_MAX_SPEED: 1750,
+  BALL_MAX_SPEED: 1600,
   WALL_BOUNCE: 0.86,
   /** Ball bounces off the floor with this much energy retained (higher = bouncier). */
   FLOOR_BOUNCE: 0.72,
@@ -133,9 +133,10 @@ export const BALANCE = {
    * became a 700 lob that anybody could run down: AI-vs-AI rallies went to 40,
    * 77, once 136 touches and a single point took over a minute. Folding the
    * average charged hit back into the base restores the pace without asking the
-   * player to hold anything.
+   * player to hold anything. It is now eased back slightly from 1150 so a
+   * rally is easier to read without turning every return into a soft lob.
    */
-  HIT_BASE: 1150,
+  HIT_BASE: 1050,
   /**
    * Straight upward kick added to every contact, on top of the bounce.
    *
@@ -231,6 +232,17 @@ export const BALANCE = {
    */
   BODY_HZ: 30,
   /**
+   * How long a guest prefers a player's own body packet over the host's copy.
+   *
+   * In a 2v2 the host's snapshot of another guest has travelled twice
+   * (guest -> host -> viewer), while the owner's broadcast has travelled only
+   * once. Using both as corrections makes that character rock between a new
+   * and an older position. A short arrival-time window chooses the direct
+   * account while it is flowing and falls back to host snapshots almost
+   * immediately if that path stops.
+   */
+  OWNER_BODY_FRESH: 0.2,
+  /**
    * Floor on how often input is repeated when nothing is changing.
    *
    * Input is sent the instant a key changes state, so this is only a heartbeat
@@ -281,15 +293,10 @@ export const BALANCE = {
   /** Above this the ease is abandoned and the body is snapped. */
   BODY_SNAP: 260,
   /**
-   * The same two numbers for a guest's *own* body, which it owns.
-   *
-   * Wildly looser on purpose. A character that is nudged under your own thumb
-   * feels broken even when the nudge is technically more accurate, so the host
-   * only gets to move you when the two simulations have genuinely come apart ,
-   * a serve reset, or a correction big enough that ignoring it would put you on
-   * the wrong side of the ball.
+   * A guest owns its own body, so routine host differences are never eased
+   * back under the player's controls. Only an error this large means a reset
+   * packet was missed and justifies an immediate recovery snap.
    */
-  OWN_TOLERANCE: 90,
   OWN_SNAP: 340,
   /** Ball error tolerated before correcting, and the error that forces a snap. */
   BALL_TOLERANCE: 12,
