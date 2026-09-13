@@ -59,7 +59,10 @@ export function detectTier(): Tier {
 
   if (mem > 0 && mem <= 3) return 0;
   if (cores > 0 && cores <= 4 && coarse) return 0;
-  if (coarse) return 1;
+  // Phones are fill-rate constrained even when they report ample memory and
+  // cores. Start them on the lightweight sea immediately instead of making a
+  // visibly laggy first minute wait for the frame governor to step down.
+  if (coarse) return 0;
   if (cores > 0 && cores <= 4) return 1;
   return 2;
 }

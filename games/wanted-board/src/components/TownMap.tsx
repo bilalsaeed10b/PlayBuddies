@@ -90,6 +90,8 @@ export default function TownMap({
   // square itself always fitted; the pieces standing on its edge did not, and
   // the row's `overflow-hidden` cut the bottom one off with no way to reach it.
   const edge = Math.max(0, Math.min(size - 56, 760));
+  const placeNameSize = Math.max(7, Math.min(14, edge / 30));
+  const placeTagSize = Math.max(6, Math.min(10, edge / 38));
   return (
     <div ref={box} className="flex h-full w-full items-center justify-center">
       {/* shrink-0 is load-bearing: the wrapper is a row flex, so without it the
@@ -126,19 +128,30 @@ export default function TownMap({
             type="button"
             disabled={!lit || !onPick}
             onClick={() => onPick?.(i)}
-            className={`absolute flex -translate-x-1/2 -translate-y-1/2 flex-col items-center justify-center rounded-2xl border-2 px-2 py-1.5 text-center transition-all ${
+            className={`absolute flex -translate-x-1/2 -translate-y-1/2 flex-col items-center justify-center overflow-hidden rounded-xl border-2 px-1 py-1 text-center transition-all sm:rounded-2xl sm:px-2 sm:py-1.5 ${
               lit
                 ? 'border-rose-700 bg-rose-100/90 shadow-[0_0_0_5px_rgba(190,18,60,0.16)]'
                 : isBank
                   ? 'border-amber-800/60 bg-amber-100/80'
                   : 'border-amber-900/25 bg-[#f7ecd6]/80'
             } ${lit && onPick ? 'cursor-pointer active:scale-95' : 'cursor-default'}`}
-            style={{ left: `${place.x}%`, top: `${place.y}%`, width: isBank ? '29%' : '24%' }}
+            style={{
+              left: `${place.x}%`,
+              top: `${place.y}%`,
+              width: isBank ? '31%' : '26%',
+              minHeight: isBank ? '27%' : '21%',
+            }}
           >
-            <span className="text-[11px] font-black uppercase leading-none tracking-[0.12em] text-amber-950 sm:text-sm">
+            <span
+              className="w-full min-w-0 font-black uppercase leading-[0.95] tracking-[0.06em] text-amber-950 [overflow-wrap:anywhere] sm:tracking-[0.1em]"
+              style={{ fontSize: placeNameSize }}
+            >
               {place.name}
             </span>
-            <span className="mt-0.5 text-[9px] font-bold uppercase tracking-wider text-amber-900/45 sm:text-[10px]">
+            <span
+              className="mt-0.5 w-full min-w-0 font-bold uppercase leading-tight tracking-[0.04em] text-amber-900/45 [overflow-wrap:anywhere] sm:tracking-wider"
+              style={{ fontSize: placeTagSize }}
+            >
               {isBank ? 'cash in here' : place.tag}
             </span>
             {myTrap === i && (

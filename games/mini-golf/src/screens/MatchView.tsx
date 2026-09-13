@@ -865,7 +865,7 @@ export default function MatchView({
 
       {/* ── how it works, pinned for the whole round rather than just this turn ── */}
       {!over && (
-        <div className="pointer-events-none absolute left-2 top-20 z-10 max-w-[10.5rem] rounded-2xl border border-white/15 bg-black/40 p-3 text-[10px] leading-relaxed text-white/70 backdrop-blur-md">
+        <div className="pointer-events-none absolute left-2 top-20 z-10 hidden max-w-[10.5rem] rounded-2xl border border-white/15 bg-black/40 p-3 text-[10px] leading-relaxed text-white/70 backdrop-blur-md landscape:block">
           <p className="mb-1 font-black uppercase tracking-[0.15em] text-white/45">How it works</p>
           <p>Drag back from anywhere and release. Further back is harder; the line is the line.</p>
           <p className="mt-1.5">Bank off the blocks, stay out of the ponds, and get down in fewer than everybody else.</p>

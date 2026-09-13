@@ -1498,19 +1498,19 @@ function RoomScreen({
   const waitingFor = people.filter((p) => p.skin === undefined || p.skin === null).length;
 
   const header = (
-    <div className="flex shrink-0 items-center justify-between gap-2">
-      <div className="min-w-0">
+    <div className="flex shrink-0 flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+      <div className="w-full min-w-0 sm:w-auto">
         <h2 className="truncate text-lg font-black tracking-tight sm:text-2xl">Pick your ship</h2>
-        <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-amber-300/80">
+        <p className="text-[10px] font-bold uppercase leading-snug tracking-[0.14em] text-amber-300/80 sm:text-[11px] sm:tracking-[0.18em]">
           {formatSides(rules.players)} across open water
           {emptyBerths > 0 && ` · ${emptyBerths} ${emptyBerths === 1 ? 'helm' : 'helms'} to bots`}
         </p>
       </div>
-      <div className="flex shrink-0 items-center gap-2">
-        <button onClick={onStats} className="panel flex items-center gap-2 rounded-2xl px-3 py-2 text-xs font-black text-sky-200" title="Captain statistics">
-          <Trophy className="h-4 w-4 text-amber-300" /> Stats
+      <div className="flex w-full shrink-0 items-center justify-end gap-1.5 sm:w-auto sm:gap-2">
+        <button onClick={onStats} className="panel flex items-center gap-2 rounded-2xl p-2.5 text-xs font-black text-sky-200 sm:px-3 sm:py-2" title="Captain statistics" aria-label="Captain statistics">
+          <Trophy className="h-4 w-4 text-amber-300" /> <span className="hidden sm:inline">Stats</span>
         </button>
-        <div className="panel flex items-center gap-2 rounded-2xl px-3 py-2 font-bold text-amber-300">
+        <div className="panel flex items-center gap-1.5 rounded-2xl px-2.5 py-2 font-bold text-amber-300 sm:gap-2 sm:px-3">
           <Coins className="h-4 w-4" /> {coins}
         </div>
         <button onClick={onFullscreen} className="panel rounded-2xl p-2.5" title="Full screen">

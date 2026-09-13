@@ -570,11 +570,26 @@ export class GameEngine {
     this.config.canvas.style.width = `${rect.width}px`;
     this.config.canvas.style.height = `${rect.height}px`;
 
-    this.effViewW = BALANCE.WORLD_W;
-    this.effViewH = BALANCE.WORLD_H;
+    /*
+     * Fill the screen instead of letterboxing the 16:9 reef.
+     *
+     * Mobile browser viewports are often much wider than 16:9 once they are
+     * turned sideways. Fitting the whole world left plain blue gutters at
+     * both edges and made every fish needlessly small. The camera now shows
+     * the largest aspect-correct slice that completely covers the canvas.
+     */
+    const aspect = Math.max(0.1, rect.width / Math.max(1, rect.height));
+    const worldAspect = BALANCE.WORLD_W / BALANCE.WORLD_H;
+    if (aspect >= worldAspect) {
+      this.effViewW = BALANCE.WORLD_W;
+      this.effViewH = BALANCE.WORLD_W / aspect;
+    } else {
+      this.effViewH = BALANCE.WORLD_H;
+      this.effViewW = BALANCE.WORLD_H * aspect;
+    }
   }
 
-  /** The whole aquarium stays visible regardless of player size or position. */
+  /** The camera-sized part of the aquarium currently visible. */
 
 
   private viewRadius() {
@@ -1370,8 +1385,29 @@ export class GameEngine {
     ctx.translate((cw - this.effViewW * scale) / 2, (ch - this.effViewH * scale) / 2);
     ctx.scale(scale, scale);
 
-    this.cameraX = BALANCE.WORLD_W / 2;
-    this.cameraY = BALANCE.WORLD_H / 2;
+    // Follow the local fish through the cropped dimension. This keeps the
+    // larger mobile view playable all the way to the reef's boundaries.
+    let focusX = 0;
+    let focusY = 0;
+    let focusCount = 0;
+    for (const fish of this.locals.values()) {
+      if (fish.dead) continue;
+      focusX += fish.x;
+      focusY += fish.y;
+      focusCount++;
+    }
+    const wantedX = focusCount ? focusX / focusCount : BALANCE.WORLD_W / 2;
+    const wantedY = focusCount ? focusY / focusCount : BALANCE.WORLD_H / 2;
+    const minX = this.effViewW / 2;
+    const minY = this.effViewH / 2;
+    const targetX = this.effViewW >= BALANCE.WORLD_W
+      ? BALANCE.WORLD_W / 2
+      : clamp(wantedX, minX, BALANCE.WORLD_W - minX);
+    const targetY = this.effViewH >= BALANCE.WORLD_H
+      ? BALANCE.WORLD_H / 2
+      : clamp(wantedY, minY, BALANCE.WORLD_H - minY);
+    this.cameraX += (targetX - this.cameraX) * 0.12;
+    this.cameraY += (targetY - this.cameraY) * 0.12;
 
     ctx.translate(this.effViewW / 2 - this.cameraX, this.effViewH / 2 - this.cameraY);
 

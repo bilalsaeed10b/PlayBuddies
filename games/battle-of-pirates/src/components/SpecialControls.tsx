@@ -80,7 +80,7 @@ export default function SpecialControls({
   return (
     <div
       ref={rootRef}
-      className="absolute bottom-[112px] left-3 z-30 w-[148px] [@media(max-height:559px)]:bottom-[84px]"
+      className="absolute left-1/2 top-[104px] z-30 w-[148px] -translate-x-1/2"
       onKeyDown={(event) => event.stopPropagation()}
       onKeyUp={(event) => event.stopPropagation()}
       onPointerDown={(event) => event.stopPropagation()}
@@ -92,7 +92,7 @@ export default function SpecialControls({
           id={`${id}-picker`}
           role="dialog"
           aria-label="Choose a special attack"
-          className="absolute bottom-full left-0 mb-2 w-[min(390px,calc(100vw_-_24px))] rounded-2xl border border-amber-200/35 bg-slate-950/95 p-2 shadow-2xl backdrop-blur-lg"
+          className="absolute left-1/2 top-full mt-2 w-[min(390px,calc(100vw_-_24px))] -translate-x-1/2 rounded-2xl border border-amber-200/35 bg-slate-950/95 p-2 shadow-2xl backdrop-blur-lg"
         >
           <div className="mb-1.5 flex items-center gap-2 px-1">
             <Sparkles aria-hidden="true" className="h-4 w-4 text-amber-300" />

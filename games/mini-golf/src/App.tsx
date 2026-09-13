@@ -264,14 +264,17 @@ export default function App() {
    */
   const people = useMemo(() => {
     return Object.values(lobby?.players ?? {})
-      .sort((a, b) => a.uid.localeCompare(b.uid))
+      // The player on this device must always receive a ball. A stale roster
+      // entry sorting ahead of the host used to fill every available seat and
+      // turn the person who pressed Start into a spectator.
+      .sort((a, b) => Number(b.uid === uid) - Number(a.uid === uid) || a.uid.localeCompare(b.uid))
       .slice(0, rules.players)
       .map((p) => ({
         uid: p.uid,
         displayName: p.displayName || 'Player',
         skin: p.fishIndex,
       }));
-  }, [lobby, rules.players]);
+  }, [lobby, rules.players, uid]);
 
   const mySkin = uid ? lobby?.players?.[uid]?.fishIndex : undefined;
   const isHost = Boolean(uid && lobby && lobby.hostId === uid);
@@ -399,8 +402,11 @@ export default function App() {
 
   const matchConfig = useMemo(
     () => (online && uid && !offlineMatch ? onlineConfig() : offlineConfig()),
+    // Rebuild once when the room becomes a match. The previous memo was made
+    // while authentication was ready but the roster was still empty, then
+    // kept that all-bot lineup when Start was pressed.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [session.seed, offlineMatch, uid],
+    [session.seed, offlineMatch, uid, view],
   );
 
   // -- onto the first tee -----------------------------------------------------
