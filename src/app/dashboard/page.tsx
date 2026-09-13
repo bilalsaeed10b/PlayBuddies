@@ -145,7 +145,9 @@ export default function DashboardPage() {
             uid: user.uid,
             displayName: (user.displayName || "Player").slice(0, 60),
             photoURL: (user.photoURL || "").slice(0, 500),
-            isReady: false,
+            // Joining a lobby is an explicit action; start every new host in
+            // the same ready state as invited guests.
+            isReady: true,
           },
         },
         createdAt: serverTimestamp(),
