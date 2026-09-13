@@ -26,7 +26,7 @@ import { BALANCE, CARDS, CARD_ORDER, TEAM_COLORS } from './game/rules';
 import { TIERS } from './engine/ai';
 import { audioService } from './services/audio';
 import { GameWallet, reportResult } from './platform/wallet';
-import { accuracy, clearStats, favouriteCard, readStats, recordBattle } from './platform/stats';
+import { accuracy, clearStats, currentWeekId, favouriteCard, readStats, recordBattle } from './platform/stats';
 import type { MatchRecord, Stats } from './platform/stats';
 import BattleView, { MatchConfig } from './screens/BattleView';
 import type { Seat } from './engine/BattleEngine';
@@ -209,6 +209,19 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('pirates_rules_v2', JSON.stringify(rules));
   }, [rules]);
+
+  // The picker reads only these aggregate aim totals for the captains beside
+  // you. Match history, cards and anything account-related remain local.
+  useEffect(() => {
+    if (!uid) return;
+    void import('./firebase')
+      .then(({ db, doc, setDoc, serverTimestamp }) => setDoc(doc(db, 'pirateStats', uid), {
+        allTime: { shots: stats.shots, hits: stats.hits },
+        week: stats.week,
+        updatedAt: serverTimestamp(),
+      }))
+      .catch((error) => console.warn('Could not publish aim totals', error));
+  }, [uid, stats.shots, stats.hits, stats.week]);
 
   // The coin balance is shared with the rest of PlayBuddies on purpose. Coins
   // earned in one game are worth something in the next, which is the only
@@ -832,6 +845,7 @@ export default function App() {
           onSettings={() => setShowSettings(true)}
           onRules={() => setShowRules(true)}
           onStats={() => setShowStats(true)}
+          stats={stats}
           rules={rules}
           onFullscreen={() => toggleFullscreen(document.documentElement, !document.fullscreenElement)}
           onPlayOffline={() => {
@@ -1347,6 +1361,7 @@ function RoomScreen({
   onSettings,
   onRules,
   onStats,
+  stats,
   rules,
   onFullscreen,
   onPlayOffline,
@@ -1376,6 +1391,7 @@ function RoomScreen({
   onSettings: () => void;
   onRules: () => void;
   onStats: () => void;
+  stats: Stats;
   rules: MatchRules;
   onFullscreen: () => void;
   onPlayOffline: () => void;
@@ -1624,7 +1640,7 @@ function RoomScreen({
         ) : (
           <div className="space-y-3">
             <p className="text-center text-[11px] font-semibold text-white/45">
-              All four are free. The paint is what you bought; this is how you fight.
+              All {HULLS.length} are free. The paint is what you bought; this is how you fight.
             </p>
             <HullGrid selected={myHull} onPick={onPickHull} pickedBy={hullPickedBy} />
           </div>
@@ -1822,12 +1838,115 @@ function RoomScreen({
             )}
           </div>
 
+          <div className="hidden lg:block">
+            <FriendsLeaderboard people={people} uid={uid} stats={stats} />
+          </div>
+
             {desktopCta}
           </div>
         </div>
       </div>
       {teamManager}
     </>
+  );
+}
+
+type PublicAimTotals = {
+  allTime: { shots: number; hits: number };
+  week: { id: string; shots: number; hits: number };
+};
+
+/**
+ * A small lobby-only ladder. It fetches one known document per captain rather
+ * than querying a collection, so a player can compare with friends in their
+ * room without turning aim stats into a browsable public directory.
+ */
+function FriendsLeaderboard({
+  people,
+  uid,
+  stats,
+}: {
+  people: { uid: string; displayName: string; photoURL?: string }[];
+  uid: string | null;
+  stats: Stats;
+}) {
+  const [tab, setTab] = useState<'weekly' | 'all-time'>('weekly');
+  const [remote, setRemote] = useState<Record<string, PublicAimTotals>>({});
+  const rosterKey = people.map((person) => person.uid).sort().join(',');
+
+  useEffect(() => {
+    let cancelled = false;
+    const crew = people.filter((person) => person.uid !== uid);
+    void import('./firebase')
+      .then(async ({ db, doc, getDoc }) => {
+        const reads = await Promise.all(crew.map(async (person) => {
+          try {
+            const snapshot = await getDoc(doc(db, 'pirateStats', person.uid));
+            const data = snapshot.data() as Partial<PublicAimTotals> | undefined;
+            const allTime = data?.allTime;
+            const week = data?.week;
+            if (
+              typeof allTime?.shots !== 'number' || typeof allTime.hits !== 'number' ||
+              typeof week?.id !== 'string' || typeof week.shots !== 'number' || typeof week.hits !== 'number'
+            ) return null;
+            return [person.uid, { allTime, week }] as const;
+          } catch {
+            return null;
+          }
+        }));
+        if (!cancelled) setRemote(Object.fromEntries(reads.filter((entry): entry is readonly [string, PublicAimTotals] => entry !== null)));
+      })
+      .catch(() => { if (!cancelled) setRemote({}); });
+    return () => { cancelled = true; };
+  }, [rosterKey, uid]);
+
+  const weekId = currentWeekId();
+  const self: PublicAimTotals = { allTime: { shots: stats.shots, hits: stats.hits }, week: stats.week };
+  const rows = people
+    .map((person) => {
+      const totals = person.uid === uid ? self : remote[person.uid];
+      const scoped = tab === 'weekly'
+        ? totals?.week.id === weekId ? totals.week : { shots: 0, hits: 0 }
+        : totals?.allTime ?? { shots: 0, hits: 0 };
+      return { ...person, ...scoped, percent: accuracy(scoped) };
+    })
+    .sort((a, b) => b.percent - a.percent || b.shots - a.shots || a.displayName.localeCompare(b.displayName));
+
+  return (
+    <section className="panel overflow-hidden rounded-[2rem] p-4">
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <div>
+          <p className="flex items-center gap-1.5 text-xs font-black uppercase tracking-[0.16em] text-amber-200">
+            <Trophy className="h-3.5 w-3.5 text-amber-300" /> Friends leaderboard
+          </p>
+          <p className="mt-0.5 text-[10px] font-semibold text-white/45">Ranked by aim accuracy</p>
+        </div>
+        <div className="flex rounded-lg bg-black/30 p-0.5 text-[9px] font-black uppercase tracking-wide">
+          <button onClick={() => setTab('weekly')} className={`rounded-md px-2 py-1 ${tab === 'weekly' ? 'bg-amber-400 text-slate-950' : 'text-white/50'}`}>Weekly</button>
+          <button onClick={() => setTab('all-time')} className={`rounded-md px-2 py-1 ${tab === 'all-time' ? 'bg-amber-400 text-slate-950' : 'text-white/50'}`}>All time</button>
+        </div>
+      </div>
+      <div className="space-y-1.5">
+        {rows.map((row, index) => (
+          <div key={row.uid} className={`rounded-xl px-2 py-1.5 ${row.uid === uid ? 'bg-amber-400/15 ring-1 ring-amber-400/35' : 'bg-black/20'}`}>
+            <div className="flex items-center gap-2 text-[11px]">
+              <span className="w-4 text-center font-black tabular-nums text-amber-300">{index + 1}</span>
+              <span className="min-w-0 flex-1 truncate font-bold">{row.displayName}{row.uid === uid ? ' · you' : ''}</span>
+              <span className="font-black tabular-nums text-amber-200">{row.shots > 0 ? `${row.percent}%` : '—'}</span>
+            </div>
+            <div className="ml-6 mt-1 flex items-center gap-2">
+              <span className="h-1 min-w-0 flex-1 overflow-hidden rounded-full bg-white/10">
+                <span className="block h-full rounded-full bg-amber-400" style={{ width: `${row.shots > 0 ? Math.max(4, row.percent) : 0}%` }} />
+              </span>
+              <span className="w-14 text-right text-[9px] font-semibold tabular-nums text-white/45">{row.hits}/{row.shots} hits</span>
+            </div>
+          </div>
+        ))}
+      </div>
+      <p className="mt-3 text-[9px] font-semibold leading-relaxed text-white/35">
+        {tab === 'weekly' ? 'This week only. A better week puts you straight up the board.' : 'Every recorded cannon turn.'}
+      </p>
+    </section>
   );
 }
 

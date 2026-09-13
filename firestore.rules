@@ -133,6 +133,33 @@ service cloud.firestore {
                    && incoming().friendCode.size() == 8;
     }
 
+    // Aim totals are intentionally tiny and get-only: the ship picker reads
+    // only the handful of captains in the lobby, never a browsable directory.
+    match /pirateStats/{userId} {
+      function validAim(aim) {
+        return aim is map
+               && aim.keys().hasOnly(['shots', 'hits'])
+               && aim.shots is int && aim.hits is int
+               && aim.shots >= 0 && aim.hits >= 0 && aim.hits <= aim.shots;
+      }
+
+      function validWeek(week) {
+        return week is map
+               && week.keys().hasOnly(['id', 'shots', 'hits'])
+               && week.id is string && week.id.size() <= 16
+               && week.shots is int && week.hits is int
+               && week.shots >= 0 && week.hits >= 0 && week.hits <= week.shots;
+      }
+
+      allow get: if signedIn();
+      allow list: if false;
+      allow create, update: if isSelf(userId)
+                            && incoming().keys().hasOnly(['allTime', 'week', 'updatedAt'])
+                            && validAim(incoming().allTime)
+                            && validWeek(incoming().week);
+      allow delete: if false;
+    }
+
     // ─── Friend connections ───
     match /connections/{connId} {
       allow get: if signedIn() && (!exists(/databases/$(database)/documents/connections/$(connId))

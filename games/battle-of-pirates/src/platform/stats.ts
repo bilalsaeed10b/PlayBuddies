@@ -2,9 +2,9 @@
  * The captain's log: what this player has actually done, across every battle.
  *
  * Deliberately local and deliberately small. Coins live in the account because
- * they are spent on things the account owns (see wallet.ts); a record of your
- * own shooting is nobody else's business and nothing else reads it, so it stays
- * in this browser under this game's own key and costs the platform nothing.
+ * they are spent on things the account owns (see wallet.ts). The detailed log
+ * stays in this browser; only aggregate aim totals are mirrored to the current
+ * lobby's Friends leaderboard.
  *
  * Every number here is counted from hulls this device actually sailed. A bot
  * that took over an abandoned wheel is not you, and neither is the enemy: a
@@ -32,15 +32,36 @@ export interface Stats {
   bestStreak: number;
   /** Times each card was fired. */
   cards: Partial<Record<CardId, number>>;
+  /** Aim totals for the current calendar week. */
+  week: WeeklyAim;
+}
+
+export interface WeeklyAim {
+  /** Monday through Sunday, expressed as the shared UTC Monday date. */
+  id: string;
+  shots: number;
+  hits: number;
+}
+
+/** Compact shared-week key for the player-facing accuracy ladder. */
+export function currentWeekId(now = new Date()): string {
+  const monday = new Date(now);
+  const day = (monday.getUTCDay() + 6) % 7;
+  monday.setUTCDate(monday.getUTCDate() - day);
+  return `${monday.getUTCFullYear()}-${String(monday.getUTCMonth() + 1).padStart(2, '0')}-${String(monday.getUTCDate()).padStart(2, '0')}`;
+}
+
+export function emptyWeek(id = currentWeekId()): WeeklyAim {
+  return { id, shots: 0, hits: 0 };
 }
 
 export const EMPTY: Stats = {
   battles: 0, wins: 0, shots: 0, hits: 0, balls: 0, ballsLanded: 0,
-  damage: 0, sunk: 0, bestStreak: 0, cards: {},
+  damage: 0, sunk: 0, bestStreak: 0, cards: {}, week: emptyWeek(),
 };
 
 /** What one battle added. The engine keeps this; `merge` folds it into the log. */
-export type MatchRecord = Omit<Stats, 'battles' | 'wins'>;
+export type MatchRecord = Omit<Stats, 'battles' | 'wins' | 'week'>;
 
 export const EMPTY_RECORD: MatchRecord = {
   shots: 0, hits: 0, balls: 0, ballsLanded: 0, damage: 0, sunk: 0, bestStreak: 0, cards: {},
@@ -54,10 +75,14 @@ export function readStats(): Stats {
     // Spread over EMPTY rather than trusted wholesale: a log written by an
     // older build is missing whichever counters came later, and a missing
     // counter read as undefined turns every total downstream into NaN.
+    const week = saved.week;
     return {
       ...EMPTY,
       ...saved,
       cards: typeof saved.cards === 'object' && saved.cards ? saved.cards : {},
+      week: week && typeof week.id === 'string' && typeof week.shots === 'number' && typeof week.hits === 'number'
+        ? week
+        : emptyWeek(),
     };
   } catch {
     return { ...EMPTY, cards: {} };
@@ -67,6 +92,8 @@ export function readStats(): Stats {
 /** Fold one finished battle into the log and save it. Returns the new totals. */
 export function recordBattle(won: boolean, match: MatchRecord): Stats {
   const now = readStats();
+  const weekId = currentWeekId();
+  const priorWeek = now.week.id === weekId ? now.week : emptyWeek(weekId);
   const cards = { ...now.cards };
   for (const [id, n] of Object.entries(match.cards)) {
     cards[id as CardId] = (cards[id as CardId] ?? 0) + (n ?? 0);
@@ -82,6 +109,7 @@ export function recordBattle(won: boolean, match: MatchRecord): Stats {
     sunk: now.sunk + match.sunk,
     bestStreak: Math.max(now.bestStreak, match.bestStreak),
     cards,
+    week: { id: weekId, shots: priorWeek.shots + match.shots, hits: priorWeek.hits + match.hits },
   };
   try {
     localStorage.setItem(KEY, JSON.stringify(next));
