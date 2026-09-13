@@ -22,9 +22,9 @@ export const PHYSICS = {
    * on the green , a shade less than the widest course, so crossing one in a
    * single putt is possible but never automatic.
    */
-  K_GREEN: 0.8,
-  K_ROUGH: 1.6,
-  K_SAND: 3.2,
+  K_GREEN: 1.2,
+  K_ROUGH: 2.4,
+  K_SAND: 4.8,
   /** Under this it has stopped, and holding on to the last hundredth of a unit per second just delays the turn. */
   STOP: 2,
   /** How much speed survives a wall. */
@@ -44,7 +44,7 @@ export const PHYSICS = {
    * ball has to be dying as it arrives , so line and weight are two separate
    * skills, which is what putting actually is.
    */
-  CAPTURE_SPEED: 42,
+  CAPTURE_SPEED: 70,
   /** The rim robs a lipped-out ball of this much speed on the way past. */
   LIP_DAMP: 0.55,
   /** Physics runs on this fixed step regardless of frame rate. */

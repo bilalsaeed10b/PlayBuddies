@@ -483,7 +483,7 @@ export const CARDS: Record<CardId, CardMeta> = {
   twin: {
     id: 'twin', name: 'Twin Shot', glyph: 'II', weight: 13,
     blurb: 'Two 8-damage cannonballs. The attack charges your special once.',
-    shots: 2, spread: 0.02, damage: 8, splashDamage: 5, blast: 0.8, gravity: 1, speed: 1,
+    shots: 2, spread: 0.02, damage: 7, splashDamage: 5, blast: 0.8, gravity: 1, speed: 1,
   },
   broadside: {
     id: 'broadside', name: 'Triple Shot', glyph: 'III', weight: 10,

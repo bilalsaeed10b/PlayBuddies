@@ -110,20 +110,16 @@ export interface Burst {
 }
 
 export interface EngineConfig {
-  /** Who holds this keep. */
-  control: Control;
-  name: string;
-  /** Index into SEATS. Also this keep's slot in the match. */
-  seat: number;
-  /** Every wave, already built from the match seed. Identical on every client. */
+  control?: Control;
+  name?: string;
+  seat?: number;
   waves: Wave[];
-  /** Salts this keep's own cosmetic rolls. Nothing that decides the fight. */
   seed: number;
   lives: number;
-  gold: number;
+  golds: number[];
+  playerCount: number;
   onSfx?: (kind: 'build' | 'sell' | 'shoot' | 'boom' | 'leak' | 'clear' | 'fall') => void;
-  /** Fired when this keep's own wave ends, so the owner can publish a summary. */
-  onWaveEnd?: (wave: number, lives: number, gold: number, down: boolean) => void;
+  onWaveEnd?: (wave: number, lives: number, golds: number[], down: boolean) => void;
 }
 
 /** A tower order, from a thumb or from the wire. Applied identically either way. */
@@ -131,6 +127,7 @@ export interface BuildOrder {
   plot: number;
   kind: TowerId | null;
   level: number;
+  owner: number;
 }
 
 export class SiegeEngine {
@@ -142,7 +139,10 @@ export class SiegeEngine {
   /** Index into `waves`. Also what the HUD calls "wave N+1". */
   wave = 0;
   lives: number;
-  gold: number;
+  golds: number[];
+  playerCount: number;
+  onSfx?: (kind: 'build' | 'sell' | 'shoot' | 'boom' | 'leak' | 'clear' | 'fall') => void;
+  onWaveEnd?: (wave: number, lives: number, golds: number[], down: boolean) => void;
 
   /**
    * Seconds left of the build phase, or elapsed into the wave.
@@ -177,11 +177,14 @@ export class SiegeEngine {
 
   constructor(cfg: EngineConfig) {
     this.cfg = cfg;
-    this.seat = cfg.seat;
-    this.name = cfg.name;
-    this.control = cfg.control;
+    this.name = cfg.name ?? 'Shared Base';
+    this.seat = cfg.seat ?? 0;
+    this.control = cfg.control ?? 'local';
     this.lives = cfg.lives;
-    this.gold = cfg.gold;
+    this.golds = cfg.golds.slice();
+    this.playerCount = cfg.playerCount;
+    this.onSfx = cfg.onSfx;
+    this.onWaveEnd = cfg.onWaveEnd;
     this.rng = mulberry32(cfg.seed ^ 0x7e11);
   }
 
@@ -246,22 +249,22 @@ export class SiegeEngine {
     if (order.kind === null) {
       const t = this.towerAt(order.plot);
       if (!t) return null;
-      if (charge) this.gold += this.refundOf(order.plot);
+      if (charge) this.golds[order.owner] += this.refundOf(order.plot);
       this.towers = this.towers.filter((x) => x.plot !== order.plot);
       this.cfg.onSfx?.('sell');
-      return { plot: order.plot, kind: null, level: 0 };
+      return { plot: order.plot, kind: null, level: 0, owner: order.owner };
     }
 
     const existing = this.towerAt(order.plot);
     const cost = this.costOf(order.plot, order.kind);
     if (cost < 0) return null;
-    if (charge && this.gold < cost) return null;
-    if (charge) this.gold -= cost;
+    if (charge && this.golds[order.owner] < cost) return null;
+    if (charge) this.golds[order.owner] -= cost;
 
     if (existing) {
       existing.level += 1;
       this.cfg.onSfx?.('build');
-      return { plot: order.plot, kind: existing.kind, level: existing.level };
+      return { plot: order.plot, kind: existing.kind, level: existing.level, owner: order.owner };
     }
 
     const col = order.plot % COLS;
@@ -281,7 +284,7 @@ export class SiegeEngine {
       kills: 0,
     });
     this.cfg.onSfx?.('build');
-    return { plot: order.plot, kind: order.kind, level: 0 };
+    return { plot: order.plot, kind: order.kind, level: 0, owner: order.owner };
   }
 
   /**
@@ -291,9 +294,9 @@ export class SiegeEngine {
    * company by a hair. This is the correction, applied at a wave boundary
    * where nothing is in the air to look wrong. See REQUIREMENTS.md 7.1.
    */
-  reconcile(wave: number, lives: number, gold: number, down: boolean) {
+  reconcile(wave: number, lives: number, golds: number[], down: boolean) {
     this.lives = lives;
-    this.gold = gold;
+    this.golds = golds.slice();
     if (down && this.phase !== 'fallen') this.fall();
     // A peer that has moved on to a later wave than this copy of their keep
     // has: catch up rather than replay, since the enemies of the wave they
@@ -398,9 +401,11 @@ export class SiegeEngine {
   private endWave() {
     const clean = this.leakedThisWave === 0;
     const bonus = (clean ? BALANCE.CLEAN_BONUS : 0) + BALANCE.CLEAR_PER_WAVE * (this.wave + 1);
-    this.gold += bonus;
+    for (let i = 0; i < this.playerCount; i++) {
+      this.golds[i] = (this.golds[i] ?? 0) + bonus;
+    }
     this.cfg.onSfx?.('clear');
-    this.cfg.onWaveEnd?.(this.wave, this.lives, this.gold, false);
+    this.cfg.onWaveEnd?.(this.wave, this.lives, this.golds, false);
 
     this.wave += 1;
     if (this.wave >= this.cfg.waves.length) {
@@ -415,7 +420,7 @@ export class SiegeEngine {
     this.enemies = [];
     this.shots = [];
     this.cfg.onSfx?.('fall');
-    this.cfg.onWaveEnd?.(this.wave, 0, this.gold, true);
+    this.cfg.onWaveEnd?.(this.wave, 0, this.golds, true);
   }
 
   private spawn() {
@@ -693,7 +698,10 @@ export class SiegeEngine {
 
     e.dead = true;
     if (by) by.kills += 1;
-    this.gold += ENEMIES[e.kind].bounty;
+    const bounty = ENEMIES[e.kind].bounty;
+    for (let i = 0; i < this.playerCount; i++) {
+      this.golds[i] = (this.golds[i] ?? 0) + bounty;
+    }
     this.killedThisWave += 1;
     this.totalKills += 1;
     this.burst(e.x, e.y, ENEMIES[e.kind].size * 2.4, 'death', ENEMIES[e.kind].trim);

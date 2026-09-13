@@ -184,11 +184,11 @@ function readWave(engine: SiegeEngine): { air: number; armour: number; swarm: nu
  * Called repeatedly during a build phase until it returns null, so one call is
  * one tower and the caller decides how much of the phase to spend.
  */
-export function decide(engine: SiegeEngine, level: number, nth: number): BuildOrder | null {
+export function decide(engine: SiegeEngine, level: number, nth: number, seat: number): BuildOrder | null {
   const tier = TIERS[Math.max(0, Math.min(TIERS.length - 1, level))];
   const rnd = mulberry32((engine.seat * 7919 + engine.wave * 104729 + nth * 31) >>> 0);
 
-  const budget = engine.gold * tier.spend;
+  const budget = engine.golds[seat] * tier.spend;
   if (budget < TOWERS.arrow.levels[0].cost) return null;
 
   const mix = readWave(engine);
@@ -203,7 +203,7 @@ export function decide(engine: SiegeEngine, level: number, nth: number): BuildOr
       .sort((a, b) => (PLOT_VALUE.get(b.plot) ?? 0) - (PLOT_VALUE.get(a.plot) ?? 0));
     if (ups.length > 0) {
       const pick = ups[0];
-      return { plot: pick.plot, kind: pick.kind, level: pick.level + 1 };
+      return { plot: pick.plot, kind: pick.kind, level: pick.level + 1, owner: seat };
     }
   }
 
@@ -230,7 +230,7 @@ export function decide(engine: SiegeEngine, level: number, nth: number): BuildOr
 
     const plot = bestPlot(engine, tier.slack, rnd);
     if (plot === null) return null;
-    return { plot, kind, level: 0 };
+    return { plot, kind, level: 0, owner: seat };
   }
   return null;
 }

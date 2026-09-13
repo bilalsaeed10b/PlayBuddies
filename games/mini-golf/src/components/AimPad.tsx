@@ -174,7 +174,7 @@ export default function AimPad({
   useEffect(() => {
     const measure = () => {
       const small = Math.min(window.innerWidth, window.innerHeight);
-      reach.current = Math.max(44, Math.min(84, small * 0.13));
+      reach.current = Math.max(34, Math.min(64, small * 0.10));
     };
     measure();
     window.addEventListener('resize', measure);

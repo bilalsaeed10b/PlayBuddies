@@ -108,7 +108,7 @@ export interface StatePacket {
   /** Wave just finished. */
   w: number;
   lives: number;
-  gold: number;
+  golds: number[];
   /** 1 once this keep has fallen. Stated so nobody has to infer it from lives. */
   down: number;
   /** The host's rules, carried so a late joiner can build a session from any write. */

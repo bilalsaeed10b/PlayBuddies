@@ -177,18 +177,18 @@ export default function MatchView({
       if (packet.t === 'bye') {
         if (seat === undefined) return;
         const e = engines[seat];
-        if (e && e.control === 'remote') {
-          e.control = 'bot';
-          setNotice(`${e.name} dropped. A bot is holding their keep.`);
+        if (e && config.seats[seat]?.control === 'remote') {
+          config.seats[seat].control = 'bot';
+          setNotice(`${config.seats[seat]?.name} dropped. A bot is holding their keep.`);
         }
         return;
       }
       if (packet.t === 'hello') {
         if (seat === undefined) return;
         const e = engines[seat];
-        if (e && e.control === 'bot') {
-          e.control = 'remote';
-          setNotice(`${e.name} is back.`);
+        if (e && config.seats[seat]?.control === 'bot') {
+          config.seats[seat].control = 'remote';
+          setNotice(`${config.seats[seat]?.name} is back.`);
         }
         return;
       }
@@ -197,7 +197,7 @@ export default function MatchView({
         // Not charged: the owner already paid on their own device, and
         // charging again here would have a peer's keep run out of gold it
         // never spent. See SiegeEngine.apply.
-        engines[seat]?.apply({ plot: packet.p, kind: packet.k, level: packet.lv }, false);
+        engines[0]?.apply({ plot: packet.p, kind: packet.k, level: packet.lv, owner: seat ?? 0 }, false);
         return;
       }
       if (packet.t === 'send') {
@@ -208,14 +208,14 @@ export default function MatchView({
           engines[i].pushIncoming(packet.w, packet.k, packet.c);
         }
         if (seat !== mine) {
-          const who = engines[seat ?? 0]?.name ?? 'Someone';
+          const who = config.seats[seat ?? 0]?.name ?? 'Someone';
           shout(`${who} sent ${packet.c} ${ENEMIES[packet.k].name}`, 'bad');
         }
         return;
       }
       if (packet.t === 'state') {
         if (seat === undefined) return;
-        engines[seat]?.reconcile(packet.w, packet.lives, packet.gold, packet.down === 1);
+        engines[0]?.reconcile(packet.w, packet.lives, packet.golds, packet.down === 1);
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -318,28 +318,24 @@ export default function MatchView({
       session.rules.mode === 'alliance',
     );
 
-    const engines = config.seats.map(
-      (seat, i) =>
-        new SiegeEngine({
-          control: seat.control,
-          name: seat.name,
-          seat: i,
-          waves,
-          seed: session.seed ^ (i * 0x9e37),
-          lives: BALANCE.LIVES,
-          gold: BALANCE.START_GOLD,
-          onSfx: i === mine ? (kind) => playSfx(kind) : undefined,
-          onWaveEnd:
-            i === mine
-              ? (wave, lives, gold, down) => {
-                  linkRef.current?.send({
-                    t: 'state', n: Date.now(), s: session.seed, w: wave, lives, gold, down: down ? 1 : 0, r: rulesBits,
-                  });
-                  if (!down) shout(`Wave ${wave + 1} cleared`, 'good');
-                }
-              : undefined,
-        }),
-    );
+    const engines = [
+      new SiegeEngine({
+        waves,
+        seed: session.seed,
+        lives: BALANCE.LIVES,
+        golds: config.seats.map(() => BALANCE.START_GOLD),
+        playerCount: config.seats.length,
+        onSfx: (kind) => playSfx(kind),
+        onWaveEnd: (wave, lives, golds, down) => {
+          if (config.isHost) {
+            linkRef.current?.send({
+              t: 'state', n: Date.now(), s: session.seed, w: wave, lives, golds, down: down ? 1 : 0, r: rulesBits,
+            });
+          }
+          if (!down) shout(`Wave ${wave + 1} cleared`, 'good');
+        }
+      })
+    ];
     enginesRef.current = engines;
 
     for (const { packet, from } of queued.current) handlePacket(packet, from);
@@ -374,7 +370,7 @@ export default function MatchView({
     (o: BuildOrder) => {
       const engine = enginesRef.current[mine];
       if (!engine || spectating) return;
-      const done = engine.apply(o);
+      const done = engine.apply({ ...o, owner: mine });
       if (!done) return;
       audioService.unlock();
       linkRef.current?.send({
@@ -388,8 +384,8 @@ export default function MatchView({
   const buySend = useCallback(
     (kind: EnemyId, count: number, cost: number) => {
       const engine = enginesRef.current[mine];
-      if (!engine || engine.gold < cost) return;
-      engine.gold -= cost;
+      if (!engine || engine.golds[mine] < cost) return;
+      engine.golds[mine] -= cost;
       // Lands on the wave after the one being fought, so it is always a
       // boundary both sides agree on.
       const wave = engine.wave + 1;
@@ -490,9 +486,9 @@ export default function MatchView({
         // reads as a keep being fortified rather than one appearing whole.
         const due = Math.floor((BALANCE.BUILD_TIME - e.timer) / 1.1);
         if (nth >= due) continue;
-        const want = decide(e, aiLevel, nth);
+        const want = decide(e, aiLevel, nth, e.seat);
         botNth.set(e.seat, nth + 1);
-        if (want) e.apply(want);
+        if (want) e.apply({ ...want, owner: e.seat });
       }
 
       return engines;
@@ -504,15 +500,15 @@ export default function MatchView({
       if (own) {
         const t = Math.ceil(own.phase === 'build' ? own.timer : own.timer);
         if (
-          own.lives !== shown.lives || Math.floor(own.gold) !== shown.gold ||
+          own.lives !== shown.lives || Math.floor(own.golds[mine]) !== shown.gold ||
           own.wave !== shown.wave || own.phase !== shown.phase || t !== shown.timer
         ) {
           shown.lives = own.lives;
-          shown.gold = Math.floor(own.gold);
+          shown.gold = Math.floor(own.golds[mine]);
           shown.wave = own.wave;
           shown.phase = own.phase;
           shown.timer = t;
-          setHud({ lives: own.lives, gold: Math.floor(own.gold), wave: own.wave, phase: own.phase, timer: t });
+          setHud({ lives: own.lives, gold: Math.floor(own.golds[mine]), wave: own.wave, phase: own.phase, timer: t });
         }
       }
 
@@ -613,7 +609,7 @@ export default function MatchView({
       const col = sel % COLS;
       const row = Math.floor(sel / COLS);
       const kind = selectedRef.current;
-      const ok = engine.costOf(sel, kind) >= 0 && engine.gold >= engine.costOf(sel, kind);
+      const ok = engine.costOf(sel, kind) >= 0 && engine.golds[mine] >= engine.costOf(sel, kind);
       ctx.fillStyle = ok ? 'rgba(120, 255, 170, 0.18)' : 'rgba(255, 90, 90, 0.2)';
       ctx.fillRect(col * TILE + 4, row * TILE + 4, TILE - 8, TILE - 8);
       ctx.strokeStyle = ok ? '#7dffaa' : '#ff6b6b';
@@ -809,7 +805,7 @@ export default function MatchView({
       // An empty plot: first tap shows the footprint and the reach, second
       // builds. Two taps rather than one because a mis-tap that spends a
       // hundred and fifty gold mid-wave is a real loss.
-      if (pickedRef.current === plot) order({ plot, kind: selectedRef.current, level: 0 });
+      if (pickedRef.current === plot) order({ plot, kind: selectedRef.current, level: 0, owner: mine });
       else setPicked(plot);
     },
     [mine, order],
@@ -863,7 +859,7 @@ export default function MatchView({
   const own = enginesRef.current[mine];
   const wave = own?.current;
   const seatColor = SEATS[watching % SEATS.length];
-  const canAfford = (id: TowerId) => (own ? own.gold >= TOWERS[id].levels[0].cost : false);
+  const canAfford = (id: TowerId) => (own ? own.golds[mine] >= TOWERS[id].levels[0].cost : false);
   const pickedTower = picked !== null && engine ? engine.towerAt(picked) : undefined;
 
   if (!session) {
@@ -1011,35 +1007,7 @@ export default function MatchView({
           </div>
         )}
 
-        {/* The other keeps, at a glance. Tap one to jump to it. */}
-        {config.seats.length > 1 && (
-          <div className="pointer-events-auto absolute right-2 top-2 z-20 flex flex-col gap-1">
-            {config.seats.map((s, i) => {
-              const c = SEATS[i % SEATS.length];
-              const b = board[i];
-              return (
-                <button
-                  key={s.id}
-                  onClick={() => setWatching(i)}
-                  className={`flex items-center gap-1.5 rounded-lg border px-2 py-1 text-[10px] font-black backdrop-blur-md transition-colors ${
-                    i === watching ? 'bg-white/15' : 'bg-black/45 hover:bg-white/10'
-                  }`}
-                  style={{ borderColor: `${c.main}66` }}
-                >
-                  <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: c.main }} />
-                  <span className="max-w-[74px] truncate" style={{ color: c.light }}>
-                    {i === mine ? 'You' : s.name}
-                  </span>
-                  {b?.down ? (
-                    <X className="h-3 w-3 text-rose-400" />
-                  ) : (
-                    <span className="tabular-nums text-white/70">{b?.lives ?? 0}</span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-        )}
+        {/* The sidebars were removed for single base game. */}
       </div>
 
       {/* ── the build bar ──
@@ -1052,9 +1020,10 @@ export default function MatchView({
             <TowerPanel
               engine={enginesRef.current[mine]}
               plot={pickedTower.plot}
-              onUpgrade={() => order({ plot: pickedTower.plot, kind: pickedTower.kind, level: pickedTower.level + 1 })}
-              onSell={() => order({ plot: pickedTower.plot, kind: null, level: 0 })}
+              onUpgrade={() => order({ plot: pickedTower.plot, kind: pickedTower.kind, level: pickedTower.level + 1, owner: mine })}
+              onSell={() => order({ plot: pickedTower.plot, kind: null, level: 0, owner: mine })}
               onClose={() => setPicked(null)}
+              mine={mine}
             />
           ) : (
             <div className="flex items-stretch gap-1.5 overflow-x-auto">
@@ -1234,12 +1203,14 @@ function TowerPanel({
   onUpgrade,
   onSell,
   onClose,
+  mine,
 }: {
-  engine: SiegeEngine | undefined;
+  engine: SiegeEngine;
   plot: number;
   onUpgrade: () => void;
   onSell: () => void;
   onClose: () => void;
+  mine: number;
 }) {
   const tower = engine?.towerAt(plot);
   if (!engine || !tower) return null;
@@ -1247,7 +1218,7 @@ function TowerPanel({
   const lv = meta.levels[tower.level];
   const next = tower.level < 2 ? meta.levels[tower.level + 1] : null;
   const upCost = next ? next.cost : 0;
-  const canUp = next !== null && engine.gold >= upCost;
+  const canUp = next !== null && engine.golds[mine] >= upCost;
 
   return (
     <div className="flex items-center gap-2">
