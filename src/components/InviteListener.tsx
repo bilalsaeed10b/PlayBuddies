@@ -77,7 +77,9 @@ export default function InviteListener() {
   const acceptInvite = async (invite: Invite) => {
     setInvites((prev) => prev.filter((i) => i.id !== invite.id));
     deleteDoc(doc(db, "invites", invite.id)).catch(() => {});
-    router.push(`/lobby?room=${invite.roomId}`);
+    // A fresh invitation must also clear an old local "removed" screen when
+    // the host is inviting this person back into the same room.
+    router.push(`/lobby?room=${invite.roomId}&join=${encodeURIComponent(invite.id)}`);
   };
 
   const declineInvite = async (inviteId: string) => {

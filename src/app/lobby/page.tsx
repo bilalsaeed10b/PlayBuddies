@@ -18,9 +18,7 @@ import { cleanWallet, readWallet, recordMatch, writeWallet } from "@/lib/wallet"
 import type { Lobby, LobbyMessage, LobbyPlayer } from "@/types/game";
 import {
   doc,
-  getDoc,
   runTransaction,
-  setDoc,
   onSnapshot,
   updateDoc,
   serverTimestamp,
@@ -69,10 +67,14 @@ const CHAT_COOLDOWN_MS = 1000;
  */
 const HOST_MIGRATION_GRACE_MS = 6000;
 const HOST_LEASE_MS = 30_000;
+/** Let a new guest register RTDB presence before the host considers pruning. */
+const JOIN_PRESENCE_GRACE_MS = 30_000;
 
 function LobbyContent() {
   const searchParams = useSearchParams();
   const roomId = normalizeRoomCode(searchParams.get("room") || "");
+  /** New for every accepted invite, including an invite back into this room. */
+  const joinAttempt = searchParams.get("join") || "";
   const router = useRouter();
   const user = useAuthStore((s) => s.user);
   const clearStats = useAuthStore((s) => s.clearStats);
@@ -253,6 +255,10 @@ function LobbyContent() {
 
     const roomRef = doc(db, "lobbies", roomId);
     let cancelled = false;
+    // A host may re-invite someone they had previously removed. Clear that
+    // local-only state before this fresh membership attempt reaches Firestore.
+    setWasKicked(false);
+    setLookupFailed(false);
     // Flips true the first time a snapshot actually shows us as a member.
     // `join()` writes asynchronously, so the very first snapshot or two can
     // legitimately arrive before it lands , without this guard, that window
@@ -270,38 +276,36 @@ function LobbyContent() {
       };
 
       try {
-        const snap = await getDoc(roomRef);
-        if (cancelled) return;
+        const outcome = await runTransaction(db, async (tx) => {
+          const snap = await tx.get(roomRef);
+          if (!snap.exists()) {
+            tx.set(roomRef, {
+              hostId: user.uid,
+              hostSeenAt: serverTimestamp(),
+              status: "waiting",
+              gameId: null,
+              players: { [user.uid]: profile },
+              createdAt: serverTimestamp(),
+              expiresAt: new Date(Date.now() + LOBBY_TTL_MS),
+            });
+            return "joined" as const;
+          }
 
-        if (!snap.exists()) {
-          await setDoc(roomRef, {
-            hostId: user.uid,
-            hostSeenAt: serverTimestamp(),
-            status: "waiting",
-            gameId: null,
-            players: { [user.uid]: profile },
-            createdAt: serverTimestamp(),
-            expiresAt: new Date(Date.now() + LOBBY_TTL_MS),
+          const data = snap.data();
+          const existing = data.players || {};
+          const game = getGame(data.gameId);
+          const max = game?.maxPlayers ?? 8;
+          if (!existing[user.uid] && Object.keys(existing).length >= max) return "full" as const;
+          if (existing[user.uid]) return "joined" as const;
+
+          tx.update(roomRef, {
+            [`players.${user.uid}`]: profile,
+            updatedAt: serverTimestamp(),
           });
-          return;
-        }
-
-        const data = snap.data();
-        const existing = data.players || {};
-        const game = getGame(data.gameId);
-        const max = game?.maxPlayers ?? 8;
-
-        // Capacity was displayed but never enforced.
-        if (!existing[user.uid] && Object.keys(existing).length >= max) {
-          if (!cancelled) setLookupFailed(true);
-          return;
-        }
-
-        if (existing[user.uid]) return; // Reopening a tab must preserve skins and readiness.
-        await updateDoc(roomRef, {
-          [`players.${user.uid}`]: profile,
-          updatedAt: serverTimestamp(),
+          return "joined" as const;
         });
+        if (cancelled) return;
+        if (outcome === "full") setLookupFailed(true);
       } catch (e) {
         console.error("Error joining room:", e);
         if (!cancelled) setLookupFailed(true);
@@ -358,7 +362,7 @@ function LobbyContent() {
       // Presence removes this connection. Keep the shared player slot while
       // another tab/device is still in the room; the host prunes absent users.
     };
-  }, [user, roomId]);
+  }, [user, roomId, joinAttempt]);
 
   // The database checks this heartbeat before allowing any host claim.
   useEffect(() => {
@@ -405,8 +409,14 @@ function LobbyContent() {
    */
   useEffect(() => {
     if (!isHost || !lobby || lobby.status !== "waiting" || presentUids.size === 0) return;
-    const stale = Object.values(lobby.players || {}).filter(
-      (player) => player.uid !== user?.uid && !presentUids.has(player.uid),
+    const now = Date.now();
+    const stale = Object.values(lobby.players || {}).filter((player) =>
+      player.uid !== user?.uid
+      && !presentUids.has(player.uid)
+      // Firestore membership can arrive before RTDB's connection marker. The
+      // grace window prevents that ordinary handshake from looking like an
+      // abandoned tab and removing a guest who has just accepted an invite.
+      && now - (player.joinedAt ?? 0) > JOIN_PRESENCE_GRACE_MS,
     );
     if (stale.length === 0) return;
 
