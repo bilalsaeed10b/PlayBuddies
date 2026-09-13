@@ -1,9 +1,12 @@
 import http from 'http';
 import fs from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
 
-const RULES_PATH = path.join(process.cwd(), 'games', 'battle-of-pirates', 'src', 'game', 'rules.ts');
-const SPECIALS_PATH = path.join(process.cwd(), 'games', 'battle-of-pirates', 'src', 'game', 'specials.ts');
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const ROOT = path.resolve(__dirname, '..');
+const RULES_PATH = path.join(ROOT, 'games', 'battle-of-pirates', 'src', 'game', 'rules.ts');
+const SPECIALS_PATH = path.join(ROOT, 'games', 'battle-of-pirates', 'src', 'game', 'specials.ts');
 
 const CARD_IDS = ['round', 'chain', 'grape', 'mortar', 'firebomb', 'bore', 'patch', 'twin', 'broadside', 'keg'];
 const CARD_KEYS = ['weight', 'spread', 'damage', 'splashDamage', 'blast', 'gravity', 'speed'];
@@ -17,7 +20,7 @@ function parseRules() {
     const blockRegex = new RegExp(`${cardId}:\\s*\\{[^}]*?\\}`, 's');
     const blockMatch = content.match(blockRegex);
     if (blockMatch) {
-      const valMatch = blockMatch[0].match(new RegExp(`${key}:\\s*([\\d.]+)`));
+      const valMatch = blockMatch[0].match(new RegExp(`\\b${key}:\\s*([\\d.]+)`));
       return valMatch ? valMatch[1] : null;
     }
     return null;
@@ -38,7 +41,7 @@ function parseRules() {
   const specials = {
     torpedo: specialsContent.match(/torpedo:\s*\{[^}]*amount:\s*([\d.]+)/)?.[1] || 25,
     acidRain: specialsContent.match(/acid-rain':\s*\{[^}]*amount:\s*([\d.]+)/)?.[1] || 15,
-    heal: specialsContent.match(/heal:\s*\{[^}]*amount:\s*([\d.]+)/)?.[1] || 30
+    heal: specialsContent.match(/heal:\s*\{[^}]*amount:\s*([\d.]+)/)?.[1] || 20
   };
 
   return { cards, specials };
@@ -50,7 +53,7 @@ function updateRules(data) {
 
   const setCardVal = (cardId, key, val) => {
     if (val === undefined || val === null || val === '') return;
-    const blockRegex = new RegExp(`(${cardId}:\\s*\\{[^}]*?)(${key}:\\s*)([\\d.]+)`, 's');
+    const blockRegex = new RegExp(`(${cardId}:\\s*\\{[^}]*?\\b)(${key}:\\s*)([\\d.]+)`, 's');
     content = content.replace(blockRegex, `$1$2${val}`);
   };
 
@@ -60,6 +63,33 @@ function updateRules(data) {
     }
     setCardVal('patch', 'heal', data.cards?.['patch_heal']);
     setCardVal('firebomb', 'burn', data.cards?.['firebomb_burn']);
+  }
+
+  // Synchronize card blurbs so in-game UI descriptions match configured values
+  const updateCardBlurb = (cardId, pattern, replacement) => {
+    const blockRegex = new RegExp(`(${cardId}:\\s*\\{[^}]*?blurb:\\s*')(.*?)(')`, 's');
+    content = content.replace(blockRegex, (match, prefix, oldBlurb, suffix) => {
+      const newBlurb = oldBlurb.replace(pattern, replacement);
+      return `${prefix}${newBlurb}${suffix}`;
+    });
+  };
+
+  if (data.cards?.['chain_damage'] !== undefined) {
+    updateCardBlurb('chain', /Two linked \d+-damage balls/, `Two linked ${data.cards['chain_damage']}-damage balls`);
+  }
+  if (data.cards?.['twin_damage'] !== undefined) {
+    updateCardBlurb('twin', /Two \d+-damage cannonballs/, `Two ${data.cards['twin_damage']}-damage cannonballs`);
+  }
+  if (data.cards?.['broadside_damage'] !== undefined) {
+    updateCardBlurb('broadside', /Three \d+-damage cannonballs/, `Three ${data.cards['broadside_damage']}-damage cannonballs`);
+  }
+  if (data.cards?.['patch_heal'] !== undefined) {
+    updateCardBlurb('patch', /Heals \d+/, `Heals ${data.cards['patch_heal']}`);
+  }
+  if (data.cards?.['firebomb_burn'] !== undefined) {
+    const burnVal = data.cards['firebomb_burn'];
+    const word = burnVal === 1 ? 'one' : burnVal === 2 ? 'two' : burnVal === 3 ? 'three' : burnVal === 4 ? 'four' : `${burnVal}`;
+    updateCardBlurb('firebomb', /Burns for \w+ of their turns/, `Burns for ${word} of their turns`);
   }
 
   if (data.specials?.torpedo) {

@@ -477,7 +477,7 @@ export const CARDS: Record<CardId, CardMeta> = {
   },
   patch: {
     id: 'patch', name: 'Patch Kit', glyph: '+', weight: 10,
-    blurb: 'Plug the holes, then fire anyway. Heals 14.',
+    blurb: 'Plug the holes, then fire anyway. Heals 12.',
     shots: 1, spread: 0, damage: 5, splashDamage: 4, blast: 0.9, gravity: 1, speed: 1, heal: 12,
   },
   twin: {
