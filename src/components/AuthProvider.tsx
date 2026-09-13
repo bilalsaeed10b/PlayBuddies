@@ -9,7 +9,6 @@ import { FRIEND_CODE_LENGTH, generateFriendCode } from "@/lib/rooms";
 import { useOnlinePresence } from "@/hooks/usePresence";
 
 const SYNC_TTL_MS = 24 * 60 * 60 * 1000;
-// Bump this whenever the profile schema needs to be rechecked for every user.
 const syncKey = (uid: string) => `pb_profile_sync_v2_${uid}`;
 
 /**
@@ -56,9 +55,7 @@ async function syncUserDocuments(user: User) {
 
   if (!friendCode || friendCode.length !== FRIEND_CODE_LENGTH) {
     // Carry over a code from before the profile split so existing friend codes
-    // keep working, rather than silently reissuing one. A code from the old
-    // 8-character era fails this same length check, so it gets reissued at the
-    // new length too instead of lingering unsearchable.
+    // keep working. Six-character profiles are upgraded to eight characters.
     try {
       const legacy = await getDoc(doc(db, "users", user.uid));
       const legacyCode = legacy.data()?.friendCode;

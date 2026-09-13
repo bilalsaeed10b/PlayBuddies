@@ -7,6 +7,7 @@ import { useGameplayStore } from "@/store/useGameplayStore";
 import { PLAYABLE_GAMES, getGame, gameUrl, gameAccent, playerCountLabel } from "@/lib/games";
 import GameThumb from "@/components/GameThumb";
 import AuthGuard from "@/components/AuthGuard";
+import { gameSelectionUpdate } from "@/lib/lobbySettings";
 import { db } from "@/lib/firebase";
 import { useFriends } from "@/hooks/useFriends";
 import { useLobbyPresence, useFriendsOnline } from "@/hooks/usePresence";
@@ -14,11 +15,11 @@ import { normalizeRoomCode, isValidRoomCode, LOBBY_TTL_MS, inviteTimestamps } fr
 import { FRIEND_CODE_LENGTH, findByFriendCode, sendFriendRequest } from "@/lib/friends";
 import { rememberLobby, forgetLobby } from "@/lib/lastLobby";
 import { cleanWallet, readWallet, recordMatch, writeWallet } from "@/lib/wallet";
-import { gameSelectionUpdate } from "@/lib/lobbySettings";
 import type { Lobby, LobbyMessage, LobbyPlayer } from "@/types/game";
 import {
   doc,
   getDoc,
+  runTransaction,
   setDoc,
   onSnapshot,
   updateDoc,
@@ -29,7 +30,6 @@ import {
   orderBy,
   limit,
   deleteField,
-  runTransaction,
 } from "firebase/firestore";
 import {
   Users,
@@ -69,12 +69,6 @@ const CHAT_COOLDOWN_MS = 1000;
  */
 const HOST_MIGRATION_GRACE_MS = 6000;
 const HOST_LEASE_MS = 30_000;
-
-/**
- * Tracks pending leave operations to survive React Strict Mode unmount/remount.
- * If a component remounts for the same user/room before the timeout fires,
- * the leave is cancelled.
- */
 
 function LobbyContent() {
   const searchParams = useSearchParams();
@@ -135,15 +129,9 @@ function LobbyContent() {
   /** Always the latest `endGame`, for the message handler below to call without needing it as a dependency. */
   const endGameRef = useRef<() => Promise<void>>(async () => {});
 
-  /**
-   * The player's purse, held here rather than in the game.
-   *
-   * A ref, not state: nothing on this page renders it, and putting it in state
-   * would repaint the lobby every time a coin was earned. The iframe's src is
-   * built during render, so a repaint there is not free, it is a reload of the
-   * running game.
-   */
-  const walletSession = useRef<{ accountId: string; gameId: string; requestId: string } | null>(null);
+  const walletSession = useRef<{
+    accountId: string; gameId: string; requestId: string;
+  } | null>(null);
 
   const presentUids = useLobbyPresence(roomId);
   // Always on, not just while the invite modal is open , the crew list also
@@ -271,6 +259,7 @@ function LobbyContent() {
     // would read identically to being kicked and bounce a player who is
     // mid-join right back out.
     let wasMember = false;
+
     const join = async () => {
       const profile: LobbyPlayer = {
         uid: user.uid,
@@ -287,11 +276,11 @@ function LobbyContent() {
         if (!snap.exists()) {
           await setDoc(roomRef, {
             hostId: user.uid,
+            hostSeenAt: serverTimestamp(),
             status: "waiting",
             gameId: null,
             players: { [user.uid]: profile },
             createdAt: serverTimestamp(),
-            hostSeenAt: serverTimestamp(),
             expiresAt: new Date(Date.now() + LOBBY_TTL_MS),
           });
           return;
@@ -308,14 +297,11 @@ function LobbyContent() {
           return;
         }
 
-        // A second tab or reload must retain the player's current readiness
-        // and selected cosmetics instead of overwriting their existing slot.
-        if (!existing[user.uid]) {
-          await updateDoc(roomRef, {
-            [`players.${user.uid}`]: profile,
-            updatedAt: serverTimestamp(),
-          });
-        }
+        if (existing[user.uid]) return; // Reopening a tab must preserve skins and readiness.
+        await updateDoc(roomRef, {
+          [`players.${user.uid}`]: profile,
+          updatedAt: serverTimestamp(),
+        });
       } catch (e) {
         console.error("Error joining room:", e);
         if (!cancelled) setLookupFailed(true);
@@ -369,55 +355,44 @@ function LobbyContent() {
       cancelled = true;
       unsubRoom();
       unsubChat();
-      // Presence owns connection lifetime. Removing a shared player slot here
-      // would evict the same user from every other open tab.
+      // Presence removes this connection. Keep the shared player slot while
+      // another tab/device is still in the room; the host prunes absent users.
     };
   }, [user, roomId]);
 
-  // Keep a server-authoritative lease while the host is connected.
+  // The database checks this heartbeat before allowing any host claim.
   useEffect(() => {
     if (!isHost || !user || !roomId) return;
-    const beat = () => updateDoc(doc(db, "lobbies", roomId), { hostSeenAt: serverTimestamp() }).catch(() => {});
-    beat();
-    const timer = window.setInterval(beat, 10_000);
-    return () => window.clearInterval(timer);
+    const beat = () => updateDoc(doc(db, "lobbies", roomId), {
+      hostSeenAt: serverTimestamp(),
+    }).catch((error) => console.error("Host heartbeat failed", error));
+    void beat();
+    const timer = setInterval(beat, 10_000);
+    return () => clearInterval(timer);
   }, [isHost, user, roomId]);
 
-  // ── Host migration ────────────────────────────────────────────────────────
   useEffect(() => {
-    if (!lobby || !user || presentUids.size === 0) return;
-    if (lobby.hostId === user.uid) return;
-    if (presentUids.has(lobby.hostId)) return;
-
+    if (!lobby || !user || presentUids.size === 0 || isHost || presentUids.has(lobby.hostId)) return;
     const candidates = Object.values(lobby.players || {})
       .filter((p) => presentUids.has(p.uid))
-      .sort((a, b) => (a.joinedAt ?? 0) - (b.joinedAt ?? 0));
-
+      .sort((a, b) => (a.joinedAt ?? 0) - (b.joinedAt ?? 0) || a.uid.localeCompare(b.uid));
     if (candidates[0]?.uid !== user.uid) return;
-
-    const timer = setTimeout(() => {
-      runTransaction(db, async (transaction) => {
-        const ref = doc(db, "lobbies", roomId);
-        const snap = await transaction.get(ref);
-        if (!snap.exists()) return;
-        const room = snap.data() as Lobby;
-        if (room.hostId !== lobby.hostId || !room.players?.[user.uid]) return;
-        const timestampMillis = (value: unknown) =>
-          value && typeof value === "object" && "toMillis" in value && typeof (value as { toMillis?: unknown }).toMillis === "function"
-            ? (value as { toMillis: () => number }).toMillis()
-            : 0;
-        const lastSeen = timestampMillis(room.hostSeenAt) || timestampMillis(room.createdAt);
-        if (Date.now() - lastSeen <= HOST_LEASE_MS) return;
-        transaction.update(ref, {
-          hostId: user.uid,
-          hostSeenAt: serverTimestamp(),
-          [`players.${room.hostId}`]: deleteField(),
-        });
-      }).catch((e) => console.error("Host migration failed", e));
-    }, HOST_MIGRATION_GRACE_MS);
-
-    return () => clearTimeout(timer);
-  }, [lobby, presentUids, user, roomId]);
+    const claim = () => runTransaction(db, async (tx) => {
+      const target = doc(db, "lobbies", roomId);
+      const snap = await tx.get(target);
+      if (!snap.exists()) return;
+      const current = snap.data();
+      if (current.hostId !== lobby.hostId || !current.players?.[user.uid]) return;
+      const lastSeen = current.hostSeenAt ?? current.createdAt;
+      if (!lastSeen?.toMillis || Date.now() - lastSeen.toMillis() <= HOST_LEASE_MS) return;
+      tx.update(target, {
+        hostId: user.uid, hostSeenAt: serverTimestamp(),
+        [`players.${current.hostId}`]: deleteField(),
+      });
+    }).catch((error) => console.error("Host migration failed", error));
+    const timer = setInterval(claim, HOST_MIGRATION_GRACE_MS);
+    return () => clearInterval(timer);
+  }, [lobby, presentUids, user, roomId, isHost]);
 
   /**
    * Keep the room document as fresh as the visible lobby.
@@ -439,7 +414,10 @@ function LobbyContent() {
       updatedAt: serverTimestamp(),
     };
     for (const player of stale) updates[`players.${player.uid}`] = deleteField();
-    updateDoc(doc(db, "lobbies", roomId), updates).catch((e) => console.error("Could not prune stale players:", e));
+    const timer = setTimeout(() => {
+      void updateDoc(doc(db, "lobbies", roomId), updates).catch((e) => console.error("Could not prune stale players:", e));
+    }, HOST_MIGRATION_GRACE_MS);
+    return () => clearTimeout(timer);
   }, [isHost, lobby, presentUids, user?.uid, roomId]);
 
   // Marks messages as seen for as long as the chat tab is the one showing.
@@ -463,24 +441,29 @@ function LobbyContent() {
    * frame that has not run its scripts yet has nothing listening, and "wait a
    * moment and hope" is not a handshake.
    */
-  const sendWallet = useCallback(async (request: { gameId?: unknown; requestId?: unknown }) => {
+  const sendWallet = useCallback(async (request: { gameId: string; requestId: string }) => {
     const frame = gameFrameRef.current?.contentWindow;
-    const gameId = typeof request.gameId === "string" ? request.gameId : "";
-    const requestId = typeof request.requestId === "string" ? request.requestId : "";
-    if (!frame || !user || !gameId || gameId !== lobby?.gameId || !requestId || requestId.length > 100) return;
-    if (walletSession.current?.requestId === requestId && walletSession.current.accountId === user.uid) return;
+    const accountId = user?.uid;
+    if (!frame || !accountId || request.gameId !== lobby?.gameId ||
+        typeof request.requestId !== "string" || request.requestId.length > 100) return;
+    // Repeated requests for an established session must not re-read stale data.
+    if (walletSession.current?.requestId === request.requestId &&
+        walletSession.current?.accountId === accountId) return;
     try {
-      const wallet = await readWallet(user.uid);
-      if (useAuthStore.getState().user?.uid !== user.uid || gameFrameRef.current?.contentWindow !== frame) return;
-      walletSession.current = { accountId: user.uid, gameId, requestId };
+      const wallet = await readWallet(accountId);
+      if (useAuthStore.getState().user?.uid !== accountId ||
+          frame !== gameFrameRef.current?.contentWindow) return;
+      walletSession.current = { accountId, gameId: request.gameId, requestId: request.requestId };
       frame.postMessage({
-        source: "playbuddies-host", type: "wallet", accountId: user.uid, gameId, requestId,
-        coins: wallet.coins[gameId] ?? 0, unlocks: wallet.unlocks[gameId] ?? [],
+        source: "playbuddies-host", type: "wallet", ...walletSession.current,
+        coins: wallet.coins[request.gameId] ?? 0,
+        unlocks: wallet.unlocks[request.gameId] ?? [],
       }, window.location.origin);
-    } catch (err) {
-      console.error("Could not read the wallet:", err);
+    } catch (error) {
+      // The game will retry. A failed read must never become an empty save.
+      console.error("Could not read the wallet:", error);
     }
-  }, [user, lobby?.gameId]);
+  }, [user?.uid, lobby?.gameId]);
 
   useEffect(() => { walletSession.current = null; }, [user?.uid, lobby?.gameId]);
 
@@ -516,8 +499,7 @@ function LobbyContent() {
     const onMessage = (e: MessageEvent) => {
       const data = e.data;
       if (!data || data.source !== "playbuddies-game") return;
-      if (e.source !== gameFrameRef.current?.contentWindow) return;
-      if (e.origin !== window.location.origin) return;
+      if (e.source !== gameFrameRef.current?.contentWindow || e.origin !== window.location.origin) return;
 
       if (data.type === "fullscreen") {
         setIsPseudoFull(Boolean(data.value));
@@ -542,12 +524,15 @@ function LobbyContent() {
 
       if (data.type === "wallet-save") {
         const session = walletSession.current;
-        if (!user || !session || data.accountId !== user.uid || session.accountId !== user.uid || data.gameId !== session.gameId || data.gameId !== lobby?.gameId || data.requestId !== session.requestId) return;
-        const gameId = session.gameId;
-        const next = cleanWallet({ coins: { [gameId]: data.coins }, unlocks: { [gameId]: data.unlocks } });
-        void writeWallet(user.uid, gameId, next).catch((err) =>
-          console.error("Could not save the wallet:", err),
-        );
+        if (!user || !session || data.accountId !== user.uid ||
+            session.accountId !== user.uid || data.gameId !== session.gameId ||
+            data.gameId !== lobby?.gameId || data.requestId !== session.requestId) return;
+        const next = cleanWallet({
+          coins: { [session.gameId]: data.coins },
+          unlocks: { [session.gameId]: data.unlocks },
+        });
+        void writeWallet(user.uid, session.gameId, next).catch((error) =>
+          console.error("Could not save the wallet:", error));
         return;
       }
 
@@ -589,10 +574,8 @@ function LobbyContent() {
   const selectGame = async (gameId: string) => {
     if (!isHost) return;
     try {
-      await updateDoc(
-        doc(db, "lobbies", roomId),
-        gameSelectionUpdate(gameId, Object.keys(lobby?.players ?? {})),
-      );
+      await updateDoc(doc(db, "lobbies", roomId),
+        gameSelectionUpdate(gameId, Object.keys(lobby?.players ?? {})));
     } catch (e) {
       console.error("Error selecting game:", e);
     }
@@ -1243,7 +1226,7 @@ function LobbyContent() {
             >
               <iframe
                 id="game-iframe"
-                key={`${user?.uid ?? "guest"}:${lobby.gameId}`}
+                key={`${user?.uid}:${lobby.gameId}`}
                 ref={gameFrameRef}
                 allowFullScreen
                 src={gameUrl(lobby.gameId, {

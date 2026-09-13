@@ -103,13 +103,7 @@ export function unpackRules(bits: number | undefined): MatchRules {
 /** The longest word this game accepts. Long enough for a real word, short enough to fit the board. */
 export const MAX_WORD_LEN = 18;
 
-/**
- * A word attempt, reduced to something safe to store, replay and draw.
- *
- * This string is the one piece of free text in the whole protocol , every
- * other field is a number. Invalid characters are rejected by validation,
- * rather than silently stripped into a different valid word.
- */
+/** Normalize case and surrounding whitespace; validation rejects invalid characters. */
 export function cleanWord(raw: string): string {
   return raw.trim().toUpperCase();
 }

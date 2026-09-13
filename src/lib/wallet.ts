@@ -71,13 +71,13 @@ export function cleanWallet(raw: { coins?: unknown; unlocks?: unknown }): Wallet
 
 export async function readWallet(uid: string): Promise<Wallet> {
   const snap = await getDoc(doc(db, "users", uid));
-  if (!snap.exists()) throw new Error("Wallet account record has not been initialized yet");
+  if (!snap.exists()) throw new Error("Account is still being initialized; retry wallet loading.");
   return cleanWallet(snap.data() as { coins?: unknown; unlocks?: unknown });
 }
 
 export async function writeWallet(uid: string, gameId: string, wallet: Wallet): Promise<void> {
-  await updateDoc(
-    doc(db, "users", uid),
+  // Write only this game's fields so other tabs/games cannot overwrite them.
+  await updateDoc(doc(db, "users", uid),
     new FieldPath("coins", gameId), wallet.coins[gameId] ?? 0,
     new FieldPath("unlocks", gameId), wallet.unlocks[gameId] ?? [],
   );

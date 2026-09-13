@@ -1,3 +1,5 @@
+import dictionary from '../../node_modules/word-list/words.txt?raw';
+
 /**
  * The answers.
  *
@@ -101,9 +103,7 @@ export function answers(): Answer[] {
 
 export const ANSWER_COUNT = () => answers().length;
 
-/** Full offline English dictionary for player-supplied words. */
-import dictionary from '../../node_modules/word-list/words.txt?raw';
-
+/** Offline English dictionary, separate from the curated bot answer pool. */
 export function isEnglishWord(raw: string): boolean {
   const word = raw.trim().toUpperCase();
   if (!/^[A-Z]{3,18}$/.test(word)) return false;

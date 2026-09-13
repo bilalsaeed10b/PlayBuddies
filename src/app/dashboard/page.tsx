@@ -9,10 +9,10 @@ import { auth, db } from "@/lib/firebase";
 import { signOut } from "firebase/auth";
 import { doc, getDoc, setDoc, updateDoc, serverTimestamp } from "firebase/firestore";
 import { getRememberedLobby, forgetLobby } from "@/lib/lastLobby";
-import { gameSelectionUpdate } from "@/lib/lobbySettings";
 import { PLAYABLE_GAMES, gameAccent, playerCountLabel } from "@/lib/games";
 import GameThumb from "@/components/GameThumb";
 import AuthGuard from "@/components/AuthGuard";
+import { gameSelectionUpdate } from "@/lib/lobbySettings";
 import {
   generateRoomCode,
   normalizeRoomCode,
@@ -68,9 +68,10 @@ export default function DashboardPage() {
     const fetchStats = async () => {
       try {
         const snap = await getDoc(doc(db, "users", user.uid));
-        if (cancelled || !snap.exists() || useAuthStore.getState().user?.uid !== user.uid) return;
+        if (cancelled || !snap.exists()) return;
         const data = snap.data();
         const games = data.stats?.gamesPlayed || 0;
+        if (useAuthStore.getState().user?.uid !== user.uid) return;
         const freshStats = { gamesPlayed: games };
         setUserStats(freshStats);
         setStats(freshStats);
@@ -115,10 +116,9 @@ export default function DashboardPage() {
         const snap = await getDoc(doc(db, "lobbies", remembered));
         if (snap.exists() && snap.data().status !== "completed") {
           if (gameId && snap.data().hostId === user.uid) {
-            await updateDoc(
-              doc(db, "lobbies", remembered),
-              gameSelectionUpdate(gameId, Object.keys(snap.data().players || {})),
-            );
+            if (snap.data().gameId !== gameId) {
+              await updateDoc(doc(db, "lobbies", remembered), gameSelectionUpdate(gameId, Object.keys(snap.data().players ?? {})));
+            }
           }
           router.push(`/lobby?room=${remembered}`);
           return;
@@ -137,6 +137,7 @@ export default function DashboardPage() {
       // appeared in the lobby they had just created.
       await setDoc(doc(db, "lobbies", roomId), {
         hostId: user.uid,
+        hostSeenAt: serverTimestamp(),
         status: "waiting",
         gameId: typeof gameId === "string" ? gameId : null,
         players: {
@@ -148,7 +149,6 @@ export default function DashboardPage() {
           },
         },
         createdAt: serverTimestamp(),
-        hostSeenAt: serverTimestamp(),
         expiresAt: new Date(Date.now() + LOBBY_TTL_MS),
       });
       router.push(`/lobby?room=${roomId}`);

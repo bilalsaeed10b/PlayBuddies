@@ -6,8 +6,9 @@ import { collection, query, where, onSnapshot, doc, deleteDoc } from "firebase/f
 import { useAuthStore } from "@/store/useAuthStore";
 import { motion, AnimatePresence } from "framer-motion";
 import { useRouter } from "next/navigation";
-import { inviteExpiry } from "@/lib/invites";
 import { MessageCircle, X, Check } from "lucide-react";
+
+import { inviteExpiry } from "@/lib/invites";
 
 interface Invite {
   id: string;
@@ -37,11 +38,10 @@ export default function InviteListener() {
 
         snapshot.forEach((docSnap) => {
           const data = docSnap.data();
-          const createdAt = typeof data.createdAt === "number" ? data.createdAt : 0;
+          const createdAt = data.createdAt ?? data.timestamp ?? 0;
           const expiresAt = inviteExpiry(data);
-          if (!expiresAt || now >= expiresAt) {
-            // Recipient-side cleanup. Invites for users who never sign in again
-            // are swept by the scheduled cleanup, not from here.
+          if (now >= expiresAt) {
+            // Remove expired invitations when their recipient reads them.
             deleteDoc(doc(db, "invites", docSnap.id)).catch(() => {});
           } else {
             active.push({

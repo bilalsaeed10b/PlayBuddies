@@ -88,16 +88,16 @@ function dirSize(dir) {
 
 if (!fs.existsSync(GAMES_DIR)) fail('games/ directory not found');
 
-const allIds = fs
+const ids = fs
   .readdirSync(GAMES_DIR, { withFileTypes: true })
   .filter((e) => e.isDirectory() && !e.name.startsWith('.'))
   .map((e) => e.name);
 
-if (only && !allIds.includes(only)) fail(`no game named "${only}" in games/`);
+if (only && !ids.includes(only)) fail(`no game named "${only}" in games/`);
 
 const registry = [];
 
-for (const id of allIds) {
+for (const id of ids) {
   const dir = path.join(GAMES_DIR, id);
   const meta = readManifest(dir, id);
   if (!meta) {
@@ -105,8 +105,6 @@ for (const id of allIds) {
     continue;
   }
 
-  // A one-game build is a fast local iteration path, but the generated catalog
-  // must always describe every game or a later app build hides the others.
   if (registryOnly || (only && id !== only)) {
     registry.push(meta);
     continue;

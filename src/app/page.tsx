@@ -144,17 +144,13 @@ function AnimatedOrbs() {
 }
 
 
-export function handleLoginError(error: unknown) {
+function handleLoginError(error: unknown) {
   console.error("Login Error:", error);
-  const err = error as { code?: string; message?: string };
-  if (err?.code === "auth/unauthorized-domain") {
-    alert(
-      `Firebase Auth: Domain "${window.location.hostname}" is not authorized.\n\n` +
-      `To fix this:\n` +
-      `1. Open Firebase Console -> Authentication -> Settings -> Authorized domains\n` +
-      `2. Click "Add domain" and enter: ${window.location.hostname}`
-    );
-  }
+  const code = (error as { code?: string })?.code;
+  if (code === "auth/popup-closed-by-user" || code === "auth/cancelled-popup-request") return;
+  alert(code === "auth/unauthorized-domain"
+    ? "Sign-in is not available at this address yet. Please use the main PlayBuddies site."
+    : "Could not sign in. Please try again.");
 }
 
 function Navbar() {
@@ -169,8 +165,6 @@ function Navbar() {
     window.addEventListener("scroll", handleScroll);
     return () => window.removeEventListener("scroll", handleScroll);
   }, []);
-
-
 
   const handleAuth = async () => {
     if (user) {

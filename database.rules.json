@@ -28,9 +28,15 @@
           ".read": "auth != null",
           ".write": "auth != null && auth.uid === $uid",
           ".validate": "!newData.exists() || newData.hasChildren(['online'])",
-          "online": { ".validate": "newData.isBoolean()" },
-          "at": { ".validate": "newData.isNumber()" },
-          "$other": { ".validate": false }
+          "online": {
+            ".validate": "newData.isBoolean()"
+          },
+          "at": {
+            ".validate": "newData.isNumber()"
+          },
+          "$other": {
+            ".validate": false
+          }
         }
       },
       "lobbies": {
@@ -64,6 +70,28 @@
     "$other": {
       ".read": false,
       ".write": false
+    },
+    "presenceSessions": {
+      "users": {
+        "$uid": {
+          ".read": "auth != null",
+          "$connection": {
+            ".write": "auth != null && auth.uid === $uid",
+            ".validate": "newData.isBoolean() && newData.val() === true"
+          }
+        }
+      },
+      "lobbies": {
+        "$roomId": {
+          ".read": "auth != null",
+          "$uid": {
+            "$connection": {
+              ".write": "auth != null && auth.uid === $uid",
+              ".validate": "newData.isBoolean() && newData.val() === true"
+            }
+          }
+        }
+      }
     }
   }
 }

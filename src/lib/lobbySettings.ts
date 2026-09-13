@@ -1,23 +1,17 @@
 import { deleteField } from "firebase/firestore";
 
-/** Reset settings that belong to the previous game before choosing another. */
+/** Every entry point that switches games must clear the previous game's state. */
 export function gameSelectionUpdate(gameId: string, playerIds: string[]) {
-  const update: Record<string, unknown> = {
-    gameId,
-    status: "waiting",
-    matchStarted: false,
-    matchRules: deleteField(),
-    matchSeed: deleteField(),
-    battleTeams: deleteField(),
-    quoridorTeams: deleteField(),
-    soloMode: deleteField(),
-    collectedGems: deleteField(),
-    level: deleteField(),
+  const reset: Record<string, ReturnType<typeof deleteField> | boolean | string> = {
+    gameId, status: "waiting", matchStarted: false,
+    matchRules: deleteField(), matchSeed: deleteField(),
+    battleTeams: deleteField(), quoridorTeams: deleteField(),
+    soloMode: deleteField(), collectedGems: deleteField(), level: deleteField(),
   };
   for (const uid of playerIds) {
-    update[`players.${uid}.fishIndex`] = deleteField();
-    update[`players.${uid}.role`] = deleteField();
-    update[`players.${uid}.isReady`] = true;
+    reset[`players.${uid}.fishIndex`] = deleteField();
+    reset[`players.${uid}.role`] = deleteField();
+    reset[`players.${uid}.isReady`] = true;
   }
-  return update;
+  return reset;
 }

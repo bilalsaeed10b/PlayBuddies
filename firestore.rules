@@ -193,6 +193,7 @@ service cloud.firestore {
         return signedIn() && request.auth.uid in resource.data.players;
       }
 
+      // MapDiff operates on keys of this map, so compare players separately.
       function touchesOnlyOwnPlayerSlot() {
         let uid = request.auth.uid;
         let next = incoming().players;
@@ -209,6 +210,8 @@ service cloud.firestore {
                ));
       }
 
+      // RTDB presence cannot be read from Firestore rules. A server-timestamped
+      // heartbeat provides the authority check, rather than trusting a guest.
       function canClaimHost() {
         let previous = resource.data.hostId;
         let lastSeen = resource.data.get('hostSeenAt', resource.data.createdAt);
@@ -238,6 +241,7 @@ service cloud.firestore {
                     && incoming().status in ['waiting', 'playing', 'completed'];
 
       allow update: if incoming().players is map && incoming().players.size() <= 8 && (
+        // Only the current host may change rules, game selection or start/end.
         (isLobbyHost()
          && (!touched().hasAny(['hostSeenAt']) || incoming().hostSeenAt == request.time))
         || (signedIn() && touchesOnlyOwnPlayerSlot())

@@ -393,9 +393,7 @@ export class LastGaspEngine {
         p.round = 0;
       }
       this.winningTeam = this.rules.mode === 'teams' ? this.teamStandings()[0]?.team ?? null : null;
-      this.winner = this.standings().find((row) =>
-        this.winningTeam === null || this.teamOf(row.seat) === this.winningTeam,
-      )?.seat ?? null;
+      this.winner = this.standings().find((row) => this.winningTeam === null || this.teamOf(row.seat) === this.winningTeam)?.seat ?? null;
     }
   }
 
@@ -407,16 +405,16 @@ export class LastGaspEngine {
 
   // ── reading ──────────────────────────────────────────────────────────────
 
-  standings(): { seat: number; total: number; round: number }[] {
-    return this.players
-      .map((p, seat) => ({ seat, total: p.total, round: p.round }))
-      .sort((a, b) => b.total - a.total || b.round - a.round || a.seat - b.seat);
-  }
-
   didWin(seat: number): boolean {
     return this.phase === 'over' && (this.winningTeam !== null
       ? this.teamOf(seat) === this.winningTeam
       : this.winner === seat);
+  }
+
+  standings(): { seat: number; total: number; round: number }[] {
+    return this.players
+      .map((p, seat) => ({ seat, total: p.total, round: p.round }))
+      .sort((a, b) => b.total - a.total || b.round - a.round || a.seat - b.seat);
   }
 
   /** Per-team totals, best first , only meaningful in Teams. */
