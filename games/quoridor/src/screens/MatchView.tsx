@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Blocks, Coins, Flag, Footprints, Loader2, RotateCw, Trophy } from 'lucide-react';
 import ControlsTray from '@shared/controls/ControlsTray';
+import { createLogger } from '@shared/log/logger';
 import { isStaleChunkError, recoverFromStaleChunk } from '@shared/net/staleChunk';
 import BoardPad from '../components/BoardPad';
 import { QuoridorEngine } from '../engine/QuoridorEngine';
@@ -23,6 +24,8 @@ import type { GameSettings, MatchRules, NetPacket } from '../types/game';
 // Type only: the runtime value arrives through the dynamic import below, which
 // is what keeps the Firebase SDK out of an offline player's bundle.
 import type { TurnLink } from '../net/turnLink';
+
+const log = createLogger('quoridor');
 
 export interface MatchConfig {
   /** null for offline play. */
@@ -535,6 +538,17 @@ export default function MatchView({
         lastClock = shown;
         setClock(shown);
       }
+      log.state({
+        seed: session.seed,
+        rev: engine.history.length,
+        turn: engine.turn,
+        phase: engine.winner >= 0 ? 'over' : 'playing',
+        history: engine.history.length,
+        positions: engine.pos.pawns,
+        stock: engine.pos.stock,
+        winner: engine.winner,
+        local: roster.localSeats,
+      });
     };
     raf = requestAnimationFrame(frame);
 

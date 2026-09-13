@@ -52,6 +52,9 @@ export interface LogEntry {
   data?: Record<string, unknown>;
 }
 
+/** Message understood by the PlayBuddies lobby shell around every game. */
+const REMOTE_MESSAGE = 'diagnostics';
+
 /** How many entries to keep in memory for a manual dump when there is no collector. */
 const RING = 3000;
 /** Ship a batch at least this often, and whenever it reaches BATCH_MAX. */
@@ -79,6 +82,7 @@ class Logger {
   /** Guards the console wrappers against logging their own output forever. */
   private inConsole = false;
   private installed = false;
+  private stateAt = new Map<string, number>();
 
   get id(): string {
     return this.clientId;
@@ -130,7 +134,10 @@ class Logger {
       this.inConsole = false;
     }
 
-    if (!this.shipping) return;
+    // A production game is framed by the authenticated PlayBuddies lobby.
+    // Even after the same-origin /__log endpoint proves absent on GitHub
+    // Pages, that parent remains a working route to the remote collector.
+    if (!this.shipping && !this.hasParentCollector()) return;
     this.pending.push(entry);
     if (this.pending.length >= BATCH_MAX) this.flush();
     else if (this.timer === null) this.timer = setTimeout(() => this.flush(), FLUSH_MS);
@@ -146,10 +153,16 @@ class Logger {
       clearTimeout(this.timer);
       this.timer = null;
     }
-    if (this.pending.length === 0 || !this.shipping) return;
+    if (this.pending.length === 0) return;
     const batch = this.pending;
     this.pending = [];
     const body = JSON.stringify(batch);
+
+    this.relayToParent(batch);
+
+    // Once a static host has returned enough 404s, stop probing it. Remote
+    // delivery above is independent and continues for the life of the frame.
+    if (!this.shipping) return;
 
     // On the way out of a page, fetch() is unreliable and sendBeacon is the
     // only thing the browser promises to finish -- which is exactly when the
@@ -191,6 +204,43 @@ class Logger {
     if (this.fails >= MAX_FAILS) this.shipping = false;
   }
 
+  private hasParentCollector(): boolean {
+    try {
+      return typeof window !== 'undefined' && window.parent !== window;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Public deployments are static, so their authenticated parent page is the
+   * collector. The parent verifies both origin and source window before it
+   * accepts this batch; a random page cannot post logs into somebody's room.
+   */
+  private relayToParent(batch: LogEntry[]) {
+    if (!this.hasParentCollector()) return;
+    try {
+      window.parent.postMessage(
+        { source: 'playbuddies-game', type: REMOTE_MESSAGE, version: 1, entries: batch },
+        window.location.origin,
+      );
+    } catch {
+      /* diagnostics are never allowed to disturb a match */
+    }
+  }
+
+  /** A cheap, throttled state sample for cross-device desync detection. */
+  state(game: string, data: Record<string, unknown>) {
+    const now = Date.now();
+    if (now - (this.stateAt.get(game) ?? 0) < 5000) return;
+    this.stateAt.set(game, now);
+    this.write('debug', game, 'state:heartbeat', {
+      ...data,
+      visibility: typeof document === 'undefined' ? 'unknown' : document.visibilityState,
+      online: typeof navigator === 'undefined' ? true : navigator.onLine,
+    });
+  }
+
   /**
    * Capture the failures nobody wrote a log line for.
    *
@@ -224,8 +274,25 @@ class Logger {
     // phone locking its screen alike; both are moments a log is worth having.
     window.addEventListener('pagehide', () => this.flush(true));
     document.addEventListener('visibilitychange', () => {
+      this.write('info', game, 'client:visibility', { state: document.visibilityState });
       if (document.visibilityState === 'hidden') this.flush(true);
     });
+    window.addEventListener('online', () => this.write('info', game, 'client:network', { online: true }));
+    window.addEventListener('offline', () => {
+      this.write('warn', game, 'client:network', { online: false });
+      this.flush(true);
+    });
+
+    const startedAt = Date.now();
+    window.setInterval(() => {
+      this.write('debug', game, 'client:heartbeat', {
+        elapsedMs: Date.now() - startedAt,
+        visibility: document.visibilityState,
+        online: navigator.onLine,
+        viewport: `${window.innerWidth}x${window.innerHeight}`,
+        build: new URLSearchParams(window.location.search).get('v') ?? 'unknown',
+      });
+    }, 15_000);
 
     for (const level of ['error', 'warn'] as const) {
       const original = console[level].bind(console);
@@ -252,6 +319,8 @@ export interface GameLogger {
   info(ev: string, data?: Record<string, unknown>): void;
   warn(ev: string, data?: Record<string, unknown>): void;
   error(ev: string, data?: Record<string, unknown>): void;
+  /** At most one compact state sample every five seconds. */
+  state(data: Record<string, unknown>): void;
   /** Attach the room code and player name once the lobby is known. */
   context(ctx: { room?: string; who?: string }): void;
   /** Everything this tab has recorded -- for a device with no collector to reach. */
@@ -267,6 +336,7 @@ export function createLogger(game: string): GameLogger {
     info: (ev, data) => logger.write('info', game, ev, data),
     warn: (ev, data) => logger.write('warn', game, ev, data),
     error: (ev, data) => logger.write('error', game, ev, data),
+    state: (data) => logger.state(game, data),
     context: (ctx) => logger.setContext(ctx),
     dump: () => logger.dump(),
     flush: () => logger.flush(),

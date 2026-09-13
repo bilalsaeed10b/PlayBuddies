@@ -10,6 +10,7 @@ import { Trophy, Wifi, WifiOff } from 'lucide-react';
 import TouchPad, { PadState } from '../components/TouchPad';
 import { IN_IFRAME, toggleFullscreen } from '../fullscreen';
 import ControlsTray from '@shared/controls/ControlsTray';
+import { createLogger } from '@shared/log/logger';
 import { isStaleChunkError, recoverFromStaleChunk } from '@shared/net/staleChunk';
 import { CHARACTERS } from '../game/characters';
 import { BALANCE, POWER_META, TEAM_COLORS, arenaFor } from '../game/rules';
@@ -29,6 +30,8 @@ import {
   packInput,
   unpackInput,
 } from '../types/game';
+
+const log = createLogger('volley-clash');
 
 export interface Person {
   uid: string;
@@ -476,6 +479,13 @@ export default function MatchView({
         scoreRef.current = [...engine.score] as [number, number];
         setScore(scoreRef.current);
       }
+      log.state({
+        rev: engine.lastAppliedTick,
+        phase: engine.phase,
+        score: engine.score,
+        host: engine.isHost,
+        local: config.localIds,
+      });
     };
     raf = requestAnimationFrame(frame);
 

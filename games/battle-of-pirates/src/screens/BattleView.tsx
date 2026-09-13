@@ -611,6 +611,16 @@ export default function BattleView({
         shown.clock = nextClock;
         setClock(nextClock);
       }
+      log.state({
+        seed: session.seed,
+        rev: engine.turnNo,
+        turn: engine.turn,
+        phase: engine.phase,
+        hp: engine.hp.map((value) => Math.round(value)),
+        charges: engine.ships.map((ship) => ship.charge),
+        winner: engine.winner,
+        local: config.localShips,
+      });
     };
     const battleClock = startBattleClock({
       step: (dt) => {

@@ -33,6 +33,8 @@ Thumbs.db
 # dev-only playtest log, written by games/_shared/devlog's Vite plugin.
 # Local debugging output, never committed.
 /dev-logs/
+/.diagnostics/
+*service-account*.json
 
 # debug
 npm-debug.log*

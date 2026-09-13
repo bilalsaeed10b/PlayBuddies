@@ -80,6 +80,23 @@ export default function MatchView({
   const [version, setVersion] = useState(0);
   const repaint = useCallback(() => setVersion((v) => v + 1), []);
 
+  useEffect(() => {
+    const sample = () => log.state({
+      seed: engine.seed,
+      rev: engine.actionCount,
+      round: engine.round,
+      phase: engine.phase,
+      history: engine.history.length,
+      pieces: engine.pieces,
+      scores: engine.players.map((player) => player.total),
+      winner: engine.winner,
+      local: config.localSeats,
+    });
+    sample();
+    const id = window.setInterval(sample, 5000);
+    return () => window.clearInterval(id);
+  }, [engine, config.localSeats]);
+
   const [notice, setNotice] = useState<string | null>(null);
   const [wordInput, setWordInput] = useState('');
   const [wordError, setWordError] = useState<string | null>(null);

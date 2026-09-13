@@ -95,6 +95,22 @@ export default function MatchView({
   const [version, setVersion] = useState(0);
   const repaint = useCallback(() => setVersion((v) => v + 1), []);
 
+  useEffect(() => {
+    const sample = () => log.state({
+      seed: effectiveSeedRef.current,
+      rev: engine.history.length,
+      round: engine.round,
+      phase: engine.phase,
+      history: engine.history.length,
+      players: engine.players.map((player) => [player.place, player.bounty, player.banked]),
+      winner: engine.winner,
+      local: config.localSeats,
+    });
+    sample();
+    const id = window.setInterval(sample, 5000);
+    return () => window.clearInterval(id);
+  }, [engine, config.localSeats]);
+
   const [phase, setPhase] = useState<'choosing' | 'reveal' | 'over'>('choosing');
   const [revealStep, setRevealStep] = useState(0);
   const [clock, setClock] = useState<number>(BALANCE.ROUND_SECONDS);

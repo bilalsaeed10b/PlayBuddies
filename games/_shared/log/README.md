@@ -29,7 +29,7 @@ Logs are written by whichever server the game is being served from:
 |---|---|---|
 | `npm run serve` (LAN host) | yes | **The one phones connect to.** This is where a real playtest lands. |
 | `npm run dev --prefix games/<id>` | yes | Single-game development. |
-| GitHub Pages | no | Nothing is listening on `/__log`. See below. |
+| GitHub Pages | Firestore | The iframe relays bounded batches through its authenticated lobby page. |
 
 Everything appends to `dev-logs/session-<date>.ndjson` , one JSON object per
 line, so it survives a crash mid-write and can be tailed live.
@@ -42,9 +42,29 @@ npm run build && npm run serve
 
 then point the phones at the `network:` URL it prints.
 
-On GitHub Pages there is no collector, so the client gives up after three
-failed sends and keeps buffering in memory instead. To retrieve a log from a
-device there, open its console and run:
+On GitHub Pages there is no HTTP server at `/__log`. The game therefore relays
+the same batch to its authenticated parent lobby, which sanitizes it and stores
+it under `/diagnostics/<room>/batches`. Web clients cannot read those records.
+Each batch carries a seven-day `expiresAt`. The diagnostics reader removes
+expired batches for the room whenever it inspects that room; a server-side TTL
+policy can be enabled later if the Firebase project moves to a billed plan.
+
+Read a public match from a development machine. An existing Firebase CLI
+session works automatically; a service account or Application Default
+Credentials also works:
+
+```bash
+set PLAYBUDDIES_SERVICE_ACCOUNT=C:\secure\playbuddies-service-account.json
+npm run diagnostics -- --room LU84W9
+npm run diagnostics -- --room LU84W9 --errors
+npm run diagnostics -- --room LU84W9 --watch
+```
+
+`GOOGLE_APPLICATION_CREDENTIALS` / Application Default Credentials work too.
+Never put the JSON key in this repository.
+
+The in-tab fallback remains useful on any host or device. Open its console and
+run:
 
 ```js
 __gamelog.text()
@@ -71,6 +91,10 @@ pass the room code as soon as the game has it.
 - uncaught errors (with a trimmed stack)
 - unhandled promise rejections
 - every `console.error` and `console.warn`
+- browser online/offline and foreground/background transitions
+- a low-rate client heartbeat with build, viewport and visibility
+- five-second game-state samples used to flag clients that disagree about the
+  turn, phase, round, health, score or other deterministic state
 
 Most of the value is here: the interesting failure is usually the one nobody
 predicted, so it has to land in the same timeline as the turns.

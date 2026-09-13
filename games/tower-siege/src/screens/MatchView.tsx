@@ -13,6 +13,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, Coins, Eye, Gauge, Heart, Loader2, Play, Send, Swords, Trophy, X } from 'lucide-react';
 import ControlsTray from '@shared/controls/ControlsTray';
+import { createLogger } from '@shared/log/logger';
 import { isStaleChunkError, recoverFromStaleChunk } from '@shared/net/staleChunk';
 import { SiegeEngine } from '../engine/SiegeEngine';
 import type { BuildOrder } from '../engine/SiegeEngine';
@@ -40,6 +41,8 @@ import type { GameSettings, NetPacket } from '../types/game';
 // Type only: the runtime value arrives through the dynamic import below, which
 // is what keeps the Firebase SDK out of an offline player's bundle.
 import type { TurnLink } from '../net/turnLink';
+
+const log = createLogger('tower-siege');
 
 export interface Seat {
   id: string;
@@ -517,6 +520,15 @@ export default function MatchView({
         shown.boardKey = boardKey;
         setBoard(engines.map((e) => ({ lives: e.lives, wave: e.wave, down: e.phase === 'fallen' })));
       }
+      log.state({
+        seed: session?.seed,
+        rev: Math.max(...engines.map((engine) => engine.wave)),
+        phases: engines.map((engine) => engine.phase),
+        wave: engines.map((engine) => engine.wave),
+        lives: engines.map((engine) => engine.lives),
+        board: boardKey,
+        local: mine,
+      });
     };
 
     /** Set every time `frame` actually runs, so the watchdog below can tell rAF is alive. */

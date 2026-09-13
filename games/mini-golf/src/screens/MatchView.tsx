@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Coins, Flag, Loader2, Target, Trophy } from 'lucide-react';
 import ControlsTray from '@shared/controls/ControlsTray';
+import { createLogger } from '@shared/log/logger';
 import { isStaleChunkError, recoverFromStaleChunk } from '@shared/net/staleChunk';
 import AimPad from '../components/AimPad';
 import type { Aim } from '../components/AimPad';
@@ -24,6 +25,8 @@ import type { GameSettings, MatchRules, NetPacket } from '../types/game';
 // Type only: the runtime value arrives through the dynamic import below, which
 // is what keeps the Firebase SDK out of an offline player's bundle.
 import type { TurnLink } from '../net/turnLink';
+
+const log = createLogger('mini-golf');
 
 export interface MatchConfig {
   /** null for offline play. */
@@ -581,6 +584,17 @@ export default function MatchView({
         lastClock = shown;
         setClock(shown);
       }
+      log.state({
+        seed: session.seed,
+        rev: engine.card.length,
+        turn: engine.turn,
+        phase: engine.phase,
+        hole: engine.holeIndex,
+        totals: engine.totals,
+        strokes: engine.strokes,
+        done: engine.done,
+        local: config.localSeats,
+      });
     };
     raf = requestAnimationFrame(frame);
 

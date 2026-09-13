@@ -363,7 +363,17 @@ export default function GameView({
     }
 
     const board = window.setInterval(() => {
-      setScoreboard(engineRef.current?.leaderboard() ?? []);
+      const rows = engineRef.current?.leaderboard() ?? [];
+      setScoreboard(rows);
+      log.state({
+        rev: Math.max(0, ...rows.map((row) => row.score)),
+        scores: rows.map((row) => [row.id, row.score, Math.round(row.size)]),
+        host: live.current.hostId,
+        runningAI: engineRef.current?.runningAI ?? false,
+        transport: fallbackReaders.current.size > 0 ? 'relayed' : (meshRef.current?.connectedPeers.length ?? 0) > 0 ? 'direct' : 'alone',
+        peers: meshRef.current?.connectedPeers.length ?? 0,
+        local: localIds,
+      });
     }, 500);
 
     return () => {

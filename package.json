@@ -12,7 +12,8 @@
     "typecheck": "npm run registry && tsc --noEmit",
     "serve": "node scripts/serve.mjs",
     "host": "npm run build && node scripts/serve.mjs",
-    "logs": "node scripts/logs.mjs"
+    "logs": "node scripts/logs.mjs",
+    "diagnostics": "node scripts/diagnostics.mjs"
   },
   "dependencies": {
     "firebase": "^12.11.0",
@@ -32,6 +33,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.2.1",
     "firebase-tools": "^15.30.0",
+    "google-auth-library": "^9.15.1",
     "tailwindcss": "^4",
     "typescript": "^5"
   }

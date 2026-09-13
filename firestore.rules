@@ -306,6 +306,42 @@ service cloud.firestore {
       }
     }
 
+    // ── Remote playtest diagnostics ────────────────────────────────────────
+    // Games cannot write here directly. Their authenticated lobby page checks
+    // the iframe source, sanitizes each entry, and stores a small batch. Logs
+    // are deliberately unreadable to web clients; the diagnostics CLI uses a
+    // Firebase service account and therefore never depends on a permissive
+    // production read rule.
+    match /diagnostics/{roomId}/batches/{batchId} {
+      function lobbyMember() {
+        return signedIn()
+               && exists(/databases/$(database)/documents/lobbies/$(roomId))
+               && request.auth.uid in get(/databases/$(database)/documents/lobbies/$(roomId)).data.players;
+      }
+
+      allow create: if lobbyMember()
+                    && incoming().keys().hasOnly([
+                      'uid', 'who', 'room', 'game', 'client', 'session', 'build',
+                      'receivedAt', 'expiresAt', 'entries'
+                    ])
+                    && incoming().uid == request.auth.uid
+                    && incoming().room == roomId
+                    && incoming().who is string && incoming().who.size() <= 60
+                    && incoming().game is string && incoming().game.size() <= 48
+                    && incoming().client is string && incoming().client.size() <= 32
+                    && incoming().session is string && incoming().session.size() <= 100
+                    && incoming().build is string && incoming().build.size() <= 100
+                    && incoming().receivedAt == request.time
+                    && incoming().expiresAt is timestamp
+                    && incoming().expiresAt > request.time + duration.value(6, 'd')
+                    && incoming().expiresAt < request.time + duration.value(8, 'd')
+                    && incoming().entries is list
+                    && incoming().entries.size() > 0
+                    && incoming().entries.size() <= 40;
+
+      allow get, list, update, delete: if false;
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }

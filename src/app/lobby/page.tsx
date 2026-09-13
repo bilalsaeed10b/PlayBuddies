@@ -11,6 +11,7 @@ import { gameSelectionUpdate } from "@/lib/lobbySettings";
 import { db } from "@/lib/firebase";
 import { useFriends } from "@/hooks/useFriends";
 import { useLobbyPresence, useFriendsOnline } from "@/hooks/usePresence";
+import { useRemoteDiagnostics } from "@/hooks/useRemoteDiagnostics";
 import { normalizeRoomCode, isValidRoomCode, LOBBY_TTL_MS, inviteTimestamps } from "@/lib/rooms";
 import { FRIEND_CODE_LENGTH, findByFriendCode, sendFriendRequest } from "@/lib/friends";
 import { rememberLobby, forgetLobby } from "@/lib/lastLobby";
@@ -201,6 +202,17 @@ function LobbyContent() {
   const isHost = Boolean(lobby && user && lobby.hostId === user.uid);
   const selectedGame = getGame(lobby?.gameId);
   const capacity = selectedGame?.maxPlayers ?? 8;
+  const enqueueDiagnostics = useRemoteDiagnostics(
+    user && lobby?.status === "playing" && lobby.gameId
+      ? {
+          roomId,
+          gameId: lobby.gameId,
+          uid: user.uid,
+          who: user.displayName || "Player",
+          session: `${lobby.gameId}:${lobby.matchSeed ?? lobby.createdAt ?? "match"}`,
+        }
+      : null,
+  );
 
   /**
    * Roster shown in the UI. Firestore holds who has *joined*; RTDB presence
@@ -508,6 +520,8 @@ function LobbyContent() {
    *   wallet-request  I have booted, what does this player own?
    *   wallet-save   Their balance changed, please keep it.
    *   result        A match finished, and whether this player won it.
+   *   diagnostics   A bounded batch from the shared game logger. The parent
+   *                 sanitizes and buffers it before an authenticated write.
    */
   useEffect(() => {
     const onMessage = (e: MessageEvent) => {
@@ -533,6 +547,11 @@ function LobbyContent() {
 
       if (data.type === "wallet-request") {
         void sendWallet(data);
+        return;
+      }
+
+      if (data.type === "diagnostics") {
+        if (data.version === 1) enqueueDiagnostics(data.entries);
         return;
       }
 
@@ -565,7 +584,7 @@ function LobbyContent() {
     // function identity changed.
     // router is intentionally omitted — Next.js router identity is stable.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user, sendWallet, clearStats, lobby?.gameId]);
+  }, [user, sendWallet, clearStats, lobby?.gameId, enqueueDiagnostics]);
 
   const copyLink = () => {
     navigator.clipboard.writeText(window.location.href).catch(() => {});
