@@ -454,7 +454,7 @@ export default function App() {
   };
 
   return (
-    <div className="relative h-[100dvh] w-full overflow-hidden">
+    <div className="game-surface relative h-[100dvh] w-full overflow-hidden">
       {(view === 'menu' || view === 'offline_menu') && (
         <Menu
           coins={coins}

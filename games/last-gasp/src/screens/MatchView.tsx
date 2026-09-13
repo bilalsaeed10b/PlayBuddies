@@ -696,7 +696,7 @@ export default function MatchView({
   );
 
   return (
-    <div ref={shellRef} className="relative flex h-[100dvh] w-full flex-col overflow-hidden">
+    <div ref={shellRef} className="game-surface relative flex h-[100dvh] w-full flex-col overflow-hidden">
       {/* ── top bar ── */}
       <div className="flex shrink-0 items-start justify-between gap-2 p-2 sm:p-3">
         <div className="shrink-0 rounded-2xl border border-slate-600/50 bg-slate-900/70 px-3 py-1.5 backdrop-blur">

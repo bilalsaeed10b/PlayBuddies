@@ -603,7 +603,7 @@ export default function MatchView({
     );
 
   return (
-    <div ref={shellRef} className="relative flex h-[100dvh] w-full flex-col overflow-hidden">
+    <div ref={shellRef} className="game-surface relative flex h-[100dvh] w-full flex-col overflow-hidden">
       {/* ── top bar: the round, the clock, the tray ── */}
       <div className="flex shrink-0 items-start justify-between gap-2 p-2 sm:p-3">
         <div className="rounded-2xl border border-amber-900/20 bg-[#f7ecd6]/90 px-3 py-1.5">
