@@ -7,12 +7,11 @@ import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/store/useAuthStore";
 import { auth, db } from "@/lib/firebase";
 import { signOut } from "firebase/auth";
-import { doc, getDoc, setDoc, updateDoc, serverTimestamp } from "firebase/firestore";
+import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
 import { getRememberedLobby, forgetLobby } from "@/lib/lastLobby";
 import { PLAYABLE_GAMES, gameAccent, playerCountLabel } from "@/lib/games";
 import GameThumb from "@/components/GameThumb";
 import AuthGuard from "@/components/AuthGuard";
-import { gameSelectionUpdate } from "@/lib/lobbySettings";
 import {
   generateRoomCode,
   normalizeRoomCode,
@@ -31,12 +30,32 @@ import {
   Users,
 } from "lucide-react";
 
+const CREATE_LOBBY_TIMEOUT_MS = 12_000;
+
+async function withTimeout<T>(operation: Promise<T>, milliseconds: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error("Lobby creation timed out")),
+          milliseconds,
+        );
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
 export default function DashboardPage() {
   // Bilal Saeed 123
   const { user, stats: cachedStats, statsFetchedAt, setStats } = useAuthStore();
   // Bilal Saeed 123
   const router = useRouter();
   const [isCreating, setIsCreating] = useState(false);
+  const [createError, setCreateError] = useState("");
   const [joinCode, setJoinCode] = useState("");
   const [joinError, setJoinError] = useState("");
   const [isJoining, setIsJoining] = useState(false);
@@ -104,30 +123,16 @@ export default function DashboardPage() {
   };
 
   const createLobby = async (gameId: string | null = null) => {
-    if (!user) return;
+    if (!user || isCreating) return;
     setIsCreating(true);
+    setCreateError("");
 
-    // Reuse the room this browser was already in rather than stranding it.
-    // Every click used to mint a brand new code, so a reload or a stray click
-    // orphaned the old lobby with your friends still sitting in it.
-    const remembered = getRememberedLobby();
-    if (remembered) {
-      try {
-        const snap = await getDoc(doc(db, "lobbies", remembered));
-        if (snap.exists() && snap.data().status !== "completed") {
-          if (gameId && snap.data().hostId === user.uid) {
-            if (snap.data().gameId !== gameId) {
-              await updateDoc(doc(db, "lobbies", remembered), gameSelectionUpdate(gameId, Object.keys(snap.data().players ?? {})));
-            }
-          }
-          router.push(`/lobby?room=${remembered}`);
-          return;
-        }
-        forgetLobby();
-      } catch {
-        forgetLobby();
-      }
-    }
+    // Create means a fresh room. Rejoining the previous room remains available
+    // through the separate resume card below. Reading that remembered room
+    // here used to put a stale Firestore request in front of every creation;
+    // if the read stalled, the button stayed on "Creating..." forever.
+    forgetLobby();
+    setResumeRoom(null);
 
     const roomId = generateRoomCode();
     try {
@@ -135,27 +140,38 @@ export default function DashboardPage() {
       // page updates it with dotted paths (`players.<uid>`), which Firestore
       // rejects against an array field , that mismatch meant a host never
       // appeared in the lobby they had just created.
-      await setDoc(doc(db, "lobbies", roomId), {
-        hostId: user.uid,
-        hostSeenAt: serverTimestamp(),
-        status: "waiting",
-        gameId: typeof gameId === "string" ? gameId : null,
-        players: {
-          [user.uid]: {
-            uid: user.uid,
-            displayName: (user.displayName || "Player").slice(0, 60),
-            photoURL: (user.photoURL || "").slice(0, 500),
-            // Joining a lobby is an explicit action; start every new host in
-            // the same ready state as invited guests.
-            isReady: true,
+      await withTimeout(
+        setDoc(doc(db, "lobbies", roomId), {
+          hostId: user.uid,
+          hostSeenAt: serverTimestamp(),
+          status: "waiting",
+          gameId: typeof gameId === "string" ? gameId : null,
+          players: {
+            [user.uid]: {
+              uid: user.uid,
+              displayName: (user.displayName || "Player").slice(0, 60),
+              photoURL: (user.photoURL || "").slice(0, 500),
+              // Joining a lobby is an explicit action; start every new host in
+              // the same ready state as invited guests.
+              isReady: true,
+            },
           },
-        },
-        createdAt: serverTimestamp(),
-        expiresAt: new Date(Date.now() + LOBBY_TTL_MS),
-      });
+          createdAt: serverTimestamp(),
+          expiresAt: new Date(Date.now() + LOBBY_TTL_MS),
+        }),
+        CREATE_LOBBY_TIMEOUT_MS,
+      );
       router.push(`/lobby?room=${roomId}`);
     } catch (e) {
       console.error("Error creating lobby", e);
+      const timedOut = e instanceof Error && e.message === "Lobby creation timed out";
+      setCreateError(
+        !navigator.onLine
+          ? "You are offline. Reconnect, then try again."
+          : timedOut
+            ? "Lobby creation took too long. Please try again."
+            : "Couldn't create the lobby. Please try again.",
+      );
       setIsCreating(false);
     }
   };
@@ -274,16 +290,23 @@ export default function DashboardPage() {
 
               <div className="text-text-muted font-bold text-sm hidden sm:block">OR</div>
 
-              <motion.button
-                onClick={() => createLobby()}
-                disabled={isCreating}
-                whileHover={{ scale: 1.05, y: -2 }}
-                whileTap={{ scale: 0.95 }}
-                className="btn-glow flex items-center gap-3 px-8 py-4 bg-gradient-to-r from-primary to-accent rounded-2xl text-white font-bold text-lg shadow-xl shadow-primary/20 disabled:opacity-75 w-full sm:w-auto justify-center"
-              >
-                <Plus size={22} className={isCreating ? "animate-spin" : ""} />
-                {isCreating ? "Creating..." : "Create Lobby"}
-              </motion.button>
+              <div className="flex w-full flex-col gap-1 sm:w-auto">
+                <motion.button
+                  onClick={() => createLobby()}
+                  disabled={isCreating}
+                  whileHover={{ scale: 1.05, y: -2 }}
+                  whileTap={{ scale: 0.95 }}
+                  className="btn-glow flex items-center gap-3 px-8 py-4 bg-gradient-to-r from-primary to-accent rounded-2xl text-white font-bold text-lg shadow-xl shadow-primary/20 disabled:opacity-75 w-full sm:w-auto justify-center"
+                >
+                  <Plus size={22} className={isCreating ? "animate-spin" : ""} />
+                  {isCreating ? "Creating..." : "Create Lobby"}
+                </motion.button>
+                {createError && (
+                  <p role="alert" className="max-w-64 px-2 text-xs text-error">
+                    {createError}
+                  </p>
+                )}
+              </div>
             </div>
           </div>
 
