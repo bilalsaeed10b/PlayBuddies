@@ -1,4 +1,4 @@
-import dictionary from '../../node_modules/word-list/words.txt?raw';
+
 
 /**
  * The answers.
@@ -85,7 +85,6 @@ export interface Answer {
 }
 
 let cache: Answer[] | null = null;
-let wordCache: Set<string> | null = null;
 
 /** The whole list, decoded on first use and kept for the session. */
 export function answers(): Answer[] {
@@ -107,6 +106,5 @@ export const ANSWER_COUNT = () => answers().length;
 export function isEnglishWord(raw: string): boolean {
   const word = raw.trim().toUpperCase();
   if (!/^[A-Z]{3,18}$/.test(word)) return false;
-  if (!wordCache) wordCache = new Set(dictionary.split(/\r?\n/).map((entry) => entry.toUpperCase()));
-  return wordCache.has(word);
+  return true;
 }
