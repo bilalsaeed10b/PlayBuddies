@@ -11,12 +11,15 @@ function reef() {
   Object.assign(b, { locals: new Map(), remotes: new Map(), enemies: new Map(), nextEnemyId: 0, spawnCursor: 0, config: {}, boss: null });
   return b;
 }
-test('late reef never accumulates more than two ordinary sharks', () => {
+test('the aquarium remains sparse and new fish only travel horizontally', () => {
   const b = reef();
   b.locals.set('a', b.makeFish('a', 'player', 500, 0));
   for (let i = 0; i < 2000; i++) b.spawnEnemy();
   assert.ok([...b.enemies.values()].filter(f => f.asset === 29).length <= 2);
   assert.ok(new Set([...b.enemies.values()].map(f => f.asset)).size > 4);
+  assert.ok(BALANCE.ENEMY_MAX <= 18);
+  assert.ok(BALANCE.ENEMY_BASE + BALANCE.ENEMY_PER_PLAYER <= 12);
+  assert.ok([...b.enemies.values()].every(f => f.vy === 0 && f.shoal === undefined));
   assert.ok(bodyRadius(900) < 106);
 });
 test('spawn anchors alternate between large and small living players', () => {
@@ -47,4 +50,17 @@ test('friendly fish prevent player kills; default permits eating smaller players
     b.checkCollisions(); assert.equal(killed,!friendlyFish);
   }
   assert.ok(BALANCE.GROWTH < 0.1);
+});
+test('a movement control brings a defeated local fish back into the water', () => {
+  const b = reef();
+  let rejoined = 0;
+  b.config = { localIds: ['a'], localFish: {}, onRejoin: () => rejoined++ };
+  b.settings = { controlScheme: 0 };
+  b.simulateAI = false;
+  const fish = b.makeFish('a', 'player', 6, 0);
+  fish.dead = true;
+  b.locals.set('a', fish);
+  b.setJoystick({ x: 1, y: 0 });
+  assert.equal(fish.dead, false);
+  assert.equal(rejoined, 1);
 });

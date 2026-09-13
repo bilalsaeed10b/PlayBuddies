@@ -53,18 +53,19 @@ export const BALANCE = {
   SPAWN_PROTECTION: 2.5,
 
   // AI population
-  ENEMY_BASE: 26,
-  ENEMY_PER_PLAYER: 6,
+  /** A quiet aquarium: a handful of fish, not a screen-filling harvest. */
+  ENEMY_BASE: 7,
+  ENEMY_PER_PLAYER: 2,
   /**
    * How many more fish join the reef as the local fleet grows, on top of
    * ENEMY_BASE -- ramped by the same `grown` curve as the predator mix (see
    * PREDATOR_RAMP_SIZE), so the water fills up over a run instead of holding
    * at one fixed headcount from the first second to the last.
    */
-  ENEMY_GROWTH_BONUS: 18,
-  ENEMY_MAX: 70,
-  ENEMY_MIN_SPEED: 55,
-  ENEMY_MAX_SPEED: 135,
+  ENEMY_GROWTH_BONUS: 5,
+  ENEMY_MAX: 18,
+  ENEMY_MIN_SPEED: 48,
+  ENEMY_MAX_SPEED: 92,
   /**
    * How much the local fleet has to grow, in size, before the reef reaches
    * its full predator pressure and population -- `grown` in spawnEnemy and
@@ -111,6 +112,8 @@ export const BALANCE = {
   SHOAL_CHANCE: 0.45,
   SHOAL_MIN: 7,
   SHOAL_MAX: 13,
+  /** Seconds between replacement fish, so a cleared patch stays calm. */
+  ENEMY_RESPAWN_DELAY: 1.4,
 
   // Boss
   BOSS_INTERVAL: 90,
@@ -161,6 +164,8 @@ export interface EngineConfig {
   onDeath: (id: string, killedBy: string, eaterId?: string, size?: number) => void;
   onLocalState: (id: string, packet: PlayerPacket) => void;
   onEnemyEaten: (enemyId: number) => void;
+  /** Lets the view dismiss its defeat card when movement brings a fish back. */
+  onRejoin?: () => void;
   onProgress?: (p: number) => void;
 }
 
@@ -223,7 +228,9 @@ export class GameEngine {
   private bossLife = 0;
   private spawnCursor = 0;
   private nextEnemyId = 1;
+  /** Retained for legacy snapshots; ordinary spawning no longer creates shoals. */
   private nextShoalId = 1;
+  private enemyRespawnIn = 0;
   /** Enemies eaten since the last time the host published a removal batch. */
   private pendingKills: number[] = [];
 
@@ -241,6 +248,7 @@ export class GameEngine {
     this.keys.add(e.code);
     // Arrow keys scroll the page inside the platform's iframe otherwise.
     if (e.code.startsWith('Arrow') || e.code === 'Space') e.preventDefault();
+    this.rejoinFromKey(e.code);
   };
   private onKeyUp = (e: KeyboardEvent) => this.keys.delete(e.code);
   private onBlur = () => this.keys.clear();
@@ -306,6 +314,7 @@ export class GameEngine {
 
   setJoystick(v: Vector2D) {
     this.joystick = v;
+    if (v.x !== 0 || v.y !== 0) this.rejoinLocal(this.config.localIds[0]);
   }
 
   /**
@@ -474,6 +483,28 @@ export class GameEngine {
     fish.y = BALANCE.WORLD_H * (0.25 + Math.random() * 0.5);
   }
 
+  /** A defeated fish can immediately return by pressing its own movement key. */
+  private rejoinFromKey(code: string) {
+    const ids = this.config.localIds;
+    for (let index = 0; index < ids.length; index++) {
+      const scheme = CONTROL_SCHEMES[(index + this.settings.controlScheme) % CONTROL_SCHEMES.length];
+      if (code === scheme.up || code === scheme.down || code === scheme.left || code === scheme.right) {
+        this.rejoinLocal(ids[index]);
+        return;
+      }
+    }
+  }
+
+  private rejoinLocal(id: string | undefined) {
+    if (!id || !this.locals.get(id)?.dead) return;
+    const everyoneOut = this.allLocalsDead();
+    this.respawn(id);
+    // The old reef may have been scaled for a much larger run. Restart it only
+    // when this client was fully out, matching the explicit Try Again button.
+    if (everyoneOut) this.resetReef();
+    this.config.onRejoin?.();
+  }
+
   /**
    * Starts the reef over at the size the players are *now*.
    *
@@ -582,7 +613,9 @@ export class GameEngine {
     this.updateLocals(dt);
     if (this.simulateAI) {
       this.simulateEnemies(dt);
-      this.simulateBoss(dt);
+      // The aquarium now stays focused on readable fish traffic. The old
+      // hunting boss is intentionally paused rather than interrupting that.
+      if (this.boss) this.simulateBoss(dt);
     } else {
       this.interpolate(this.enemies.values(), dt);
       if (this.boss) this.applyNet(this.boss, dt);
@@ -679,14 +712,10 @@ export class GameEngine {
 
   private seedEnemies() {
     const target = this.enemyTarget();
-    // A couple of shoals from the outset, so the reef looks inhabited rather
-    // than evenly sprinkled.
-    this.spawnShoal();
-    this.spawnShoal();
     while (this.enemies.size < target) {
       const fish = this.spawnEnemy();
-      // The opening population is scattered across the map rather than pushed
-      // in from the edge, so the first ten seconds aren't an empty ocean.
+      // Only the opening fish are placed in the aquarium. Every later fish
+      // swims cleanly across it from one side to the other.
       fish.x = Math.random() * BALANCE.WORLD_W;
       fish.y = Math.random() * BALANCE.WORLD_H;
     }
@@ -781,7 +810,7 @@ export class GameEngine {
       // something bite-sized *for you specifically* -- for variety.
       size =
         Math.random() < 0.55
-          ? 4 + Math.random() * (SHOAL_MAX_SIZE - 4)
+          ? 4 + Math.random() * 10
           : ref * (0.3 + Math.random() * 0.55);
     } else if (roll < peerCut) {
       // Peers: can't eat you, you can't eat them. They make the water feel busy.
@@ -812,17 +841,18 @@ export class GameEngine {
     const fish = this.makeFish(String(id), 'enemy', size, asset);
     fish.pace *= 1 + grown * 0.2;
 
-    const angle = Math.random() * Math.PI * 2;
-    fish.x = Math.cos(angle) < 0 ? -90 : BALANCE.WORLD_W + 90;
+    const fromLeft = Math.random() < 0.5;
+    fish.x = fromLeft ? -90 : BALANCE.WORLD_W + 90;
     fish.y = 60 + Math.random() * (BALANCE.WORLD_H - 120);
 
     const speed = BALANCE.ENEMY_MIN_SPEED + Math.random() * (BALANCE.ENEMY_MAX_SPEED - BALANCE.ENEMY_MIN_SPEED);
-    // Head roughly back toward the action rather than straight off the map.
-    const toward = Math.atan2(anchor.y - fish.y, anchor.x - fish.x) + (Math.random() - 0.5) * 1.6;
-    fish.vx = Math.cos(toward) * speed * fish.pace;
-    fish.vy = Math.sin(toward) * speed * fish.pace * 0.6;
-    fish.angle = toward;
-    fish.heading = toward;
+    // Aquarium fish never chase, flee, cluster or select routes. They are
+    // simple left-to-right swimmers, like the reference game.
+    const heading = fromLeft ? 0 : Math.PI;
+    fish.vx = Math.cos(heading) * speed;
+    fish.vy = 0;
+    fish.angle = heading;
+    fish.heading = heading;
 
     this.enemies.set(id, fish);
     return fish;
@@ -852,6 +882,26 @@ export class GameEngine {
    * Players are not an input to any of this. Nothing chases, nothing flees.
    */
   private simulateEnemies(dt: number) {
+    // Aquarium fish move in one clear direction until they leave the screen.
+    // There is deliberately no flocking, wandering, hunting, or response to
+    // nearby players here.
+    for (const fish of this.enemies.values()) {
+      fish.x += fish.vx * dt;
+      this.face(fish, dt, 5);
+    }
+    for (const [id, fish] of this.enemies) {
+      if (fish.x < -140 || fish.x > BALANCE.WORLD_W + 140) this.enemies.delete(id);
+    }
+    this.enemyRespawnIn -= dt;
+    if (this.enemies.size < this.enemyTarget() && this.enemyRespawnIn <= 0) {
+      this.spawnEnemy();
+      this.enemyRespawnIn = BALANCE.ENEMY_RESPAWN_DELAY;
+    }
+    return;
+
+    // Kept behind an unreachable branch while older replays that carry shoal
+    // metadata age out. New matches never enter this path.
+    if (false) {
     const cull = this.viewRadius() * BALANCE.CULL_RING;
     const cullSq = cull * cull;
     const enemies = [...this.enemies.values()];
@@ -861,13 +911,13 @@ export class GameEngine {
     const shoals = new Map<number, { x: number; y: number; hx: number; hy: number; n: number }>();
     for (const fish of enemies) {
       if (fish.shoal === undefined) continue;
-      const s = shoals.get(fish.shoal) ?? { x: 0, y: 0, hx: 0, hy: 0, n: 0 };
+      const s = shoals.get(fish.shoal!) ?? { x: 0, y: 0, hx: 0, hy: 0, n: 0 };
       s.x += fish.x;
       s.y += fish.y;
       s.hx += Math.cos(fish.heading);
       s.hy += Math.sin(fish.heading);
       s.n++;
-      shoals.set(fish.shoal, s);
+      shoals.set(fish.shoal!, s);
     }
 
     for (const fish of enemies) {
@@ -884,10 +934,11 @@ export class GameEngine {
       let hy = Math.sin(fish.heading) * 0.55; // fish travel flatter than they climb
 
       const shoal =
-        fish.shoal !== undefined && isShoalingSize(fish.size) ? shoals.get(fish.shoal) : undefined;
-      if (shoal && shoal.n > 1) {
-        const cxAvg = shoal.x / shoal.n;
-        const cyAvg = shoal.y / shoal.n;
+        fish.shoal !== undefined && isShoalingSize(fish.size) ? shoals.get(fish.shoal!)! : undefined;
+      if (shoal !== undefined && shoal!.n > 1) {
+        const group = shoal!;
+        const cxAvg = group.x / group.n;
+        const cyAvg = group.y / group.n;
         const dx = cxAvg - fish.x;
         const dy = cyAvg - fish.y;
         const dist = Math.hypot(dx, dy) || 1;
@@ -907,9 +958,9 @@ export class GameEngine {
           hy -= (dy / dist) * 1.3;
         }
 
-        const align = Math.hypot(shoal.hx, shoal.hy) || 1;
-        hx += (shoal.hx / align) * BALANCE.SCHOOL_ALIGN;
-        hy += (shoal.hy / align) * BALANCE.SCHOOL_ALIGN * 0.55;
+        const align = Math.hypot(group.hx, group.hy) || 1;
+        hx += (group.hx / align) * BALANCE.SCHOOL_ALIGN;
+        hy += (group.hy / align) * BALANCE.SCHOOL_ALIGN * 0.55;
       }
 
       // Turn back before hitting a wall rather than bouncing off it.
@@ -963,7 +1014,7 @@ export class GameEngine {
     // because that is the entire point of them.
     for (let i = 0; i < 3 && this.enemies.size < target; i++) {
       if (Math.random() < BALANCE.SHOAL_CHANCE && this.enemies.size + BALANCE.SHOAL_MAX <= target) {
-        this.spawnShoal();
+        this.spawnEnemy();
         break;
       }
       this.spawnEnemy();
@@ -978,7 +1029,7 @@ export class GameEngine {
    * middle: the only thing the old rule checked was that sizes were close, and
    * two fish of the same size are very often different species.
    */
-  private spawnShoal() {
+  const spawnShoal = () => {
     // Anchor first, same reasoning as spawnEnemy: sized for whoever the shoal
     // is actually appearing next to, not the match's global average, so a
     // player who hasn't grown much still finds an appropriately tiny cloud of
@@ -1011,6 +1062,8 @@ export class GameEngine {
       fish.vy = Math.sin(heading) * speed * 0.5;
       this.enemies.set(id, fish);
     }
+  }
+  void spawnShoal;
   }
 
   private simulateBoss(dt: number) {
@@ -1342,7 +1395,11 @@ export class GameEngine {
     ctx.translate(this.effViewW / 2 - this.cameraX, this.effViewH / 2 - this.cameraY);
 
     if (this.backdrop) {
-      ctx.drawImage(this.backdrop, 0, 0, BALANCE.WORLD_W, BALANCE.WORLD_H);
+      // Keep the fish crisp while easing the stock scenery back a little.
+      ctx.save();
+      ctx.filter = 'blur(2px) saturate(0.88)';
+      ctx.drawImage(this.backdrop, -5, -5, BALANCE.WORLD_W + 10, BALANCE.WORLD_H + 10);
+      ctx.restore();
     } else {
       ctx.fillStyle = '#0a4468';
       ctx.fillRect(0, 0, BALANCE.WORLD_W, BALANCE.WORLD_H);

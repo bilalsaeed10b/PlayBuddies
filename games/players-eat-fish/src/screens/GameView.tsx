@@ -141,6 +141,7 @@ export default function GameView({
         if (p >= 1) setTimeout(() => setReady(true), 250);
       },
       onEat: () => {},
+      onRejoin: () => setDefeat(null),
       onLocalState: (id, packet) => {
         localPackets.current.set(id, packet);
       },
