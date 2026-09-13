@@ -50,18 +50,14 @@ body {
 }
 
 
-::-webkit-scrollbar {
-  width: 6px;
+/* Keep every scrollable area usable while leaving the chrome out of the UI. */
+* {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
 }
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-::-webkit-scrollbar-thumb {
-  background: rgba(139, 92, 246, 0.3);
-  border-radius: 999px;
-}
-::-webkit-scrollbar-thumb:hover {
-  background: rgba(139, 92, 246, 0.5);
+
+*::-webkit-scrollbar {
+  display: none;
 }
 
 

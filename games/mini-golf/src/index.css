@@ -1,5 +1,9 @@
 @import "tailwindcss";
 
+/* Scroll areas still work with touch, mouse wheels, and keyboard input. */
+* { -ms-overflow-style: none; scrollbar-width: none; }
+*::-webkit-scrollbar { display: none; }
+
 /**
  * A phone held sideways.
  *
