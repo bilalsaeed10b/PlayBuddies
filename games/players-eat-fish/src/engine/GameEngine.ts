@@ -44,10 +44,11 @@ export const BALANCE = {
    * Growth is by area, not by radius: size² accumulates. Eating your first few
    * fish is dramatic and eating your hundredth barely moves the needle, which
    * is what keeps a long run from ending with one fish filling the screen.
-   * Lowered from 0.55 so that curve stretches out much further -- size climbs
-   * noticeably slower across a whole run, not just at the high end.
+   * Area growth keeps large fish from exploding in size. 0.16 is deliberately
+   * below the original 0.24 pace, but high enough that a run visibly develops
+   * instead of leaving the player almost unchanged after many catches.
    */
-  GROWTH: 0.035,
+  GROWTH: 0.16,
   /** Score is immediate progress; restoring the original pace keeps every catch rewarding. */
   SCORE_RATE: 0.8,
   SPAWN_PROTECTION: 2.5,
@@ -497,11 +498,9 @@ export class GameEngine {
 
   private rejoinLocal(id: string | undefined) {
     if (!id || !this.locals.get(id)?.dead) return;
-    const everyoneOut = this.allLocalsDead();
     this.respawn(id);
-    // The old reef may have been scaled for a much larger run. Restart it only
-    // when this client was fully out, matching the explicit Try Again button.
-    if (everyoneOut) this.resetReef();
+    // The reef belongs to the match, not to one life. Clearing it here made a
+    // host's whole population teleport whenever that host moved after dying.
     this.config.onRejoin?.();
   }
 

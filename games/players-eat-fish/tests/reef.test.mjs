@@ -65,7 +65,7 @@ test('friendly fish prevent player kills; default permits eating smaller players
     let killed = false; b.kill = () => { killed = true; };
     b.checkCollisions(); assert.equal(killed,!friendlyFish);
   }
-  assert.ok(BALANCE.GROWTH <= 0.035);
+  assert.ok(BALANCE.GROWTH >= 0.14 && BALANCE.GROWTH <= 0.18);
   assert.equal(BALANCE.SCORE_RATE, 0.8);
 });
 test('a player can eat an NPC with the same displayed size', () => {
@@ -101,7 +101,11 @@ test('a movement control brings a defeated local fish back into the water', () =
   const fish = b.makeFish('a', 'player', 6, 0);
   fish.dead = true;
   b.locals.set('a', fish);
+  const existingEnemy = b.makeFish('1', 'enemy', 30, 1);
+  b.enemies.set(1, existingEnemy);
+  b.resetReef = () => { throw new Error('movement rejoin must not replace the reef'); };
   b.setJoystick({ x: 1, y: 0 });
   assert.equal(fish.dead, false);
   assert.equal(rejoined, 1);
+  assert.equal(b.enemies.get(1), existingEnemy);
 });

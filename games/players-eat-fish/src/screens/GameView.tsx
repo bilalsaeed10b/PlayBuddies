@@ -61,12 +61,13 @@ interface Props {
   /** Called with the final score whenever a local player is eaten. */
   onRunEnded: (score: number) => void;
   /**
-   * The run is over for this device, and whether it ended on top.
+   * An offline run is over for this device, and whether it ended on top.
    *
    * Separate from onRunEnded, which fires once per fish: with three
    * players sharing a keyboard that is three deaths and would have been
    * counted as three games. A reef has no finish line, so topping the
    * board when the last local fish goes down is what counts as winning it.
+   * Online death is only a life lost and never calls this callback.
    */
   onMatchOver: (won: boolean) => void;
 }
@@ -157,7 +158,9 @@ export default function GameView({
         // not freeze the others , the screen only comes up once nobody is left.
         if (engineRef.current?.allLocalsDead()) {
           setDefeat({ by: killedBy, score: fish?.score ?? 0, best: fish?.bestScore ?? 0 });
-          onMatchOver(engineRef.current.leaderboard()[0]?.local === true);
+          // Multiplayer is one continuous reef: death removes this fish until
+          // its player moves again. It is not a match result or a new game.
+          if (!online) onMatchOver(engineRef.current.leaderboard()[0]?.local === true);
         }
 
         if (!eaterId || !size) return;
@@ -420,8 +423,8 @@ export default function GameView({
   const respawn = () => {
     setDefeat(null);
     localIds.forEach((id) => engineRef.current?.respawn(id));
-    // After the seats are back at starting size, so the reef is rebuilt around
-    // the new reference rather than the one the last run ended on.
+    // This action only exists offline. A fresh solo attempt gets a fresh reef;
+    // online players return with movement and preserve the shared population.
     engineRef.current?.resetReef();
   };
 
@@ -434,7 +437,7 @@ export default function GameView({
         className={`block w-full h-full transition-opacity duration-500 ${ready ? 'opacity-100' : 'opacity-0'}`}
       />
 
-      {ready && !defeat && (
+      {ready && (!defeat || online) && (
         <Joystick
           onMove={(v) => engineRef.current?.setJoystick(v)}
           onEnd={() => engineRef.current?.setJoystick({ x: 0, y: 0 })}
@@ -527,7 +530,20 @@ export default function GameView({
         </div>
       )}
 
-      {defeat && (
+      {online && defeat && (
+        <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center p-6">
+          <div className="rounded-3xl border border-white/25 bg-sky-950/80 px-7 py-5 text-center text-white shadow-2xl backdrop-blur-md">
+            <h2 className="text-3xl font-black tracking-tighter">EATEN</h2>
+            <p className="mt-1 text-sm font-bold text-sky-100">{defeat.by} got you.</p>
+            <p className="mt-3 text-xs font-black uppercase tracking-[0.18em] text-emerald-300">
+              Move to dive back into this reef
+            </p>
+            <p className="mt-1 text-xs font-bold text-sky-200">Run score {defeat.score}</p>
+          </div>
+        </div>
+      )}
+
+      {!online && defeat && (
         <div className="absolute inset-0 z-30 flex items-center justify-center bg-sky-950/70 p-6 backdrop-blur-sm">
           <div className="max-h-[88dvh] w-full max-w-sm overflow-y-auto overscroll-contain space-y-6 rounded-[2rem] border border-white/20 bg-white/90 p-8 text-center shadow-2xl">
             <div>
@@ -546,13 +562,13 @@ export default function GameView({
                 onClick={respawn}
                 className="w-full rounded-2xl bg-emerald-600 py-4 text-lg font-black text-white transition-transform active:scale-95"
               >
-                {online ? 'BACK IN THE WATER' : 'TRY AGAIN'}
+                TRY AGAIN
               </button>
               <button
                 onClick={onExit}
                 className="w-full rounded-2xl bg-slate-900/5 py-3 font-bold text-slate-700 transition-colors hover:bg-slate-900/10"
               >
-                {online ? 'Back to lobby' : 'Main menu'}
+                Main menu
               </button>
             </div>
           </div>
