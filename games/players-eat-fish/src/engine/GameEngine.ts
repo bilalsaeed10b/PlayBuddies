@@ -48,22 +48,22 @@ export const BALANCE = {
    * noticeably slower across a whole run, not just at the high end.
    */
   GROWTH: 0.035,
-  /** Score climbs a little slower than size does -- its own dial, not tied to GROWTH. */
-  SCORE_RATE: 0.25,
+  /** Score is immediate progress; restoring the original pace keeps every catch rewarding. */
+  SCORE_RATE: 0.8,
   SPAWN_PROTECTION: 2.5,
 
   // AI population
-  /** A quiet aquarium: a handful of fish, not a screen-filling harvest. */
-  ENEMY_BASE: 7,
-  ENEMY_PER_PLAYER: 2,
+  /** Enough life to create choices while keeping the calm, single-fish flow. */
+  ENEMY_BASE: 9,
+  ENEMY_PER_PLAYER: 3,
   /**
    * How many more fish join the reef as the local fleet grows, on top of
    * ENEMY_BASE -- ramped by the same `grown` curve as the predator mix (see
    * PREDATOR_RAMP_SIZE), so the water fills up over a run instead of holding
    * at one fixed headcount from the first second to the last.
    */
-  ENEMY_GROWTH_BONUS: 5,
-  ENEMY_MAX: 18,
+  ENEMY_GROWTH_BONUS: 6,
+  ENEMY_MAX: 24,
   ENEMY_MIN_SPEED: 48,
   ENEMY_MAX_SPEED: 92,
   /**
@@ -124,7 +124,7 @@ export const BALANCE = {
 
   // Presentation
   BUBBLES: 60,
-  VISUAL_SCALE: 1.3,
+  VISUAL_SCALE: 0.92,
   /**
    * Steepest a fish ever tilts, in radians (~85°) -- most of the way to
    * straight up or down, so swimming vertically actually reads as vertically.
@@ -776,54 +776,35 @@ export class GameEngine {
     const roll = Math.random();
 
     /**
-     * Predators lean in as the fleet grows, but prey stays the majority of
-     * every spawn no matter how far that ramp has climbed.
-     *
-     * This used to run preyCut from 0.55 down to 0.35 and split everything
-     * past peerCut 50/50 between small predator and shark -- so a fully
-     * grown reef spawned *predators* nearly two shots in three, and a coin
-     * flip of those was a shark. That is exactly the "I just keep getting
-     * sharks and no other fish" complaint: past a few hundred size the water
-     * stopped looking like an ocean and started looking like a shark tank.
-     * A real reef has vastly more small fish than big ones at every depth;
-     * this now holds prey at a majority throughout, and sharks are the rare
-     * tier they're supposed to be -- unmistakably huge when one shows up,
-     * but a small slice of an already-smaller predator budget rather than
-     * half of it.
+     * Every neighbourhood offers the same clear risk/reward choice: four fish
+     * in ten are food for the player this spawn is anchored to, while six in
+     * ten are larger hazards. This ratio is independent for every spawn, so it
+     * also stays fair when multiplayer seats have very different sizes.
      */
     const grown = this.grownFor(ref);
-    const preyCut = 0.65 - grown * 0.1; // 65% fresh -> 55% fully grown, always the majority
-    const peerCut = preyCut + 0.15; // peers: a fixed 15% slice throughout
-    const predatorBudget = 1 - peerCut; // 20% fresh -> 30% fully grown
-    // Of that predator budget, sharks are always the minority tier -- roughly
-    // a quarter of it, so "predator" mostly still means the small kind you
-    // can out-turn, and a shark stays the exception that makes you look twice.
-    const sharkCut = peerCut + predatorBudget * 0.72;
+    const edible = roll < 0.4;
+    const largePredator = !edible && Math.random() < 0.18 * grown;
 
     let size: number;
-    if (roll < preyCut) {
-      // Prey is two different things, not one ref-scaled band: past the
-      // halfway point it's a truly small fish, an absolute size regardless
-      // of how big this neighbourhood has grown, which is what keeps the
-      // water looking like it has little fish in it even once everyone is
-      // huge. The other half is the old ref-relative snack -- always
-      // something bite-sized *for you specifically* -- for variety.
-      size =
-        Math.random() < 0.55
-          ? 4 + Math.random() * 10
-          : ref * (0.3 + Math.random() * 0.55);
-    } else if (roll < peerCut) {
-      // Peers: can't eat you, you can't eat them. They make the water feel busy.
-      size = ref * (0.85 + Math.random() * 0.3);
-    } else if (roll < sharkCut) {
-      // Small predator: bigger than you, but only just -- a threat you can
-      // actually out-turn or out-grow, not a wall.
-      size = ref * (1.15 + Math.random() * 0.45);
+    if (edible) {
+      // A quarter of food shares the player's displayed number. NPC ties are
+      // deliberately edible, so matching the label is a safe, useful catch.
+      const foodRoll = Math.random();
+      if (foodRoll < 0.25) {
+        size = Math.floor(ref) + Math.random();
+      } else if (foodRoll < 0.6) {
+        // Keep real minnows in an advanced reef instead of eventually turning
+        // every edible spawn into the same giant-species sprite.
+        size = 4 + Math.random() * Math.min(36, Math.max(0, ref - 4));
+      } else {
+        size = ref * (0.35 + Math.random() * 0.55);
+      }
+    } else if (!largePredator) {
+      // Most hazards are close enough to become future food after some growth.
+      size = ref * (1.12 + Math.random() * 0.48);
     } else {
-      // Shark: unmistakably, seriously bigger, and deliberately the
-      // narrowest slice of the roll -- a rare sight, not the default
-      // predator you meet once the reef has grown up.
-      size = ref * (2.0 + Math.random() * 1.4);
+      // Truly large predators only enter progressively; they never dominate.
+      size = ref * (1.8 + Math.random() * 1.2);
     }
     // A safety ceiling, not a real limit -- big enough that a predator's own
     // ref-relative formula above decides its size long before this ever
@@ -837,7 +818,7 @@ export class GameEngine {
     // Swordfish, so an 11-point snack could look like an endgame threat.
     // Swordfish, tiger sharks, and the boss are now naturally reserved for
     // the late size bands in the catalogue.
-    const shark = roll >= sharkCut && sharks < 2 && ref >= 100;
+    const shark = largePredator && sharks < 2 && ref >= 100;
     const asset = shark ? 29 : Math.min(28, assetForSize(size));
     const fish = this.makeFish(String(id), 'enemy', size, asset);
     fish.pace *= 1 + grown * 0.2;
@@ -1167,7 +1148,7 @@ export class GameEngine {
       // AI fish
       for (const [id, enemy] of this.enemies) {
         if (!overlaps(me, enemy)) continue;
-        if (canEat(me, enemy)) {
+        if (canEat(me, enemy, true)) {
           // Removed straight away so eating feels instant. If we are a guest,
           // the host is told and confirms it to everyone else; the worst case
           // is that two players briefly both believe they got the same fish.
@@ -1576,7 +1557,7 @@ function clamp(v: number, lo: number, hi: number) {
  * water.
  */
 export function bodyRadius(size: number): number {
-  return 10 + 95 * (1 - Math.exp(-Math.pow(size, 0.75) * BALANCE.VISUAL_SCALE / 95));
+  return 7 + 95 * (1 - Math.exp(-Math.pow(size, 0.75) * BALANCE.VISUAL_SCALE / 95));
 }
 
 /** Half-width and half-height of the drawn sprite, at `bodyRadius` scale. */
@@ -1592,11 +1573,14 @@ const SPRITE_HALF_W = 1.25;
  * 150 a fish showing "141" was , the bigger you got, the more the game
  * disagreed with its own HUD.
  *
- * Equal displayed sizes mean neither can eat the other, so two evenly matched
- * fish still bump apart rather than trading a coin flip on floating point noise.
+ * Equal NPCs can be eaten because the local player's collision owns that
+ * decision. Equal human players remain a tie so two clients cannot both report
+ * that they ate each other.
  */
-function canEat(predator: Fish, prey: Fish): boolean {
-  return Math.floor(predator.size) > Math.floor(prey.size);
+function canEat(predator: Fish, prey: Fish, allowDisplayedTie = false): boolean {
+  const predatorLabel = Math.floor(predator.size);
+  const preyLabel = Math.floor(prey.size);
+  return allowDisplayedTie ? predatorLabel >= preyLabel : predatorLabel > preyLabel;
 }
 
 /** Keeps the camera inside the world, or centres it when the view is bigger. */

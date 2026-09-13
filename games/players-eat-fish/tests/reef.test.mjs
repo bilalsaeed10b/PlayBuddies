@@ -11,17 +11,32 @@ function reef() {
   Object.assign(b, { locals: new Map(), remotes: new Map(), enemies: new Map(), nextEnemyId: 0, spawnCursor: 0, config: {}, boss: null });
   return b;
 }
-test('the aquarium remains sparse and new fish only travel horizontally', () => {
+test('the aquarium stays readable and new fish only travel horizontally', () => {
   const b = reef();
   b.locals.set('a', b.makeFish('a', 'player', 500, 0));
   for (let i = 0; i < 2000; i++) b.spawnEnemy();
   assert.ok([...b.enemies.values()].filter(f => f.asset === 29).length <= 2);
   assert.ok(new Set([...b.enemies.values()].map(f => f.asset)).size > 4);
-  assert.ok(BALANCE.ENEMY_MAX <= 18);
-  assert.ok(BALANCE.ENEMY_BASE + BALANCE.ENEMY_PER_PLAYER <= 12);
+  assert.ok(BALANCE.ENEMY_MAX <= 24);
+  assert.ok(BALANCE.ENEMY_BASE + BALANCE.ENEMY_PER_PLAYER <= 14);
   assert.ok([...b.enemies.values()].every(f => f.vy === 0 && f.shoal === undefined));
   assert.ok([...b.enemies.values()].filter(f => f.size < 120).every(f => f.asset < 28));
-  assert.ok(bodyRadius(900) < 106);
+  assert.ok(bodyRadius(10) < 14);
+  assert.ok(bodyRadius(900) < 92);
+});
+test('spawn mix is 40% edible and 60% larger for its nearby player', () => {
+  const b = reef();
+  b.locals.set('a', b.makeFish('a', 'player', 50, 0));
+  let state = 0x5eed1234;
+  const originalRandom = Math.random;
+  Math.random = () => ((state = (state * 1664525 + 1013904223) >>> 0) / 0x100000000);
+  try {
+    for (let i = 0; i < 1200; i++) b.spawnEnemy();
+  } finally {
+    Math.random = originalRandom;
+  }
+  const edible = [...b.enemies.values()].filter(f => Math.floor(f.size) <= 50).length;
+  assert.ok(edible / b.enemies.size > 0.37 && edible / b.enemies.size < 0.43);
 });
 test('spawn anchors alternate between large and small living players', () => {
   const b = reef();
@@ -51,7 +66,31 @@ test('friendly fish prevent player kills; default permits eating smaller players
     b.checkCollisions(); assert.equal(killed,!friendlyFish);
   }
   assert.ok(BALANCE.GROWTH <= 0.035);
-  assert.ok(BALANCE.SCORE_RATE <= 0.25);
+  assert.equal(BALANCE.SCORE_RATE, 0.8);
+});
+test('a player can eat an NPC with the same displayed size', () => {
+  const b = reef();
+  let eaten = 0;
+  b.config = {
+    localIds: ['a'],
+    friendlyFish: false,
+    onEnemyEaten: () => eaten++,
+    onEat: () => {},
+    onDeath: () => {},
+  };
+  b.simulateAI = false;
+  b.grow = () => {};
+  b.burst = () => {};
+  const player = b.makeFish('a', 'player', 10.1, 0);
+  player.bornAt = -100;
+  const enemy = b.makeFish('1', 'enemy', 10.9, 0);
+  player.x = enemy.x = 100;
+  player.y = enemy.y = 100;
+  b.locals.set('a', player);
+  b.enemies.set(1, enemy);
+  b.checkCollisions();
+  assert.equal(eaten, 1);
+  assert.equal(b.enemies.size, 0);
 });
 test('a movement control brings a defeated local fish back into the water', () => {
   const b = reef();
