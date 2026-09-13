@@ -55,6 +55,7 @@ interface Props {
   localFish: Record<string, number>;
   localNames: Record<string, string>;
   settings: GameSettings;
+  friendlyFish?: boolean;
   onOpenSettings: () => void;
   onExit: () => void;
   /** Called with the final score whenever a local player is eaten. */
@@ -79,6 +80,7 @@ export default function GameView({
   localFish,
   localNames,
   settings,
+  friendlyFish = false,
   onOpenSettings,
   onExit,
   onRunEnded,
@@ -132,6 +134,7 @@ export default function GameView({
       localFish,
       localNames,
       settings,
+      friendlyFish,
       simulateAI: !online || hostId === uid,
       onProgress: (p) => {
         setProgress(p);

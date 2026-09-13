@@ -66,7 +66,7 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [uid, setUid] = useState<string | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
-  const [lobby, setLobby] = useState<{ hostId: string; players: Record<string, LobbyPerson & { isReady?: boolean }>; matchStarted?: boolean } | null>(null);
+  const [lobby, setLobby] = useState<{ hostId: string; players: Record<string, LobbyPerson & { isReady?: boolean }>; friendlyFish?: boolean; matchStarted?: boolean } | null>(null);
   const [lobbyError, setLobbyError] = useState<string | null>(null);
 
   const [seatCount, setSeatCount] = useState(1);
@@ -163,7 +163,7 @@ export default function App() {
             setLobbyError('That lobby is gone.');
             return;
           }
-          const data = snap.data() as { hostId: string; players: Record<string, LobbyPerson>; matchStarted?: boolean };
+          const data = snap.data() as { hostId: string; players: Record<string, LobbyPerson>; friendlyFish?: boolean; matchStarted?: boolean };
           if (!data.players?.[uid]) {
             setLobbyError("You're not in this lobby.");
             return;
@@ -289,6 +289,7 @@ export default function App() {
           localIds={localIds}
           localFish={localFish}
           localNames={localNames}
+          friendlyFish={Boolean(netPlay) && lobby?.friendlyFish === true}
           settings={settings}
           onOpenSettings={() => setShowSettings(true)}
           onExit={leaveWater}
@@ -426,6 +427,12 @@ export default function App() {
           coins={coins}
           isHost={isHost}
           onPick={pickFishOnline}
+          friendlyFish={lobby?.friendlyFish === true}
+          onFriendlyFish={async (value) => {
+            if (!isHost || lobby?.matchStarted) return;
+            const { db, doc, updateDoc } = await import('./firebase');
+            await updateDoc(doc(db, 'lobbies', handoff.room), { friendlyFish: value });
+          }}
           onStart={startMatch}
           onShop={() => setView('shop')}
           onSettings={() => setShowSettings(true)}
@@ -619,6 +626,8 @@ function RoomScreen({
   isHost,
   onPick,
   onStart,
+  friendlyFish,
+  onFriendlyFish,
   onShop,
   onSettings,
   onFullscreen,
@@ -635,6 +644,8 @@ function RoomScreen({
   isHost: boolean;
   onPick: (index: number) => void;
   onStart: () => void;
+  friendlyFish: boolean;
+  onFriendlyFish: (value: boolean) => Promise<void>;
   onShop: () => void;
   onSettings: () => void;
   onFullscreen: () => void;
@@ -748,6 +759,11 @@ function RoomScreen({
 
           {/* Action Button */}
           <div className="glass-dark shrink-0 rounded-2xl md:rounded-[2rem] landscape:rounded-[2rem] p-2.5 sm:p-4">
+            <label className="mb-3 flex items-center gap-2 text-sm text-white">
+              <input type="checkbox" checked={friendlyFish} disabled={!isHost}
+                onChange={(e) => { void onFriendlyFish(e.target.checked).catch(console.error); }} />
+              <span>Friendly Fish <small className="block opacity-70">{friendlyFish ? 'Players cannot eat each other' : 'Players can eat smaller players'}</small></span>
+            </label>
             {isHost ? (
               <>
                 <button
