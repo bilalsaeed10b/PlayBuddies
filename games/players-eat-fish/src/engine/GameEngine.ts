@@ -47,9 +47,9 @@ export const BALANCE = {
    * Lowered from 0.55 so that curve stretches out much further -- size climbs
    * noticeably slower across a whole run, not just at the high end.
    */
-  GROWTH: 0.07,
+  GROWTH: 0.035,
   /** Score climbs a little slower than size does -- its own dial, not tied to GROWTH. */
-  SCORE_RATE: 0.8,
+  SCORE_RATE: 0.25,
   SPAWN_PROTECTION: 2.5,
 
   // AI population
@@ -833,11 +833,12 @@ export class GameEngine {
 
     const id = this.nextEnemyId++;
     const sharks = [...this.enemies.values()].filter((f) => f.asset === 29 && !f.dead).length;
-    const shark = roll >= sharkCut && sharks < 2 && ref >= 35;
-    const predators = [3, 6, 22, 28];
-    const asset = shark ? 29 : roll >= peerCut
-      ? predators[Math.floor(Math.random() * predators.length)]
-      : Math.min(27, assetForSize(size));
+    // Art follows the fish's real size. The old random predator list included
+    // Swordfish, so an 11-point snack could look like an endgame threat.
+    // Swordfish, tiger sharks, and the boss are now naturally reserved for
+    // the late size bands in the catalogue.
+    const shark = roll >= sharkCut && sharks < 2 && ref >= 100;
+    const asset = shark ? 29 : Math.min(28, assetForSize(size));
     const fish = this.makeFish(String(id), 'enemy', size, asset);
     fish.pace *= 1 + grown * 0.2;
 
@@ -1355,7 +1356,7 @@ export class GameEngine {
     //
     // BASE_URL rather than a bare filename so it resolves under any deploy
     // prefix, the same way fishSrc() does.
-    bg.src = `${import.meta.env.BASE_URL}bg.webp`;
+    bg.src = `${import.meta.env.BASE_URL}bg-deep.webp`;
     bg.onload = () => {
       this.backdrop = bg;
       done();

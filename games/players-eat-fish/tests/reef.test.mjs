@@ -20,6 +20,7 @@ test('the aquarium remains sparse and new fish only travel horizontally', () => 
   assert.ok(BALANCE.ENEMY_MAX <= 18);
   assert.ok(BALANCE.ENEMY_BASE + BALANCE.ENEMY_PER_PLAYER <= 12);
   assert.ok([...b.enemies.values()].every(f => f.vy === 0 && f.shoal === undefined));
+  assert.ok([...b.enemies.values()].filter(f => f.size < 120).every(f => f.asset < 28));
   assert.ok(bodyRadius(900) < 106);
 });
 test('spawn anchors alternate between large and small living players', () => {
@@ -49,7 +50,8 @@ test('friendly fish prevent player kills; default permits eating smaller players
     let killed = false; b.kill = () => { killed = true; };
     b.checkCollisions(); assert.equal(killed,!friendlyFish);
   }
-  assert.ok(BALANCE.GROWTH < 0.1);
+  assert.ok(BALANCE.GROWTH <= 0.035);
+  assert.ok(BALANCE.SCORE_RATE <= 0.25);
 });
 test('a movement control brings a defeated local fish back into the water', () => {
   const b = reef();
