@@ -293,9 +293,13 @@ function LobbyContent() {
 
           const data = snap.data();
           const existing = data.players || {};
-          const game = getGame(data.gameId);
-          const max = game?.maxPlayers ?? 8;
-          if (!existing[user.uid] && Object.keys(existing).length >= max) return "full" as const;
+          // Firestore is deliberately the durable membership record, while
+          // RTDB says who is actually connected. A disconnected old player
+          // can briefly still occupy a Firestore slot while the host prunes
+          // it. Do not refuse a real invited guest just because those ghosts
+          // fill a game's smaller visual capacity; the rules still enforce
+          // the platform-wide hard cap of eight.
+          if (!existing[user.uid] && Object.keys(existing).length >= 8) return "full" as const;
           if (existing[user.uid]) return "joined" as const;
 
           tx.update(roomRef, {
