@@ -98,8 +98,8 @@ export const TOWERS: Record<TowerId, TowerMeta> = {
     chain: 0,
     chainRange: 0,
     shotSpeed: 720,
-    hue: '#a3702f',
-    trim: '#f0c079',
+    hue: '#FFA500',
+    trim: '#FFD700',
     levels: [
       { damage: 9, range: 170, cooldown: 0.55, cost: 80 },
       { damage: 15, range: 190, cooldown: 0.46, cost: 90 },
@@ -118,8 +118,8 @@ export const TOWERS: Record<TowerId, TowerMeta> = {
     chain: 0,
     chainRange: 0,
     shotSpeed: 430,
-    hue: '#5b6470',
-    trim: '#aebbc9',
+    hue: '#696969',
+    trim: '#A9A9A9',
     levels: [
       { damage: 26, range: 195, cooldown: 1.55, cost: 150 },
       { damage: 42, range: 215, cooldown: 1.42, cost: 160 },
@@ -138,8 +138,8 @@ export const TOWERS: Record<TowerId, TowerMeta> = {
     chain: 0,
     chainRange: 0,
     shotSpeed: 560,
-    hue: '#2e6d86',
-    trim: '#a5e8ff',
+    hue: '#00BFFF',
+    trim: '#E0FFFF',
     levels: [
       { damage: 4, range: 165, cooldown: 1.1, cost: 120 },
       { damage: 7, range: 185, cooldown: 0.95, cost: 110 },
@@ -158,8 +158,8 @@ export const TOWERS: Record<TowerId, TowerMeta> = {
     chain: 3,
     chainRange: 118,
     shotSpeed: Infinity,
-    hue: '#4c3a86',
-    trim: '#c4b5fd',
+    hue: '#8A2BE2',
+    trim: '#DDA0DD',
     levels: [
       { damage: 13, range: 138, cooldown: 0.9, cost: 175 },
       { damage: 21, range: 152, cooldown: 0.8, cost: 170 },
@@ -178,8 +178,8 @@ export const TOWERS: Record<TowerId, TowerMeta> = {
     chain: 0,
     chainRange: 0,
     shotSpeed: 1150,
-    hue: '#6b4a2f',
-    trim: '#e0b184',
+    hue: '#8B4513',
+    trim: '#D2B48C',
     levels: [
       { damage: 62, range: 320, cooldown: 2.1, cost: 210 },
       { damage: 96, range: 360, cooldown: 1.95, cost: 200 },
@@ -234,27 +234,27 @@ export interface EnemyMeta {
 export const ENEMIES: Record<EnemyId, EnemyMeta> = {
   runner: {
     id: 'runner', name: 'Runner', hp: 27, speed: 118, armour: 0, flying: false,
-    bounty: 6, size: 12, body: '#d97757', trim: '#ffd4b8',
+    bounty: 6, size: 12, body: '#FF4500', trim: '#FF8C00',
   },
   grunt: {
     id: 'grunt', name: 'Grunt', hp: 60, speed: 66, armour: 1, flying: false,
-    bounty: 9, size: 15, body: '#8a9a5b', trim: '#dbe8b0',
+    bounty: 9, size: 15, body: '#32CD32', trim: '#7CFC00',
   },
   brute: {
     id: 'brute', name: 'Brute', hp: 238, speed: 40, armour: 8, flying: false,
-    bounty: 26, size: 22, body: '#7c4a3a', trim: '#e8a87c',
+    bounty: 26, size: 22, body: '#8B0000', trim: '#DC143C',
   },
   flyer: {
     id: 'flyer', name: 'Wing', hp: 48, speed: 92, armour: 0, flying: true,
-    bounty: 12, size: 13, body: '#6a5acd', trim: '#c9c2ff',
+    bounty: 12, size: 13, body: '#9400D3', trim: '#BA55D3',
   },
   warden: {
     id: 'warden', name: 'Warden', hp: 120, speed: 88, armour: 5, flying: false,
-    bounty: 30, size: 17, body: '#4a5d7e', trim: '#9fc4f0',
+    bounty: 30, size: 17, body: '#1E90FF', trim: '#87CEFA',
   },
   boss: {
     id: 'boss', name: 'Siege Beast', hp: 940, speed: 34, armour: 14, flying: false,
-    bounty: 220, size: 34, body: '#5c2f3f', trim: '#ff9bb5',
+    bounty: 220, size: 34, body: '#C71585', trim: '#FF69B4',
   },
 };
 
