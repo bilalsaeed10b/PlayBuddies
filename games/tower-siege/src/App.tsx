@@ -9,16 +9,18 @@ import {
   LogOut,
   Maximize2,
   Play,
-  ScrollText,
+  ShoppingBag,
   Settings as SettingsIcon,
   Shield,
   Swords,
+  Users,
+  User,
 } from 'lucide-react';
 import { askHostToEndGame, askToLeaveLobby, toggleFullscreen } from './fullscreen';
 import { GameWallet, reportResult } from './platform/wallet';
 import { TIERS } from './engine/ai';
-import { ENEMIES, SEATS, TOWERS, TOWER_ORDER, DEFAULT_RULES, PLAYER_COUNTS, packRules, unpackRules } from './game/rules';
-import type { MatchRules, Mode, PlayerCount } from './game/rules';
+import { SEATS, DEFAULT_RULES, packRules, unpackRules } from './game/rules';
+import type { MatchRules, PlayerCount } from './game/rules';
 import { audioService } from './services/audio';
 import MatchView from './screens/MatchView';
 import type { MatchConfig, Seat } from './screens/MatchView';
@@ -69,7 +71,7 @@ export default function App() {
 
   const [view, setView] = useState<View>(online ? 'room' : 'menu');
   const [showSettings, setShowSettings] = useState(false);
-  const [showRules, setShowRules] = useState(false);
+  const [showShop, setShowShop] = useState(false);
   const [uid, setUid] = useState<string | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
   const [lobby, setLobby] = useState<{
@@ -178,31 +180,26 @@ export default function App() {
   const isHost = Boolean(uid && lobby && lobby.hostId === uid);
 
   /**
-   * The host's chosen player count follows the room, not the other way round.
+   * Match size follows the live room so an old local setting cannot create
+   * ghost seats. Tower Siege supports a duel or a four-player 2v2.
    *
-   * `rules.players` used to be whatever this device remembered from its last
-   * siege -- often two -- so a host who opened a fresh room with three
-   * friends found the keeps already decided one of them would be watching,
-   * with nothing on screen to say so before Start. This raises it to the
-   * smallest count the room actually fits the moment somebody new joins, and
-   * never on its own lowers a count the host (or an earlier run of this same
-   * effect) already set -- so choosing fewer keeps than the room on purpose,
-   * bots holding the rest, still works exactly as before for whoever wants it.
+   * A previous room choice must never turn two live players into four stale
+   * seats. The current roster is the source of truth before the host starts.
    */
   useEffect(() => {
     if (!online || !isHost || !lobby) return;
     const roomSize = Object.keys(lobby.players ?? {}).length;
-    const fits = PLAYER_COUNTS.find((n) => n >= roomSize) ?? PLAYER_COUNTS[PLAYER_COUNTS.length - 1];
-    if (fits > rules.players) setRules((r) => ({ ...r, players: fits }));
-  }, [online, isHost, lobby, rules.players]);
+    const fits: PlayerCount = roomSize > 2 ? 4 : 2;
+    if (fits !== rules.players || (fits === 4 && rules.mode === 'alliance')) {
+      setRules((r) => ({ ...r, players: fits, mode: fits === 4 ? 'siege' : r.mode, sends: false }));
+    }
+  }, [online, isHost, lobby, rules.players, rules.mode]);
 
   /**
    * Everyone in the match, sorted by uid.
    *
    * Sorted rather than in arrival order so every client computes the identical
-   * seating from data it already has , otherwise two players would disagree
-   * about which keep is which, and a spectator arrow would land on the wrong
-   * one.
+   * seating from data it already has; ownership and 2v2 teams depend on this.
    */
   const people = useMemo(() => {
     return Object.values(lobby?.players ?? {})
@@ -218,6 +215,15 @@ export default function App() {
     if (typeof bits !== 'number') return;
     setRules(unpackRules(bits));
   }, [online, isHost, lobby?.matchRules]);
+
+  // Publish mode choices while everyone is still in the room. Guests must
+  // know the seat count before MatchView freezes its roster at the start.
+  useEffect(() => {
+    if (!online || !isHost) return;
+    void import('./firebase').then(({ db, doc, updateDoc }) =>
+      updateDoc(doc(db, 'lobbies', handoff.room), { matchRules: packRules(rules) }),
+    ).catch((error) => console.error('Could not share the Tower Siege mode', error));
+  }, [online, isHost, handoff.room, rules]);
 
   useEffect(() => {
     if (!online || offlineMatch) return;
@@ -340,10 +346,13 @@ export default function App() {
   // Frozen to match identity, not recomputed live: MatchView reads config
   // fields like seat team every frame, and a live roster reorder mid-round
   // (reconnect, late write) would otherwise flip them under a running game.
+  const pregameConfigKey = view === 'game'
+    ? 'locked'
+    : `${packRules(rules)}:${people.map((person) => person.uid).join(',')}`;
   const matchConfig = useMemo(
     () => (offlineMatch || !online ? offlineConfig() : onlineConfig()),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [session.seed, offlineMatch, online],
+    [session.seed, offlineMatch, online, pregameConfigKey],
   );
 
   // -- render -----------------------------------------------------------------
@@ -356,12 +365,11 @@ export default function App() {
           aiLevel={aiLevel}
           onAiLevel={setAiLevel}
           onSolo={() => openOffline(1)}
-          onPractice={() => openOffline(2)}
+          onMultiplayer={() => (online ? setView('room') : askToLeaveLobby())}
           onSettings={() => setShowSettings(true)}
-          onRules={() => setShowRules(true)}
+          onShop={() => setShowShop(true)}
           onFullscreen={() => toggleFullscreen(document.documentElement, !document.fullscreenElement)}
           onExit={askToLeaveLobby}
-          rules={rules}
           onBack={view === 'offline_menu' ? () => setView('room') : undefined}
         />
       )}
@@ -376,7 +384,7 @@ export default function App() {
           isHost={isHost}
           rules={rules}
           coins={coins}
-          onRules={() => setShowRules(true)}
+          onMode={(mode, players) => setRules((r) => ({ ...r, mode, players, sends: false }))}
           onSettings={() => setShowSettings(true)}
           onStart={startMatch}
           onFullscreen={() => toggleFullscreen(document.documentElement, !document.fullscreenElement)}
@@ -406,300 +414,121 @@ export default function App() {
         <SettingsPanel settings={settings} onChange={setSettings} onClose={() => setShowSettings(false)} />
       )}
 
-      {showRules && (
-        <RulesPanel
-          rules={rules}
-          editable={!online || isHost}
-          onChange={setRules}
-          onClose={() => setShowRules(false)}
-        />
-      )}
+      {showShop && <ShopPanel coins={coins} onClose={() => setShowShop(false)} />}
     </div>
   );
 }
 
 // -- pieces -------------------------------------------------------------------
 
-function rulesSummary(r: MatchRules): string {
-  return [
-    r.mode === 'siege' ? 'Siege , last keep standing' : 'Alliance , shared lives',
-    `${r.players} keep${r.players === 1 ? '' : 's'}`,
-    `${r.waves} waves`,
-    r.mode === 'siege' ? (r.sends ? 'sending on' : 'no sending') : null,
-  ]
-    .filter(Boolean)
-    .join(' · ');
-}
-
 function Menu({
   coins,
   aiLevel,
   onAiLevel,
   onSolo,
-  onPractice,
+  onMultiplayer,
   onSettings,
-  onRules,
+  onShop,
   onFullscreen,
   onExit,
-  rules,
   onBack,
 }: {
   coins: number;
   aiLevel: number;
   onAiLevel: (n: number) => void;
   onSolo: () => void;
-  onPractice: () => void;
+  onMultiplayer: () => void;
   onSettings: () => void;
-  onRules: () => void;
+  onShop: () => void;
   onFullscreen: () => void;
   onExit: () => void;
-  rules: MatchRules;
   onBack?: () => void;
 }) {
   return (
-    <div className="flex h-full flex-col gap-4 overflow-y-auto overscroll-contain p-6">
-      {/* A real row, not an overlay -- so a long title on a short screen pushes
-          the content down instead of running under these buttons. */}
+    <div className="menu-sky flex h-full flex-col overflow-y-auto overscroll-contain p-3 sm:p-6">
       <div className="flex shrink-0 items-start justify-between gap-2">
-        <div>
-          {onBack && (
-            <button onClick={onBack} aria-label="Back" className="panel rounded-2xl p-3">
-              <ArrowLeft className="h-5 w-5" />
-            </button>
-          )}
-        </div>
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          <div className="panel flex items-center gap-2 rounded-2xl px-3 py-2.5 font-bold text-amber-300">
-            <Coins className="h-4 w-4" /> {coins}
-          </div>
-          <button onClick={onRules} className="panel flex items-center gap-2 rounded-2xl px-3 py-2.5 font-bold text-white/70">
-            <ScrollText className="h-4 w-4" /> Rules
-          </button>
-          <button onClick={onFullscreen} aria-label="Full screen" className="panel rounded-2xl p-2.5">
-            <Maximize2 className="h-5 w-5" />
-          </button>
-          <button onClick={onSettings} aria-label="Settings" className="panel rounded-2xl p-2.5">
-            <SettingsIcon className="h-5 w-5" />
-          </button>
-          <button onClick={onExit} aria-label="Leave" className="panel rounded-2xl p-2.5">
-            <LogOut className="h-5 w-5" />
-          </button>
+        <div>{onBack && <button onClick={onBack} aria-label="Back" className="panel rounded-2xl p-3"><ArrowLeft className="h-5 w-5" /></button>}</div>
+        <div className="flex items-center gap-2">
+          <div className="panel flex items-center gap-2 rounded-2xl px-3 py-2 font-black text-amber-300"><Coins className="h-4 w-4" /> {coins}</div>
+          <button onClick={onFullscreen} aria-label="Full screen" className="panel rounded-2xl p-2.5"><Maximize2 className="h-5 w-5" /></button>
+          <button onClick={onExit} aria-label="Leave" className="panel rounded-2xl p-2.5"><LogOut className="h-5 w-5" /></button>
         </div>
       </div>
 
-      <div className="flex flex-1 flex-col items-center justify-center gap-6">
-      <div className="text-center">
-        <div className="mb-4 inline-block rounded-3xl bg-amber-400/20 p-4">
-          <Castle className="h-12 w-12 text-amber-300" />
+      <div className="mx-auto flex w-full max-w-4xl flex-1 flex-col items-center justify-center gap-4 py-4 short:py-1">
+        <div className="text-center">
+          <div className="mx-auto mb-2 grid h-16 w-16 place-items-center rounded-[1.4rem] border-2 border-amber-200/60 bg-amber-400 text-slate-900 shadow-[0_10px_35px_rgba(251,191,36,.35)] short:h-11 short:w-11"><Castle className="h-9 w-9 short:h-6 short:w-6" /></div>
+          <h1 className="text-4xl font-black leading-none tracking-tighter drop-shadow-lg sm:text-6xl short:text-3xl">TOWER <span className="text-amber-300">SIEGE</span></h1>
+          <p className="mt-2 text-[11px] font-black uppercase tracking-[0.28em] text-cyan-100/75">One battlefield · every machine matters</p>
         </div>
-        <h1 className="text-4xl font-black leading-none tracking-tighter drop-shadow-lg sm:text-6xl">
-          TOWER <span className="text-amber-300">SIEGE</span>
-        </h1>
-        <p className="mt-2 text-[11px] font-bold uppercase tracking-[0.3em] text-white/70">
-          Same waves · Separate keeps
-        </p>
-      </div>
 
-      <div className="panel w-full max-w-md space-y-5 rounded-[2rem] p-6">
-        <button
-          onClick={onSolo}
-          className="flex w-full items-center justify-center gap-2 rounded-2xl bg-amber-400 py-4 text-lg font-black text-slate-900 transition-transform active:scale-95"
-        >
-          <Play className="h-5 w-5 fill-current" /> Hold the keep alone
-        </button>
+        <div className="grid w-full grid-cols-2 gap-3 sm:grid-cols-4">
+          <MenuCard icon={<User />} title="Single Player" hint="Defend the keep alone" tone="amber" onClick={onSolo} />
+          <MenuCard icon={<Users />} title="Multiplayer" hint="Co-op, 1v1 or 2v2" tone="cyan" onClick={onMultiplayer} />
+          <MenuCard icon={<ShoppingBag />} title="Shop" hint="Battlefield collection" tone="violet" onClick={onShop} />
+          <MenuCard icon={<SettingsIcon />} title="Settings" hint="Sound and display" tone="emerald" onClick={onSettings} />
+        </div>
 
-        <button
-          onClick={onPractice}
-          className="w-full rounded-2xl border border-white/25 bg-white/10 py-4 font-black transition-colors hover:bg-white/20"
-        >
-          Race a bot
-          <span className="mt-1 block text-[11px] font-bold normal-case tracking-normal text-white/50">
-            Same waves hit both keeps. Whoever holds out longer takes it.
-          </span>
-        </button>
-
-        <div className="space-y-2">
-          <p className="text-[11px] font-black uppercase tracking-[0.2em] text-white/50">Bot rank</p>
-          <div className="flex gap-1 rounded-xl bg-black/30 p-1">
-            {TIERS.map((tier, i) => (
-              <button
-                key={tier.label}
-                onClick={() => onAiLevel(i)}
-                className={`flex-1 rounded-lg py-2 text-xs font-black uppercase tracking-wider transition-colors ${
-                  aiLevel === i ? 'bg-amber-400 text-slate-900' : 'text-white/60'
-                }`}
-              >
-                {tier.label}
-              </button>
-            ))}
+        <div className="panel w-full max-w-xl rounded-2xl p-3">
+          <div className="flex items-center justify-between gap-3">
+            <div><p className="text-xs font-black uppercase tracking-wider text-white/75">Commander AI</p><p className="text-[10px] text-white/45">Used for empty seats and solo practice.</p></div>
+            <div className="flex gap-1 rounded-xl bg-black/25 p-1">
+              {TIERS.map((tier, i) => <button key={tier.label} onClick={() => onAiLevel(i)} className={`rounded-lg px-3 py-2 text-[10px] font-black uppercase ${aiLevel === i ? 'bg-amber-400 text-slate-950' : 'text-white/55'}`}>{tier.label}</button>)}
+            </div>
           </div>
         </div>
-
-        <div className="rounded-2xl bg-black/25 p-3 text-center text-xs leading-relaxed text-white/50">
-          <p className="mb-1 font-black uppercase tracking-[0.15em] text-white/40">How it works</p>
-          <p>Pick a tower, tap a plot twice to build it. Tap a standing tower to upgrade or sell it.</p>
-          <p className="mt-1">Everyone faces the identical horde. Leak twenty and your keep falls.</p>
-          <p className="mt-2 text-white/40">
-            Playing online? Start a lobby on PlayBuddies and pick this game , up to four keeps.
-          </p>
-        </div>
-      </div>
-
-      <p className="text-center text-[11px] font-semibold text-white/35">{rulesSummary(rules)}</p>
       </div>
     </div>
   );
 }
 
+function MenuCard({ icon, title, hint, tone, onClick }: { icon: React.ReactNode; title: string; hint: string; tone: 'amber' | 'cyan' | 'violet' | 'emerald'; onClick: () => void }) {
+  const colors = { amber: 'from-amber-300 to-orange-500 text-slate-950', cyan: 'from-cyan-300 to-blue-500 text-slate-950', violet: 'from-violet-400 to-fuchsia-500 text-white', emerald: 'from-emerald-300 to-teal-500 text-slate-950' };
+  return <button onClick={onClick} className={`group min-h-32 rounded-[1.6rem] bg-gradient-to-br ${colors[tone]} p-[2px] text-left shadow-xl transition-transform hover:-translate-y-1 active:scale-95 short:min-h-20`}><span className="flex h-full flex-col justify-between rounded-[1.5rem] bg-slate-950/82 p-4 text-white short:p-2"><span className="grid h-10 w-10 place-items-center rounded-xl bg-white/12 [&>svg]:h-5 [&>svg]:w-5">{icon}</span><span><strong className="block text-base font-black short:text-sm">{title}</strong><small className="text-[10px] font-bold text-white/50 short:hidden">{hint}</small></span></span></button>;
+}
+
 function RoomScreen({
-  ready,
-  error,
-  uid,
-  people,
-  hostId,
-  isHost,
-  rules,
-  coins,
-  onRules,
-  onSettings,
-  onStart,
-  onFullscreen,
-  onExit,
-  onPlayOffline,
+  ready, error, uid, people, hostId, isHost, rules, coins, onMode, onSettings, onStart, onFullscreen, onExit, onPlayOffline,
 }: {
-  ready: boolean;
-  error: string | null;
-  uid: string | null;
-  people: { uid: string; displayName: string }[];
-  hostId: string | null;
-  isHost: boolean;
-  rules: MatchRules;
-  coins: number;
-  onRules: () => void;
-  onSettings: () => void;
-  onStart: () => void;
-  onFullscreen: () => void;
-  onExit: () => void;
-  onPlayOffline: () => void;
+  ready: boolean; error: string | null; uid: string | null;
+  people: { uid: string; displayName: string }[]; hostId: string | null; isHost: boolean;
+  rules: MatchRules; coins: number;
+  onMode: (mode: MatchRules['mode'], players: PlayerCount) => void;
+  onSettings: () => void; onStart: () => void; onFullscreen: () => void; onExit: () => void; onPlayOffline: () => void;
 }) {
-  if (error) {
-    return (
-      <div className="flex h-full flex-col items-center justify-center gap-4 p-6 text-center">
-        <p className="text-lg font-black">{error}</p>
-        <button onClick={onPlayOffline} className="rounded-2xl bg-amber-400 px-5 py-3 font-black text-slate-900">
-          Hold a keep on your own
-        </button>
-      </div>
-    );
-  }
-
-  if (!ready) {
-    return (
-      <div className="flex h-full flex-col items-center justify-center gap-3">
-        <Loader2 className="h-10 w-10 animate-spin text-amber-300" />
-        <p className="font-bold text-white/70">Finding the room…</p>
-      </div>
-    );
-  }
-
+  if (error) return <div className="flex h-full flex-col items-center justify-center gap-4 p-6 text-center"><p className="text-lg font-black">{error}</p><button onClick={onPlayOffline} className="rounded-2xl bg-amber-400 px-5 py-3 font-black text-slate-900">Play single player</button></div>;
+  if (!ready) return <div className="flex h-full flex-col items-center justify-center gap-3"><Loader2 className="h-10 w-10 animate-spin text-amber-300" /><p className="font-bold text-white/70">Finding the room…</p></div>;
+  const active = (mode: MatchRules['mode'], players: number) => rules.mode === mode && rules.players === players;
+  const modeCards = [
+    { mode: 'alliance' as const, players: 2 as PlayerCount, icon: <Shield />, name: 'Shared Keep', hint: 'Two defenders, one base. Private money from your own towers.' },
+    { mode: 'siege' as const, players: 2 as PlayerCount, icon: <Swords />, name: 'Head-to-Head', hint: '1v1 on one battlefield. Most tower kills wins.' },
+    { mode: 'siege' as const, players: 4 as PlayerCount, icon: <Users />, name: 'Team Siege', hint: 'Four players, 2v2. Alternating seats form the teams.' },
+  ];
   return (
-    <div className="mx-auto flex h-full w-full max-w-3xl flex-col overflow-y-auto overscroll-contain gap-3 p-4 sm:gap-4 sm:p-6">
+    <div className="menu-sky mx-auto flex h-full w-full flex-col overflow-y-auto overscroll-contain p-3 sm:p-6">
       <div className="flex shrink-0 items-center justify-between gap-2">
-        <h2 className="min-w-0 truncate text-lg font-black tracking-tight sm:text-2xl">
-          Tower Siege
-        </h2>
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          <div className="panel flex items-center gap-2 rounded-2xl px-3 py-2 font-bold text-amber-300">
-            <Coins className="h-4 w-4" /> {coins}
-          </div>
-          <button onClick={onRules} className="panel flex items-center gap-2 rounded-2xl px-3 py-2 font-bold text-white/70">
-            <ScrollText className="h-4 w-4" /> Rules
-          </button>
-          <button onClick={onFullscreen} aria-label="Full screen" className="panel shrink-0 rounded-2xl p-2.5">
-            <Maximize2 className="h-5 w-5" />
-          </button>
-          <button onClick={onSettings} aria-label="Settings" className="panel shrink-0 rounded-2xl p-2.5">
-            <SettingsIcon className="h-5 w-5" />
-          </button>
-          <button onClick={onExit} aria-label="Leave" className="panel shrink-0 rounded-2xl p-2.5">
-            <LogOut className="h-5 w-5" />
-          </button>
-        </div>
+        <div><h2 className="text-xl font-black sm:text-3xl">Choose the battle</h2><p className="text-[10px] font-black uppercase tracking-[.2em] text-cyan-100/55">One shared battlefield</p></div>
+        <div className="flex items-center gap-2"><div className="panel flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-black text-amber-300"><Coins className="h-4 w-4" />{coins}</div><button onClick={onFullscreen} className="panel rounded-xl p-2.5"><Maximize2 className="h-5 w-5" /></button><button onClick={onSettings} className="panel rounded-xl p-2.5"><SettingsIcon className="h-5 w-5" /></button><button onClick={onExit} className="panel rounded-xl p-2.5"><LogOut className="h-5 w-5" /></button></div>
       </div>
-
-      {/* Loud on purpose. "See the rules" further down the roster panel read
-          as maintenance, so nothing said towers are shared targets, that
-          gold only comes from a wave survived, or that sending enemies at a
-          rival keep is even a thing you can do, before a first siege taught
-          it the slow way. */}
-      <button
-        onClick={onRules}
-        className="relative flex shrink-0 items-center gap-3 overflow-hidden rounded-2xl border-2 border-amber-400/60 bg-amber-400/10 px-4 py-3 short:py-1.5 text-left transition-transform active:scale-[0.99]"
-      >
-        <span className="absolute -right-6 -top-6 h-16 w-16 animate-pulse rounded-full bg-amber-400/20" aria-hidden />
-        <ScrollText className="h-6 w-6 short:h-5 short:w-5 shrink-0 text-amber-300" />
-        <div className="min-w-0 flex-1">
-          <p className="text-sm font-black uppercase tracking-wide text-amber-200">
-            {isHost ? 'New here? Read the rules' : 'How towers and sending work'}
-          </p>
-          <p className="text-[11px] font-bold text-amber-300/70 short:hidden">Worth 30 seconds before the gates open.</p>
-        </div>
-        <span className="shrink-0 rounded-xl bg-amber-400 px-3 py-1.5 text-[11px] font-black uppercase tracking-wide text-slate-900 short:hidden">
-          Guide
-        </span>
-      </button>
-
-      <div className="panel min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain rounded-[2rem] p-5">
-        <div>
-          <p className="text-[11px] font-black uppercase tracking-[0.2em] text-white/45">The defenders</p>
-          <div className="mt-2 space-y-1.5">
-            {people.map((p, i) => (
-              <div key={p.uid} className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2">
-                <span className="h-3 w-3 shrink-0 rounded-full" style={{ background: SEATS[i % SEATS.length].main }} />
-                <span className="min-w-0 flex-1 truncate text-sm font-bold">
-                  {p.displayName}
-                  {p.uid === uid ? ' · you' : ''}
-                </span>
-                {p.uid === hostId && <Crown className="h-4 w-4 shrink-0 text-amber-300" />}
-              </div>
-            ))}
-            {Array.from({ length: Math.max(0, rules.players - people.length) }).map((_, i) => (
-              <div
-                key={`bot-${i}`}
-                className="flex items-center gap-2 rounded-xl border border-dashed border-white/12 px-3 py-2 text-white/40"
-              >
-                <span className="h-3 w-3 shrink-0 rounded-full bg-white/20" />
-                <span className="text-sm font-bold">Empty berth , a bot holds it</span>
-              </div>
-            ))}
+      <div className="mx-auto grid min-h-0 w-full max-w-5xl flex-1 gap-3 py-3 lg:grid-cols-[1.4fr_.8fr]">
+        <section className="panel rounded-[2rem] p-3 sm:p-5">
+          <p className="mb-3 text-xs font-black uppercase tracking-[.18em] text-white/50">Game modes</p>
+          <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-1">
+            {modeCards.map((m) => {
+              const wrongRoomSize = m.players === 4 ? people.length < 3 : people.length > 2;
+              return <button key={`${m.mode}-${m.players}`} disabled={!isHost || wrongRoomSize} onClick={() => onMode(m.mode, m.players)} className={`flex items-center gap-3 rounded-2xl border-2 p-4 text-left transition-all disabled:cursor-default disabled:opacity-40 ${active(m.mode, m.players) ? 'border-amber-300 bg-amber-400/18 shadow-[0_0_28px_rgba(251,191,36,.18)]' : 'border-white/12 bg-white/5 hover:bg-white/10'}`}><span className={`grid h-12 w-12 shrink-0 place-items-center rounded-2xl [&>svg]:h-6 [&>svg]:w-6 ${active(m.mode,m.players) ? 'bg-amber-400 text-slate-950' : 'bg-cyan-400/15 text-cyan-200'}`}>{m.icon}</span><span><strong className="block text-base font-black">{m.name}</strong><small className="mt-1 block text-[11px] font-semibold leading-snug text-white/50">{m.hint}{wrongRoomSize ? ' Room size does not fit this mode.' : ''}</small></span></button>;
+            })}
           </div>
-        </div>
-
-        <div className="rounded-2xl bg-black/25 p-3">
-          <p className="text-[11px] font-black uppercase tracking-[0.15em] text-white/40">This match</p>
-          <p className="mt-1 text-xs font-semibold text-white/60">{rulesSummary(rules)}</p>
-          <button onClick={onRules} className="mt-2 text-[11px] font-black text-amber-300">
-            {isHost ? 'Change the rules' : 'See the rules'}
-          </button>
-        </div>
-      </div>
-
-      <div className="shrink-0 space-y-2">
-        {isHost ? (
-          <button
-            onClick={onStart}
-            className="flex w-full items-center justify-center gap-2 rounded-xl bg-amber-400 py-2.5 text-sm font-black text-slate-900"
-          >
-            <Play className="h-4 w-4 fill-current" /> Raise the gates
-          </button>
-        ) : (
-          <p className="rounded-2xl border border-white/10 bg-white/5 py-3 text-center text-sm font-bold text-white/50">
-            Waiting for the host to start.
-          </p>
-        )}
-        <button onClick={onPlayOffline} className="w-full text-[11px] font-bold text-white/35 hover:text-white/60">
-          Or hold a keep on your own
-        </button>
+          {!isHost && <p className="mt-3 text-center text-[11px] font-bold text-amber-200/70">The host is choosing the mode.</p>}
+        </section>
+        <section className="panel flex min-h-0 flex-col rounded-[2rem] p-3 sm:p-5">
+          <p className="text-xs font-black uppercase tracking-[.18em] text-white/50">Players on the field</p>
+          <div className="mt-3 min-h-0 flex-1 space-y-2 overflow-y-auto">
+            {people.slice(0, rules.players).map((person, i) => <div key={person.uid} className="flex items-center gap-3 rounded-2xl border border-white/10 bg-slate-950/35 p-3"><span className="grid h-9 w-9 place-items-center rounded-xl font-black text-slate-950" style={{background: SEATS[i].main}}>{i + 1}</span><span className="min-w-0 flex-1 truncate text-sm font-black">{person.displayName}{person.uid === uid ? ' · you' : ''}</span>{rules.mode === 'siege' && <span className="rounded-lg bg-white/8 px-2 py-1 text-[9px] font-black" style={{color: SEATS[i % 2].light}}>TEAM {(i % 2) + 1}</span>}{person.uid === hostId && <Crown className="h-4 w-4 text-amber-300" />}</div>)}
+            {Array.from({length: Math.max(0, rules.players - people.length)}).map((_, i) => <div key={i} className="rounded-2xl border border-dashed border-white/15 p-3 text-xs font-bold text-white/35">Commander bot fills seat {people.length + i + 1}</div>)}
+          </div>
+          <div className="mt-3 space-y-2">{isHost ? <button onClick={onStart} className="flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-amber-300 to-orange-500 py-3.5 font-black text-slate-950 shadow-lg"><Play className="h-4 w-4 fill-current" />Start {rules.mode === 'alliance' ? 'co-op' : rules.players === 4 ? '2v2' : 'duel'}</button> : <p className="rounded-2xl bg-white/5 py-3 text-center text-sm font-bold text-white/50">Waiting for the host</p>}<button onClick={onPlayOffline} className="w-full py-1 text-[10px] font-bold text-white/40">Single-player menu</button></div>
+        </section>
       </div>
     </div>
   );
@@ -763,149 +592,14 @@ function SettingsPanel({
   );
 }
 
-function RulesPanel({
-  rules,
-  editable,
-  onChange,
-  onClose,
-}: {
-  rules: MatchRules;
-  editable: boolean;
-  onChange: (r: MatchRules) => void;
-  onClose: () => void;
-}) {
-  // Escape closes it too. See @shared/ui/dismiss.
+function ShopPanel({ coins, onClose }: { coins: number; onClose: () => void }) {
   useEscape(true, onClose);
   return (
-    <div {...scrimProps(onClose)} className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm">
-      <div className="panel max-h-[88dvh] w-full max-w-md space-y-6 overflow-y-auto overscroll-contain rounded-[2rem] p-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h3 className="text-xl font-black">Match rules</h3>
-            <p className="text-[11px] font-semibold text-white/45">
-              {editable ? 'Applies to every keep. Takes effect next match.' : 'Set by the host.'}
-            </p>
-          </div>
-          <button onClick={onClose} aria-label="Close" className="rounded-xl p-2 hover:bg-white/10">
-            <ArrowLeft className="h-5 w-5" />
-          </button>
-        </div>
-
-        <div className="space-y-2">
-          <p className="text-sm font-bold">How it is won</p>
-          <div className="grid grid-cols-2 gap-2">
-            {(
-              [
-                { id: 'siege' as Mode, icon: <Swords className="h-4 w-4" />, name: 'Siege', hint: 'Own lives. Last keep standing wins.' },
-                { id: 'alliance' as Mode, icon: <Shield className="h-4 w-4" />, name: 'Alliance', hint: 'One pool of lives. Waves scale with the party.' },
-              ]
-            ).map((m) => (
-              <button
-                key={m.id}
-                disabled={!editable}
-                onClick={() => onChange({ ...rules, mode: m.id })}
-                className={`rounded-xl border p-3 text-left transition-colors disabled:opacity-50 ${
-                  rules.mode === m.id ? 'border-amber-400 bg-amber-400/15' : 'border-white/15 bg-white/5'
-                }`}
-              >
-                <span className="flex items-center gap-1.5 text-sm font-black">
-                  {m.icon} {m.name}
-                </span>
-                <span className="mt-1 block text-[10px] font-semibold leading-snug text-white/50">{m.hint}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="space-y-2">
-          <p className="text-sm font-bold">
-            Keeps
-            <span className="block text-[11px] font-normal text-white/50">
-              Anyone in the room past this watches. Empty berths are held by bots.
-            </span>
-          </p>
-          <div className="grid grid-cols-4 gap-2">
-            {PLAYER_COUNTS.map((n) => (
-              <button
-                key={n}
-                disabled={!editable}
-                onClick={() => onChange({ ...rules, players: n })}
-                className={`rounded-xl border py-2.5 text-sm font-black transition-colors disabled:opacity-50 ${
-                  rules.players === n ? 'border-amber-400 bg-amber-400/20 text-amber-200' : 'border-white/15 bg-white/5 text-white/60'
-                }`}
-              >
-                {n}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="space-y-2">
-          <p className="text-sm font-bold">
-            Waves
-            <span className="block text-[11px] font-normal text-white/50">
-              Hold them all and the keeps still standing share the win.
-            </span>
-          </p>
-          <div className="grid grid-cols-3 gap-2">
-            {[10, 20, 30].map((n) => (
-              <button
-                key={n}
-                disabled={!editable}
-                onClick={() => onChange({ ...rules, waves: n })}
-                className={`rounded-xl border py-2.5 text-sm font-black transition-colors disabled:opacity-50 ${
-                  rules.waves === n ? 'border-amber-400 bg-amber-400/20 text-amber-200' : 'border-white/15 bg-white/5 text-white/60'
-                }`}
-              >
-                {n}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <label className="flex items-center justify-between gap-3">
-          <span className="text-sm font-bold">
-            Sending
-            <span className="block text-[11px] font-normal text-white/50">
-              Siege only. Spend gold to push extra enemies into every other keep&apos;s next wave , it costs more than
-              it pays them, so it is a real bet. Off makes it a pure race.
-            </span>
-          </span>
-          <input
-            type="checkbox"
-            disabled={!editable || rules.mode !== 'siege'}
-            checked={rules.sends && rules.mode === 'siege'}
-            onChange={(e) => onChange({ ...rules, sends: e.target.checked })}
-            className="h-6 w-6 shrink-0 accent-amber-400 disabled:opacity-40"
-          />
-        </label>
-
-        <div className="space-y-2 rounded-2xl bg-black/25 p-3">
-          <p className="text-[11px] font-black uppercase tracking-[0.15em] text-white/40">The towers</p>
-          {TOWER_ORDER.map((id) => (
-            <div key={id} className="flex gap-2">
-              <span className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: TOWERS[id].trim }} />
-              <p className="text-[11px] leading-snug text-white/55">
-                <span className="font-black text-white/80">{TOWERS[id].name}</span> , {TOWERS[id].blurb}
-                {!TOWERS[id].air && <span className="text-rose-300/80"> Cannot hit flyers.</span>}
-              </p>
-            </div>
-          ))}
-        </div>
-
-        <div className="space-y-2 rounded-2xl bg-black/25 p-3">
-          <p className="text-[11px] font-black uppercase tracking-[0.15em] text-white/40">What is coming</p>
-          {(['runner', 'grunt', 'brute', 'flyer', 'warden', 'boss'] as const).map((id) => (
-            <div key={id} className="flex items-center gap-2 text-[11px]">
-              <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: ENEMIES[id].body }} />
-              <span className="font-black text-white/80">{ENEMIES[id].name}</span>
-              <span className="text-white/45">
-                {ENEMIES[id].flying ? 'flies straight over' : `${ENEMIES[id].armour >= 5 ? 'armoured' : 'unarmoured'}`}
-                {ENEMIES[id].speed >= 100 ? ' · fast' : ENEMIES[id].speed <= 40 ? ' · slow' : ''}
-              </span>
-            </div>
-          ))}
-        </div>
+    <div {...scrimProps(onClose)} className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/75 p-4 backdrop-blur-sm">
+      <div className="panel w-full max-w-lg rounded-[2rem] p-6">
+        <div className="flex items-center justify-between"><div><h3 className="text-2xl font-black">Siege Shop</h3><p className="text-xs text-white/45">Cosmetic banners and field styles are arriving next.</p></div><button onClick={onClose} className="rounded-xl p-2 hover:bg-white/10"><ArrowLeft /></button></div>
+        <div className="mt-5 grid grid-cols-3 gap-3">{['Royal Gold', 'Ocean Blue', 'Dragon Red'].map((name, i) => <div key={name} className="rounded-2xl border border-white/12 bg-white/5 p-3 text-center"><div className="mx-auto h-16 rounded-xl" style={{background: ['#fbbf24','#22d3ee','#fb7185'][i]}} /><p className="mt-2 text-xs font-black">{name}</p><p className="text-[10px] text-white/40">Coming soon</p></div>)}</div>
+        <p className="mt-5 text-center text-sm font-black text-amber-300"><Coins className="mr-1 inline h-4 w-4" />{coins} available</p>
       </div>
     </div>
   );

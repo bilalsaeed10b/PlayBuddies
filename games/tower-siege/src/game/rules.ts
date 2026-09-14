@@ -415,7 +415,7 @@ export const DEFAULT_RULES: MatchRules = {
   mode: 'siege',
   players: 2,
   waves: 20,
-  sends: true,
+  sends: false,
 };
 
 /** Every count this game seats, low to high -- what the lobby fits a room into. */
@@ -449,7 +449,7 @@ export function unpackRules(bits: number | undefined): MatchRules {
   };
 }
 
-/** Seat colours. One per keep, and the spectator frame borrows them. */
+/** Seat colours used for machine ownership and team identity. */
 export const SEATS = [
   { name: 'Amber', main: '#f59e0b', light: '#fcd34d', dark: '#78350f' },
   { name: 'Violet', main: '#8b5cf6', light: '#c4b5fd', dark: '#4c1d95' },

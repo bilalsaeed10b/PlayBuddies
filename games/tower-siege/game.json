@@ -1,13 +1,13 @@
 {
   "id": "tower-siege",
   "name": "Tower Siege",
-  "subtitle": "Same waves, separate keeps, last one standing",
-  "description": "Build towers and hold your keep against wave after wave. Everyone faces the identical horde , defend together with shared lives, or race to see whose keep falls last.",
+  "subtitle": "One battlefield, private fortunes, shared danger",
+  "description": "Build your own machines on one shared battlefield. Defend the keep together, duel for the most kills, or command a side in a full 2v2 siege.",
   "category": "strategy",
   "minPlayers": 1,
   "maxPlayers": 4,
   "estimatedDuration": "8-20 min",
-  "controls": "Pick a tower and tap a plot to build. Tap a tower to upgrade or sell. Arrows at the top step through the other keeps to watch how they are holding up.",
+  "controls": "Pick a machine and tap a plot twice to build. Your machines earn your gold. Tap one of your machines to upgrade or sell it.",
   "thumbnail": "thumb.svg",
   "accent": {
     "from": "#f59e0b",

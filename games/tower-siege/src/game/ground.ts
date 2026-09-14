@@ -101,18 +101,18 @@ function paintGround(ctx: CanvasRenderingContext2D) {
   // you cannot unsee once you have noticed it. A radial gradient has no edge
   // to band along.
   const base = ctx.createLinearGradient(0, 0, WORLD_W * 0.25, WORLD_H);
-  base.addColorStop(0, '#4a8449');
-  base.addColorStop(0.5, '#3d7440');
-  base.addColorStop(1, '#2d5a35');
+  base.addColorStop(0, '#83d85c');
+  base.addColorStop(0.5, '#55b951');
+  base.addColorStop(1, '#2f9b55');
   ctx.fillStyle = base;
   ctx.fillRect(0, 0, WORLD_W, WORLD_H);
 
   // Patches: lighter meadow, darker shade, and dry yellowed ground. Sized in
   // multiples of a tile so they read at the scale the board is looked at.
   const patches: [string, number, number][] = [
-    ['rgba(122, 172, 96, 0.5)', 30, 150],
-    ['rgba(38, 82, 46, 0.45)', 26, 170],
-    ['rgba(150, 168, 88, 0.3)', 16, 120],
+    ['rgba(190, 244, 102, 0.5)', 30, 150],
+    ['rgba(25, 132, 73, 0.38)', 26, 170],
+    ['rgba(255, 221, 91, 0.25)', 16, 120],
   ];
   for (const [colour, count, size] of patches) {
     for (let i = 0; i < count; i++) {
@@ -196,13 +196,13 @@ function paintRoad(ctx: CanvasRenderingContext2D, rnd: () => number) {
   ctx.lineWidth = ROAD_W + 16;
   strokeRoute(ctx);
 
-  ctx.strokeStyle = '#6b5a3f';
+  ctx.strokeStyle = '#84542f';
   ctx.lineWidth = ROAD_W + 4;
   strokeRoute(ctx);
-  ctx.strokeStyle = '#8d7952';
+  ctx.strokeStyle = '#c88a47';
   ctx.lineWidth = ROAD_W;
   strokeRoute(ctx);
-  ctx.strokeStyle = '#9c8760';
+  ctx.strokeStyle = '#e4b86b';
   ctx.lineWidth = ROAD_W - 16;
   strokeRoute(ctx);
 

@@ -72,6 +72,21 @@ export interface BuildPacket {
   k: TowerId | null;
   /** Its level after the action. 0 for a fresh build. */
   lv: number;
+  /** Owning seat. Optional only for packets written by an older build. */
+  o?: number;
+}
+
+/** One defender starts the shared wave for everybody. */
+export interface WavePacket {
+  t: 'wave';
+  n: number;
+  s: number;
+  w: number;
+  r?: number;
+  lives?: number;
+  golds?: number[];
+  towers?: { p: number; k: TowerId; lv: number; o: number; kills: number }[];
+  kills?: number[];
 }
 
 /**
@@ -113,6 +128,12 @@ export interface StatePacket {
   down: number;
   /** The host's rules, carried so a late joiner can build a session from any write. */
   r?: number;
+  /** Full shared-board repair. Present on host snapshots. */
+  towers?: { p: number; k: TowerId; lv: number; o: number; kills: number }[];
+  kills?: number[];
+  /** 1 for a live snapshot; absent for the old end-of-wave correction. */
+  snap?: number;
+  phase?: Phase;
 }
 
 /**
@@ -149,6 +170,7 @@ export interface IdlePacket {
 export type NetPacket =
   | StartPacket
   | BuildPacket
+  | WavePacket
   | SendPacket
   | StatePacket
   | ByePacket

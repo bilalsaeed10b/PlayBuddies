@@ -39,6 +39,13 @@
   .panel {
     @apply border border-white/12 bg-white/[0.06] shadow-[0_18px_50px_rgba(0,0,0,0.45)] backdrop-blur-xl;
   }
+
+  .menu-sky {
+    background:
+      radial-gradient(circle at 15% 12%, rgba(255, 232, 126, 0.28), transparent 25%),
+      radial-gradient(circle at 84% 75%, rgba(65, 229, 170, 0.2), transparent 32%),
+      linear-gradient(155deg, #08345b 0%, #0d6590 44%, #124d59 68%, #163d35 100%);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -1,10 +1,8 @@
 /**
  * One keep, simulated.
  *
- * Deliberately one keep and not the whole match: a four-player siege is four
- * of these running side by side on every device, which is what makes
- * spectating cost nothing at all (R4) , the keep you are watching is already
- * being simulated, it just was not the one being drawn.
+ * One engine is the whole match: one route, one keep, and every player's
+ * machines. Gold and kill credit stay private through tower ownership.
  *
  * Nothing in here knows about React, Firestore or a canvas. It takes a wave
  * list and a stream of build orders and it produces enemies, shots and a
@@ -72,6 +70,8 @@ export interface Tower {
   fired: number;
   /** Kills, shown when the tower is selected. Nothing reads it but the panel. */
   kills: number;
+  /** Seat that bought this machine. It pays, controls, and earns from it. */
+  owner: number;
 }
 
 export interface Shot {
@@ -166,6 +166,8 @@ export class SiegeEngine {
   /** Totals for the scoreboard. */
   totalKills = 0;
   totalLeaks = 0;
+  /** Competitive score and the source of each player's private income. */
+  killsByPlayer: number[];
 
   private cfg: EngineConfig;
   private spawnCursor = 0;
@@ -183,6 +185,7 @@ export class SiegeEngine {
     this.lives = cfg.lives;
     this.golds = cfg.golds.slice();
     this.playerCount = cfg.playerCount;
+    this.killsByPlayer = cfg.golds.map(() => 0);
     this.onSfx = cfg.onSfx;
     this.onWaveEnd = cfg.onWaveEnd;
     this.rng = mulberry32(cfg.seed ^ 0x7e11);
@@ -249,6 +252,7 @@ export class SiegeEngine {
     if (order.kind === null) {
       const t = this.towerAt(order.plot);
       if (!t) return null;
+      if (t.owner !== order.owner) return null;
       if (charge) this.golds[order.owner] += this.refundOf(order.plot);
       this.towers = this.towers.filter((x) => x.plot !== order.plot);
       this.cfg.onSfx?.('sell');
@@ -256,6 +260,7 @@ export class SiegeEngine {
     }
 
     const existing = this.towerAt(order.plot);
+    if (existing && existing.owner !== order.owner) return null;
     const cost = this.costOf(order.plot, order.kind);
     if (cost < 0) return null;
     if (charge && this.golds[order.owner] < cost) return null;
@@ -282,6 +287,7 @@ export class SiegeEngine {
       cool: 0,
       fired: 0,
       kills: 0,
+      owner: order.owner,
     });
     this.cfg.onSfx?.('build');
     return { plot: order.plot, kind: order.kind, level: 0, owner: order.owner };
@@ -305,6 +311,49 @@ export class SiegeEngine {
       this.wave = wave + 1;
       this.beginBuild();
     }
+  }
+
+  /** Replace the shared economy and machines with the host's latest picture. */
+  syncShared(
+    lives: number,
+    golds: number[],
+    towers: { p: number; k: TowerId; lv: number; o: number; kills: number }[],
+    kills: number[],
+  ) {
+    this.lives = lives;
+    this.golds = golds.slice(0, this.playerCount);
+    while (this.golds.length < this.playerCount) this.golds.push(BALANCE.START_GOLD);
+    this.killsByPlayer = kills.slice(0, this.playerCount);
+    while (this.killsByPlayer.length < this.playerCount) this.killsByPlayer.push(0);
+    this.totalKills = this.killsByPlayer.reduce((sum, value) => sum + value, 0);
+    this.towers = towers.map((tower) => {
+      const col = tower.p % COLS;
+      const row = Math.floor(tower.p / COLS);
+      const at = centreOf(col, row);
+      return {
+        plot: tower.p,
+        kind: tower.k,
+        level: clamp(Math.round(tower.lv), 0, 2),
+        owner: clamp(Math.round(tower.o), 0, this.playerCount - 1),
+        kills: Math.max(0, Math.round(tower.kills)),
+        x: at.x,
+        y: at.y,
+        face: -Math.PI / 2,
+        cool: 0,
+        fired: 0,
+      };
+    });
+  }
+
+  sharedSnapshot() {
+    return {
+      lives: this.lives,
+      golds: this.golds.slice(),
+      towers: this.towers.map((tower) => ({
+        p: tower.plot, k: tower.kind, lv: tower.level, o: tower.owner, kills: tower.kills,
+      })),
+      kills: this.killsByPlayer.slice(),
+    };
   }
 
   /** Fold an opponent's purchase into the wave it was bought against. */
@@ -697,11 +746,12 @@ export class SiegeEngine {
     if (e.hp > 0) return;
 
     e.dead = true;
-    if (by) by.kills += 1;
-    const bounty = ENEMIES[e.kind].bounty;
-    for (let i = 0; i < this.playerCount; i++) {
-      this.golds[i] = (this.golds[i] ?? 0) + bounty;
+    if (by) {
+      by.kills += 1;
+      this.killsByPlayer[by.owner] = (this.killsByPlayer[by.owner] ?? 0) + 1;
     }
+    const bounty = ENEMIES[e.kind].bounty;
+    if (by) this.golds[by.owner] = (this.golds[by.owner] ?? 0) + bounty;
     this.killedThisWave += 1;
     this.totalKills += 1;
     this.burst(e.x, e.y, ENEMIES[e.kind].size * 2.4, 'death', ENEMIES[e.kind].trim);

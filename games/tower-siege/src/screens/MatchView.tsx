@@ -1,5 +1,5 @@
 /**
- * The siege on screen: every keep simulated, one of them drawn.
+ * The siege on screen: one battlefield shared by every defender.
  *
  * The component owns the canvas, the render loop and the wire. The engines own
  * the fight and know about none of the three, which is what keeps the
@@ -11,7 +11,7 @@
  * fetched.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronLeft, ChevronRight, Coins, Eye, Gauge, Heart, Loader2, Play, Send, Swords, Trophy, X } from 'lucide-react';
+import { Coins, Gauge, Heart, Loader2, Play, Swords, Trophy, X } from 'lucide-react';
 import ControlsTray from '@shared/controls/ControlsTray';
 import { createLogger } from '@shared/log/logger';
 import { isStaleChunkError, recoverFromStaleChunk } from '@shared/net/staleChunk';
@@ -22,7 +22,6 @@ import {
   BALANCE,
   ENEMIES,
   SEATS,
-  SENDS,
   TILE,
   TOWERS,
   TOWER_ORDER,
@@ -31,7 +30,7 @@ import {
   packRules,
   unpackRules,
 } from '../game/rules';
-import type { EnemyId, MatchRules, TowerId } from '../game/rules';
+import type { MatchRules, TowerId } from '../game/rules';
 import { COLS, ROWS, WORLD_H, WORLD_W, isBuildable } from '../game/map';
 import { drawKeep, drawTowerHead, enemySprite, towerBase } from '../game/art';
 import { bakeGround, drawPlots } from '../game/ground';
@@ -56,9 +55,9 @@ export interface MatchConfig {
   uid: string | null;
   peerUids: string[];
   isHost: boolean;
-  /** One keep per seat, in the fixed order every client derives the same way. */
+  /** Players sharing this battlefield, in the same stable order on every client. */
   seats: Seat[];
-  /** Which seat this device holds. -1 for a spectator with no keep. */
+  /** Which economy and tower colour this device owns. */
   mine: number;
   aiLevel: number;
   seed: number;
@@ -102,14 +101,11 @@ export default function MatchView({
     online && !config.isHost ? null : { seed: config.seed, rules: config.rules },
   );
 
-  /** Which keep is on screen. Starts on your own; the arrows move it. */
-  const [watching, setWatching] = useState(Math.max(0, config.mine));
   const [selected, setSelected] = useState<TowerId>('arrow');
   const [picked, setPicked] = useState<number | null>(null);
   const [banner, setBanner] = useState<{ id: number; text: string; tone: 'good' | 'bad' } | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [over, setOver] = useState<{ won: boolean; standing: number[] } | null>(null);
-  const [showSends, setShowSends] = useState(false);
   const [speed, setSpeed] = useState<(typeof SPEEDS)[number]>(1);
 
   // HUD mirrors. Written from the frame loop only when the number a human is
@@ -123,9 +119,7 @@ export default function MatchView({
     phase: 'build',
     timer: 0,
   });
-  const [board, setBoard] = useState<{ lives: number; wave: number; down: boolean }[]>(() =>
-    config.seats.map(() => ({ lives: BALANCE.LIVES, wave: 0, down: false })),
-  );
+  const [scores, setScores] = useState<number[]>(() => config.seats.map(() => 0));
 
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
@@ -146,7 +140,7 @@ export default function MatchView({
   }, [seatIdKey]);
 
   /**
-   * Every keep, simulated.
+   * The one shared keep.
    *
    * Rebuilt only when the *match* changes , a new seed or new rules. Listing
    * anything the lobby can touch here would reset a siege in progress the
@@ -162,6 +156,16 @@ export default function MatchView({
     bannerTimer.current = window.setTimeout(() => setBanner(null), BANNER_MS);
   }, []);
 
+  const broadcastSnapshot = useCallback((engine: SiegeEngine, seed: number) => {
+    if (!config.isHost) return;
+    const snap = engine.sharedSnapshot();
+    linkRef.current?.send({
+      t: 'state', n: Date.now(), s: seed, w: engine.wave,
+      lives: snap.lives, golds: snap.golds, down: engine.phase === 'fallen' ? 1 : 0,
+      towers: snap.towers, kills: snap.kills, snap: 1, phase: engine.phase, r: rulesBits,
+    });
+  }, [config.isHost, rulesBits]);
+
   // -- the wire ---------------------------------------------------------------
 
   const handlePacket = useCallback(
@@ -169,6 +173,14 @@ export default function MatchView({
       if (packet.t === 'start') {
         setSession((cur) => (cur && cur.seed === packet.seed ? cur : { seed: packet.seed, rules: unpackRules(packet.r) }));
         return;
+      }
+      // The host's start document is replaced by later actions. A player who
+      // reconnects can therefore recover the session from any host snapshot.
+      if (packet.t === 'state' && typeof packet.r === 'number') {
+        setSession((cur) => cur ?? { seed: packet.s, rules: unpackRules(packet.r) });
+      }
+      if (packet.t === 'wave' && typeof packet.r === 'number') {
+        setSession((cur) => cur ?? { seed: packet.s, rules: unpackRules(packet.r) });
       }
       const engines = enginesRef.current;
       if (engines.length === 0) {
@@ -179,17 +191,15 @@ export default function MatchView({
 
       if (packet.t === 'bye') {
         if (seat === undefined) return;
-        const e = engines[seat];
-        if (e && config.seats[seat]?.control === 'remote') {
+        if (config.seats[seat]?.control === 'remote') {
           config.seats[seat].control = 'bot';
-          setNotice(`${config.seats[seat]?.name} dropped. A bot is holding their keep.`);
+          setNotice(`${config.seats[seat]?.name} dropped. A bot took over their machines.`);
         }
         return;
       }
       if (packet.t === 'hello') {
         if (seat === undefined) return;
-        const e = engines[seat];
-        if (e && config.seats[seat]?.control === 'bot') {
+        if (config.seats[seat]?.control === 'bot') {
           config.seats[seat].control = 'remote';
           setNotice(`${config.seats[seat]?.name} is back.`);
         }
@@ -197,32 +207,41 @@ export default function MatchView({
       }
       if (packet.t === 'build') {
         if (seat === undefined) return;
-        // Not charged: the owner already paid on their own device, and
-        // charging again here would have a peer's keep run out of gold it
-        // never spent. See SiegeEngine.apply.
-        engines[0]?.apply({ plot: packet.p, kind: packet.k, level: packet.lv, owner: seat ?? 0 }, false);
+        // Every peer applies the same charged action to the same shared board.
+        // The sender does not receive its own packet, so each economy is charged once.
+        const shared = engines[0];
+        shared?.apply({ plot: packet.p, kind: packet.k, level: packet.lv, owner: packet.o ?? seat }, true);
+        if (shared && config.isHost) broadcastSnapshot(shared, packet.s);
         return;
       }
-      if (packet.t === 'send') {
-        // Lands on everyone but whoever bought it, which is what stops a
-        // four-player siege turning into three players ganging up on one.
-        for (let i = 0; i < engines.length; i++) {
-          if (i === seat) continue;
-          engines[i].pushIncoming(packet.w, packet.k, packet.c);
+      if (packet.t === 'wave') {
+        const shared = engines[0];
+        if (!shared) return;
+        if (packet.towers && packet.kills && packet.golds && typeof packet.lives === 'number') {
+          shared.syncShared(packet.lives, packet.golds, packet.towers, packet.kills);
         }
-        if (seat !== mine) {
-          const who = config.seats[seat ?? 0]?.name ?? 'Someone';
-          shout(`${who} sent ${packet.c} ${ENEMIES[packet.k].name}`, 'bad');
-        }
+        if (packet.w > shared.wave) shared.reconcile(packet.w - 1, shared.lives, shared.golds, false);
+        if (packet.w === shared.wave) shared.startWaveNow();
         return;
       }
+      if (packet.t === 'send') return; // Legacy packets from separate-keep builds.
       if (packet.t === 'state') {
         if (seat === undefined) return;
-        engines[0]?.reconcile(packet.w, packet.lives, packet.golds, packet.down === 1);
+        const shared = engines[0];
+        if (packet.towers && packet.kills) {
+          shared?.syncShared(packet.lives, packet.golds, packet.towers, packet.kills);
+        }
+        if (packet.snap === 1) {
+          if (shared && packet.down === 1) shared.reconcile(packet.w, packet.lives, packet.golds, true);
+          if (shared && packet.w > shared.wave) shared.reconcile(packet.w - 1, packet.lives, packet.golds, false);
+          if (shared && packet.phase === 'wave' && shared.phase === 'build') shared.startWaveNow();
+          return;
+        }
+        shared?.reconcile(packet.w, packet.lives, packet.golds, packet.down === 1);
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [seatOfUid, mine, shout],
+    [seatOfUid, mine, shout, broadcastSnapshot, config.isHost],
   );
 
   useEffect(() => {
@@ -318,7 +337,7 @@ export default function MatchView({
       session.seed,
       session.rules.waves,
       session.rules.players,
-      session.rules.mode === 'alliance',
+      true,
     );
 
     const engines = [
@@ -331,8 +350,11 @@ export default function MatchView({
         onSfx: (kind) => playSfx(kind),
         onWaveEnd: (wave, lives, golds, down) => {
           if (config.isHost) {
+            const shared = enginesRef.current[0];
+            const snap = shared?.sharedSnapshot();
             linkRef.current?.send({
-              t: 'state', n: Date.now(), s: session.seed, w: wave, lives, golds, down: down ? 1 : 0, r: rulesBits,
+              t: 'state', n: Date.now(), s: session.seed, w: wave, lives, golds, down: down ? 1 : 0,
+              towers: snap?.towers, kills: snap?.kills, r: rulesBits,
             });
           }
           if (!down) shout(`Wave ${wave + 1} cleared`, 'good');
@@ -366,52 +388,34 @@ export default function MatchView({
 
   // -- actions ----------------------------------------------------------------
 
-  const spectating = watching !== mine;
-
   /** Build, upgrade or sell, and tell everyone what actually happened. */
   const order = useCallback(
     (o: BuildOrder) => {
-      const engine = enginesRef.current[mine];
-      if (!engine || spectating) return;
+      const engine = enginesRef.current[0];
+      if (!engine) return;
       const done = engine.apply({ ...o, owner: mine });
       if (!done) return;
       audioService.unlock();
-      linkRef.current?.send({
-        t: 'build', n: Date.now(), s: session?.seed ?? 0, p: done.plot, k: done.kind, lv: done.level,
+      if (config.isHost) broadcastSnapshot(engine, session?.seed ?? 0);
+      else linkRef.current?.send({
+        t: 'build', n: Date.now(), s: session?.seed ?? 0, p: done.plot, k: done.kind, lv: done.level, o: mine,
       });
       setPicked(null);
     },
-    [mine, spectating, session?.seed],
-  );
-
-  const buySend = useCallback(
-    (kind: EnemyId, count: number, cost: number) => {
-      const engine = enginesRef.current[mine];
-      if (!engine || engine.golds[mine] < cost) return;
-      engine.golds[mine] -= cost;
-      // Lands on the wave after the one being fought, so it is always a
-      // boundary both sides agree on.
-      const wave = engine.wave + 1;
-      for (let i = 0; i < enginesRef.current.length; i++) {
-        if (i === mine) continue;
-        enginesRef.current[i].pushIncoming(wave, kind, count);
-      }
-      linkRef.current?.send({ t: 'send', n: Date.now(), s: session?.seed ?? 0, k: kind, c: count, w: wave });
-      shout(`Sent ${count} ${ENEMIES[kind].name} at wave ${wave + 1}`, 'good');
-      setShowSends(false);
-    },
-    [mine, session?.seed, shout],
+    [mine, session?.seed, config.isHost, broadcastSnapshot],
   );
 
   const startNow = useCallback(() => {
-    enginesRef.current[mine]?.startWaveNow();
+    const engine = enginesRef.current[0];
+    if (!engine || (online && !config.isHost)) return;
+    const snap = engine.sharedSnapshot();
+    engine.startWaveNow();
+    linkRef.current?.send({
+      t: 'wave', n: Date.now(), s: session?.seed ?? 0, w: engine.wave, r: rulesBits,
+      lives: snap.lives, golds: snap.golds, towers: snap.towers, kills: snap.kills,
+    });
     audioService.unlock();
-  }, [mine]);
-
-  const step = useCallback((dir: 1 | -1) => {
-    setWatching((w) => (w + dir + config.seats.length) % config.seats.length);
-    setPicked(null);
-  }, [config.seats.length]);
+  }, [session?.seed, online, config.isHost, rulesBits]);
 
   // -- the loop ---------------------------------------------------------------
 
@@ -425,6 +429,7 @@ export default function MatchView({
     let bgTimer: number | null = null;
     let last = performance.now();
     let clock = 0;
+    let accumulator = 0;
     let dpr = 1;
     let scale = 1;
     let offX = 0;
@@ -470,28 +475,34 @@ export default function MatchView({
       const engines = enginesRef.current;
       if (engines.length === 0) return null;
 
-      // Every keep advances, not only the one being watched , that is what
-      // makes the spectator view live rather than a snapshot, and what lets a
-      // bot lose a match while you are looking the other way.
-      for (let i = 0; i < mul; i++) {
-        for (const e of engines) e.update(dt);
-      }
+      // Fixed simulation ticks make tower targeting and kills independent of
+      // each device's frame rate. A 30fps phone and a 144Hz host now resolve
+      // the same wave instead of slowly producing different battlefields.
+      const fixed = 1 / 60;
+      accumulator += dt * mul;
+      let ticks = Math.min(300, Math.floor(accumulator / fixed));
+      accumulator -= ticks * fixed;
+      while (ticks-- > 0) for (const e of engines) e.update(fixed);
 
-      // Bots spend during their build phase, a tower at a time so the buying
-      // is spread across the phase rather than landing in one frame.
-      for (const e of engines) {
-        if (e.control !== 'bot' || e.phase !== 'build') {
-          if (e.phase !== 'build') botNth.delete(e.seat);
+      // Every bot owns a private purse and places its own machines on this map.
+      const shared = engines[0];
+      for (let seat = 0; seat < config.seats.length; seat++) {
+        if (config.seats[seat]?.control !== 'bot' || shared.phase !== 'build') {
+          if (shared.phase !== 'build') botNth.delete(seat);
           continue;
         }
-        const nth = botNth.get(e.seat) ?? 0;
+        const nth = botNth.get(seat) ?? 0;
         // Paced off the build clock: roughly one purchase a second, which
         // reads as a keep being fortified rather than one appearing whole.
-        const due = Math.floor((BALANCE.BUILD_TIME - e.timer) / 1.1);
+        const due = Math.floor((BALANCE.BUILD_TIME - shared.timer) / 1.1);
         if (nth >= due) continue;
-        const want = decide(e, aiLevel, nth, e.seat);
-        botNth.set(e.seat, nth + 1);
-        if (want) e.apply({ ...want, owner: e.seat });
+        if (online && !config.isHost) continue;
+        const want = decide(shared, aiLevel, nth, seat);
+        botNth.set(seat, nth + 1);
+        if (want) {
+          const done = shared.apply({ ...want, owner: seat });
+          if (done && online && config.isHost) broadcastSnapshot(shared, session.seed);
+        }
       }
 
       return engines;
@@ -499,7 +510,7 @@ export default function MatchView({
 
     /** HUD mirrors, only touched when something a human can read has changed. */
     const publish = (engines: SiegeEngine[]) => {
-      const own = engines[mine];
+      const own = engines[0];
       if (own) {
         const t = Math.ceil(own.phase === 'build' ? own.timer : own.timer);
         if (
@@ -515,17 +526,17 @@ export default function MatchView({
         }
       }
 
-      const boardKey = engines.map((e) => `${e.lives}:${e.wave}:${e.phase === 'fallen' ? 1 : 0}`).join('|');
-      if (boardKey !== shown.boardKey) {
+      const boardKey = `${own?.lives}:${own?.wave}:${own?.phase}:${own?.killsByPlayer.join(',')}`;
+      if (boardKey !== shown.boardKey && own) {
         shown.boardKey = boardKey;
-        setBoard(engines.map((e) => ({ lives: e.lives, wave: e.wave, down: e.phase === 'fallen' })));
+        setScores(own.killsByPlayer.slice());
       }
       log.state({
         seed: session?.seed,
-        rev: Math.max(...engines.map((engine) => engine.wave)),
-        phases: engines.map((engine) => engine.phase),
-        wave: engines.map((engine) => engine.wave),
-        lives: engines.map((engine) => engine.lives),
+        rev: own?.wave ?? 0,
+        phases: [own?.phase],
+        wave: [own?.wave],
+        lives: [own?.lives],
         board: boardKey,
         local: mine,
       });
@@ -539,7 +550,7 @@ export default function MatchView({
       lastFrameStamp = now;
       const engines = step(now, 0.05);
       if (!engines) return;
-      render(ctx, engines[watchRef.current] ?? engines[0], clock);
+      render(ctx, engines[0], clock);
       publish(engines);
     };
 
@@ -571,8 +582,6 @@ export default function MatchView({
   }, [session?.seed, aiLevel, mine]);
 
   /** Read inside the loop so changing it does not tear the loop down. */
-  const watchRef = useRef(watching);
-  watchRef.current = watching;
   const pickedRef = useRef(picked);
   pickedRef.current = picked;
   const selectedRef = useRef(selected);
@@ -587,7 +596,12 @@ export default function MatchView({
     const { canvas } = ctx;
     const { scale, offX, offY } = viewRef.current;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.fillStyle = '#0b1220';
+    const surround = ctx.createLinearGradient(0, 0, 0, canvas.height);
+    surround.addColorStop(0, '#53c9f5');
+    surround.addColorStop(0.18, '#9be7ff');
+    surround.addColorStop(0.19, '#73c85b');
+    surround.addColorStop(1, '#2d8c49');
+    ctx.fillStyle = surround;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     ctx.setTransform(scale, 0, 0, scale, offX, offY);
 
@@ -597,7 +611,7 @@ export default function MatchView({
     // The plots only while a tower is actually being placed. Baked into the
     // ground they were a cage over every inch of the map; see ground.ts.
     const placing = pickedRef.current !== null && !engine.towerAt(pickedRef.current);
-    if (placing && watchRef.current === mine) {
+    if (placing) {
       drawPlots(ctx, new Set(engine.towers.map((t) => t.plot)));
     }
 
@@ -617,7 +631,7 @@ export default function MatchView({
     }
 
     // The plot under the thumb, while a tower is picked up.
-    if (sel !== null && !engine.towerAt(sel) && watchRef.current === mine) {
+    if (sel !== null && !engine.towerAt(sel)) {
       const col = sel % COLS;
       const row = Math.floor(sel / COLS);
       const kind = selectedRef.current;
@@ -641,6 +655,14 @@ export default function MatchView({
 
     // Towers: baked base, live head.
     for (const t of engine.towers) {
+      const ownerColor = SEATS[t.owner % SEATS.length];
+      ctx.fillStyle = `${ownerColor.main}25`;
+      ctx.strokeStyle = `${ownerColor.light}cc`;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.ellipse(t.x, t.y + 18, 27, 10, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
       const base = towerBase(t.kind, t.level);
       if (base) ctx.drawImage(base, t.x - base.width / 2, t.y - base.height / 2);
       ctx.save();
@@ -648,6 +670,13 @@ export default function MatchView({
       ctx.rotate(t.face);
       drawTowerHead(ctx, t.kind, t.level, t.fired, clock);
       ctx.restore();
+      ctx.fillStyle = ownerColor.main;
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(t.x + 21, t.y - 21, 8, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
       if (t.plot === sel) {
         ctx.strokeStyle = '#ffe9a8';
         ctx.lineWidth = 2.5;
@@ -782,7 +811,7 @@ export default function MatchView({
 
   const onTap = useCallback(
     (ev: React.PointerEvent<HTMLCanvasElement>) => {
-      const engine = enginesRef.current[watchRef.current];
+      const engine = enginesRef.current[0];
       if (!engine) return;
       audioService.unlock();
       const canvas = canvasRef.current;
@@ -798,15 +827,11 @@ export default function MatchView({
       if (col < 0 || row < 0 || col >= COLS || row >= ROWS) return;
       const plot = row * COLS + col;
 
-      // A spectated keep is read-only (R4). Tapping it selects a tower so its
-      // range can be read, and nothing more.
-      if (watchRef.current !== mine) {
-        setPicked(engine.towerAt(plot) ? plot : null);
-        return;
-      }
-
       const existing = engine.towerAt(plot);
       if (existing) {
+        if (existing.owner !== mine) {
+          setNotice(`${config.seats[existing.owner]?.name ?? 'A teammate'} owns this machine.`);
+        }
         setPicked((p) => (p === plot ? null : plot));
         return;
       }
@@ -827,36 +852,21 @@ export default function MatchView({
 
   useEffect(() => {
     if (over) return;
-    const engines = enginesRef.current;
-    if (engines.length === 0) return;
-    const standing = board.map((b, i) => (b.down ? -1 : i)).filter((i) => i >= 0);
-    const meDown = board[mine]?.down ?? false;
-    const coop = session?.rules.mode === 'alliance';
-
-    if (coop) {
-      // One pool: everybody's keep falls together, and clearing the list
-      // together is the win.
-      if (meDown) finish(false);
-      else if (engines[mine]?.phase === 'won') finish(true);
-      return;
-    }
-    if (standing.length <= 1 && config.seats.length > 1) {
-      finish(standing[0] === mine);
-    } else if (meDown) {
-      finish(false);
-    } else if (engines[mine]?.phase === 'won' && standing.length === 1) {
-      finish(true);
-    } else if (engines[mine]?.phase === 'won' && config.seats.length === 1) {
-      finish(true);
-    }
+    const engine = enginesRef.current[0];
+    if (!engine || (engine.phase !== 'won' && engine.phase !== 'fallen')) return;
+    const teamScores = [0, 0];
+    engine.killsByPlayer.forEach((kills, seat) => { teamScores[seat % 2] += kills; });
+    const coop = session?.rules.mode === 'alliance' || config.seats.length === 1;
+    const won = engine.phase === 'won' && (coop || teamScores[mine % 2] >= teamScores[(mine + 1) % 2]);
+    finish(won);
 
     function finish(won: boolean) {
-      setOver({ won, standing });
-      onResult(won, engines[mine]?.wave ?? 0);
+      setOver({ won, standing: config.seats.map((_, i) => i) });
+      onResult(won, engine.wave);
       audioService.end(won);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [board, mine, over, session?.rules.mode]);
+  }, [scores, mine, over, session?.rules.mode]);
 
   useEffect(
     () => () => {
@@ -867,10 +877,9 @@ export default function MatchView({
 
   // -- render -----------------------------------------------------------------
 
-  const engine = enginesRef.current[watching];
-  const own = enginesRef.current[mine];
+  const engine = enginesRef.current[0];
+  const own = engine;
   const wave = own?.current;
-  const seatColor = SEATS[watching % SEATS.length];
   const canAfford = (id: TowerId) => (own ? own.golds[mine] >= TOWERS[id].levels[0].cost : false);
   const pickedTower = picked !== null && engine ? engine.towerAt(picked) : undefined;
 
@@ -906,7 +915,17 @@ export default function MatchView({
               <span className="text-xs font-black tabular-nums text-emerald-200">Build {hud.timer}s</span>
             </div>
           )}
-          <button
+          {config.seats.length > 1 && (
+            <div className="hidden items-center gap-2 rounded-xl border border-white/15 bg-black/40 px-2.5 py-1.5 backdrop-blur-md sm:flex">
+              {config.seats.map((seat, i) => (
+                <span key={seat.id} className={`text-[10px] font-black ${i === mine ? 'text-white' : 'text-white/55'}`}>
+                  <span className="mr-1 inline-block h-2 w-2 rounded-full" style={{ background: SEATS[i].main }} />
+                  {session.rules.mode === 'siege' ? `T${(i % 2) + 1} ` : ''}{i === mine ? 'You' : seat.name}: {scores[i] ?? 0}
+                </span>
+              ))}
+            </div>
+          )}
+          {!online && <button
             onClick={() => setSpeed((s) => SPEEDS[(SPEEDS.indexOf(s) + 1) % SPEEDS.length])}
             aria-label="Game speed"
             className={`flex items-center gap-1.5 rounded-xl border px-2.5 py-1.5 backdrop-blur-md transition-colors ${
@@ -915,7 +934,7 @@ export default function MatchView({
           >
             <Gauge className="h-3.5 w-3.5" />
             <span className="text-xs font-black tabular-nums">{speed}×</span>
-          </button>
+          </button>}
         </div>
 
         <div className="pointer-events-auto shrink-0">
@@ -936,45 +955,6 @@ export default function MatchView({
       </div>
 
       {/* ── whose keep is on screen ── */}
-      {config.seats.length > 1 && (
-        <div className="z-30 flex shrink-0 items-center justify-center gap-2 px-2 pb-1 short:pb-0">
-          <button
-            onClick={() => step(-1)}
-            aria-label="Previous keep"
-            className="rounded-xl border border-white/20 bg-black/40 p-2 backdrop-blur-md transition-colors hover:bg-white/10"
-          >
-            <ChevronLeft className="h-5 w-5" />
-          </button>
-          <div
-            className="flex min-w-0 items-center gap-2 rounded-xl border px-3 py-1.5 backdrop-blur-md"
-            style={{
-              borderColor: `${seatColor.main}88`,
-              background: spectating ? `${seatColor.main}22` : 'rgba(0,0,0,0.4)',
-            }}
-          >
-            {spectating && <Eye className="h-3.5 w-3.5 shrink-0" style={{ color: seatColor.light }} />}
-            <span className="truncate text-xs font-black" style={{ color: seatColor.light }}>
-              {spectating ? `${engine?.name ?? 'Keep'}'s keep` : 'Your keep'}
-            </span>
-            {board[watching]?.down && <span className="text-[10px] font-black text-rose-300">FALLEN</span>}
-          </div>
-          <button
-            onClick={() => step(1)}
-            aria-label="Next keep"
-            className="rounded-xl border border-white/20 bg-black/40 p-2 backdrop-blur-md transition-colors hover:bg-white/10"
-          >
-            <ChevronRight className="h-5 w-5" />
-          </button>
-          {spectating && (
-            <button
-              onClick={() => setWatching(mine)}
-              className="rounded-xl border border-amber-400/50 bg-amber-400/20 px-3 py-1.5 text-[11px] font-black text-amber-200"
-            >
-              Back to yours
-            </button>
-          )}
-        </div>
-      )}
 
       {/* ── the board ── */}
       <div ref={boardRef} className="relative min-h-0 flex-1">
@@ -982,15 +962,9 @@ export default function MatchView({
 
         {/* A spectated keep is framed in its owner's colour, so there is never
             a moment where a player is unsure which board their taps go to. */}
-        {spectating && (
-          <div
-            className="pointer-events-none absolute inset-0 border-4"
-            style={{ borderColor: `${seatColor.main}99` }}
-          />
-        )}
 
         {/* Wave preview, so the build phase is a decision and not a guess. */}
-        {hud.phase === 'build' && wave && !spectating && (
+        {hud.phase === 'build' && wave && (
           <div className="pointer-events-none absolute inset-x-0 top-2 z-20 flex justify-center px-3">
             <div className="flex max-w-full flex-wrap items-center gap-2 rounded-2xl border border-white/15 bg-black/60 px-3 py-2 backdrop-blur-md">
               <span className="text-[10px] font-black uppercase tracking-wider text-white/50">Incoming</span>
@@ -1026,11 +1000,11 @@ export default function MatchView({
           Sideways, the three bars of chrome came to 183px against 176px of
           actual keep -- more furniture than game. Each one gives back what it
           can: padding here, the tower's role line below. */}
-      {!spectating && !over && (
+      {!over && (
         <div className="z-30 shrink-0 border-t border-white/10 bg-slate-950/80 p-2 backdrop-blur-md short:p-1">
           {pickedTower ? (
             <TowerPanel
-              engine={enginesRef.current[mine]}
+              engine={enginesRef.current[0]}
               plot={pickedTower.plot}
               onUpgrade={() => order({ plot: pickedTower.plot, kind: pickedTower.kind, level: pickedTower.level + 1, owner: mine })}
               onSell={() => order({ plot: pickedTower.plot, kind: null, level: 0, owner: mine })}
@@ -1067,20 +1041,12 @@ export default function MatchView({
               })}
 
               <div className="flex shrink-0 flex-col gap-1.5">
-                {hud.phase === 'build' && (
+                {hud.phase === 'build' && (!online || config.isHost) && (
                   <button
                     onClick={startNow}
                     className="flex items-center gap-1 rounded-xl bg-emerald-400 px-3 py-1.5 text-[11px] font-black text-emerald-950"
                   >
                     <Play className="h-3.5 w-3.5 fill-current" /> Start
-                  </button>
-                )}
-                {session.rules.sends && session.rules.mode === 'siege' && config.seats.length > 1 && (
-                  <button
-                    onClick={() => setShowSends((s) => !s)}
-                    className="flex items-center gap-1 rounded-xl border border-violet-400/50 bg-violet-500/20 px-3 py-1.5 text-[11px] font-black text-violet-200"
-                  >
-                    <Send className="h-3.5 w-3.5" /> Send
                   </button>
                 )}
               </div>
@@ -1089,43 +1055,7 @@ export default function MatchView({
         </div>
       )}
 
-      {spectating && (
-        <div className="z-30 shrink-0 border-t border-white/10 bg-slate-950/80 p-3 text-center text-[11px] font-bold text-white/50 backdrop-blur-md">
-          Watching {engine?.name ?? 'another keep'} , your own towers are on your own board.
-        </div>
-      )}
-
       {/* ── sending ── */}
-      {showSends && !spectating && (
-        <div className="absolute inset-0 z-40 flex items-end justify-center bg-black/60 p-4 backdrop-blur-sm sm:items-center">
-          <div className="max-h-[88dvh] w-full max-w-sm overflow-y-auto overscroll-contain space-y-2 rounded-[1.75rem] border border-white/15 bg-slate-900/95 p-5">
-            <div className="flex items-center justify-between">
-              <h3 className="text-lg font-black">Send a horde</h3>
-              <button onClick={() => setShowSends(false)} className="rounded-lg p-1.5 hover:bg-white/10">
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-            <p className="text-[11px] text-white/50">
-              Lands on every other keep at wave {Math.min(hud.wave + 2, session.rules.waves)}. It costs more than it pays
-              them in bounty, so it is a real bet.
-            </p>
-            {SENDS.map((s) => (
-              <button
-                key={s.kind}
-                disabled={hud.gold < s.cost}
-                onClick={() => buySend(s.kind, s.count, s.cost)}
-                className="flex w-full items-center justify-between rounded-xl border border-white/12 bg-white/5 px-3 py-2.5 text-left disabled:opacity-40"
-              >
-                <span className="flex items-center gap-2">
-                  <span className="h-3 w-3 rounded-full" style={{ background: ENEMIES[s.kind].body }} />
-                  <span className="text-sm font-bold">{s.label}</span>
-                </span>
-                <span className="text-sm font-black text-amber-300">{s.cost}g</span>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
 
       {notice && (
         <div className="pointer-events-none absolute inset-x-0 bottom-24 z-30 flex justify-center px-4">
@@ -1142,7 +1072,7 @@ export default function MatchView({
             <Trophy className={`mx-auto h-14 w-14 ${over.won ? 'text-amber-300' : 'text-slate-500'}`} />
             <div>
               <h2 className="text-3xl font-black tracking-tight">
-                {over.won ? (session.rules.mode === 'alliance' ? 'The line held' : 'Last keep standing') : 'Your keep fell'}
+                {over.won ? (session.rules.mode === 'alliance' ? 'The keep stands' : 'Your team wins') : (session.rules.mode === 'alliance' ? 'The keep fell' : 'Rival team wins')}
               </h2>
               <p className="mt-1 text-sm font-semibold text-white/50">
                 {`Wave ${Math.min((own?.wave ?? 0) + 1, session.rules.waves)} of ${session.rules.waves}`}
@@ -1156,7 +1086,7 @@ export default function MatchView({
                   <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: SEATS[i % SEATS.length].main }} />
                   <span className="min-w-0 flex-1 truncate text-left font-bold">{i === mine ? 'You' : s.name}</span>
                   <span className="font-black tabular-nums">
-                    {board[i]?.down ? 'fell' : `wave ${(board[i]?.wave ?? 0) + 1}`}
+                    {scores[i] ?? 0} kills
                   </span>
                 </div>
               ))}
@@ -1169,14 +1099,6 @@ export default function MatchView({
             </div>
             {/* A fallen player can still watch the rest of it out, which is the
                 only thing that makes losing first bearable in a four-hander. */}
-            {!over.won && config.seats.length > 1 && (
-              <button
-                onClick={() => setOver(null)}
-                className="w-full text-[11px] font-bold text-white/40 hover:text-white/70"
-              >
-                Keep watching the others
-              </button>
-            )}
           </div>
         </div>
       )}
@@ -1230,7 +1152,8 @@ function TowerPanel({
   const lv = meta.levels[tower.level];
   const next = tower.level < 2 ? meta.levels[tower.level + 1] : null;
   const upCost = next ? next.cost : 0;
-  const canUp = next !== null && engine.golds[mine] >= upCost;
+  const isMine = tower.owner === mine;
+  const canUp = isMine && next !== null && engine.golds[mine] >= upCost;
 
   return (
     <div className="flex items-center gap-2">
@@ -1239,6 +1162,9 @@ function TowerPanel({
           <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: meta.trim }} />
           {meta.name}
           <span className="text-white/40">lvl {tower.level + 1}</span>
+          <span className="rounded-md px-1.5 py-0.5 text-[8px] uppercase" style={{ color: SEATS[tower.owner].light, background: `${SEATS[tower.owner].main}22` }}>
+            {isMine ? 'yours' : `P${tower.owner + 1}`}
+          </span>
         </p>
         <p className="truncate text-[10px] font-bold text-white/45">
           {lv.damage} dmg · {Math.round(lv.range)} reach · {tower.kills} slain
@@ -1260,7 +1186,8 @@ function TowerPanel({
       )}
       <button
         onClick={onSell}
-        className="rounded-xl border border-rose-400/40 bg-rose-500/15 px-3 py-2 text-[11px] font-black text-rose-200"
+        disabled={!isMine}
+        className="rounded-xl border border-rose-400/40 bg-rose-500/15 px-3 py-2 text-[11px] font-black text-rose-200 disabled:opacity-30"
       >
         Sell {engine.refundOf(plot)}g
       </button>

@@ -186,13 +186,13 @@ function readWave(engine: SiegeEngine): { air: number; armour: number; swarm: nu
  */
 export function decide(engine: SiegeEngine, level: number, nth: number, seat: number): BuildOrder | null {
   const tier = TIERS[Math.max(0, Math.min(TIERS.length - 1, level))];
-  const rnd = mulberry32((engine.seat * 7919 + engine.wave * 104729 + nth * 31) >>> 0);
+  const rnd = mulberry32((seat * 7919 + engine.wave * 104729 + nth * 31) >>> 0);
 
   const budget = engine.golds[seat] * tier.spend;
   if (budget < TOWERS.arrow.levels[0].cost) return null;
 
   const mix = readWave(engine);
-  const owned = engine.towers;
+  const owned = engine.towers.filter((tower) => tower.owner === seat);
   const haveAir = owned.some((t) => TOWERS[t.kind].air);
 
   // Upgrade the tower that sees the most road, before adding another one on a
