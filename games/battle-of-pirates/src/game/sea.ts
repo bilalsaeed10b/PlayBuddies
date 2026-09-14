@@ -432,15 +432,15 @@ export function drawWeather(
   ctx.beginPath();
   ctx.rect(0, 0, w, h);
   ctx.clip();
-  drawWeatherAtmosphere(ctx, arena, clock, kind, count);
+  drawWeatherAtmosphere(ctx, arena, clock, kind);
   if (kind === 'mist' || kind === 'snow') {
     ctx.fillStyle = kind === 'mist' ? 'rgba(185,213,220,0.06)' : 'rgba(135,190,236,0.08)';
     ctx.fillRect(0, 0, w, h);
     if (kind === 'mist') {
       // Broad translucent ellipses stay behind the fleet; no costly blur filter.
       ctx.fillStyle = 'rgba(207,228,231,0.065)';
-      for (let i = 0; i < 6; i++) {
-        ctx.beginPath(); ctx.ellipse(w * (i / 5) + Math.sin(clock * 0.09 + i) * 80,
+      for (let i = 0; i < 4; i++) {
+        ctx.beginPath(); ctx.ellipse(w * (i / 3) + Math.sin(clock * 0.09 + i) * 80,
           arena.seaY * (0.75 + (i % 3) * 0.08), w * 0.28, 48 + (i % 3) * 18, 0, 0, Math.PI * 2); ctx.fill();
       }
       ctx.restore(); return;
@@ -468,7 +468,7 @@ export function drawWeather(
   if (kind === 'rain' || kind === 'thunder') {
     ctx.strokeStyle = 'rgba(175,220,238,0.22)'; ctx.lineWidth = 1.5;
     ctx.beginPath();
-    for (let i = 0; i < Math.min(18, count / 4); i++) {
+    for (let i = 0; i < Math.min(10, count / 5); i++) {
       const phase = (clock * 1.3 + i * 0.17) % 1;
       const x = field[i * RAIN_STRIDE + 2];
       const y = arena.seaY + 8 + (i * 47) % Math.max(1, h - arena.seaY - 12);
@@ -501,21 +501,19 @@ function drawWeatherAtmosphere(
   arena: Arena,
   clock: number,
   kind: WeatherKind,
-  count: number,
 ) {
   const { w, seaY } = arena;
   ctx.save();
   if (kind === 'rain' || kind === 'thunder') {
+    // The detailed storm bank is already baked by `foulWeather`. A second
+    // moving bank used to repaint 16-28 large ellipses every frame, causing
+    // the worst slowdown exactly when projectile effects were also busiest.
     const storm = kind === 'thunder';
-    const clouds = count < 70 ? 4 : 7;
-    ctx.globalAlpha *= storm ? 0.72 : 0.45;
-    for (let i = 0; i < clouds; i++) {
-      const drift = ((i * 0.19 + clock * (storm ? 0.006 : 0.003)) % 1.2) * w - w * 0.1;
-      const y = seaY * (0.12 + (i % 3) * 0.11);
-      puff(ctx, drift, y, 0.8 + (i % 3) * 0.22, storm ? 'rgba(13, 24, 43, 0.9)' : 'rgba(47, 73, 91, 0.72)');
-    }
-    ctx.globalAlpha *= 0.7;
-    ctx.fillStyle = storm ? 'rgba(34, 61, 92, 0.17)' : 'rgba(87, 128, 148, 0.11)';
+    ctx.globalAlpha *= storm ? 0.34 : 0.2;
+    ctx.fillStyle = storm ? 'rgba(21, 37, 62, 0.62)' : 'rgba(61, 91, 108, 0.42)';
+    ctx.fillRect(0, seaY * 0.08, w, seaY * 0.25);
+    ctx.globalAlpha *= 0.55;
+    ctx.fillStyle = storm ? 'rgba(34, 61, 92, 0.22)' : 'rgba(87, 128, 148, 0.15)';
     ctx.fillRect(0, seaY * 0.45, w, seaY * 0.3);
   } else if (kind === 'mist') {
     ctx.globalAlpha *= 0.5;

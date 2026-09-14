@@ -304,9 +304,6 @@ export class BattleEngine {
   private bobY: number[] = [];
   /** Round-robin cursor for reusing a live particle once the cap is reached. */
   private recycle = 0;
-  /** Cached letterbox gradient, and the canvas height it was built for. */
-  private bg: CanvasGradient | null = null;
-  private bgH = -1;
   /**
    * Back rows first, so a shallower hull draws over a deeper one.
    *
@@ -2516,11 +2513,6 @@ export class BattleEngine {
     this.scale = Math.min(cssW / this.arena.w, cssH / this.arena.h) * this.dpr;
     this.offX = (canvas.width - this.arena.w * this.scale) / 2;
     this.offY = (canvas.height - this.arena.h * this.scale) / 2;
-    // The letterbox gradient is built from the transform above, so this is
-    // the one place it can go stale. A rotation can land on the same pixel
-    // height with a different scale, which a height check alone would miss.
-    this.bg = null;
-
     this.backdrop = null;
     this.backdropWeather = null;
   }
@@ -2613,50 +2605,27 @@ export class BattleEngine {
     const weather = this.weather;
     const storm = wetWeather(weather);
 
-    // Letterbox bars, painted as sky above the horizon and sea below it
-    // rather than a flat colour, so a wide desktop window reads as more sky
-    // and more water instead of a stripe of a third colour top and bottom.
-    //
-    // Built once and kept. Every input to it -- the canvas height, the
-    // viewport transform -- only changes on a resize, and a CanvasGradient is
-    // a real object the engine has to compile a colour ramp for; there is no
-    // reason to hand it a new one sixty times a second to describe a picture
-    // that has not moved.
-    if (!this.bg || this.bgH !== canvas.height) {
-      // `bgH` is belt and braces; `resize` above is what actually clears it.
-      const horizon = clamp((this.offY + this.arena.seaY * this.scale) / canvas.height, 0.04, 0.96);
-      const bg = ctx.createLinearGradient(0, 0, 0, canvas.height);
-      bg.addColorStop(0, '#071b33');
-      bg.addColorStop(Math.max(0, horizon - 0.08), '#14507f');
-      bg.addColorStop(horizon, '#2f8fb8');
-      bg.addColorStop(Math.min(1, horizon + 0.001), '#1a6a96');
-      bg.addColorStop(1, '#062744');
-      this.bg = bg;
-      this.bgH = canvas.height;
-    }
-    ctx.fillStyle = this.bg;
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    this.drawLetterboxScenery(ctx, canvas, weather);
-
-    const sx = this.shake ? (Math.random() - 0.5) * this.shake : 0;
-    const sy = this.shake ? (Math.random() - 0.5) * this.shake : 0;
-    ctx.setTransform(this.scale, 0, 0, this.scale, this.offX + sx * this.scale, this.offY + sy * this.scale);
-
     if (!this.backdrop || this.backdropWeather !== weather) {
       this.backdrop = bakeSea(this.arena, q.fancy, storm);
       this.backdropWeather = weather;
     }
     const night = Math.max(specialNightAmount(this.special), weather === 'snow' ? 0.35 : weather === 'mist' ? 0.16 : 0);
+    this.drawViewportScenery(ctx, canvas, night, q);
+
+    const sx = this.shake ? (Math.random() - 0.5) * this.shake : 0;
+    const sy = this.shake ? (Math.random() - 0.5) * this.shake : 0;
+    ctx.setTransform(this.scale, 0, 0, this.scale, this.offX + sx * this.scale, this.offY + sy * this.scale);
+
     if (this.backdrop) {
       drawSky(ctx, this.arena, night, q.fancy);
       ctx.drawImage(this.backdrop, 0, 0);
     } else drawFallbackSea(ctx, this.arena, night, storm);
 
-    drawWaves(ctx, this.arena, this.clock, storm ? q.waves + 2 : q.waves, storm ? 1.7 : 1);
+    drawWaves(ctx, this.arena, this.clock, storm ? q.waves + 1 : q.waves, storm ? 1.5 : 1);
     // Behind the ships on purpose. Rain in front of the hulls turns a six-ship
     // fleet action into a smear on the cheap phones this has to run on, and
     // the hulls are the one thing that must stay readable in a gale.
-    if (weather !== 'clear') drawWeather(ctx, this.arena, this.clock, weather, Math.round((weather === 'thunder' ? 160 : weather === 'snow' ? 72 : 100) * q.particles));
+    if (weather !== 'clear') drawWeather(ctx, this.arena, this.clock, weather, Math.round((weather === 'thunder' ? 88 : weather === 'snow' ? 48 : 64) * q.particles));
     if (this.special) drawSpecialSky(ctx, this.arena, this.special, q);
 
     for (const rock of this.rocks) if (rock.hp > 0) drawRock(ctx, rock);
@@ -2682,47 +2651,28 @@ export class BattleEngine {
   }
 
   /**
-   * The arena keeps its aspect ratio so aiming never stretches. Rather than
-   * leaving the resulting letterbox as flat paint, extend the same sky and
-   * water into it with a handful of cheap cloud and wave strokes.
+   * Fill aspect-ratio space with the same painted world instead of separate
+   * solid bars. The already-baked backdrop makes this one extra image blit;
+   * it replaces the old per-frame cloud, rain and sine-wave letterbox pass.
    */
-  private drawLetterboxScenery(ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement, weather: WeatherKind) {
-    const top = Math.max(0, Math.floor(this.offY));
-    const bottom = Math.min(canvas.height, Math.ceil(this.offY + this.arena.h * this.scale));
-    const w = canvas.width;
+  private drawViewportScenery(
+    ctx: CanvasRenderingContext2D,
+    canvas: HTMLCanvasElement,
+    night: number,
+    q: Quality,
+  ) {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (this.offX < 1 && this.offY < 1) return;
+    const cover = Math.max(canvas.width / this.arena.w, canvas.height / this.arena.h);
+    const x = (canvas.width - this.arena.w * cover) / 2;
+    const y = (canvas.height - this.arena.h * cover) / 2;
     ctx.save();
-    if (top > 6) {
-      ctx.beginPath(); ctx.rect(0, 0, w, top); ctx.clip();
-      ctx.fillStyle = weather === 'thunder' ? 'rgba(20,37,66,0.36)' : 'rgba(204,232,247,0.08)';
-      for (let i = 0; i < 5; i++) {
-        const x = ((i * 0.23 + this.clock * 0.003) % 1) * w;
-        const y = top * (0.22 + (i % 3) * 0.23);
-        ctx.beginPath(); ctx.ellipse(x, y, w * 0.1, 20 + (i % 2) * 12, 0, 0, Math.PI * 2); ctx.fill();
-      }
-      if (weather === 'rain' || weather === 'thunder') {
-        ctx.strokeStyle = 'rgba(190,226,245,0.32)'; ctx.lineWidth = Math.max(1, this.dpr);
-        ctx.beginPath();
-        for (let i = 0; i < 42; i++) {
-          const x = (i * 97 + 41) % w;
-          const y = (i * 53 + this.clock * 180) % Math.max(1, top);
-          ctx.moveTo(x, y); ctx.lineTo(x, y + 20);
-        }
-        ctx.stroke();
-      }
-    }
-    if (bottom < canvas.height - 6) {
-      ctx.beginPath(); ctx.rect(0, bottom, w, canvas.height - bottom); ctx.clip();
-      ctx.strokeStyle = weather === 'snow' ? 'rgba(181,226,246,0.24)' : 'rgba(151,220,239,0.25)';
-      ctx.lineWidth = Math.max(1, this.dpr * 1.15);
-      for (let row = 0; row < 9; row++) {
-        const y = bottom + 18 + row * 22;
-        ctx.beginPath();
-        for (let x = 0; x <= w + 40; x += 50) {
-          const yy = y + Math.sin(x * 0.017 + this.clock * 1.25 + row) * 4;
-          if (x === 0) ctx.moveTo(x, yy); else ctx.lineTo(x, yy);
-        }
-        ctx.stroke();
-      }
+    ctx.setTransform(cover, 0, 0, cover, x, y);
+    if (this.backdrop) {
+      drawSky(ctx, this.arena, night, q.fancy);
+      ctx.drawImage(this.backdrop, 0, 0);
+    } else {
+      drawFallbackSea(ctx, this.arena, night, wetWeather(this.weather));
     }
     ctx.restore();
   }
@@ -2965,21 +2915,8 @@ export class BattleEngine {
       const color = this.shotColor(p);
       const ornament = SHIPS[this.ships[p.from]?.skin]?.ornament;
 
-      if (q.fancy && (p.burn > 0 || ornament === 'seraph' || ornament === 'leviathan' || ornament === 'eclipse')) {
+      if (q.fancy && (ornament === 'seraph' || ornament === 'leviathan' || ornament === 'eclipse')) {
         ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(Math.atan2(p.vy, p.vx));
-        // A short, clock-driven wake keeps the silhouettes distinct without
-        // adding particles to the simulation or changing projectile physics.
-        if (p.burn > 0) {
-          for (let layer = 0; layer < 3; layer++) {
-            const length = p.r * (5 - layer) * (1 + Math.sin(p.age * 43 + layer) * 0.13);
-            const width = p.r * (1.2 - layer * 0.25);
-            ctx.fillStyle = ['#ff5722', '#ffb52e', '#fff4b8'][layer];
-            ctx.globalAlpha = 0.65 + layer * 0.1;
-            ctx.beginPath(); ctx.moveTo(p.r, 0);
-            ctx.quadraticCurveTo(-p.r, -width * 2, -length, Math.sin(p.age * 31) * width);
-            ctx.quadraticCurveTo(-p.r * 2, width * 2, p.r, 0); ctx.fill();
-          }
-        }
         ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineWidth = 1.5;
         for (let j = 0; j < 7; j++) {
           const phase = (p.age * 2.2 + j / 7) % 1;
@@ -2993,53 +2930,79 @@ export class BattleEngine {
           } else if (ornament === 'eclipse') {
             ctx.beginPath(); ctx.ellipse(x, y, 2, p.r * (0.5 + phase), phase * 2, 0, Math.PI * 2); ctx.stroke();
           }
-          if (p.burn > 0) {
-            ctx.fillStyle = '#ffd27d'; ctx.fillRect(x, y + Math.sin(j * 3 + p.age * 8) * 9, 3, 2); ctx.fillStyle = color;
-          }
         }
         ctx.restore();
       }
 
-      // A cheap single-stroke trail is still visible on low-end devices.
-      if (!q.trails && p.trail.length > 4) {
-        ctx.save(); ctx.strokeStyle = color; ctx.globalAlpha *= 0.45; ctx.lineWidth = p.r * 0.8;
-        ctx.beginPath(); ctx.moveTo(p.trail[0], p.trail[1]);
-        for (let i = 4; i < p.trail.length; i += 4) ctx.lineTo(p.trail[i], p.trail[i + 1]);
-        ctx.lineTo(p.x, p.y); ctx.stroke(); ctx.restore();
-      }
-      if (q.trails && p.trail.length > 4) {
+      // A flight trail is a wake of fading motes, not a polyline stapled to
+      // the cannonball. Sampling fewer history points on cheap devices keeps
+      // the silhouette while reducing both paths and overdraw.
+      if (p.trail.length > 4) {
         ctx.save();
-        ctx.lineCap = 'round';
-        for (let i = 2; i < p.trail.length; i += 2) {
-          const t = i / p.trail.length;
-          ctx.strokeStyle = color;
-          ctx.globalAlpha = t * 0.48;
-          ctx.lineWidth = p.r * 2.1 * t;
-          ctx.beginPath();
-          ctx.moveTo(p.trail[i - 2], p.trail[i - 1]);
-          ctx.lineTo(p.trail[i], p.trail[i + 1]);
-          ctx.stroke();
-          if (q.fancy && p.burn > 0 && i % 6 === 0) {
-            // Flame and smoke follow sampled flight positions, including bends
-            // in the arc, instead of being detached from the projectile path.
-            const size = p.r * (2 + t * 2.5);
-            ctx.globalAlpha = t * 0.7;
-            if (fx.fire) ctx.drawImage(fx.fire, p.trail[i] - size / 2, p.trail[i + 1] - size / 2, size, size);
-            ctx.globalAlpha = (1 - t) * 0.3;
-            if (fx.smoke) ctx.drawImage(fx.smoke, p.trail[i] - size, p.trail[i + 1] - size * 0.6, size * 2, size * 1.5);
+        const stride = q.trails ? 4 : 8;
+        for (let i = 0; i < p.trail.length - 1; i += stride) {
+          const t = Math.max(0.08, (i + 2) / p.trail.length);
+          const x = p.trail[i];
+          const y = p.trail[i + 1];
+          if (p.burn > 0) {
+            const size = p.r * (2.2 + t * 2.7);
+            if (q.fancy && fx.smoke && i % 8 === 0) {
+              const smoke = size * 1.7;
+              ctx.globalAlpha = (1 - t) * 0.24;
+              ctx.drawImage(fx.smoke, x - smoke / 2, y - smoke / 2, smoke, smoke);
+            }
+            if (fx.fire) {
+              ctx.globalAlpha = 0.22 + t * 0.62;
+              ctx.drawImage(fx.fire, x - size / 2, y - size / 2, size, size);
+            }
+            ctx.globalAlpha = t * 0.8;
+            ctx.fillStyle = t > 0.65 ? '#fff1a8' : '#ff7a24';
+            ctx.beginPath(); ctx.arc(x, y, Math.max(1.5, p.r * t * 0.45), 0, Math.PI * 2); ctx.fill();
+          } else {
+            const radius = Math.max(1.2, p.r * (0.3 + t * 0.62));
+            ctx.globalAlpha = t * 0.18;
+            ctx.fillStyle = color;
+            ctx.beginPath(); ctx.arc(x, y, radius * 2.2, 0, Math.PI * 2); ctx.fill();
+            ctx.globalAlpha = 0.2 + t * 0.58;
+            ctx.beginPath(); ctx.arc(x, y, radius, 0, Math.PI * 2); ctx.fill();
           }
         }
         ctx.restore();
       }
 
-      if (fx.spark && q.fancy) {
-        const glow = p.r * 4;
-        ctx.globalAlpha = 0.45;
+      if (p.burn > 0) {
+        // Give Firebomb its old flame-first identity back: a long turbulent
+        // tongue behind a dark iron core, backed by the cached fire sprite.
+        ctx.save();
+        ctx.translate(p.x, p.y);
+        ctx.rotate(Math.atan2(p.vy, p.vx));
+        for (let layer = 0; layer < 3; layer++) {
+          const flicker = 1 + Math.sin(p.age * 38 + layer * 2.1) * 0.12;
+          const length = p.r * (6.7 - layer * 1.45) * flicker;
+          const width = p.r * (1.7 - layer * 0.38);
+          ctx.globalAlpha = 0.78 + layer * 0.08;
+          ctx.fillStyle = ['#d93616', '#ff8b20', '#fff0a6'][layer];
+          ctx.beginPath();
+          ctx.moveTo(p.r * 0.45, 0);
+          ctx.quadraticCurveTo(-p.r * 1.2, -width, -length, Math.sin(p.age * 29 + layer) * width * 0.34);
+          ctx.quadraticCurveTo(-p.r * 1.3, width, p.r * 0.45, 0);
+          ctx.fill();
+        }
+        ctx.restore();
+      }
+
+      if (fx.spark && (q.fancy || p.burn > 0)) {
+        const glow = p.r * (p.burn > 0 ? 6.5 : 4);
+        ctx.globalAlpha = p.burn > 0 ? 0.72 : 0.45;
         ctx.drawImage(fx.spark, p.x - glow / 2, p.y - glow / 2, glow, glow);
         ctx.globalAlpha = 1;
       }
 
-      ctx.fillStyle = p.burn > 0 ? '#ffb747' : '#12161d';
+      if (p.burn > 0) {
+        ctx.fillStyle = '#ff7a1b';
+        ctx.beginPath(); ctx.arc(p.x, p.y, p.r * 1.2, 0, Math.PI * 2); ctx.fill();
+      }
+      ctx.fillStyle = p.burn > 0 ? '#49170e' : '#12161d';
       ctx.beginPath();
       ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
       ctx.fill();
@@ -3052,7 +3015,7 @@ export class BattleEngine {
         }
         ctx.restore();
       }
-      ctx.fillStyle = 'rgba(255,255,255,0.42)';
+      ctx.fillStyle = p.burn > 0 ? 'rgba(255,229,135,0.9)' : 'rgba(255,255,255,0.42)';
       ctx.beginPath();
       ctx.arc(p.x - p.r * 0.32, p.y - p.r * 0.36, p.r * 0.34, 0, Math.PI * 2);
       ctx.fill();
