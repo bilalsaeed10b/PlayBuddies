@@ -81,6 +81,21 @@ function formatHullsCode(hulls) {
     const critDamage = Number(h.critDamage) || 1;
     const aimDots = Math.round(Number(h.aimDots) || 0);
 
+    const extraProps = [];
+    if (h.hpDots !== undefined && h.hpDots !== null && h.hpDots !== '' && Number(h.hpDots) > 0) {
+      extraProps.push(`hpDots: ${Math.round(Number(h.hpDots))}`);
+    }
+    if (h.damageDots !== undefined && h.damageDots !== null && h.damageDots !== '' && Number(h.damageDots) > 0) {
+      extraProps.push(`damageDots: ${Math.round(Number(h.damageDots))}`);
+    }
+    if (h.critDots !== undefined && h.critDots !== null && h.critDots !== '' && Number(h.critDots) > 0) {
+      extraProps.push(`critDots: ${Math.round(Number(h.critDots))}`);
+    }
+    if (h.aimGuideDots !== undefined && h.aimGuideDots !== null && h.aimGuideDots !== '' && Number(h.aimGuideDots) > 0) {
+      extraProps.push(`aimGuideDots: ${Math.round(Number(h.aimGuideDots))}`);
+    }
+    const extraStr = extraProps.length > 0 ? `,\n    ${extraProps.join(', ')}` : '';
+
     return `  {
     id: ${JSON.stringify(id)},
     name: ${JSON.stringify(name)},
@@ -88,7 +103,7 @@ function formatHullsCode(hulls) {
     cost: ${JSON.stringify(cost)},
     perks: ${JSON.stringify(perks)},
     hp: ${hp}, width: ${width}, drift: ${drift}, blast: ${blast}, damage: ${damage},
-    critChance: ${critChance}, critDamage: ${critDamage}, aimDots: ${aimDots},
+    critChance: ${critChance}, critDamage: ${critDamage}, aimDots: ${aimDots}${extraStr},
   },`;
   }).join('\n');
 
@@ -410,6 +425,27 @@ const server = http.createServer((req, res) => {
                   <label>Aim Guide Extra Dots (0 - 8)</label>
                   <input type="number" step="1" class="h-aimDots" value="\${hull.aimDots ?? 0}" />
                 </div>
+                <div class="form-group full" style="border-top: 1px dashed rgba(255,255,255,0.12); padding-top: 10px; margin-top: 6px;">
+                  <label style="color: #ffd27d; font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em;">
+                    Visual Meter Dots (1 - 5, leave blank for Auto-adjust)
+                  </label>
+                </div>
+                <div class="form-group">
+                  <label>Hull Dots (1-5, blank=Auto)</label>
+                  <input type="number" min="1" max="5" class="h-hpDots" value="\${hull.hpDots ?? ''}" placeholder="Auto" />
+                </div>
+                <div class="form-group">
+                  <label>Guns Dots (1-5, blank=Auto)</label>
+                  <input type="number" min="1" max="5" class="h-damageDots" value="\${hull.damageDots ?? ''}" placeholder="Auto" />
+                </div>
+                <div class="form-group">
+                  <label>Critical Dots (1-5, blank=Auto)</label>
+                  <input type="number" min="1" max="5" class="h-critDots" value="\${hull.critDots ?? ''}" placeholder="Auto" />
+                </div>
+                <div class="form-group">
+                  <label>Aim Dots (1-5, blank=Auto)</label>
+                  <input type="number" min="1" max="5" class="h-aimGuideDots" value="\${hull.aimGuideDots ?? ''}" placeholder="Auto" />
+                </div>
               </div>
             \`;
             return card;
@@ -495,7 +531,12 @@ const server = http.createServer((req, res) => {
               const perksRaw = card.querySelector('.h-perks').value;
               const perks = perksRaw.split(',').map(p => p.trim()).filter(Boolean);
 
-              data.hulls.push({
+              const hpDotsVal = card.querySelector('.h-hpDots')?.value.trim();
+              const damageDotsVal = card.querySelector('.h-damageDots')?.value.trim();
+              const critDotsVal = card.querySelector('.h-critDots')?.value.trim();
+              const aimGuideDotsVal = card.querySelector('.h-aimGuideDots')?.value.trim();
+
+              const hullObj = {
                 id,
                 name,
                 blurb,
@@ -509,7 +550,14 @@ const server = http.createServer((req, res) => {
                 critChance: Number(card.querySelector('.h-critChance').value) || 0,
                 critDamage: Number(card.querySelector('.h-critDamage').value) || 1,
                 aimDots: Number(card.querySelector('.h-aimDots').value) || 0,
-              });
+              };
+
+              if (hpDotsVal !== '' && hpDotsVal !== undefined) hullObj.hpDots = Number(hpDotsVal);
+              if (damageDotsVal !== '' && damageDotsVal !== undefined) hullObj.damageDots = Number(damageDotsVal);
+              if (critDotsVal !== '' && critDotsVal !== undefined) hullObj.critDots = Number(critDotsVal);
+              if (aimGuideDotsVal !== '' && aimGuideDotsVal !== undefined) hullObj.aimGuideDots = Number(aimGuideDotsVal);
+
+              data.hulls.push(hullObj);
             });
 
             try {

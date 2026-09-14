@@ -21,7 +21,7 @@ import {
 import { askHostToEndGame, askToLeaveLobby, toggleFullscreen } from './fullscreen';
 import { FREE_SHIPS, SHIPS, drawShip } from './game/ships';
 import { WEATHER_CHOICES, weatherFor, wetWeather } from './game/weather';
-import { HULLS } from './game/hulls';
+import { HULLS, getHullStatDots } from './game/hulls';
 import { BALANCE, CARDS, CARD_ORDER, TEAM_COLORS } from './game/rules';
 import { TIERS } from './engine/ai';
 import { audioService } from './services/audio';
@@ -1182,7 +1182,7 @@ function HullGrid({
   pickedBy?: Record<number, string[]>;
 }) {
   return (
-    <div className="grid grid-cols-2 gap-2 sm:gap-3 short:grid-cols-4 short:gap-1.5">
+    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2.5 sm:gap-3 short:grid-cols-4 short:gap-1.5">
       {HULLS.map((hull, i) => {
         const isSelected = selected === i;
         const others = pickedBy?.[i] ?? [];
@@ -1190,7 +1190,7 @@ function HullGrid({
           <button
             key={hull.id}
             onClick={() => onPick(i)}
-            className={`flex flex-col gap-2 rounded-2xl border p-3 text-left transition-colors short:gap-1 short:p-2 ${
+            className={`flex flex-col gap-2 rounded-2xl border p-3 sm:p-3.5 text-left transition-colors short:gap-1 short:p-2 ${
               isSelected
                 ? 'border-amber-400 bg-amber-400/15'
                 : 'border-white/15 bg-white/5 hover:bg-white/10'
@@ -1200,7 +1200,7 @@ function HullGrid({
               <span className="truncate text-sm font-black">{hull.name}</span>
               {isSelected && <Check className="h-3.5 w-3.5 shrink-0 text-amber-300" />}
             </div>
-            <p className="text-[10px] leading-snug text-white/55 short:hidden">{hull.blurb}</p>
+            <p className="text-[10.5px] leading-snug text-white/60 short:hidden">{hull.blurb}</p>
             <HullMeters hull={hull} />
             <p className="text-[9px] font-black uppercase tracking-wider text-rose-300/80">
               {hull.cost}
@@ -1332,7 +1332,7 @@ function OfflinePick({
       {choosingHull ? (
         <div className="space-y-3">
           <p className="text-center text-[11px] font-semibold text-white/45">
-            All four are free and always have been. Pick how you want to fight, not what you paid for.
+            All {HULLS.length} are free and always have been. Pick how you want to fight, not what you paid for.
           </p>
           <HullGrid selected={hulls[seat] ?? 0} onPick={pickHull} pickedBy={hullPickedBy} />
         </div>
@@ -1620,7 +1620,7 @@ function RoomScreen({
    * neither of them readable; a tab costs one row.
    */
   const shipGridPanel = (extra: string) => (
-    <div className={`panel flex min-h-0 flex-col rounded-[2rem] p-3 sm:p-6 ${extra}`}>
+    <div className={`panel flex min-h-0 flex-col rounded-[2rem] p-3 sm:p-5 lg:p-5 xl:p-6 min-h-[520px] lg:min-h-[600px] xl:min-h-[660px] ${extra}`}>
       <div className="mb-3 flex shrink-0 gap-1 rounded-xl bg-black/30 p-1">
         {(['ship', 'hull'] as const).map((t) => (
           <button
@@ -1634,11 +1634,11 @@ function RoomScreen({
           </button>
         ))}
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1.5 scrollbar-thin">
         {tab === 'ship' ? (
           <ShipGrid owned={owned} coins={coins} selected={mine ?? null} pickedBy={pickedBy} onPick={onPick} />
         ) : (
-          <div className="space-y-3">
+          <div className="space-y-3 pb-3">
             <p className="text-center text-[11px] font-semibold text-white/45">
               All {HULLS.length} are free. The paint is what you bought; this is how you fight.
             </p>
@@ -1753,17 +1753,17 @@ function RoomScreen({
           the mountain and the reload that decide most battles. */}
       <button
         onClick={onRules}
-        className="relative flex shrink-0 items-center gap-3 overflow-hidden rounded-2xl border-2 border-amber-400/60 bg-amber-400/10 px-4 py-3 text-left transition-transform active:scale-[0.99] short:hidden"
+        className="relative flex shrink-0 items-center gap-3 overflow-hidden rounded-2xl border-2 border-amber-400/60 bg-amber-400/10 px-3.5 py-2 sm:px-4 sm:py-2.5 text-left transition-transform active:scale-[0.99] short:hidden"
       >
-        <span className="absolute -right-6 -top-6 h-16 w-16 animate-pulse rounded-full bg-amber-400/20" aria-hidden />
-        <ScrollText className="h-6 w-6 shrink-0 text-amber-300" />
+        <span className="absolute -right-6 -top-6 h-14 w-14 animate-pulse rounded-full bg-amber-400/20" aria-hidden />
+        <ScrollText className="h-5 w-5 shrink-0 text-amber-300" />
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-black uppercase tracking-wide text-amber-200">
+          <p className="text-xs sm:text-sm font-black uppercase tracking-wide text-amber-200">
             {isHost ? 'New here? Read the rules' : 'How weather and cards work'}
           </p>
-          <p className="text-[11px] font-bold text-amber-300/70">Worth 30 seconds before the first shot.</p>
+          <p className="text-[10px] sm:text-[11px] font-bold text-amber-300/70">Worth 30 seconds before the first shot.</p>
         </div>
-        <span className="shrink-0 rounded-xl bg-amber-400 px-3 py-1.5 text-[11px] font-black uppercase tracking-wide text-slate-900">
+        <span className="shrink-0 rounded-xl bg-amber-400 px-2.5 py-1 sm:px-3 sm:py-1.5 text-[10px] sm:text-[11px] font-black uppercase tracking-wide text-slate-900">
           Guide
         </span>
       </button>
@@ -1952,23 +1952,30 @@ function FriendsLeaderboard({
 
 /** Visual role profile. Values are relative to the strongest available role. */
 function HullMeters({ hull }: { hull: typeof HULLS[number] }) {
+  const statDots = getHullStatDots(hull);
   const meters = [
-    { label: 'Hull', value: hull.hp / 1.35, color: 'bg-emerald-400' },
-    { label: 'Guns', value: hull.damage / 1.18, color: 'bg-amber-400' },
-    { label: 'Critical', value: hull.critChance / 0.32, color: 'bg-rose-400' },
-    { label: 'Aim', value: hull.aimDots / 4, color: 'bg-cyan-300' },
+    { label: 'Hull', dots: statDots.hpDots, color: 'bg-emerald-400' },
+    { label: 'Guns', dots: statDots.damageDots, color: 'bg-amber-400' },
+    { label: 'Critical', dots: statDots.critDots, color: 'bg-rose-400' },
+    { label: 'Aim', dots: statDots.aimGuideDots, color: 'bg-cyan-300' },
   ];
   return (
     <div className="grid grid-cols-2 gap-x-2 gap-y-1.5 short:hidden">
       {meters.map((meter) => {
-        const level = Math.max(0, Math.min(1, meter.value));
+        const filled = Math.max(1, Math.min(5, meter.dots));
+        const empty = 5 - filled;
+        const percent = (filled / 5) * 100;
         return (
-          <div key={meter.label} title={`${meter.label}: ${Math.round(level * 5)} of 5`}>
+          <div key={meter.label} title={`${meter.label}: ${filled} of 5`}>
             <div className="mb-0.5 flex justify-between text-[8px] font-black uppercase tracking-wider text-white/45">
-              <span>{meter.label}</span><span>{'●'.repeat(Math.max(1, Math.round(level * 5)))}</span>
+              <span>{meter.label}</span>
+              <span className="tracking-[1px]">
+                <span className="text-white/90">{'●'.repeat(filled)}</span>
+                {empty > 0 && <span className="text-white/25">{'●'.repeat(empty)}</span>}
+              </span>
             </div>
             <span className="block h-1.5 overflow-hidden rounded-full bg-white/10">
-              <span className={`block h-full rounded-full ${meter.color}`} style={{ width: `${Math.max(5, level * 100)}%` }} />
+              <span className={`block h-full rounded-full ${meter.color}`} style={{ width: `${percent}%` }} />
             </span>
           </div>
         );
