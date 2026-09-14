@@ -4,7 +4,7 @@ import { loadModule } from './loadModule.mjs';
 
 const { BattleEngine } = await loadModule(new URL('../src/engine/BattleEngine.ts', import.meta.url));
 const { DEFAULT_RULES, packRules, unpackRules } = await loadModule(new URL('../src/types/game.ts', import.meta.url));
-const { WEATHER, weatherFor, weatherForRound, wetWeather } = await loadModule(new URL('../src/game/weather.ts', import.meta.url));
+const { WEATHER, weatherFor, weatherForMatch, wetWeather } = await loadModule(new URL('../src/game/weather.ts', import.meta.url));
 const { drawWeather } = await loadModule(new URL('../src/game/sea.ts', import.meta.url));
 const { arenaFor } = await loadModule(new URL('../src/game/rules.ts', import.meta.url));
 
@@ -29,15 +29,12 @@ test('all weather choices survive wire encoding and old storm rooms become rain'
   assert.deepEqual(unpackRules(packRules(random)), random);
 });
 
-test('random weather uses one shared seeded deck and changes at each round', () => {
+test('random weather chooses one shared seeded sky for the complete match', () => {
   const rules = { ...DEFAULT_RULES, weather: 'random', storm: false };
-  const first = Array.from({ length: WEATHER.length }, (_, round) => weatherForRound(rules, 3129, round));
-  assert.equal(new Set(first).size, WEATHER.length);
-  assert.deepEqual(
-    first,
-    Array.from({ length: WEATHER.length }, (_, round) => weatherForRound(rules, 3129, round)),
-  );
-  assert.equal(weatherForRound(rules, 3129, WEATHER.length), first[0]);
+  const opening = weatherForMatch(rules, 3129);
+  for (let read = 0; read < 20; read++) assert.equal(weatherForMatch(rules, 3129), opening);
+  const seededSkies = Array.from({ length: 32 }, (_, seed) => weatherForMatch(rules, seed));
+  assert.ok(new Set(seededSkies).size > 1, 'different matches should still get varied weather');
 });
 
 test('weather never changes flight, damage, cards or between-turn drift', () => {

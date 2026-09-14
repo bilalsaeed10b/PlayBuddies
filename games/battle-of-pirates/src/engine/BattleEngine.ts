@@ -21,7 +21,7 @@
 import { fxSprites, bakeSea, drawSky, drawFallbackSea, drawRock, drawWaves, drawWeather, rockRadius } from '../game/sea';
 import { SHIPS, drawFlag, drawShip } from '../game/ships';
 import { HULLS, hullAt } from '../game/hulls';
-import { weatherForRound, wetWeather, THUNDER_PERIOD, THUNDER_SOUND, type WeatherKind } from '../game/weather';
+import { weatherForMatch, wetWeather, THUNDER_PERIOD, THUNDER_SOUND, type WeatherKind } from '../game/weather';
 import type { HullClass } from '../game/hulls';
 import {
   BALANCE,
@@ -363,7 +363,7 @@ export class BattleEngine {
    */
   private damageTexts: DamageText[] = [];
   private backdrop: HTMLCanvasElement | null = null;
-  /** The sky used to bake `backdrop`; random weather only rebuilds between rounds. */
+  /** The expanded sky and sea bake; rebuilt only after a resize or quality change. */
   private backdropWeather: WeatherKind | null = null;
   private acc = 0;
   private clock = 0;
@@ -639,9 +639,9 @@ export class BattleEngine {
     this.drawOrder = this.ships.map((_, i) => i).sort((a, b) => this.waterLevelFor(a) - this.waterLevelFor(b));
   }
 
-  /** The shown weather changes only on a complete fleet cycle, never mid-shot. */
+  /** One deterministic weather choice for the complete match. */
   get weather(): WeatherKind {
-    return weatherForRound(this.cfg.rules, this.cfg.seed, Math.floor(this.turnNo / Math.max(1, this.ships.length)));
+    return weatherForMatch(this.cfg.rules, this.cfg.seed);
   }
 
   /**
@@ -2605,27 +2605,35 @@ export class BattleEngine {
     const weather = this.weather;
     const storm = wetWeather(weather);
 
+    // Paint one genuinely expanded world at the current viewport aspect.
+    // Gameplay keeps the same fixed arena and transform, so ballistics and
+    // pointer aiming do not change; only the scenery grows into the extra
+    // world space above/below or beside it.
+    const padY = this.offY / this.scale;
+    const sceneryArena: Arena = {
+      ...this.arena,
+      w: canvas.width / this.scale,
+      h: canvas.height / this.scale,
+      seaY: this.arena.seaY + padY,
+      deepSeaY: this.arena.deepSeaY + padY,
+    };
     if (!this.backdrop || this.backdropWeather !== weather) {
-      this.backdrop = bakeSea(this.arena, q.fancy, storm);
+      this.backdrop = bakeSea(sceneryArena, q.fancy, storm);
       this.backdropWeather = weather;
     }
     const night = Math.max(specialNightAmount(this.special), weather === 'snow' ? 0.35 : weather === 'mist' ? 0.16 : 0);
-    this.drawViewportScenery(ctx, canvas, night, q);
+    ctx.setTransform(this.scale, 0, 0, this.scale, 0, 0);
+    if (this.backdrop) {
+      drawSky(ctx, sceneryArena, night, q.fancy);
+      ctx.drawImage(this.backdrop, 0, 0);
+    } else drawFallbackSea(ctx, sceneryArena, night, storm);
+    drawWaves(ctx, sceneryArena, this.clock, storm ? q.waves + 1 : q.waves, storm ? 1.5 : 1);
+    if (weather !== 'clear') drawWeather(ctx, sceneryArena, this.clock, weather, Math.round((weather === 'thunder' ? 88 : weather === 'snow' ? 48 : 64) * q.particles));
 
     const sx = this.shake ? (Math.random() - 0.5) * this.shake : 0;
     const sy = this.shake ? (Math.random() - 0.5) * this.shake : 0;
     ctx.setTransform(this.scale, 0, 0, this.scale, this.offX + sx * this.scale, this.offY + sy * this.scale);
 
-    if (this.backdrop) {
-      drawSky(ctx, this.arena, night, q.fancy);
-      ctx.drawImage(this.backdrop, 0, 0);
-    } else drawFallbackSea(ctx, this.arena, night, storm);
-
-    drawWaves(ctx, this.arena, this.clock, storm ? q.waves + 1 : q.waves, storm ? 1.5 : 1);
-    // Behind the ships on purpose. Rain in front of the hulls turns a six-ship
-    // fleet action into a smear on the cheap phones this has to run on, and
-    // the hulls are the one thing that must stay readable in a gale.
-    if (weather !== 'clear') drawWeather(ctx, this.arena, this.clock, weather, Math.round((weather === 'thunder' ? 88 : weather === 'snow' ? 48 : 64) * q.particles));
     if (this.special) drawSpecialSky(ctx, this.arena, this.special, q);
 
     for (const rock of this.rocks) if (rock.hp > 0) drawRock(ctx, rock);
@@ -2648,33 +2656,6 @@ export class BattleEngine {
     this.drawOffscreenMarkers(ctx);
     this.drawCall(ctx);
     this.drawFeed(ctx);
-  }
-
-  /**
-   * Fill aspect-ratio space with the same painted world instead of separate
-   * solid bars. The already-baked backdrop makes this one extra image blit;
-   * it replaces the old per-frame cloud, rain and sine-wave letterbox pass.
-   */
-  private drawViewportScenery(
-    ctx: CanvasRenderingContext2D,
-    canvas: HTMLCanvasElement,
-    night: number,
-    q: Quality,
-  ) {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    if (this.offX < 1 && this.offY < 1) return;
-    const cover = Math.max(canvas.width / this.arena.w, canvas.height / this.arena.h);
-    const x = (canvas.width - this.arena.w * cover) / 2;
-    const y = (canvas.height - this.arena.h * cover) / 2;
-    ctx.save();
-    ctx.setTransform(cover, 0, 0, cover, x, y);
-    if (this.backdrop) {
-      drawSky(ctx, this.arena, night, q.fancy);
-      ctx.drawImage(this.backdrop, 0, 0);
-    } else {
-      drawFallbackSea(ctx, this.arena, night, wetWeather(this.weather));
-    }
-    ctx.restore();
   }
 
   private drawOneShip(ctx: CanvasRenderingContext2D, i: number, q: Quality) {
@@ -2915,8 +2896,21 @@ export class BattleEngine {
       const color = this.shotColor(p);
       const ornament = SHIPS[this.ships[p.from]?.skin]?.ornament;
 
-      if (q.fancy && (ornament === 'seraph' || ornament === 'leviathan' || ornament === 'eclipse')) {
+      if (q.fancy && (p.burn > 0 || ornament === 'seraph' || ornament === 'leviathan' || ornament === 'eclipse')) {
         ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(Math.atan2(p.vy, p.vx));
+        // A short, clock-driven wake keeps the silhouettes distinct without
+        // adding particles to the simulation or changing projectile physics.
+        if (p.burn > 0) {
+          for (let layer = 0; layer < 3; layer++) {
+            const length = p.r * (5 - layer) * (1 + Math.sin(p.age * 43 + layer) * 0.13);
+            const width = p.r * (1.2 - layer * 0.25);
+            ctx.fillStyle = ['#ff5722', '#ffb52e', '#fff4b8'][layer];
+            ctx.globalAlpha = 0.65 + layer * 0.1;
+            ctx.beginPath(); ctx.moveTo(p.r, 0);
+            ctx.quadraticCurveTo(-p.r, -width * 2, -length, Math.sin(p.age * 31) * width);
+            ctx.quadraticCurveTo(-p.r * 2, width * 2, p.r, 0); ctx.fill();
+          }
+        }
         ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineWidth = 1.5;
         for (let j = 0; j < 7; j++) {
           const phase = (p.age * 2.2 + j / 7) % 1;
@@ -2930,79 +2924,37 @@ export class BattleEngine {
           } else if (ornament === 'eclipse') {
             ctx.beginPath(); ctx.ellipse(x, y, 2, p.r * (0.5 + phase), phase * 2, 0, Math.PI * 2); ctx.stroke();
           }
-        }
-        ctx.restore();
-      }
-
-      // A flight trail is a wake of fading motes, not a polyline stapled to
-      // the cannonball. Sampling fewer history points on cheap devices keeps
-      // the silhouette while reducing both paths and overdraw.
-      if (p.trail.length > 4) {
-        ctx.save();
-        const stride = q.trails ? 4 : 8;
-        for (let i = 0; i < p.trail.length - 1; i += stride) {
-          const t = Math.max(0.08, (i + 2) / p.trail.length);
-          const x = p.trail[i];
-          const y = p.trail[i + 1];
           if (p.burn > 0) {
-            const size = p.r * (2.2 + t * 2.7);
-            if (q.fancy && fx.smoke && i % 8 === 0) {
-              const smoke = size * 1.7;
-              ctx.globalAlpha = (1 - t) * 0.24;
-              ctx.drawImage(fx.smoke, x - smoke / 2, y - smoke / 2, smoke, smoke);
-            }
-            if (fx.fire) {
-              ctx.globalAlpha = 0.22 + t * 0.62;
-              ctx.drawImage(fx.fire, x - size / 2, y - size / 2, size, size);
-            }
-            ctx.globalAlpha = t * 0.8;
-            ctx.fillStyle = t > 0.65 ? '#fff1a8' : '#ff7a24';
-            ctx.beginPath(); ctx.arc(x, y, Math.max(1.5, p.r * t * 0.45), 0, Math.PI * 2); ctx.fill();
-          } else {
-            const radius = Math.max(1.2, p.r * (0.3 + t * 0.62));
-            ctx.globalAlpha = t * 0.18;
-            ctx.fillStyle = color;
-            ctx.beginPath(); ctx.arc(x, y, radius * 2.2, 0, Math.PI * 2); ctx.fill();
-            ctx.globalAlpha = 0.2 + t * 0.58;
-            ctx.beginPath(); ctx.arc(x, y, radius, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = '#ffd27d'; ctx.fillRect(x, y + Math.sin(j * 3 + p.age * 8) * 9, 3, 2); ctx.fillStyle = color;
           }
         }
         ctx.restore();
       }
 
-      if (p.burn > 0) {
-        // Give Firebomb its old flame-first identity back: a long turbulent
-        // tongue behind a dark iron core, backed by the cached fire sprite.
+      if (q.trails && p.trail.length > 4) {
         ctx.save();
-        ctx.translate(p.x, p.y);
-        ctx.rotate(Math.atan2(p.vy, p.vx));
-        for (let layer = 0; layer < 3; layer++) {
-          const flicker = 1 + Math.sin(p.age * 38 + layer * 2.1) * 0.12;
-          const length = p.r * (6.7 - layer * 1.45) * flicker;
-          const width = p.r * (1.7 - layer * 0.38);
-          ctx.globalAlpha = 0.78 + layer * 0.08;
-          ctx.fillStyle = ['#d93616', '#ff8b20', '#fff0a6'][layer];
+        ctx.lineCap = 'round';
+        for (let i = 2; i < p.trail.length; i += 2) {
+          const t = i / p.trail.length;
+          ctx.strokeStyle = color;
+          ctx.globalAlpha = t * 0.48;
+          ctx.lineWidth = p.r * 2.1 * t;
           ctx.beginPath();
-          ctx.moveTo(p.r * 0.45, 0);
-          ctx.quadraticCurveTo(-p.r * 1.2, -width, -length, Math.sin(p.age * 29 + layer) * width * 0.34);
-          ctx.quadraticCurveTo(-p.r * 1.3, width, p.r * 0.45, 0);
-          ctx.fill();
+          ctx.moveTo(p.trail[i - 2], p.trail[i - 1]);
+          ctx.lineTo(p.trail[i], p.trail[i + 1]);
+          ctx.stroke();
         }
         ctx.restore();
       }
 
-      if (fx.spark && (q.fancy || p.burn > 0)) {
-        const glow = p.r * (p.burn > 0 ? 6.5 : 4);
-        ctx.globalAlpha = p.burn > 0 ? 0.72 : 0.45;
+      if (fx.spark && q.fancy) {
+        const glow = p.r * 4;
+        ctx.globalAlpha = 0.45;
         ctx.drawImage(fx.spark, p.x - glow / 2, p.y - glow / 2, glow, glow);
         ctx.globalAlpha = 1;
       }
 
-      if (p.burn > 0) {
-        ctx.fillStyle = '#ff7a1b';
-        ctx.beginPath(); ctx.arc(p.x, p.y, p.r * 1.2, 0, Math.PI * 2); ctx.fill();
-      }
-      ctx.fillStyle = p.burn > 0 ? '#49170e' : '#12161d';
+      ctx.fillStyle = '#12161d';
       ctx.beginPath();
       ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
       ctx.fill();
@@ -3015,7 +2967,7 @@ export class BattleEngine {
         }
         ctx.restore();
       }
-      ctx.fillStyle = p.burn > 0 ? 'rgba(255,229,135,0.9)' : 'rgba(255,255,255,0.42)';
+      ctx.fillStyle = 'rgba(255,255,255,0.42)';
       ctx.beginPath();
       ctx.arc(p.x - p.r * 0.32, p.y - p.r * 0.36, p.r * 0.34, 0, Math.PI * 2);
       ctx.fill();

@@ -7,11 +7,11 @@ export const WEATHER = [
   { id: 'snow', name: 'Snowfall', hint: 'Cold blue water and slowly falling snow.' },
 ] as const;
 export type WeatherKind = typeof WEATHER[number]['id'];
-/** Random chooses a new cosmetic weather at the start of every full fleet round. */
+/** Random chooses one cosmetic weather for the whole match. */
 export type WeatherChoice = WeatherKind | 'random';
 
 export const WEATHER_CHOICES = [
-  { id: 'random', name: 'Random each round', hint: 'A fresh sky rolls in after every full fleet cycle.' },
+  { id: 'random', name: 'Random match weather', hint: 'One sky is chosen at launch and stays for the whole battle.' },
   ...WEATHER,
 ] as const;
 
@@ -21,18 +21,15 @@ export function weatherFor(rules: { storm: boolean; weather?: WeatherChoice }): 
 }
 
 /**
- * A weather roll is derived from match data, never from wall time. That keeps
- * every spectator and reconnecting player looking at the same sea without a
- * weather packet in the turn protocol.
+ * The weather roll is derived once from the match seed, never from wall time
+ * or turn number. Every peer therefore keeps the same sky for the full battle
+ * without another field in the turn protocol.
  */
-export function weatherForRound(rules: { storm: boolean; weather?: WeatherChoice }, seed: number, round: number): WeatherKind {
+export function weatherForMatch(rules: { storm: boolean; weather?: WeatherChoice }, seed: number): WeatherKind {
   if (rules.weather !== 'random') return weatherFor(rules);
-  // Randomize the opening sky from the match seed, then step through the
-  // weather deck. This is still random from a player's perspective, while
-  // guaranteeing that a new round never looks identical by coincidence.
   let n = seed >>> 0;
   n ^= n >>> 16; n = Math.imul(n, 0x85ebca6b) >>> 0; n ^= n >>> 13;
-  return WEATHER[((n >>> 0) + round) % WEATHER.length].id;
+  return WEATHER[(n >>> 0) % WEATHER.length].id;
 }
 export const wetWeather = (kind: WeatherChoice) => kind === 'rain' || kind === 'thunder';
 

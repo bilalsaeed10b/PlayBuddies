@@ -2459,7 +2459,7 @@ function RulesPanel({
 
         <div className="space-y-2">
           <p className="text-sm font-bold">Weather</p>
-          <p className="text-[11px] text-white/50">Random is the default: a new sky rolls in each round. Rain falls straight down; weather does not change your aim.</p>
+          <p className="text-[11px] text-white/50">Random is the default: one sky is chosen when the match starts and stays until it ends. Rain falls straight down; weather does not change your aim.</p>
           <div className="grid grid-cols-2 gap-2">
             {WEATHER_CHOICES.map(option => (
               <button key={option.id} disabled={!editable} aria-pressed={rules.weather === option.id || (!rules.weather && weatherFor(rules) === option.id)}
