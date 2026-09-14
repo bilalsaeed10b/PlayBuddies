@@ -1457,6 +1457,7 @@ function RoomScreen({
   /** Paint or class. Paint first, because it is the one with a price on it. */
   const [tab, setTab] = useState<'ship' | 'hull'>('ship');
   const [showTeams, setShowTeams] = useState(false);
+  const [showLeaderboard, setShowLeaderboard] = useState(false);
 
   if (error) {
     return (
@@ -1507,8 +1508,16 @@ function RoomScreen({
         </p>
       </div>
       <div className="flex w-full shrink-0 items-center justify-end gap-1.5 sm:w-auto sm:gap-2">
+        <button
+          onClick={() => setShowLeaderboard(true)}
+          className="panel flex items-center gap-2 rounded-2xl p-2.5 text-xs font-black text-amber-200 sm:px-3 sm:py-2"
+          title="Friends leaderboard"
+          aria-label="Friends leaderboard"
+        >
+          <Trophy className="h-4 w-4 text-amber-300" /> <span className="hidden sm:inline">Leaderboard</span>
+        </button>
         <button onClick={onStats} className="panel flex items-center gap-2 rounded-2xl p-2.5 text-xs font-black text-sky-200 sm:px-3 sm:py-2" title="Captain statistics" aria-label="Captain statistics">
-          <Trophy className="h-4 w-4 text-amber-300" /> <span className="hidden sm:inline">Stats</span>
+          <Target className="h-4 w-4 text-sky-300" /> <span className="hidden sm:inline">Stats</span>
         </button>
         <div className="panel flex items-center gap-1.5 rounded-2xl px-2.5 py-2 font-bold text-amber-300 sm:gap-2 sm:px-3">
           <Coins className="h-4 w-4" /> {coins}
@@ -1737,6 +1746,9 @@ function RoomScreen({
           {shipGridPanel('flex-1')}
         </div>
         {teamManager}
+        {showLeaderboard && (
+          <LeaderboardModal people={people} uid={uid} stats={stats} onClose={() => setShowLeaderboard(false)} />
+        )}
       </>
     );
   }
@@ -1838,15 +1850,14 @@ function RoomScreen({
             )}
           </div>
 
-          <div className="hidden lg:block">
-            <FriendsLeaderboard people={people} uid={uid} stats={stats} />
-          </div>
-
             {desktopCta}
           </div>
         </div>
       </div>
       {teamManager}
+      {showLeaderboard && (
+        <LeaderboardModal people={people} uid={uid} stats={stats} onClose={() => setShowLeaderboard(false)} />
+      )}
     </>
   );
 }
@@ -1855,21 +1866,21 @@ type PublicAimTotals = {
   allTime: { shots: number; hits: number };
   week: { id: string; shots: number; hits: number };
 };
-
 /**
- * A small lobby-only ladder. It fetches one known document per captain rather
- * than querying a collection, so a player can compare with friends in their
- * room without turning aim stats into a browsable public directory.
+ * A modal dialog for the friends leaderboard. Accessible via the header button.
  */
-function FriendsLeaderboard({
+function LeaderboardModal({
   people,
   uid,
   stats,
+  onClose,
 }: {
   people: { uid: string; displayName: string; photoURL?: string }[];
   uid: string | null;
   stats: Stats;
+  onClose: () => void;
 }) {
+  useEscape(true, onClose);
   const [tab, setTab] = useState<'weekly' | 'all-time'>('weekly');
   const [remote, setRemote] = useState<Record<string, PublicAimTotals>>({});
   const rosterKey = people.map((person) => person.uid).sort().join(',');
@@ -1913,40 +1924,49 @@ function FriendsLeaderboard({
     .sort((a, b) => b.percent - a.percent || b.shots - a.shots || a.displayName.localeCompare(b.displayName));
 
   return (
-    <section className="panel overflow-hidden rounded-[2rem] p-4">
-      <div className="mb-3 flex items-center justify-between gap-2">
-        <div>
-          <p className="flex items-center gap-1.5 text-xs font-black uppercase tracking-[0.16em] text-amber-200">
-            <Trophy className="h-3.5 w-3.5 text-amber-300" /> Friends leaderboard
-          </p>
-          <p className="mt-0.5 text-[10px] font-semibold text-white/45">Ranked by aim accuracy</p>
-        </div>
-        <div className="flex rounded-lg bg-black/30 p-0.5 text-[9px] font-black uppercase tracking-wide">
-          <button onClick={() => setTab('weekly')} className={`rounded-md px-2 py-1 ${tab === 'weekly' ? 'bg-amber-400 text-slate-950' : 'text-white/50'}`}>Weekly</button>
-          <button onClick={() => setTab('all-time')} className={`rounded-md px-2 py-1 ${tab === 'all-time' ? 'bg-amber-400 text-slate-950' : 'text-white/50'}`}>All time</button>
-        </div>
-      </div>
-      <div className="space-y-1.5">
-        {rows.map((row, index) => (
-          <div key={row.uid} className={`rounded-xl px-2 py-1.5 ${row.uid === uid ? 'bg-amber-400/15 ring-1 ring-amber-400/35' : 'bg-black/20'}`}>
-            <div className="flex items-center gap-2 text-[11px]">
-              <span className="w-4 text-center font-black tabular-nums text-amber-300">{index + 1}</span>
-              <span className="min-w-0 flex-1 truncate font-bold">{row.displayName}{row.uid === uid ? ' · you' : ''}</span>
-              <span className="font-black tabular-nums text-amber-200">{row.shots > 0 ? `${row.percent}%` : '—'}</span>
-            </div>
-            <div className="ml-6 mt-1 flex items-center gap-2">
-              <span className="h-1 min-w-0 flex-1 overflow-hidden rounded-full bg-white/10">
-                <span className="block h-full rounded-full bg-amber-400" style={{ width: `${row.shots > 0 ? Math.max(4, row.percent) : 0}%` }} />
-              </span>
-              <span className="w-14 text-right text-[9px] font-semibold tabular-nums text-white/45">{row.hits}/{row.shots} hits</span>
-            </div>
+    <div {...scrimProps(onClose)} className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/75 p-4 backdrop-blur-sm">
+      <div className="panel max-h-[88dvh] w-full max-w-md overflow-hidden rounded-[2rem] p-5 sm:p-6" onClick={(e) => e.stopPropagation()}>
+        <div className="mb-3.5 flex items-start justify-between gap-2">
+          <div>
+            <h3 className="flex items-center gap-2 text-lg font-black tracking-tight text-amber-200">
+              <Trophy className="h-5 w-5 text-amber-300" /> Friends leaderboard
+            </h3>
+            <p className="mt-0.5 text-xs font-semibold text-white/50">Ranked by aim accuracy across open water</p>
           </div>
-        ))}
+          <button onClick={onClose} aria-label="Close leaderboard" className="rounded-xl p-2 text-white/65 hover:bg-white/10">
+            <ArrowLeft className="h-5 w-5" />
+          </button>
+        </div>
+
+        <div className="mb-3 flex justify-end">
+          <div className="flex rounded-lg bg-black/30 p-0.5 text-[10px] font-black uppercase tracking-wide">
+            <button onClick={() => setTab('weekly')} className={`rounded-md px-2.5 py-1 ${tab === 'weekly' ? 'bg-amber-400 text-slate-950' : 'text-white/50'}`}>Weekly</button>
+            <button onClick={() => setTab('all-time')} className={`rounded-md px-2.5 py-1 ${tab === 'all-time' ? 'bg-amber-400 text-slate-950' : 'text-white/50'}`}>All time</button>
+          </div>
+        </div>
+
+        <div className="max-h-[50dvh] space-y-2 overflow-y-auto overscroll-contain pr-1">
+          {rows.map((row, index) => (
+            <div key={row.uid} className={`rounded-2xl px-3 py-2 ${row.uid === uid ? 'bg-amber-400/15 ring-1 ring-amber-400/35' : 'bg-black/20'}`}>
+              <div className="flex items-center gap-2 text-xs">
+                <span className="w-5 text-center font-black tabular-nums text-amber-300">{index + 1}</span>
+                <span className="min-w-0 flex-1 truncate font-bold">{row.displayName}{row.uid === uid ? ' · you' : ''}</span>
+                <span className="font-black tabular-nums text-amber-200">{row.shots > 0 ? `${row.percent}%` : '—'}</span>
+              </div>
+              <div className="ml-7 mt-1.5 flex items-center gap-2">
+                <span className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-white/10">
+                  <span className="block h-full rounded-full bg-amber-400" style={{ width: `${row.shots > 0 ? Math.max(4, row.percent) : 0}%` }} />
+                </span>
+                <span className="w-16 text-right text-[10px] font-semibold tabular-nums text-white/50">{row.hits}/{row.shots} hits</span>
+              </div>
+            </div>
+          ))}
+        </div>
+        <p className="mt-4 text-[10px] font-semibold leading-relaxed text-white/40">
+          {tab === 'weekly' ? 'This week only. A better week puts you straight up the board.' : 'Every recorded cannon turn.'}
+        </p>
       </div>
-      <p className="mt-3 text-[9px] font-semibold leading-relaxed text-white/35">
-        {tab === 'weekly' ? 'This week only. A better week puts you straight up the board.' : 'Every recorded cannon turn.'}
-      </p>
-    </section>
+    </div>
   );
 }
 
