@@ -21,7 +21,7 @@ import {
 import { askHostToEndGame, askToLeaveLobby, toggleFullscreen } from './fullscreen';
 import { FREE_SHIPS, SHIPS, drawShip } from './game/ships';
 import { WEATHER_CHOICES, weatherFor, wetWeather } from './game/weather';
-import { HULLS, getHullStatDots } from './game/hulls';
+import { DEFAULT_HULL_INDEX, HULLS, getHullStatDots } from './game/hulls';
 import { BALANCE, CARDS, CARD_ORDER, TEAM_COLORS } from './game/rules';
 import { TIERS } from './engine/ai';
 import { audioService } from './services/audio';
@@ -351,9 +351,9 @@ export default function App() {
         uid: p.uid,
         displayName: p.displayName || 'Player',
         skin: p.fishIndex,
-        // A player who has not touched the picker sails a Frigate, which is
+        // A player who has not touched the picker sails a Balanced hull, which is
         // the class every number in BALANCE was tuned against.
-        hull: typeof p.role === 'number' ? p.role : 0,
+        hull: typeof p.role === 'number' ? p.role : DEFAULT_HULL_INDEX,
         // A host's explicit placement wins. Alternating remains a stable,
         // balanced default until someone opens team management.
         team: lobby?.battleTeams?.[p.uid] === 1 ? 1 : lobby?.battleTeams?.[p.uid] === 0 ? 0 : (i % 2) as Team,
@@ -364,7 +364,7 @@ export default function App() {
 
   const mySkin = uid ? lobby?.players?.[uid]?.fishIndex : undefined;
   const myHullRaw = uid ? lobby?.players?.[uid]?.role : undefined;
-  const myHull = typeof myHullRaw === 'number' ? myHullRaw : 0;
+  const myHull = typeof myHullRaw === 'number' ? myHullRaw : DEFAULT_HULL_INDEX;
   const isHost = Boolean(uid && lobby && lobby.hostId === uid);
 
   /**
@@ -1334,7 +1334,7 @@ function OfflinePick({
           <p className="text-center text-[11px] font-semibold text-white/45">
             All {HULLS.length} are free and always have been. Pick how you want to fight, not what you paid for.
           </p>
-          <HullGrid selected={hulls[seat] ?? 0} onPick={pickHull} pickedBy={hullPickedBy} />
+          <HullGrid selected={hulls[seat] ?? DEFAULT_HULL_INDEX} onPick={pickHull} pickedBy={hullPickedBy} />
         </div>
       ) : (
         <ShipGrid owned={owned} coins={coins} selected={null} pickedBy={pickedBy} onPick={pickShip} />
@@ -1630,7 +1630,7 @@ function RoomScreen({
               tab === t ? 'bg-amber-400 text-slate-900' : 'text-white/55'
             }`}
           >
-            {t === 'ship' ? 'Paint' : `Hull · ${HULLS[myHull]?.name ?? 'Frigate'}`}
+            {t === 'ship' ? 'Paint' : `Hull · ${HULLS[myHull]?.name ?? 'Balanced'}`}
           </button>
         ))}
       </div>

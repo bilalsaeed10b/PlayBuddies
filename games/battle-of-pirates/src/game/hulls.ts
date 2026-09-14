@@ -53,8 +53,8 @@ export function getHullStatDots(hull: HullClass): HullStatDots {
   let damage = hull.damageDots;
   if (damage === undefined || damage === null || damage <= 0) {
     if (hull.damage <= 0.78) damage = 2; // e.g. Tank (0.75) -> 2 dots
-    else if (hull.damage <= 0.92) damage = 3; // e.g. Critical (0.85), Aimer (0.90) -> 3 dots
-    else if (hull.damage <= 1.05) damage = 4; // e.g. Balanced (1.0) -> 4 dots
+    else if (hull.damage <= 1.05) damage = 3; // e.g. Critical (0.85), Aimer (0.90), Balanced (1.0) -> 3 dots
+    else if (hull.damage <= 1.15) damage = 4;
     else damage = 5;                          // e.g. Shooter (1.18) -> 5 dots
   }
 
@@ -87,6 +87,15 @@ export function getHullStatDots(hull: HullClass): HullStatDots {
 }
 
 export const HULLS: HullClass[] = [
+  {
+    id: "balanced",
+    name: "Balanced",
+    blurb: "A reliable all-rounder with no weak hull, gun or targeting stat to exploit.",
+    cost: "No extreme specialty",
+    perks: ["Even hull and cannon strength", "Steady blast and handling"],
+    hp: 1, width: 1, drift: 1, blast: 1, damage: 1,
+    critChance: 0, critDamage: 1, aimDots: 1,
+  },
   {
     id: "shooter",
     name: "Shooter",
@@ -123,19 +132,13 @@ export const HULLS: HullClass[] = [
     hp: 1, width: 0.9, drift: 0.94, blast: 0.95, damage: 0.9,
     critChance: 0, critDamage: 1, aimDots: 4,
   },
-  {
-    id: "balanced",
-    name: "Balanced",
-    blurb: "A reliable all-rounder with no weak hull, gun or targeting stat to exploit.",
-    cost: "No extreme specialty",
-    perks: ["Even hull and cannon strength", "Steady blast and handling"],
-    hp: 1, width: 1, drift: 1, blast: 1, damage: 1,
-    critChance: 0.08, critDamage: 1.25, aimDots: 1,
-  },
 ];
+
+/** The default baseline battle role (Balanced). */
+export const DEFAULT_HULL_INDEX = 0;
 
 /** Never out of range, whatever a stale save or a peer claims. */
 export function hullAt(index: number | null | undefined): HullClass {
-  if (typeof index !== 'number' || !Number.isInteger(index)) return HULLS[0];
-  return HULLS[index] ?? HULLS[0];
+  if (typeof index !== 'number' || !Number.isInteger(index)) return HULLS[DEFAULT_HULL_INDEX] ?? HULLS[0];
+  return HULLS[index] ?? HULLS[DEFAULT_HULL_INDEX] ?? HULLS[0];
 }

@@ -20,7 +20,7 @@
  */
 import { fxSprites, bakeSea, drawSky, drawFallbackSea, drawRock, drawWaves, drawWeather, rockRadius } from '../game/sea';
 import { SHIPS, drawFlag, drawShip } from '../game/ships';
-import { HULLS, hullAt } from '../game/hulls';
+import { DEFAULT_HULL_INDEX, HULLS, hullAt } from '../game/hulls';
 import { weatherForMatch, wetWeather, THUNDER_PERIOD, THUNDER_SOUND, type WeatherKind } from '../game/weather';
 import type { HullClass } from '../game/hulls';
 import {
@@ -148,6 +148,19 @@ interface Ring {
   life: number;
   width: number;
   color?: string;
+}
+
+/** One staged cannon blast. It outlives the white flash long enough to leave a smoke puff. */
+interface MuzzleBurst {
+  x: number;
+  y: number;
+  angle: number;
+  life: number;
+  max: number;
+  color: string;
+  scale: number;
+  heavy: boolean;
+  seed: number;
 }
 
 /** One floating number over a hull -- see `damageTexts` for why it exists. */
@@ -347,7 +360,7 @@ export class BattleEngine {
   private cfg: EngineConfig;
   private projectiles: Projectile[] = [];
   private gunKick: number[] = [];
-  private muzzleBursts: { x: number; y: number; angle: number; life: number; color: string }[] = [];
+  private muzzleBursts: MuzzleBurst[] = [];
   private particles: Particle[] = [];
   private pool: Particle[] = [];
   private rings: Ring[] = [];
@@ -536,7 +549,7 @@ export class BattleEngine {
       control: seat.control,
       aiLevel: seat.aiLevel,
       skin: clamp(seat.skin, 0, SHIPS.length - 1),
-      hull: clamp(seat.hull ?? 0, 0, HULLS.length - 1),
+      hull: clamp(seat.hull ?? DEFAULT_HULL_INDEX, 0, HULLS.length - 1),
       hp: BALANCE.MAX_HP * hullAt(seat.hull).hp,
       charge: 0,
       maxHp: BALANCE.MAX_HP * hullAt(seat.hull).hp,
@@ -1064,8 +1077,20 @@ export class BattleEngine {
     // The hull kicks away from the shot and rights itself.
     ship.lean += facing * -0.09;
     this.gunKick[shooter] = 1;
-    this.muzzleBursts.push({ ...mouth, angle, life: 0.22, color: this.shotColor(this.projectiles[volleyStart]) });
-    this.muzzleFlash(mouth.x, mouth.y, angle);
+    const heavy = card.id === 'keg' || card.id === 'mortar';
+    const burstLife = heavy ? 0.38 : 0.3;
+    const shotColor = this.shotColor(this.projectiles[volleyStart]);
+    this.muzzleBursts.push({
+      ...mouth,
+      angle,
+      life: burstLife,
+      max: burstLife,
+      color: shotColor,
+      scale: 0.9 + power * 0.35 + (heavy ? 0.2 : 0),
+      heavy,
+      seed: this.turnNo * 97 + shooter * 31 + card.shots * 13,
+    });
+    this.muzzleFlash(mouth.x, mouth.y, angle, power, heavy, shotColor);
     const heavyKick = card.id === 'keg' ? 8 : card.id === 'mortar' ? 5 : 0;
     this.shake = Math.max(this.shake, 6 + power * 8 + heavyKick);
     this.phase = 'flight';
@@ -2220,21 +2245,20 @@ export class BattleEngine {
     });
   }
 
-  private muzzleFlash(x: number, y: number, angle: number) {
-    // Neither burst below is a spark, splash or splinter, so sinkY is never
-    // read for these -- passed as y itself only because burst() takes it
-    // unconditionally.
-    this.burst(9, 0, x, y, y, (q) => {
+  private muzzleFlash(x: number, y: number, angle: number, power: number, heavy: boolean, color: string) {
+    // Fire and smoke never drown, so their sinkY is just the muzzle's y. The
+    // short sparks do not live long enough to reach the sea either.
+    this.burst(heavy ? 13 : 9, 0, x, y, y, (q) => {
       const a = angle + (Math.random() - 0.5) * 0.7;
-      const speed = 200 + Math.random() * 400;
+      const speed = 220 + Math.random() * (380 + power * 180);
       q.vx = Math.cos(a) * speed;
       q.vy = Math.sin(a) * speed;
-      q.max = 0.2 + Math.random() * 0.2;
+      q.max = 0.2 + Math.random() * (heavy ? 0.3 : 0.2);
       q.life = q.max;
-      q.size = 26 + Math.random() * 26;
+      q.size = 24 + Math.random() * (heavy ? 42 : 28);
       q.grow = 1.7;
     });
-    this.burst(6, 1, x, y, y, (q) => {
+    this.burst(heavy ? 10 : 7, 1, x, y, y, (q) => {
       const a = angle + (Math.random() - 0.5) * 1.1;
       const speed = 90 + Math.random() * 160;
       q.vx = Math.cos(a) * speed;
@@ -2243,6 +2267,19 @@ export class BattleEngine {
       q.life = q.max;
       q.size = 22 + Math.random() * 30;
       q.grow = 2.2;
+    });
+    // A handful of bright fragments makes the ignition feel violent without
+    // turning every shot into another long-lived projectile trail.
+    this.burst(heavy ? 14 : 8, 2, x, y, y, (q) => {
+      const a = angle + (Math.random() - 0.5) * 1.35;
+      const speed = 280 + Math.random() * (420 + power * 220);
+      q.vx = Math.cos(a) * speed;
+      q.vy = Math.sin(a) * speed;
+      q.max = 0.16 + Math.random() * 0.24;
+      q.life = q.max;
+      q.size = 8 + Math.random() * 9;
+      q.grow = 0.55;
+      q.color = color;
     });
   }
 
@@ -2431,7 +2468,7 @@ export class BattleEngine {
   }
 
   private decay(dt: number) {
-    for (let i = 0; i < this.gunKick.length; i++) this.gunKick[i] = Math.max(0, (this.gunKick[i] ?? 0) - dt * 5);
+    for (let i = 0; i < this.gunKick.length; i++) this.gunKick[i] = Math.max(0, (this.gunKick[i] ?? 0) - dt * 3.35);
     for (let i = this.muzzleBursts.length - 1; i >= 0; i--) {
       this.muzzleBursts[i].life -= dt;
       if (this.muzzleBursts[i].life <= 0) this.muzzleBursts.splice(i, 1);
@@ -2881,14 +2918,83 @@ export class BattleEngine {
   private drawProjectiles(ctx: CanvasRenderingContext2D, q: Quality) {
     const fx = fxSprites();
     for (const burst of this.muzzleBursts) {
-      const t = burst.life / 0.22;
-      ctx.save(); ctx.translate(burst.x, burst.y); ctx.rotate(burst.angle);
-      ctx.globalAlpha *= t; ctx.fillStyle = burst.color;
-      ctx.beginPath(); ctx.moveTo(-6, -8); ctx.lineTo(25, -18 * t); ctx.lineTo(18, -5);
-      ctx.lineTo(80 * t, 0); ctx.lineTo(18, 5); ctx.lineTo(25, 18 * t); ctx.lineTo(-6, 8); ctx.closePath(); ctx.fill();
-      ctx.fillStyle = '#fff8e7'; ctx.beginPath(); ctx.ellipse(9, 0, 21 * t, 6 * t, 0, 0, Math.PI * 2); ctx.fill();
-      ctx.strokeStyle = burst.color; ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.ellipse(24 * (1 - t), 0, 4 + (1 - t) * 9, 9 + (1 - t) * 25, 0, 0, Math.PI * 2); ctx.stroke(); ctx.restore();
+      const age = clamp(1 - burst.life / burst.max, 0, 1);
+      const flash = clamp(1 - age / 0.58, 0, 1);
+      const smoke = clamp((age - 0.08) / 0.92, 0, 1);
+      ctx.save();
+      ctx.translate(burst.x, burst.y);
+      ctx.rotate(burst.angle);
+      ctx.scale(burst.scale, burst.scale);
+
+      // Smoke follows the flame instead of appearing as an unrelated puff.
+      // The cached sprite costs one blit per cloud and disappears with this
+      // short burst, so even a four-ship broadside stays cheap.
+      if (fx.smoke && q.fancy && smoke > 0) {
+        const clouds = burst.heavy ? 4 : 3;
+        for (let i = 0; i < clouds; i++) {
+          const phase = burst.seed * 0.017 + i * 2.4;
+          const size = (28 + i * 9 + smoke * 34) * (burst.heavy ? 1.15 : 1);
+          const x = 8 + smoke * (18 + i * 11);
+          const y = Math.sin(phase) * (5 + smoke * 9) - smoke * (4 + i * 3);
+          ctx.globalAlpha = Math.sin(smoke * Math.PI) * (0.22 - i * 0.025);
+          ctx.drawImage(fx.smoke, x - size / 2, y - size / 2, size, size);
+        }
+      }
+
+      // Two pressure rings make heavy cannons feel as if they displace air.
+      for (let i = 0; i < (burst.heavy ? 2 : 1); i++) {
+        const ringAge = clamp(age * 1.35 - i * 0.16, 0, 1);
+        if (ringAge <= 0) continue;
+        ctx.globalAlpha = (1 - ringAge) * 0.48;
+        ctx.strokeStyle = i === 0 ? '#fff6d5' : burst.color;
+        ctx.lineWidth = Math.max(1.2, 4 * (1 - ringAge));
+        ctx.beginPath();
+        ctx.ellipse(12 + ringAge * 58, 0, 5 + ringAge * 18, 12 + ringAge * 31, 0, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+
+      if (flash > 0) {
+        const pulse = 0.92 + Math.sin(age * 34) * 0.08;
+        // Wide coloured petals, a hot amber body and a white ignition core.
+        ctx.globalAlpha = flash * 0.78;
+        ctx.fillStyle = burst.color;
+        for (let petal = -1; petal <= 1; petal++) {
+          const side = petal * (10 + age * 6);
+          const length = (burst.heavy ? 104 : 82) * flash * pulse;
+          ctx.beginPath();
+          ctx.moveTo(-7, side * 0.28);
+          ctx.quadraticCurveTo(22, side - 18 * flash, length, side * 0.22);
+          ctx.quadraticCurveTo(24, side + 13 * flash, -7, side * 0.28);
+          ctx.fill();
+        }
+        ctx.globalAlpha = Math.min(1, flash * 1.15);
+        ctx.fillStyle = '#ffb52e';
+        ctx.beginPath();
+        ctx.moveTo(-8, -8); ctx.quadraticCurveTo(32, -17, (burst.heavy ? 84 : 68) * flash, 0);
+        ctx.quadraticCurveTo(30, 17, -8, 8); ctx.closePath(); ctx.fill();
+        ctx.fillStyle = '#fffbed';
+        ctx.beginPath();
+        ctx.ellipse(12 + flash * 8, 0, 11 + flash * 20, 5 + flash * 4, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        if (q.fancy) {
+          const sparks = burst.heavy ? 10 : 6;
+          ctx.strokeStyle = '#fff0a8';
+          ctx.lineWidth = 2;
+          ctx.lineCap = 'round';
+          for (let i = 0; i < sparks; i++) {
+            const phase = burst.seed * 0.031 + i * 2.17;
+            const distance = age * (55 + (i % 4) * 12);
+            const y = Math.sin(phase) * (8 + age * 30);
+            ctx.globalAlpha = flash * (0.45 + (i % 3) * 0.18);
+            ctx.beginPath();
+            ctx.moveTo(18 + distance, y);
+            ctx.lineTo(25 + distance + flash * 9, y + Math.sin(phase + 1) * 5);
+            ctx.stroke();
+          }
+        }
+      }
+      ctx.restore();
     }
     this.drawChains(ctx);
     for (const p of this.projectiles) {

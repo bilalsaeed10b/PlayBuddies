@@ -323,6 +323,11 @@ function hullPath(ctx: CanvasRenderingContext2D, facing: 1 | -1, shape: Shape) {
 function drawCannon(ctx: CanvasRenderingContext2D, d: ShipDraw) {
   ctx.save();
   ctx.translate(d.facing * BALANCE.MUZZLE_X, BALANCE.MUZZLE_Y);
+  const recoil = clamp(d.recoil ?? 0, 0, 1);
+  // The carriage gives a little with the deck while the barrel travels farther
+  // on its slides. The eased return reads as weight instead of a one-frame
+  // teleport, but is entirely visual and never moves the actual muzzle.
+  ctx.translate(-d.facing * recoil * 3.5, recoil * 1.4);
 
   // Carriage. Sits square on the deck whichever way the barrel points.
   ctx.fillStyle = '#3f2d1c';
@@ -334,7 +339,8 @@ function drawCannon(ctx: CanvasRenderingContext2D, d: ShipDraw) {
   ctx.fill();
 
   ctx.rotate(d.aim ?? (d.facing > 0 ? -0.5 : Math.PI + 0.5));
-  ctx.translate(-12 * (d.recoil ?? 0), 0);
+  const barrelKick = 18 * Math.pow(recoil, 1.3);
+  ctx.translate(-barrelKick, 0);
   ctx.fillStyle = barrelGradient(ctx);
   ctx.beginPath();
   ctx.moveTo(-14, -11);
