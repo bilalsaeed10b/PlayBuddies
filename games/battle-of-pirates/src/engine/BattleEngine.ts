@@ -2929,8 +2929,8 @@ export class BattleEngine {
       // Smoke follows the flame instead of appearing as an unrelated puff.
       // The cached sprite costs one blit per cloud and disappears with this
       // short burst, so even a four-ship broadside stays cheap.
-      if (fx.smoke && q.fancy && smoke > 0) {
-        const clouds = burst.heavy ? 4 : 3;
+      if (fx.smoke && smoke > 0) {
+        const clouds = q.fancy ? (burst.heavy ? 4 : 3) : 1;
         for (let i = 0; i < clouds; i++) {
           const phase = burst.seed * 0.017 + i * 2.4;
           const size = (28 + i * 9 + smoke * 34) * (burst.heavy ? 1.15 : 1);
@@ -2977,8 +2977,8 @@ export class BattleEngine {
         ctx.ellipse(12 + flash * 8, 0, 11 + flash * 20, 5 + flash * 4, 0, 0, Math.PI * 2);
         ctx.fill();
 
-        if (q.fancy) {
-          const sparks = burst.heavy ? 10 : 6;
+        {
+          const sparks = q.fancy ? (burst.heavy ? 10 : 6) : (burst.heavy ? 4 : 2);
           ctx.strokeStyle = '#fff0a8';
           ctx.lineWidth = 2;
           ctx.lineCap = 'round';
@@ -3002,12 +3002,16 @@ export class BattleEngine {
       const color = this.shotColor(p);
       const ornament = SHIPS[this.ships[p.from]?.skin]?.ornament;
 
-      if (q.fancy && (p.burn > 0 || ornament === 'seraph' || ornament === 'leviathan' || ornament === 'eclipse')) {
+      // Firebomb's flame is gameplay feedback, so even battery saver keeps a
+      // reduced version. Premium ornament wakes remain decoration and still
+      // disappear on the cheapest tier.
+      if (p.burn > 0 || (q.fancy && (ornament === 'seraph' || ornament === 'leviathan' || ornament === 'eclipse'))) {
         ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(Math.atan2(p.vy, p.vx));
         // A short, clock-driven wake keeps the silhouettes distinct without
         // adding particles to the simulation or changing projectile physics.
         if (p.burn > 0) {
-          for (let layer = 0; layer < 3; layer++) {
+          const flameLayers = q.fancy ? 3 : 2;
+          for (let layer = 0; layer < flameLayers; layer++) {
             const length = p.r * (5 - layer) * (1 + Math.sin(p.age * 43 + layer) * 0.13);
             const width = p.r * (1.2 - layer * 0.25);
             ctx.fillStyle = ['#ff5722', '#ffb52e', '#fff4b8'][layer];
@@ -3018,8 +3022,9 @@ export class BattleEngine {
           }
         }
         ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineWidth = 1.5;
-        for (let j = 0; j < 7; j++) {
-          const phase = (p.age * 2.2 + j / 7) % 1;
+        const motes = q.fancy ? 7 : 3;
+        for (let j = 0; j < motes; j++) {
+          const phase = (p.age * 2.2 + j / motes) % 1;
           const x = -p.r * (2 + phase * 10);
           const y = Math.sin(phase * 8 + p.age * 5) * p.r * (0.3 + phase);
           ctx.globalAlpha = (1 - phase) * 0.8;
@@ -3037,25 +3042,26 @@ export class BattleEngine {
         ctx.restore();
       }
 
-      if (q.trails && p.trail.length > 4) {
+      if ((q.trails || p.burn > 0) && p.trail.length > 4) {
         ctx.save();
         ctx.lineCap = 'round';
-        for (let i = 2; i < p.trail.length; i += 2) {
+        const stride = q.trails ? 2 : 4;
+        for (let i = stride; i < p.trail.length; i += stride) {
           const t = i / p.trail.length;
           ctx.strokeStyle = color;
-          ctx.globalAlpha = t * 0.48;
-          ctx.lineWidth = p.r * 2.1 * t;
+          ctx.globalAlpha = t * (q.trails ? 0.48 : 0.34);
+          ctx.lineWidth = p.r * (q.trails ? 2.1 : 1.6) * t;
           ctx.beginPath();
-          ctx.moveTo(p.trail[i - 2], p.trail[i - 1]);
+          ctx.moveTo(p.trail[i - stride], p.trail[i - stride + 1]);
           ctx.lineTo(p.trail[i], p.trail[i + 1]);
           ctx.stroke();
         }
         ctx.restore();
       }
 
-      if (fx.spark && q.fancy) {
+      if (fx.spark && (q.fancy || p.burn > 0)) {
         const glow = p.r * 4;
-        ctx.globalAlpha = 0.45;
+        ctx.globalAlpha = q.fancy ? 0.45 : 0.28;
         ctx.drawImage(fx.spark, p.x - glow / 2, p.y - glow / 2, glow, glow);
         ctx.globalAlpha = 1;
       }
@@ -3064,7 +3070,7 @@ export class BattleEngine {
       ctx.beginPath();
       ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
       ctx.fill();
-      if (q.fancy) {
+      if (q.fancy || p.burn > 0) {
         ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(Math.atan2(p.vy, p.vx));
         ctx.strokeStyle = color; ctx.lineWidth = 1.7;
         ctx.beginPath(); ctx.arc(0, 0, p.r + 1, -Math.PI * 0.6, Math.PI * 0.6); ctx.stroke();

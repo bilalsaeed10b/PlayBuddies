@@ -218,6 +218,21 @@ function pair() {
   run(0.55);
   return { host, guest, run, deliver, messages };
 }
+test('host firing and guest replay both create the complete launch animation', () => {
+  const { host, guest, deliver } = pair();
+  host.fire({ angle: -0.6, power: 0.8, card: 'firebomb' });
+  assert.equal(host.phase, 'flight');
+  assert.equal(host.muzzleBursts.length, 1);
+  assert.ok(host.particles.length > 0);
+  assert.ok(host.projectiles.length > 0);
+
+  deliver();
+  guest.update(1 / 120);
+  assert.equal(guest.phase, 'flight');
+  assert.equal(guest.muzzleBursts.length, 1);
+  assert.ok(guest.particles.length > 0);
+  assert.ok(guest.projectiles.length > 0);
+});
 for (const kind of ['torpedo', 'acid-rain', 'heal']) {
   for (const dropPreview of [false, true]) test(`${kind} multiplayer outcome agrees ${dropPreview ? 'without preview' : 'with preview'}`, () => {
     const { host, guest, run } = pair();

@@ -2097,7 +2097,7 @@ function SettingsPanel({
     {
       key: 'lowPower',
       label: 'Low power mode',
-      hint: 'Forces the cheap render path. The game already drops to it on its own when frames get long.',
+      hint: 'Reduces scenery and particle density. Cannon flashes and essential weapon effects stay visible.',
     },
   ];
 
