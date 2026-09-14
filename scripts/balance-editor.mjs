@@ -556,7 +556,21 @@ const server = http.createServer((req, res) => {
   }
 });
 
-server.listen(4000, () => {
-  console.log('Balance Editor running at http://localhost:4000');
+let currentPort = Number(process.env.PORT) || 4000;
+
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    console.log(`Port ${currentPort} is in use, trying port ${currentPort + 1}...`);
+    currentPort++;
+    server.listen(currentPort, () => {
+      console.log(`Balance Editor running at http://localhost:${currentPort}`);
+    });
+  } else {
+    console.error('Server error:', err);
+  }
+});
+
+server.listen(currentPort, () => {
+  console.log(`Balance Editor running at http://localhost:${currentPort}`);
 });
 
