@@ -3,7 +3,7 @@
  * before a match, so no shop purchase ever buys an advantage.
  */
 export interface HullClass {
-  id: 'shooter' | 'tank' | 'critical' | 'aimer' | 'balanced';
+  id: string;
   name: string;
   blurb: string;
   cost: string;
