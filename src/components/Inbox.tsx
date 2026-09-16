@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import { Bell, Bug, Check, Coins, Gift, Sparkles, X } from "lucide-react";
 import { useAuthStore } from "@/store/useAuthStore";
@@ -13,14 +14,14 @@ import { BadgeIcon } from "@/components/BadgeChip";
  *
  * Two surfaces over one subscription: a bell that carries the unread count,
  * and a one-time popup the first time an unread message is seen in a session.
- * The popup exists because the messages that land here are rewards , coins
- * for a bug someone actually went and found , and a reward nobody notices is
+ * The popup exists because the messages that land here are rewards — coins
+ * for a bug someone actually went and found — and a reward nobody notices is
  * not much of a reward.
  */
 export default function Inbox() {
   const { user } = useAuthStore();
   // Keyed on the uid so signing in as someone else throws the whole thing
-  // away rather than needing an effect to reset each piece of state , which
+  // away rather than needing an effect to reset each piece of state — which
   // is also the difference between a clean subscription and one that briefly
   // shows the last account's messages to the new one.
   if (!user) return null;
@@ -31,9 +32,14 @@ function InboxFor({ uid }: { uid: string }) {
   const [messages, setMessages] = useState<InboxMessage[]>([]);
   const [open, setOpen] = useState(false);
   const [popup, setPopup] = useState<InboxMessage[] | null>(null);
+  const [mounted, setMounted] = useState(false);
   // A ref, not state: this must not cause a render of its own, and the first
   // snapshot to arrive is the only one that can ever set it.
   const greeted = useRef(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   useEffect(() => {
     return watchInbox(
@@ -80,25 +86,34 @@ function InboxFor({ uid }: { uid: string }) {
         )}
       </button>
 
-      <AnimatePresence>
-        {open && (
-          <InboxPanel
-            messages={messages}
-            onClose={() => setOpen(false)}
-            onReadAll={() => markAllRead(uid, messages).catch(() => {})}
-            onRead={(id) => markRead(uid, id).catch(() => {})}
-          />
-        )}
-      </AnimatePresence>
+      {mounted && typeof document !== "undefined" && createPortal(
+        <>
+          <AnimatePresence>
+            {open && (
+              <InboxPanel
+                messages={messages}
+                onClose={() => setOpen(false)}
+                onReadAll={() => markAllRead(uid, messages).catch(() => {})}
+                onRead={(id) => markRead(uid, id).catch(() => {})}
+              />
+            )}
+          </AnimatePresence>
 
-      <AnimatePresence>
-        {popup && popup.length > 0 && (
-          <RewardPopup messages={popup} onClose={dismissPopup} onOpenInbox={() => {
-            void dismissPopup();
-            setOpen(true);
-          }} />
-        )}
-      </AnimatePresence>
+          <AnimatePresence>
+            {popup && popup.length > 0 && (
+              <RewardPopup
+                messages={popup}
+                onClose={dismissPopup}
+                onOpenInbox={() => {
+                  void dismissPopup();
+                  setOpen(true);
+                }}
+              />
+            )}
+          </AnimatePresence>
+        </>,
+        document.body
+      )}
     </>
   );
 }
@@ -121,14 +136,14 @@ function InboxPanel({
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       onClick={onClose}
-      className="fixed inset-0 z-[75] bg-black/70 backdrop-blur-sm flex items-start justify-center p-4 pt-20"
+      className="fixed inset-0 z-[100] bg-black/70 backdrop-blur-sm flex items-start justify-center p-4 pt-20 overflow-y-auto"
     >
       <motion.div
         initial={{ opacity: 0, y: -16, scale: 0.97 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
         exit={{ opacity: 0, y: -16, scale: 0.97 }}
         onClick={(e) => e.stopPropagation()}
-        className="glass-solid bg-[#141423] w-full max-w-md rounded-3xl border border-white/10 shadow-2xl max-h-[70vh] flex flex-col overflow-hidden"
+        className="glass-solid bg-[#141423] w-full max-w-md rounded-3xl border border-white/10 shadow-2xl max-h-[80vh] flex flex-col overflow-hidden my-auto sm:my-0"
       >
         <div className="flex items-center justify-between p-4 border-b border-white/10">
           <div className="flex items-center gap-2.5">
@@ -216,7 +231,7 @@ function RewardPopup({
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="fixed inset-0 z-[90] bg-black/75 backdrop-blur-sm flex items-center justify-center p-4"
+      className="fixed inset-0 z-[100] bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto"
       onClick={onClose}
     >
       <motion.div
@@ -224,19 +239,19 @@ function RewardPopup({
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.9, y: 20 }}
         onClick={(e) => e.stopPropagation()}
-        className="glass-solid bg-[#141423] w-full max-w-sm rounded-3xl border border-white/10 shadow-2xl p-6 text-center"
+        className="glass-solid bg-[#141423] w-full max-w-sm rounded-3xl border border-white/10 shadow-2xl p-6 text-center my-auto max-h-[90vh] flex flex-col"
       >
-        <div className="w-16 h-16 mx-auto rounded-2xl bg-gradient-to-br from-amber-400 to-yellow-500 flex items-center justify-center mb-4">
+        <div className="w-16 h-16 mx-auto rounded-2xl bg-gradient-to-br from-amber-400 to-yellow-500 flex items-center justify-center mb-4 shrink-0 shadow-lg shadow-amber-500/20">
           <Gift size={30} className="text-black" />
         </div>
-        <h2 className="text-xl font-black text-white">
+        <h2 className="text-xl font-black text-white shrink-0">
           {coins > 0 ? `You received ${coins.toLocaleString()} coins` : "You have something waiting"}
         </h2>
-        <p className="text-xs text-text-muted mt-1">
+        <p className="text-xs text-text-muted mt-1 shrink-0">
           {messages.length === 1 ? "While you were away" : `${messages.length} new messages`}
         </p>
 
-        <div className="mt-5 space-y-2 text-left">
+        <div className="mt-5 space-y-2 text-left overflow-y-auto pr-1">
           {messages.map((m) => (
             <div key={m.id} className="flex gap-3 rounded-2xl bg-white/5 p-3">
               <MessageIcon message={m} />
@@ -248,16 +263,16 @@ function RewardPopup({
           ))}
         </div>
 
-        <div className="mt-5 grid grid-cols-2 gap-2">
+        <div className="mt-5 grid grid-cols-2 gap-2 shrink-0">
           <button
             onClick={onOpenInbox}
-            className="rounded-2xl border border-white/15 bg-white/5 py-3 text-sm font-bold text-white/80"
+            className="rounded-2xl border border-white/15 bg-white/5 hover:bg-white/10 py-3 text-sm font-bold text-white/80 transition-colors"
           >
             Open inbox
           </button>
           <button
             onClick={onClose}
-            className="rounded-2xl bg-gradient-to-r from-amber-400 to-yellow-500 py-3 text-sm font-black text-black"
+            className="rounded-2xl bg-gradient-to-r from-amber-400 to-yellow-500 hover:brightness-110 py-3 text-sm font-black text-black transition-all shadow-md shadow-amber-500/20"
           >
             Nice
           </button>
