@@ -11,6 +11,7 @@ import {
   type NetworkHealth,
 } from "@/lib/adminMetrics";
 import type { BugReport } from "@/lib/bugs";
+import TrelloPanel from "./TrelloPanel";
 import { Card, Meter, Pill, Stat } from "./ui";
 
 /**
@@ -56,6 +57,8 @@ export default function SystemPanel({
 
   return (
     <div className="space-y-6">
+      <TrelloPanel />
+
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <Stat
           label="Firestore RTT"

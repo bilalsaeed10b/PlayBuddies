@@ -33,6 +33,7 @@ import {
   ShieldAlert,
 } from "lucide-react";
 import { isAdminUser } from "@/lib/admin";
+import Inbox from "@/components/Inbox";
 
 const CREATE_LOBBY_TIMEOUT_MS = 12_000;
 
@@ -232,6 +233,7 @@ export default function DashboardPage() {
           </div>
 
           <div className="flex items-center gap-3" ref={profileRef}>
+            <Inbox />
             {/* Profile pill */}
             <div className="relative">
               <button

@@ -26,8 +26,14 @@ const SEVERITY_STYLE: Record<BugSeverity, string> = {
   critical: "border-red-500/60 text-red-300",
 };
 
+// "platform" is a real answer, not the absence of one. It used to be the
+// empty string, which made it indistinguishable from "this player never
+// touched the picker" , and since it was also the default, every report that
+// sailed past the field arrived filed against the platform.
+export const PLATFORM_OPTION = "platform";
+
 const GAME_OPTIONS = [
-  { value: "", label: "Platform / not a game" },
+  { value: PLATFORM_OPTION, label: "Platform / not a game" },
   ...PLAYABLE_GAMES.map((g) => ({ value: g.id, label: g.name })),
 ];
 
@@ -84,11 +90,15 @@ function BugReportModal({ onClose }: { onClose: () => void }) {
   const [description, setDescription] = useState("");
   const [gameId, setGameId] = useState("");
   const [severity, setSeverity] = useState<BugSeverity>("medium");
-  const [category, setCategory] = useState<BugCategory>("gameplay");
+  // Empty rather than "gameplay". A pre-selected answer is one the player
+  // never has to look at, and the two fields that decide which Trello list a
+  // report lands in are exactly the two worth making somebody choose.
+  const [category, setCategory] = useState<BugCategory | "">("");
   const [shot, setShot] = useState<{ blob: Blob; preview: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [done, setDone] = useState(false);
+  const [shotWarning, setShotWarning] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
 
   // Object URLs are per-blob, so the old one has to go when a second
@@ -170,16 +180,35 @@ function BugReportModal({ onClose }: { onClose: () => void }) {
     }
   };
 
+  /**
+   * What is still missing, in the order the form asks for it.
+   *
+   * Three required answers, and all three are required for the same reason:
+   * they are what an approved report is triaged and routed by. A description
+   * and a screenshot are worth far more per report, but a report without
+   * either is still actionable, and one filed against the wrong game is not.
+   */
+  const missing =
+    title.trim().length < 4 ? "title" : !gameId ? "game" : !category ? "category" : "";
+
   const submit = async () => {
     if (!user) return;
-    if (title.trim().length < 4) {
+    if (missing === "title") {
       setError("Give the bug a short title so it can be found in the list.");
+      return;
+    }
+    if (missing === "game") {
+      setError("Pick which game this happened in, or Platform if it was not a game.");
+      return;
+    }
+    if (missing === "category") {
+      setError("Pick the area this belongs to so it reaches the right place.");
       return;
     }
     setBusy(true);
     setError("");
     try {
-      await submitBugReport(
+      const result = await submitBugReport(
         {
           uid: user.uid,
           displayName: user.displayName || "Player",
@@ -192,16 +221,24 @@ function BugReportModal({ onClose }: { onClose: () => void }) {
           gameId,
           roomId,
           severity,
-          category,
+          category: category as BugCategory,
           screenshot: shot?.blob ?? null,
           context: captureContext(),
         },
       );
+      // The report landed either way. A screenshot that did not upload is
+      // said out loud rather than swallowed, and the confirmation stays on
+      // screen instead of closing itself, so the player can read why.
+      setShotWarning(result.screenshotError);
       setDone(true);
-      setTimeout(onClose, 1800);
+      if (!result.screenshotError) setTimeout(onClose, 1800);
     } catch (e) {
       console.error("Bug report failed", e);
-      setError("The report could not be sent. Check your connection and try again.");
+      setError(
+        e instanceof Error && e.message
+          ? `The report could not be sent: ${e.message}`
+          : "The report could not be sent. Check your connection and try again.",
+      );
     } finally {
       setBusy(false);
     }
@@ -250,10 +287,26 @@ function BugReportModal({ onClose }: { onClose: () => void }) {
             <p className="text-sm text-text-secondary mt-1">
               Ten approved reports earns you the Tester badge.
             </p>
+            {shotWarning && (
+              <div className="mt-5 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-left">
+                <p className="text-xs font-bold text-amber-300">
+                  Your report was saved, but the screenshot was not.
+                </p>
+                <p className="mt-1 text-[11px] text-amber-100/70 break-words">{shotWarning}</p>
+              </div>
+            )}
+            {shotWarning && (
+              <button
+                onClick={onClose}
+                className="mt-4 w-full rounded-2xl border border-white/15 bg-white/5 py-2.5 text-sm font-bold text-white/80"
+              >
+                Close
+              </button>
+            )}
           </div>
         ) : (
           <div className="p-5 space-y-4">
-            <Field label="What went wrong?">
+            <Field label="What went wrong?" required>
               <input
                 value={title}
                 onChange={(e) => setTitle(e.target.value.slice(0, TITLE_MAX))}
@@ -263,18 +316,20 @@ function BugReportModal({ onClose }: { onClose: () => void }) {
             </Field>
 
             <div className="grid grid-cols-2 gap-3">
-              <Field label="Game">
+              <Field label="Game" required>
                 <CustomSelect
                   value={gameId}
                   onChange={setGameId}
                   options={GAME_OPTIONS}
+                  placeholder="Choose a game"
                 />
               </Field>
-              <Field label="Area">
+              <Field label="Area" required>
                 <CustomSelect
                   value={category}
                   onChange={(v) => setCategory(v as BugCategory)}
                   options={CATEGORY_OPTIONS}
+                  placeholder="Choose an area"
                 />
               </Field>
             </div>
@@ -297,7 +352,10 @@ function BugReportModal({ onClose }: { onClose: () => void }) {
               </div>
             </Field>
 
-            <Field label="What happened, and what did you expect?">
+            <Field
+              label="What happened, and what did you expect?"
+              hint="Optional , but this is the part that gets a bug fixed"
+            >
               <textarea
                 value={description}
                 onChange={(e) => setDescription(e.target.value.slice(0, DESCRIPTION_MAX))}
@@ -307,7 +365,10 @@ function BugReportModal({ onClose }: { onClose: () => void }) {
               />
             </Field>
 
-            <Field label="Screenshot (paste, upload or capture)">
+            <Field
+              label="Screenshot (paste, upload or capture)"
+              hint="Optional , reports with one are far more likely to be approved"
+            >
               {shot ? (
                 <div className="relative rounded-xl overflow-hidden border border-white/10">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -359,7 +420,7 @@ function BugReportModal({ onClose }: { onClose: () => void }) {
 
             <button
               onClick={submit}
-              disabled={busy || title.trim().length < 4}
+              disabled={busy || missing !== ""}
               className="w-full flex items-center justify-center gap-2 py-3.5 rounded-2xl bg-gradient-to-r from-lime-400 to-emerald-500 text-black font-black disabled:opacity-40 transition-opacity"
             >
               {busy ? <Loader2 size={18} className="animate-spin" /> : <Bug size={18} />}
@@ -372,11 +433,25 @@ function BugReportModal({ onClose }: { onClose: () => void }) {
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({
+  label,
+  hint,
+  required,
+  children,
+}: {
+  label: string;
+  hint?: string;
+  required?: boolean;
+  children: React.ReactNode;
+}) {
   return (
     <div className="space-y-1.5">
-      <label className="text-[11px] font-bold uppercase tracking-wider text-text-muted">
-        {label}
+      <label className="flex flex-wrap items-baseline gap-x-2 text-[11px] font-bold uppercase tracking-wider text-text-muted">
+        <span>
+          {label}
+          {required && <span className="ml-1 text-red-400">*</span>}
+        </span>
+        {hint && <span className="normal-case tracking-normal text-text-muted/70">{hint}</span>}
       </label>
       {children}
     </div>

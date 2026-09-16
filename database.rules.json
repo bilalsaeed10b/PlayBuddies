@@ -1,7 +1,13 @@
 {
   "rules": {
     "presenceSessions": {
+      // Each tab writes one child under its own uid; a user counts as online
+      // while any child survives. The admin allowlist may read the whole set
+      // at once, which is what the panel's online count needs: per-uid is the
+      // only other readable node, and counting from those would mean one
+      // listener per account for every account on the platform.
       "users": {
+        ".read": "auth != null && auth.token.email_verified === true && (auth.token.email === 'bilalsaeed10b@gmail.com' || auth.token.email === 'bilalsaeed12b@gmail.com')",
         "$uid": {
           ".read": "auth != null",
           "$connection": {
@@ -70,28 +76,6 @@
     "$other": {
       ".read": false,
       ".write": false
-    },
-    "presenceSessions": {
-      "users": {
-        "$uid": {
-          ".read": "auth != null",
-          "$connection": {
-            ".write": "auth != null && auth.uid === $uid",
-            ".validate": "newData.isBoolean() && newData.val() === true"
-          }
-        }
-      },
-      "lobbies": {
-        "$roomId": {
-          ".read": "auth != null",
-          "$uid": {
-            "$connection": {
-              ".write": "auth != null && auth.uid === $uid",
-              ".validate": "newData.isBoolean() && newData.val() === true"
-            }
-          }
-        }
-      }
     }
   }
 }

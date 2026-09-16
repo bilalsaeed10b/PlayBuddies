@@ -38,6 +38,9 @@ export default function PlayerDetailModal({
   const [error, setError] = useState("");
   const [gameId, setGameId] = useState(PLAYABLE_GAMES[0]?.id ?? "");
   const [amount, setAmount] = useState(100);
+  // Goes into the message the player actually reads. A reward that arrives
+  // with no explanation is indistinguishable from a bug in the wallet.
+  const [reason, setReason] = useState("");
 
   const badge = topBadge({
     gamesPlayed: user.gamesPlayed,
@@ -67,7 +70,8 @@ export default function PlayerDetailModal({
     setBusy(true);
     setError("");
     try {
-      await adjustCoins(user.uid, gameId, sign * Math.abs(amount));
+      await adjustCoins(user.uid, gameId, sign * Math.abs(amount), reason);
+      setReason("");
       onChanged();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not change that balance.");
@@ -125,7 +129,7 @@ export default function PlayerDetailModal({
 
           <section>
             <h3 className="text-[11px] font-bold uppercase tracking-wider text-text-muted mb-2">
-              Grants
+              Gift a badge
             </h3>
             <div className="flex flex-wrap gap-2">
               <GrantToggle
@@ -148,6 +152,10 @@ export default function PlayerDetailModal({
                 onToggle={(v) => toggleGrant("premium", v)}
               />
             </div>
+            <p className="mt-2 text-[10px] text-text-muted leading-relaxed">
+              Unlocks the badge and tells them so. Which one they actually wear is their choice,
+              made from their own profile , this does not put it on for them.
+            </p>
           </section>
 
           <section>
@@ -203,6 +211,16 @@ export default function PlayerDetailModal({
                 Take
               </button>
             </div>
+
+            <input
+              value={reason}
+              onChange={(e) => setReason(e.target.value.slice(0, 200))}
+              placeholder="Why? e.g. Reward for finding the Quoridor bot bug"
+              className="mt-2 w-full bg-white/5 border border-white/10 rounded-xl px-2.5 py-2 text-xs text-white outline-none placeholder:text-text-muted/60"
+            />
+            <p className="mt-1 text-[10px] text-text-muted">
+              This is the message that lands in their inbox. Left blank, they just see the amount.
+            </p>
           </section>
 
           {theirReports.length > 0 && (

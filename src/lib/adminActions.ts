@@ -1,5 +1,8 @@
-import { deleteDoc, doc, increment, setDoc } from "firebase/firestore";
+import { deleteDoc, doc, increment, setDoc, writeBatch } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+import { BADGES_BY_ID, type GrantKey } from "@/lib/badges";
+import { sendInboxMessage } from "@/lib/inbox";
+import { getGame } from "@/lib/games";
 
 /**
  * Writes an admin makes that reach outside the bug queue: grants, coin
@@ -9,15 +12,43 @@ import { db } from "@/lib/firebase";
  * assumption is not decoration, it is enforced again at the only place it can
  * actually matter: firestore.rules refuses every one of these writes for a
  * non-admin token regardless of what this file lets you call.
+ *
+ * Anything a player would want to know about lands in their inbox, and those
+ * sends are deliberately best-effort: a grant that succeeded and a
+ * notification that did not is still a grant, and failing the whole action
+ * would invite an admin to hand out the same reward twice.
  */
 
-/** The grant badges an admin can hand out or take back by hand. */
-export async function setGrant(
-  uid: string,
-  key: "premium" | "tester" | "testerPlus",
-  value: boolean,
-): Promise<void> {
+/** Which badge each grant key unlocks, for the message the player receives. */
+const BADGE_FOR_GRANT: Record<GrantKey, string> = {
+  premium: "premium",
+  tester: "tester",
+  testerPlus: "tester_plus",
+};
+
+/**
+ * Hand out or take back one of the grant badges.
+ *
+ * A grant unlocks a badge; it does not put it on. What a player wears is
+ * `profiles/{uid}.badge`, which only they can write , so this is a gift, and
+ * the choice to display it stays with the person wearing it.
+ */
+export async function setGrant(uid: string, key: GrantKey, value: boolean): Promise<void> {
   await setDoc(doc(db, "users", uid), { grants: { [key]: value } }, { merge: true });
+
+  if (!value) return;
+  const badge = BADGES_BY_ID[BADGE_FOR_GRANT[key]];
+  if (!badge) return;
+  try {
+    await sendInboxMessage(uid, {
+      kind: "badge",
+      title: `${badge.label} unlocked`,
+      body: `You have been given the ${badge.label} badge. Put it on from your profile whenever you like , it is yours either way.`,
+      badgeId: badge.id,
+    });
+  } catch (e) {
+    console.error("Grant landed but the inbox message did not", e);
+  }
 }
 
 /**
@@ -27,13 +58,36 @@ export async function setGrant(
  * player at once should both land, not have the second overwrite the first's
  * read of a now-stale balance.
  */
-export async function adjustCoins(uid: string, gameId: string, delta: number): Promise<void> {
+export async function adjustCoins(
+  uid: string,
+  gameId: string,
+  delta: number,
+  reason = "",
+): Promise<void> {
   if (!Number.isFinite(delta) || delta === 0) return;
+  const amount = Math.round(delta);
   await setDoc(
     doc(db, "users", uid),
-    { coins: { [gameId]: increment(Math.round(delta)) } },
+    { coins: { [gameId]: increment(amount) } },
     { merge: true },
   );
+
+  const game = getGame(gameId)?.name ?? gameId;
+  try {
+    await sendInboxMessage(uid, {
+      kind: "coins",
+      title: amount > 0 ? `+${amount} coins in ${game}` : `${amount} coins in ${game}`,
+      body:
+        reason.trim() ||
+        (amount > 0
+          ? `An admin added ${amount} coins to your ${game} purse.`
+          : `An admin adjusted your ${game} purse by ${amount} coins.`),
+      amount,
+      gameId,
+    });
+  } catch (e) {
+    console.error("Coins landed but the inbox message did not", e);
+  }
 }
 
 /**
@@ -47,4 +101,25 @@ export async function adjustCoins(uid: string, gameId: string, delta: number): P
  */
 export async function closeRoom(roomId: string): Promise<void> {
   await deleteDoc(doc(db, "lobbies", roomId));
+}
+
+/**
+ * Delete a batch of abandoned rooms in one go.
+ *
+ * Nothing in the app has ever deleted a lobby document, so these accumulate
+ * for the life of the project , a few hundred rooms whose players closed the
+ * tab days ago, every one of them still read on every admin page load. The
+ * caller decides which ids are stale (see `isRoomLive`); this only carries
+ * them out, 400 at a time, which is inside Firestore's 500-write batch limit.
+ */
+export async function purgeRooms(roomIds: string[]): Promise<number> {
+  let done = 0;
+  for (let i = 0; i < roomIds.length; i += 400) {
+    const slice = roomIds.slice(i, i + 400);
+    const batch = writeBatch(db);
+    for (const id of slice) batch.delete(doc(db, "lobbies", id));
+    await batch.commit();
+    done += slice.length;
+  }
+  return done;
 }

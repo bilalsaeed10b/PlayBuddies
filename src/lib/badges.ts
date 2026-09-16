@@ -62,35 +62,35 @@ export const TESTER_THRESHOLD = 10;
 export const TESTER_PLUS_THRESHOLD = 30;
 
 /**
- * Deliberately five badges, not ten.
+ * Deliberately five badges, not ten, and both stat badges count wins.
  *
  * The original catalog handed out First Boot, Rookie and First Win for doing
  * nothing more than existing, so within a day of playing almost every account
  * wore three or four badges , a badge that describes the median player
- * describes nobody. Only the two that take real, sustained play (Champion,
- * Legend) and the three an admin actually controls (Tester, Tester+,
- * Premium+) remain, and the two stat badges were pushed well past a first
- * sitting's worth of games.
+ * describes nobody. Games-played went too: it rewards sitting through matches
+ * rather than winning them, and a player who loses 150 times is not who a
+ * trophy is for. What is left takes either sustained winning (Master, Legend)
+ * or an admin's say-so (Tester, Tester+, Premium+).
  */
 export const BADGES: BadgeDef[] = [
   {
-    id: "champion",
-    label: "Champion",
-    description: "Played 150 games",
+    id: "master",
+    label: "Master",
+    description: "Won 100 matches",
     icon: "trophy",
     color: "from-pink-500 to-rose-500",
     source: "stat",
-    gamesNeeded: 150,
+    winsNeeded: 100,
     rank: 1,
   },
   {
     id: "legend",
     label: "Legend",
-    description: "Won 75 matches",
+    description: "Won 200 matches",
     icon: "crown",
     color: "from-violet-600 to-pink-600",
     source: "stat",
-    winsNeeded: 75,
+    winsNeeded: 200,
     rank: 2,
   },
   {
@@ -175,6 +175,28 @@ export function topBadge(progress: BadgeProgress): BadgeDef | null {
   const earned = earnedBadges(progress);
   if (earned.length === 0) return null;
   return earned.reduce((best, b) => (b.rank > best.rank ? b : best));
+}
+
+/** An explicit "wear nothing", distinct from never having chosen. */
+export const NO_BADGE = "none";
+
+/**
+ * Which badge a player is actually wearing.
+ *
+ * An admin can hand out a badge but not decide it is the one on display ,
+ * `chosen` is written by the player from their own profile and nowhere else.
+ * The two fallbacks are what keeps that from being a downgrade: a player who
+ * has never opened the picker still wears their best badge automatically, and
+ * a choice that stops being valid (a grant taken back) quietly falls back to
+ * the same rather than showing a badge they no longer hold.
+ */
+export function wornBadge(progress: BadgeProgress, chosen?: string): BadgeDef | null {
+  if (chosen === NO_BADGE) return null;
+  if (chosen) {
+    const picked = BADGES_BY_ID[chosen];
+    if (picked && hasBadge(picked, progress)) return picked;
+  }
+  return topBadge(progress);
 }
 
 /** Which tester grants an approved-report count has earned. */

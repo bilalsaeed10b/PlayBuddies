@@ -3,28 +3,35 @@
 import { useEffect, useState } from "react";
 import { Activity, Crown, Radio, Trash2, Users, WifiOff, X } from "lucide-react";
 import { getGame } from "@/lib/games";
-import { closeRoom } from "@/lib/adminActions";
-import { timeAgo, type LiveLobby, type NetworkHealth } from "@/lib/adminMetrics";
+import { closeRoom, purgeRooms } from "@/lib/adminActions";
+import {
+  isRoomLive,
+  ROOM_STALE_MS,
+  timeAgo,
+  type LiveLobby,
+  type NetworkHealth,
+} from "@/lib/adminMetrics";
 import { Avatar, Card, Empty, Pill, Stat } from "./ui";
 
 /**
  * Every room on the platform right now, and who is sitting in it.
  *
- * "All rooms" and "currently playing" used to be the same list, so on a quiet
- * afternoon with nobody mid-match the panel still filled up with every room
- * sitting in its lobby waiting for players , which reads as "the platform is
- * busy" when it is actually idle. The two are now separate tabs, and each
- * says plainly what it means when it's empty rather than falling through to
- * show the other one.
+ * The hard part is the word "now". Nothing in PlayBuddies ever deletes a
+ * lobby document, so `status: 'playing'` is not a fact about the present , it
+ * is whatever the room was doing at the moment its last player closed the
+ * tab, preserved for ever. Reading the collection raw showed 200 rooms and
+ * 96 matches in progress on a platform where nobody was playing at all, most
+ * of those rooms days old.
  *
- * A host whose heartbeat has gone quiet is called out rather than left to
- * look normal: that is the state where a room still exists, still holds
- * players, and nobody in it can start anything , and it is also the one case
- * an admin can actually do something about, with the close button below.
+ * What makes a room live is therefore the host's heartbeat (`isRoomLive`),
+ * not its status field. Status only says *what kind* of live it is. Rooms
+ * that fail that test are not hidden , they are their own tab, with the
+ * count in the open, because a few hundred of them is a real thing to know
+ * about and the panel is the only place it would ever be visible.
  */
 const HOST_STALE_MS = 30_000;
 
-type SubTab = "active" | "all";
+type SubTab = "active" | "waiting" | "stale";
 
 export default function LivePanel({
   lobbies,
@@ -41,6 +48,8 @@ export default function LivePanel({
 }) {
   const [subTab, setSubTab] = useState<SubTab>("active");
   const [closing, setClosing] = useState("");
+  const [purging, setPurging] = useState(false);
+  const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
 
   // A ticking clock rather than Date.now() mid-render: the host-quiet counter
@@ -52,15 +61,45 @@ export default function LivePanel({
     return () => clearInterval(timer);
   }, []);
 
-  const playing = lobbies.filter((l) => l.status === "playing");
-  const waiting = lobbies.filter((l) => l.status === "waiting");
-  const completed = lobbies.filter((l) => l.status !== "playing" && l.status !== "waiting");
-  const seated = lobbies.reduce((n, l) => n + l.playerCount, 0);
+  // Recomputed against the same ticking clock the host-quiet badge uses, so a
+  // room crosses from live to stale on screen rather than at the next refresh.
+  const live = lobbies.filter((l) => isRoomLive(l, now));
+  const stale = lobbies.filter((l) => !isRoomLive(l, now));
+  const playing = live.filter((l) => l.status === "playing");
+  const waiting = live.filter((l) => l.status !== "playing");
+  const seated = live.reduce((n, l) => n + l.playerCount, 0);
 
-  const shown = subTab === "active" ? playing : lobbies;
+  const shown = subTab === "active" ? playing : subTab === "waiting" ? waiting : stale;
   const sorted = [...shown].sort(
     (a, b) => (b.updatedAt?.toMillis?.() ?? 0) - (a.updatedAt?.toMillis?.() ?? 0),
   );
+
+  const purge = async () => {
+    if (stale.length === 0) return;
+    if (
+      !window.confirm(
+        `Delete ${stale.length} abandoned room${stale.length === 1 ? "" : "s"}?
+
+` +
+          `These have not had a host heartbeat in over ${Math.round(ROOM_STALE_MS / 1000)}s, ` +
+          `so nobody is in them. Anyone still on a room's page would be dropped back to the dashboard. ` +
+          `This cannot be undone.`,
+      )
+    ) {
+      return;
+    }
+    setPurging(true);
+    setError("");
+    try {
+      const n = await purgeRooms(stale.map((l) => l.id));
+      setNotice(`Cleared ${n} abandoned room${n === 1 ? "" : "s"}.`);
+      onChanged();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not clear those rooms.");
+    } finally {
+      setPurging(false);
+    }
+  };
 
   const close = async (roomId: string) => {
     if (!window.confirm(`Close room ${roomId}? Everyone in it is dropped back to the dashboard.`)) {
@@ -81,28 +120,62 @@ export default function LivePanel({
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
-        <Stat label="Total rooms" value={lobbies.length} icon={<Activity size={13} />} />
-        <Stat label="Mid-match" value={playing.length} tone="good" icon={<Radio size={13} />} />
-        <Stat label="Waiting" value={waiting.length} icon={<Users size={13} />} />
+        <Stat
+          label="Mid-match"
+          value={playing.length}
+          tone="good"
+          hint="host beating now"
+          icon={<Radio size={13} />}
+        />
+        <Stat label="Waiting" value={waiting.length} hint="open lobbies" icon={<Users size={13} />} />
+        <Stat
+          label="Abandoned"
+          value={stale.length}
+          tone={stale.length > 20 ? "warn" : "default"}
+          hint={`no heartbeat in ${Math.round(ROOM_STALE_MS / 1000)}s`}
+          icon={<Activity size={13} />}
+        />
         <Stat
           label="Online now"
           value={onlineUids.size}
-          hint={`${seated} seated in rooms`}
+          hint={`${seated} seated in live rooms`}
           icon={<Users size={13} />}
         />
-        <Stat label="Total players" value={totalPlayers} hint="registered accounts" icon={<Users size={13} />} />
+        <Stat
+          label="Total players"
+          value={totalPlayers}
+          hint="registered accounts"
+          icon={<Users size={13} />}
+        />
       </div>
 
       <Card
-        title="Live rooms"
-        subtitle={subTab === "active" ? "Matches in progress" : "Every room, any state"}
+        title="Rooms"
+        subtitle={
+          subTab === "active"
+            ? "Matches in progress right now"
+            : subTab === "waiting"
+              ? "Open lobbies with a live host"
+              : "Rooms whose host stopped reporting , nobody is in these"
+        }
         right={
           <div className="flex items-center gap-2">
+            {subTab === "stale" && stale.length > 0 && (
+              <button
+                onClick={purge}
+                disabled={purging}
+                className="flex items-center gap-1.5 rounded-xl bg-red-500/15 px-3 py-1.5 text-[11px] font-bold text-red-300 hover:bg-red-500/25 disabled:opacity-40 transition-colors"
+              >
+                <Trash2 size={12} />
+                {purging ? "Clearing…" : `Clear all ${stale.length}`}
+              </button>
+            )}
             <div className="flex gap-1 rounded-xl bg-white/5 p-1">
               {(
                 [
                   ["active", `Active (${playing.length})`],
-                  ["all", `All (${lobbies.length})`],
+                  ["waiting", `Waiting (${waiting.length})`],
+                  ["stale", `Abandoned (${stale.length})`],
                 ] as [SubTab, string][]
               ).map(([id, label]) => (
                 <button
@@ -123,6 +196,7 @@ export default function LivePanel({
         }
       >
         {error && <p className="text-xs text-red-400 mb-3">{error}</p>}
+        {notice && <p className="text-xs text-emerald-400 mb-3">{notice}</p>}
 
         {sorted.length === 0 ? (
           <Empty
@@ -130,7 +204,9 @@ export default function LivePanel({
             text={
               subTab === "active"
                 ? "No matches in progress right now."
-                : "No rooms open right now."
+                : subTab === "waiting"
+                  ? "No lobbies sitting open right now."
+                  : "Nothing abandoned , every room on the platform has a live host."
             }
           />
         ) : (
@@ -147,9 +223,13 @@ export default function LivePanel({
                     </Pill>
                     {l.gameId && <Pill tone="info">{getGame(l.gameId)?.name ?? l.gameId}</Pill>}
                     <Pill>{l.playerCount} seated</Pill>
-                    {hostStale && (
+                    {/* In the live tabs this is a countdown worth watching; in
+                        the abandoned tab every row would carry a meaningless
+                        five-figure one, so the age below says it instead. */}
+                    {hostStale && subTab !== "stale" && (
                       <Pill tone="bad">host quiet {Math.round((now - hostSeen) / 1000)}s</Pill>
                     )}
+                    {subTab === "stale" && <Pill tone="neutral">last seen {timeAgo(l.hostSeenAt)}</Pill>}
                     <span className="ml-auto text-[11px] text-text-muted">{timeAgo(l.updatedAt)}</span>
                     <button
                       onClick={() => close(l.id)}
@@ -194,10 +274,11 @@ export default function LivePanel({
         )}
       </Card>
 
-      {completed.length > 0 && subTab === "all" && (
-        <p className="text-[11px] text-text-muted">
-          {completed.length} room{completed.length === 1 ? "" : "s"} above finished but haven&apos;t
-          been cleared yet.
+      {subTab === "stale" && stale.length > 0 && (
+        <p className="text-[11px] text-text-muted leading-relaxed">
+          Nothing deletes a lobby when its players leave, so these build up on their own. They are
+          harmless apart from the read they cost on every load of this page , clearing them is
+          housekeeping, not a fix.
         </p>
       )}
     </div>

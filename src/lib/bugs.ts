@@ -18,7 +18,8 @@ import {
 } from "firebase/firestore";
 import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
 import { db, storage } from "@/lib/firebase";
-import { testerGrantsFor } from "@/lib/badges";
+import { BADGES_BY_ID, testerGrantsFor } from "@/lib/badges";
+import { sendInboxMessage } from "@/lib/inbox";
 
 /**
  * Bug reports: the player's side of the loop, and the admin's.
@@ -106,6 +107,8 @@ export interface BugReport {
   adminNotes: string;
   /** Set once, when an admin first moves this report to `approved`. */
   countedForBadge: boolean;
+  /** The Trello card this was filed as, empty until it has been. */
+  trelloUrl: string;
   createdAt: Timestamp | null;
   updatedAt: Timestamp | null;
   resolvedAt: Timestamp | null;
@@ -189,6 +192,18 @@ export interface Reporter {
   photoURL: string;
 }
 
+export interface SubmitResult {
+  id: string;
+  /**
+   * Why the screenshot did not make it, if one was attached and failed.
+   *
+   * Separate from a thrown error because the two outcomes need different
+   * words: the report itself either landed or it did not, and an attachment
+   * that failed changes neither.
+   */
+  screenshotError: string;
+}
+
 /**
  * File one report.
  *
@@ -197,7 +212,10 @@ export interface Reporter {
  * a bucket nobody will ever look in. If the upload then fails the report keeps
  * its empty `screenshotPath` and the admin list says the shot is missing.
  */
-export async function submitBugReport(reporter: Reporter, input: NewBugReport): Promise<string> {
+export async function submitBugReport(
+  reporter: Reporter,
+  input: NewBugReport,
+): Promise<SubmitResult> {
   const created = await addDoc(collection(db, "bugReports"), {
     uid: reporter.uid,
     reporterName: reporter.displayName.slice(0, 60),
@@ -221,12 +239,28 @@ export async function submitBugReport(reporter: Reporter, input: NewBugReport): 
     resolvedBy: "",
   });
 
+  // Isolated on purpose. The upload used to run unguarded, so a Storage
+  // failure , most often rules that were never deployed, which answers with a
+  // flat permission error , threw out of here *after* the report had already
+  // been written. The player was told "the report could not be sent" about a
+  // report that had in fact landed, and filed it again.
+  //
+  // The report is the thing that matters; the screenshot is an attachment. A
+  // failure is handed back for the caller to say out loud, and the report
+  // keeps its empty `screenshotPath`, which the queue already renders as
+  // "no screenshot".
+  let screenshotError = "";
   if (input.screenshot) {
-    const path = `bugShots/${reporter.uid}/${created.id}.webp`;
-    const fileRef = ref(storage, path);
-    await uploadBytes(fileRef, input.screenshot, { contentType: "image/webp" });
-    const url = await getDownloadURL(fileRef);
-    await updateDoc(created, { screenshotPath: path, screenshotURL: url });
+    try {
+      const path = `bugShots/${reporter.uid}/${created.id}.webp`;
+      const fileRef = ref(storage, path);
+      await uploadBytes(fileRef, input.screenshot, { contentType: "image/webp" });
+      const url = await getDownloadURL(fileRef);
+      await updateDoc(created, { screenshotPath: path, screenshotURL: url });
+    } catch (e) {
+      console.error("Bug report screenshot upload failed", e);
+      screenshotError = e instanceof Error ? e.message : String(e);
+    }
   }
 
   // Best-effort: the submitted counter is a convenience for the reporter's own
@@ -241,7 +275,7 @@ export async function submitBugReport(reporter: Reporter, input: NewBugReport): 
     // Ignored on purpose , see above.
   }
 
-  return created.id;
+  return { id: created.id, screenshotError };
 }
 
 function toReport(id: string, data: Record<string, unknown>): BugReport {
@@ -264,6 +298,7 @@ function toReport(id: string, data: Record<string, unknown>): BugReport {
     context: (d.context as BugContext) ?? ({} as BugContext),
     adminNotes: d.adminNotes ?? "",
     countedForBadge: d.countedForBadge === true,
+    trelloUrl: d.trelloUrl ?? "",
     createdAt: d.createdAt ?? null,
     updatedAt: d.updatedAt ?? null,
     resolvedAt: d.resolvedAt ?? null,
@@ -360,6 +395,69 @@ async function creditApprovedReport(uid: string): Promise<void> {
   if (deserved.tester && grants.tester !== true) patch.tester = true;
   if (deserved.testerPlus && grants.testerPlus !== true) patch.testerPlus = true;
   if (Object.keys(patch).length > 0) await setDoc(userRef, { grants: patch }, { merge: true });
+
+  // Best-effort, like every other inbox send: the credit is the real event
+  // and it has already landed. Sent after the grants so a reporter who just
+  // crossed a tier gets the approval and the badge as two separate messages,
+  // in that order, rather than one that mentions a badge they cannot see yet.
+  try {
+    await sendInboxMessage(uid, {
+      kind: "bug",
+      title: "Bug report approved",
+      body: `Your report was approved , that is ${approved} approved ${approved === 1 ? "report" : "reports"} now. Thanks for making the games better.`,
+    });
+    for (const key of Object.keys(patch) as ("tester" | "testerPlus")[]) {
+      const badge = BADGES_BY_ID[key === "tester" ? "tester" : "tester_plus"];
+      if (!badge) continue;
+      await sendInboxMessage(uid, {
+        kind: "badge",
+        title: `${badge.label} unlocked`,
+        body: `${badge.description}. Put it on from your profile whenever you like.`,
+        badgeId: badge.id,
+      });
+    }
+  } catch (e) {
+    console.error("Report credited but the inbox message did not send", e);
+  }
+}
+
+export const EDITABLE_FIELDS = ["title", "description", "gameId", "severity", "category"] as const;
+
+export interface BugEdit {
+  title: string;
+  description: string;
+  gameId: string;
+  severity: BugSeverity;
+  category: BugCategory;
+}
+
+/**
+ * An admin's tidy-up of a report before it goes anywhere.
+ *
+ * The reporter still cannot edit their own report , that rule has not moved,
+ * and it is what keeps a report honest evidence of what was filed. This is
+ * the other side of it: "ship dissapears sometimes??" is a real bug badly
+ * written, and the version that reaches Trello should be the one a developer
+ * can act on months later. The original wording is not preserved, on purpose:
+ * a queue holding two versions of every report is a queue nobody trusts.
+ */
+export async function editReport(reportId: string, edit: BugEdit): Promise<void> {
+  await updateDoc(doc(db, "bugReports", reportId), {
+    title: edit.title.trim().slice(0, TITLE_MAX),
+    description: edit.description.trim().slice(0, DESCRIPTION_MAX),
+    gameId: edit.gameId.slice(0, 48),
+    severity: edit.severity,
+    category: edit.category,
+    updatedAt: serverTimestamp(),
+  });
+}
+
+/** Where an approved report ended up on the board, so it is filed exactly once. */
+export async function setTrelloCard(reportId: string, url: string): Promise<void> {
+  await updateDoc(doc(db, "bugReports", reportId), {
+    trelloUrl: url.slice(0, 500),
+    updatedAt: serverTimestamp(),
+  });
 }
 
 /** One-shot count for panels that do not need a live subscription. */

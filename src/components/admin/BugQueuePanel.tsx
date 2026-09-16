@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Bug,
   Check,
@@ -10,15 +10,25 @@ import {
   Monitor,
   Search,
   Signal,
+  Pencil,
   Trash2,
   X,
 } from "lucide-react";
-import { getGame } from "@/lib/games";
+import { getGame, PLAYABLE_GAMES } from "@/lib/games";
+import { createCard, isConfigured, listFor, loadTrelloConfig } from "@/lib/trello";
 import {
   BUG_STATUSES,
   CLOSED_STATUSES,
   NOTES_MAX,
+  editReport,
   setReportStatus,
+  setTrelloCard,
+  BUG_CATEGORIES,
+  BUG_SEVERITIES,
+  TITLE_MAX,
+  DESCRIPTION_MAX,
+  type BugCategory,
+  type BugEdit,
   type BugReport,
   type BugSeverity,
   type BugStatus,
@@ -194,12 +204,94 @@ function ReportDetail({
   const [notes, setNotes] = useState(report.adminNotes);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+
+  /**
+   * The admin's cleaned-up version of the report.
+   *
+   * Held as draft state rather than written on every keystroke: this is the
+   * text that becomes a Trello card, and half-typed titles have no business
+   * on the board or in the queue. Seeded from the report and reset whenever a
+   * different one is opened.
+   */
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState<BugEdit>({
+    title: report.title,
+    description: report.description,
+    gameId: report.gameId,
+    severity: report.severity,
+    category: report.category,
+  });
+
+  useEffect(() => {
+    setNotes(report.adminNotes);
+    setEditing(false);
+    setError("");
+    setNotice("");
+    setDraft({
+      title: report.title,
+      description: report.description,
+      gameId: report.gameId,
+      severity: report.severity,
+      category: report.category,
+    });
+  }, [report.id, report.adminNotes, report.title, report.description, report.gameId, report.severity, report.category]);
+
+  const saveEdit = async () => {
+    if (draft.title.trim().length < 4) {
+      setError("A title that short will not mean anything on the board.");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      await editReport(report.id, draft);
+      setEditing(false);
+      setNotice("Report updated.");
+      onChanged();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not save those edits.");
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const apply = async (status: BugStatus) => {
     setBusy(true);
     setError("");
+    setNotice("");
     try {
       await setReportStatus(report, status, admin, notes);
+
+      // Trello is deliberately after the status change and reported
+      // separately. A card that failed to file is a nuisance an admin can
+      // retry; an approval rolled back because of it would un-credit a
+      // reporter who has already been told their report was approved.
+      if (status === "approved" && !report.trelloUrl) {
+        try {
+          const config = await loadTrelloConfig();
+          if (isConfigured(config)) {
+            const listId = listFor(config, report.gameId);
+            if (!listId) {
+              setNotice(
+                `Approved. No Trello list is mapped to ${report.gameId || "this game"} , set one in System.`,
+              );
+            } else {
+              const card = await createCard(config, listId, { ...report, ...draft });
+              await setTrelloCard(report.id, card.shortUrl || card.url);
+              setNotice(`Approved and filed to Trello.`);
+            }
+          } else {
+            setNotice("Approved. Trello is not connected yet , add credentials in System.");
+          }
+        } catch (e) {
+          console.error("Trello card failed", e);
+          setNotice(
+            `Approved, but Trello refused the card: ${e instanceof Error ? e.message : "unknown error"}`,
+          );
+        }
+      }
+
       onChanged();
     } catch (e) {
       console.error("Status change failed", e);
@@ -216,13 +308,25 @@ function ReportDetail({
       title={report.title}
       subtitle={`${report.reporterName} · ${report.reporterEmail}`}
       right={
-        <button
-          onClick={onClose}
-          aria-label="Close"
-          className="w-8 h-8 rounded-lg hover:bg-white/10 flex items-center justify-center text-text-muted shrink-0"
-        >
-          <X size={16} />
-        </button>
+        <div className="flex items-center gap-1 shrink-0">
+          <button
+            onClick={() => setEditing((v) => !v)}
+            aria-label={editing ? "Stop editing" : "Edit this report"}
+            title={editing ? "Stop editing" : "Edit before it goes to Trello"}
+            className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${
+              editing ? "bg-primary text-white" : "hover:bg-white/10 text-text-muted"
+            }`}
+          >
+            <Pencil size={15} />
+          </button>
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            className="w-8 h-8 rounded-lg hover:bg-white/10 flex items-center justify-center text-text-muted"
+          >
+            <X size={16} />
+          </button>
+        </div>
       }
       className="max-h-[calc(100vh-7rem)] overflow-y-auto"
     >
@@ -234,12 +338,96 @@ function ReportDetail({
           {report.gameId && <Pill tone="info">{getGame(report.gameId)?.name ?? report.gameId}</Pill>}
           {report.roomId && <Pill>room {report.roomId}</Pill>}
           {report.countedForBadge && <Pill tone="good">counted</Pill>}
+          {report.trelloUrl && (
+            <a href={report.trelloUrl} target="_blank" rel="noreferrer">
+              <Pill tone="info">on Trello</Pill>
+            </a>
+          )}
         </div>
 
-        {report.description && (
-          <p className="text-sm text-text-secondary whitespace-pre-wrap leading-relaxed">
-            {report.description}
-          </p>
+        {editing ? (
+          /* The reporter can never edit their own report , this is the admin
+             pass that turns "ship dissapears??" into something a developer can
+             pick up off the board in three months. Saved explicitly, because
+             these exact words are what becomes the card. */
+          <div className="space-y-3 rounded-2xl border border-primary/30 bg-primary/5 p-3">
+            <EditField label="Title">
+              <input
+                value={draft.title}
+                onChange={(e) => setDraft({ ...draft, title: e.target.value.slice(0, TITLE_MAX) })}
+                className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-primary/50"
+              />
+            </EditField>
+
+            <EditField label="Description">
+              <textarea
+                value={draft.description}
+                onChange={(e) =>
+                  setDraft({ ...draft, description: e.target.value.slice(0, DESCRIPTION_MAX) })
+                }
+                rows={5}
+                placeholder="Steps to reproduce, what happened, what should have happened."
+                className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-sm text-white outline-none resize-none focus:border-primary/50"
+              />
+            </EditField>
+
+            <div className="grid grid-cols-3 gap-2">
+              <EditField label="Game">
+                <select
+                  value={draft.gameId}
+                  onChange={(e) => setDraft({ ...draft, gameId: e.target.value })}
+                  className="w-full bg-white/5 border border-white/10 rounded-xl px-2 py-2 text-xs text-white outline-none"
+                >
+                  <option value="platform">Platform</option>
+                  {PLAYABLE_GAMES.map((g) => (
+                    <option key={g.id} value={g.id}>
+                      {g.name}
+                    </option>
+                  ))}
+                </select>
+              </EditField>
+              <EditField label="Area">
+                <select
+                  value={draft.category}
+                  onChange={(e) => setDraft({ ...draft, category: e.target.value as BugCategory })}
+                  className="w-full bg-white/5 border border-white/10 rounded-xl px-2 py-2 text-xs text-white outline-none capitalize"
+                >
+                  {BUG_CATEGORIES.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
+              </EditField>
+              <EditField label="Severity">
+                <select
+                  value={draft.severity}
+                  onChange={(e) => setDraft({ ...draft, severity: e.target.value as BugSeverity })}
+                  className="w-full bg-white/5 border border-white/10 rounded-xl px-2 py-2 text-xs text-white outline-none capitalize"
+                >
+                  {BUG_SEVERITIES.map((sev) => (
+                    <option key={sev} value={sev}>
+                      {sev}
+                    </option>
+                  ))}
+                </select>
+              </EditField>
+            </div>
+
+            <button
+              disabled={busy}
+              onClick={saveEdit}
+              className="w-full rounded-xl bg-primary py-2 text-xs font-black text-white disabled:opacity-40"
+            >
+              Save edits
+            </button>
+          </div>
+        ) : (
+          report.description && (
+            <p className="text-sm text-text-secondary whitespace-pre-wrap leading-relaxed">
+              {report.description}
+            </p>
+          )
         )}
 
         {report.screenshotURL ? (
@@ -306,6 +494,7 @@ function ReportDetail({
         </div>
 
         {error && <p className="text-xs text-red-400">{error}</p>}
+        {notice && <p className="text-xs text-emerald-400">{notice}</p>}
 
         <div className="space-y-2">
           <div className="grid grid-cols-3 gap-2">
@@ -327,11 +516,12 @@ function ReportDetail({
             className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-gradient-to-r from-lime-400 to-emerald-500 text-black font-black text-sm disabled:opacity-40"
           >
             <Check size={16} />
-            {report.countedForBadge ? "Approved" : "Approve — credits the reporter"}
+            {report.countedForBadge ? "Approved" : "Approve — credits & files to Trello"}
           </button>
           {!report.countedForBadge && (
-            <p className="text-[10px] text-text-muted text-center">
-              Counts toward their Tester badge ({TESTER_THRESHOLD} approved needed).
+            <p className="text-[10px] text-text-muted text-center leading-relaxed">
+              Credits their Tester badge ({TESTER_THRESHOLD} approved needed) and opens a card on
+              the board. Edit the wording first if it needs it.
             </p>
           )}
 
@@ -360,6 +550,17 @@ function ReportDetail({
         </p>
       </div>
     </Card>
+  );
+}
+
+function EditField({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <label className="text-[10px] font-bold uppercase tracking-wider text-text-muted">
+        {label}
+      </label>
+      <div className="mt-1">{children}</div>
+    </div>
   );
 }
 

@@ -9,6 +9,7 @@ import {
 } from "firebase/firestore";
 import { get, onValue, ref } from "firebase/database";
 import { db, rtdb } from "@/lib/firebase";
+import { hasConnections } from "@/lib/presence";
 
 /**
  * What the admin panel can actually know, and what it only estimates.
@@ -53,6 +54,25 @@ export interface LiveLobby {
   createdAt: Timestamp | null;
   updatedAt: Timestamp | null;
   hostSeenAt: Timestamp | null;
+}
+
+/**
+ * How quiet a room has to go before it stops counting as live.
+ *
+ * The host writes `hostSeenAt` every 10 seconds for as long as anyone is in
+ * the room, and *nothing* ever deletes a lobby document , so a room whose
+ * players closed the tab keeps whatever status it had at that moment, for
+ * ever. Without this cutoff the panel read 200 rooms and called 96 of them
+ * mid-match, most of them days old. Six missed beats is the line: long enough
+ * that a phone waking from sleep is not declared dead, short enough that a
+ * room abandoned a minute ago stops being counted as a live match.
+ */
+export const ROOM_STALE_MS = 60_000;
+
+/** Whether a room's host was heard from recently enough to call it live. */
+export function isRoomLive(lobby: LiveLobby, now = Date.now()): boolean {
+  const beat = lobby.hostSeenAt?.toMillis?.() ?? lobby.updatedAt?.toMillis?.() ?? 0;
+  return beat > 0 && now - beat <= ROOM_STALE_MS;
 }
 
 export interface AdminUser {
@@ -174,10 +194,26 @@ export function useOnlineUids(enabled: boolean) {
 
   useEffect(() => {
     if (!enabled) return;
-    const unsub = onValue(ref(rtdb, "presence/users"), (snap) => {
-      const value = (snap.val() ?? {}) as Record<string, { online?: boolean }>;
-      setUids(Object.entries(value).filter(([, v]) => v?.online === true).map(([uid]) => uid));
-    });
+    // `presenceSessions/users`, not the older `presence/users`: the app moved
+    // to one child per open tab (see src/hooks/usePresence.ts) so a second
+    // device does not mark you offline when the first one closes. The old
+    // path is still in the rules but nothing has written a `{ online: true }`
+    // flag there in a long time, which is why this panel counted nobody while
+    // the live rooms below were visibly full of people.
+    const unsub = onValue(
+      ref(rtdb, "presenceSessions/users"),
+      (snap) => {
+        const value = (snap.val() ?? {}) as Record<string, Record<string, boolean>>;
+        setUids(Object.entries(value).filter(([, v]) => hasConnections(v)).map(([uid]) => uid));
+      },
+      (e) => {
+        // Almost always the database rules: reading the whole set is
+        // admin-only and that rule ships in database.rules.json, which is
+        // deployed separately from the Firestore ones.
+        console.error("Admin presence read failed", e);
+        setUids([]);
+      },
+    );
     return unsub;
   }, [enabled]);
 

@@ -11,8 +11,9 @@ import {
   EMPTY_PROGRESS,
   TESTER_THRESHOLD,
   hasBadge,
+  NO_BADGE,
+  wornBadge,
   testerProgress,
-  topBadge,
   type BadgeProgress,
 } from "@/lib/badges";
 import BadgeChip, { BadgeIcon } from "@/components/BadgeChip";
@@ -86,6 +87,16 @@ export default function ProfilePage() {
   const [codeCopied, setCodeCopied] = useState(false);
 
   const [progress, setProgress] = useState<BadgeProgress>(EMPTY_PROGRESS);
+  /**
+   * The badge this player chose to wear, read from their public profile.
+   *
+   * Empty means they have never picked one, which is not the same thing as
+   * picking none , see `wornBadge`. An admin handing out a badge writes to
+   * `grants` and never to this: the gift is theirs to keep either way, and
+   * putting it on is their call alone.
+   */
+  const [chosenBadge, setChosenBadge] = useState<string>("");
+  const [savingBadge, setSavingBadge] = useState("");
   const [loadingStats, setLoadingStats] = useState(true);
   const gamesPlayed = progress.gamesPlayed;
   const wins = progress.wins;
@@ -110,6 +121,7 @@ export default function ProfilePage() {
         const profileSnap = await getDoc(doc(db, "profiles", user.uid));
         if (!cancelled && profileSnap.exists()) {
           setFriendCode(profileSnap.data().friendCode || "");
+          setChosenBadge(profileSnap.data().badge ?? "");
           // Use profile photoURL if it differs (updated from profile page)
           const pPhoto = profileSnap.data().photoURL;
           if (pPhoto) setPhotoURL(pPhoto);
@@ -204,11 +216,38 @@ export default function ProfilePage() {
     setTimeout(() => setCodeCopied(false), 2000);
   };
 
+  /**
+   * Put a badge on, or take it off.
+   *
+   * Written to the public profile because that is the document everyone else
+   * reads a name and a badge from. The rules check it against the grants on
+   * the private one, so choosing a badge you were never given is refused by
+   * the database rather than only by this button being hidden.
+   */
+  const wearBadge = async (badgeId: string) => {
+    if (!user) return;
+    setSavingBadge(badgeId);
+    try {
+      await setDoc(
+        doc(db, "profiles", user.uid),
+        { badge: badgeId, updatedAt: serverTimestamp() },
+        { merge: true },
+      );
+      setChosenBadge(badgeId);
+      flash(badgeId === NO_BADGE ? "Badge removed." : "Badge updated!");
+    } catch (e) {
+      console.error("Badge save error:", e);
+      flash("Could not change your badge. Try again.");
+    } finally {
+      setSavingBadge("");
+    }
+  };
+
   if (!user) return null;
 
   const earnedCount = BADGES.filter((b) => hasBadge(b, progress)).length;
   const tester = testerProgress(progress.bugsApproved);
-  const wearing = topBadge(progress);
+  const wearing = wornBadge(progress, chosenBadge);
 
   return (
     <AuthGuard>
@@ -467,20 +506,57 @@ export default function ProfilePage() {
               </p>
             </div>
 
+            {earnedCount > 0 && (
+              <div className="glass rounded-2xl border border-white/10 p-3 mb-3 flex items-center justify-between gap-3">
+                <p className="text-[11px] text-text-muted leading-relaxed">
+                  Tap a badge you have earned to wear it beside your name.
+                </p>
+                <button
+                  onClick={() => wearBadge(NO_BADGE)}
+                  disabled={savingBadge !== "" || chosenBadge === NO_BADGE}
+                  className="shrink-0 rounded-xl border border-white/10 px-3 py-1.5 text-[11px] font-bold text-text-secondary hover:border-white/25 disabled:opacity-40 transition-colors"
+                >
+                  Wear none
+                </button>
+              </div>
+            )}
+
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               {BADGES.map((badge, i) => {
                 const earned = hasBadge(badge, progress);
+                const isWorn = wearing?.id === badge.id;
+                // What is still missing, in the badge's own units. A locked
+                // badge that says nothing is just a grey square; one that says
+                // "62 / 100 wins" is a reason to play another match.
+                const track =
+                  badge.winsNeeded !== undefined
+                    ? { have: progress.wins, need: badge.winsNeeded }
+                    : badge.gamesNeeded !== undefined
+                      ? { have: progress.gamesPlayed, need: badge.gamesNeeded }
+                      : badge.bugsNeeded !== undefined
+                        ? { have: progress.bugsApproved, need: badge.bugsNeeded }
+                        : null;
                 return (
-                  <motion.div
+                  <motion.button
                     key={badge.id}
                     initial={{ opacity: 0, scale: 0.8 }}
                     animate={{ opacity: 1, scale: 1 }}
                     transition={{ delay: 0.15 + i * 0.04 }}
-                    title={badge.description}
-                    className={`glass rounded-2xl p-4 border flex flex-col items-center gap-2 text-center transition-all relative overflow-hidden ${
+                    title={
                       earned
-                        ? "border-white/15 hover:border-white/30"
-                        : "border-white/5 opacity-50"
+                        ? isWorn
+                          ? `${badge.label} , currently worn`
+                          : `Wear ${badge.label}`
+                        : badge.description
+                    }
+                    onClick={() => earned && !isWorn && wearBadge(badge.id)}
+                    disabled={!earned || savingBadge !== ""}
+                    className={`glass rounded-2xl p-4 border flex flex-col items-center gap-2 text-center transition-all relative overflow-hidden ${
+                      isWorn
+                        ? "border-primary/60 ring-1 ring-primary/40"
+                        : earned
+                          ? "border-white/15 hover:border-white/30 cursor-pointer"
+                          : "border-white/5 opacity-50 cursor-default"
                     }`}
                   >
                     {earned && (
@@ -504,13 +580,39 @@ export default function ProfilePage() {
                         <BadgeIcon name={badge.icon} size={28} />
                       </div>
                     </div>
-                    <div className="relative z-0">
+                    <div className="relative z-0 w-full">
                       <p className="text-xs font-bold text-white leading-tight">{badge.label}</p>
                       <p className="text-[10px] text-text-muted mt-0.5 leading-tight">
                         {badge.description}
                       </p>
+
+                      {isWorn && (
+                        <span className="mt-1.5 inline-block rounded-full bg-primary/20 px-2 py-0.5 text-[9px] font-black uppercase tracking-wider text-primary">
+                          worn
+                        </span>
+                      )}
+
+                      {!earned && track && (
+                        <div className="mt-2">
+                          <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
+                            <div
+                              className={`h-full rounded-full bg-gradient-to-r ${badge.color} transition-[width] duration-500`}
+                              style={{
+                                width: `${Math.min(100, (track.have / track.need) * 100)}%`,
+                              }}
+                            />
+                          </div>
+                          <p className="mt-1 text-[9px] text-text-muted tabular-nums">
+                            {track.have} / {track.need}
+                          </p>
+                        </div>
+                      )}
+
+                      {!earned && !track && (
+                        <p className="mt-1.5 text-[9px] text-amber-400/80">Given by an admin</p>
+                      )}
                     </div>
-                  </motion.div>
+                  </motion.button>
                 );
               })}
             </div>

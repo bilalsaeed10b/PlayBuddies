@@ -171,6 +171,47 @@ service cloud.firestore {
       allow update: if isAdmin();
 
       allow delete: if false;
+
+      /**
+       * The player's inbox: what the platform did to their account.
+       *
+       * Only an admin writes one , every message is the record of an action
+       * an admin took (coins granted, a badge given, a report approved), so a
+       * player able to write here could post themselves a receipt for a
+       * reward they were never given. The owner may mark one read and clear
+       * it, and that is the whole of their side of it.
+       */
+      match /inbox/{messageId} {
+        allow get, list: if isSelf(userId) || isAdmin();
+
+        allow create: if isAdmin()
+                      && incoming().keys().hasOnly([
+                        'kind', 'title', 'body', 'amount', 'gameId',
+                        'badgeId', 'read', 'createdAt'
+                      ])
+                      && incoming().kind in ['coins', 'badge', 'bug', 'note']
+                      && incoming().title is string
+                      && incoming().title.size() <= 80
+                      && incoming().body is string
+                      && incoming().body.size() <= 400
+                      && incoming().read == false;
+
+        // Read receipts only. The message itself is evidence and stays as
+        // written , an owner who could edit `amount` could rewrite what they
+        // were told they received.
+        allow update: if (isSelf(userId) || isAdmin()) && touched().hasOnly(['read']);
+
+        allow delete: if isSelf(userId) || isAdmin();
+      }
+    }
+
+    // ─── Admin configuration ───
+    // Third-party credentials, currently the Trello key and token that file an
+    // approved report as a card. Admin-only in both directions, which is the
+    // entire reason these are not build-time environment variables: anything
+    // prefixed NEXT_PUBLIC_ ships inside the bundle every visitor downloads.
+    match /adminConfig/{docId} {
+      allow read, write: if isAdmin();
     }
 
     // ─── Public profile ───
