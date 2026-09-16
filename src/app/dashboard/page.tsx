@@ -1,7 +1,7 @@
 
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { motion } from "framer-motion";
 import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/store/useAuthStore";
@@ -28,6 +28,7 @@ import {
   ArrowRight,
   Play,
   Users,
+  ChevronDown,
 } from "lucide-react";
 
 const CREATE_LOBBY_TIMEOUT_MS = 12_000;
@@ -61,6 +62,8 @@ export default function DashboardPage() {
   const [isJoining, setIsJoining] = useState(false);
   const [userStats, setUserStats] = useState({ gamesPlayed: 0 });
   const [loadingStats, setLoadingStats] = useState(true);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const profileRef = useRef<HTMLDivElement>(null);
   // Read once on mount: localStorage isn't available during the server render,
   // and reading it in the body would make the first paint mismatch.
   const [resumeRoom, setResumeRoom] = useState<string | null>(null);
@@ -111,6 +114,17 @@ export default function DashboardPage() {
 
   useEffect(() => {
     setResumeRoom(getRememberedLobby());
+  }, []);
+
+  // Close the profile dropdown when clicking outside.
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (profileRef.current && !profileRef.current.contains(e.target as Node)) {
+        setProfileOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
   }, []);
 
   const handleSignOut = async () => {
@@ -214,30 +228,87 @@ export default function DashboardPage() {
             </span>
           </div>
 
-          <div className="flex items-center gap-6">
-            <div className="flex items-center gap-3">
-              <div className="text-right hidden sm:block">
-                <p className="text-sm font-bold text-white">{user?.displayName}</p>
-                <p className="text-xs text-text-muted">{user?.email}</p>
-              </div>
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={user?.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user?.uid}`}
-                alt="Profile"
-                onError={(e) => {
-                  e.currentTarget.onerror = null;
-                  e.currentTarget.src = `https://api.dicebear.com/7.x/avataaars/svg?seed=${user?.uid}`;
-                }}
-                className="w-10 h-10 rounded-full border-2 border-primary/50"
-              />
+          <div className="flex items-center gap-3" ref={profileRef}>
+            {/* Profile pill */}
+            <div className="relative">
+              <button
+                onClick={() => setProfileOpen((v) => !v)}
+                className="flex items-center gap-2 glass border border-white/10 hover:border-primary/40 rounded-2xl px-3 py-2 transition-all hover:bg-white/5 group"
+                aria-label="Profile menu"
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={user?.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user?.uid}`}
+                  alt="Profile"
+                  onError={(e) => {
+                    e.currentTarget.onerror = null;
+                    e.currentTarget.src = `https://api.dicebear.com/7.x/avataaars/svg?seed=${user?.uid}`;
+                  }}
+                  className="w-8 h-8 rounded-full border-2 border-primary/50"
+                />
+                <div className="hidden sm:block text-left">
+                  <p className="text-sm font-bold text-white leading-tight">{user?.displayName?.split(" ")[0]}</p>
+                </div>
+                <ChevronDown
+                  size={14}
+                  className={`text-text-muted transition-transform duration-200 ${profileOpen ? "rotate-180" : ""}`}
+                />
+              </button>
+
+              {/* Dropdown */}
+              {profileOpen && (
+                <div className="absolute right-0 top-full mt-2 w-64 glass-solid bg-[#161626] rounded-2xl border border-white/10 shadow-2xl z-50 overflow-hidden">
+                  {/* User info header */}
+                  <div className="p-4 border-b border-white/10">
+                    <div className="flex items-center gap-3">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={user?.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user?.uid}`}
+                        alt="Profile"
+                        onError={(e) => {
+                          e.currentTarget.onerror = null;
+                          e.currentTarget.src = `https://api.dicebear.com/7.x/avataaars/svg?seed=${user?.uid}`;
+                        }}
+                        className="w-12 h-12 rounded-full border-2 border-primary/50 shrink-0"
+                      />
+                      <div className="min-w-0">
+                        <p className="font-bold text-white truncate">{user?.displayName}</p>
+                        <p className="text-xs text-text-muted truncate">{user?.email}</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Stats */}
+                  <div className="grid grid-cols-2 gap-px bg-white/5 border-b border-white/10">
+                    <div className="bg-[#161626] p-3 text-center">
+                      <p className="text-lg font-black text-white">{onlineFriends.size}</p>
+                      <p className="text-[10px] text-text-muted uppercase tracking-wider flex items-center justify-center gap-1">
+                        <Users size={10} /> Online
+                      </p>
+                    </div>
+                    <div className="bg-[#161626] p-3 text-center">
+                      <p className="text-lg font-black text-white">
+                        {loadingStats ? "—" : userStats.gamesPlayed}
+                      </p>
+                      <p className="text-[10px] text-text-muted uppercase tracking-wider flex items-center justify-center gap-1">
+                        <Gamepad2 size={10} /> Played
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Actions */}
+                  <div className="p-2">
+                    <button
+                      onClick={() => { setProfileOpen(false); handleSignOut(); }}
+                      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-red-400 hover:bg-red-500/10 hover:text-red-300 transition-colors"
+                    >
+                      <LogOut size={16} />
+                      Sign Out
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
-            <button
-              onClick={handleSignOut}
-              className="p-2 rounded-lg glass hover:bg-white/10 text-text-muted hover:text-white transition-colors"
-              title="Sign Out"
-            >
-              <LogOut size={20} />
-            </button>
           </div>
         </nav>
 

@@ -16,6 +16,7 @@ import { normalizeRoomCode, isValidRoomCode, LOBBY_TTL_MS, inviteTimestamps } fr
 import { FRIEND_CODE_LENGTH, findByFriendCode, sendFriendRequest } from "@/lib/friends";
 import { rememberLobby, forgetLobby } from "@/lib/lastLobby";
 import { cleanWallet, readWallet, recordMatch, writeWallet } from "@/lib/wallet";
+import { playPop } from "@/lib/sounds";
 import type { Lobby, LobbyMessage, LobbyPlayer } from "@/types/game";
 import {
   doc,
@@ -126,6 +127,8 @@ function LobbyContent() {
    * the Chat tab is tracking against.
    */
   const seenChatCount = useRef(0);
+  /** The id of the last message we already played a sound for, to avoid double-pops. */
+  const lastSoundMsgId = useRef<string | null>(null);
   const gameFrameRef = useRef<HTMLIFrameElement>(null);
   /** The wrapper that goes fullscreen , the frame plus its floating controls. */
   const gameShellRef = useRef<HTMLDivElement>(null);
@@ -451,6 +454,23 @@ function LobbyContent() {
     if (sidebarTab === "chat") seenChatCount.current = messages.length;
   }, [sidebarTab, messages.length]);
   const hasUnreadChat = sidebarTab !== "chat" && messages.length > seenChatCount.current;
+
+  // Play a soft pop when a new message arrives from someone else,
+  // regardless of whether the chat tab is open.
+  useEffect(() => {
+    if (messages.length === 0) return;
+    const latest = messages[messages.length - 1];
+    if (!latest) return;
+    // Skip our own messages and anything we already pinged.
+    if (latest.uid === user?.uid) {
+      lastSoundMsgId.current = latest.id;
+      return;
+    }
+    if (latest.id === lastSoundMsgId.current) return;
+    lastSoundMsgId.current = latest.id;
+    playPop();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages]);
 
   useEffect(() => {
     const onFsChange = () => {

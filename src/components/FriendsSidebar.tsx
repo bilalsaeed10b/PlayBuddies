@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState, startTransition } from "react";
+
+const sleep = (ms: number) => new Promise<void>((res) => setTimeout(res, ms));
 import { usePathname } from "next/navigation";
 import { doc, onSnapshot, addDoc, collection } from "firebase/firestore";
 import { db } from "@/lib/firebase";
@@ -251,6 +253,8 @@ export default function FriendsSidebar() {
                                   ...inviteTimestamps(),
                                 });
                                 count++;
+                                // Stagger writes to avoid Firestore rate limits.
+                                await sleep(150);
                               } catch (e) {
                                 console.error("Invite error:", e);
                               }
