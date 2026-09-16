@@ -1,4 +1,5 @@
 import { rtdb, dbRef, dbSet, dbPush, dbOnValue, dbOnDisconnect, dbRemove } from '../firebase';
+import { fetchTurnServers } from '@shared/net/turnServers';
 
 /**
  * A full WebRTC mesh for up to eight players, signalled through Realtime
@@ -20,10 +21,22 @@ import { rtdb, dbRef, dbSet, dbPush, dbOnValue, dbOnDisconnect, dbRemove } from 
  * agree on who calls whom and glare never happens.
  */
 
-const ICE_SERVERS: RTCIceServer[] = [
+const STUN_SERVERS: RTCIceServer[] = [
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun1.l.google.com:19302' },
 ];
+
+/**
+ * Read fresh by every new `RTCPeerConnection` below, never captured at
+ * import time , the fetch above is still in flight for the very first
+ * attempts a page makes, and those must not be held up waiting on it. They
+ * simply go out STUN-only, same as before TURN existed; whichever attempt
+ * comes after the fetch resolves gets the relay too.
+ */
+let iceServers: RTCIceServer[] = STUN_SERVERS;
+void fetchTurnServers().then((turn) => {
+  if (turn.length > 0) iceServers = [...STUN_SERVERS, ...turn];
+});
 
 interface Peer {
   pc: RTCPeerConnection;
@@ -105,7 +118,7 @@ export class Mesh {
   }
 
   private connect(peerId: string) {
-    const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+    const pc = new RTCPeerConnection({ iceServers });
 
     // Pre-negotiated channel: both sides create it with the same id, so there
     // is no ondatachannel race to lose.

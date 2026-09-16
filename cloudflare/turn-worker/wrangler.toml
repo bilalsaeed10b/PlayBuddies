@@ -1,0 +1,9 @@
+name = "playbuddies-turn"
+main = "src/index.ts"
+compatibility_date = "2026-09-01"
+
+# Secrets (never put these here): after `wrangler login`, run
+#   wrangler secret put TURN_KEY_ID
+#   wrangler secret put TURN_API_TOKEN
+# using the Token ID and API Token from a TURN Key created at
+# https://dash.cloudflare.com/?to=/:account/calls
