@@ -531,6 +531,11 @@ export class GameEngine {
     return this.locals.get(id);
   }
 
+  /** Any fish , ours or a peer's , for lookups (chat bubbles) that don't care which. */
+  fishAt(id: string): Fish | undefined {
+    return this.locals.get(id) ?? this.remotes.get(id);
+  }
+
   /**
    * Every seat that has been in the water this match, ranked by the best
    * score they have ever reached in it -- not by their current size, which
@@ -591,6 +596,32 @@ export class GameEngine {
 
   /** The camera-sized part of the aquarium currently visible. */
 
+  /**
+   * World → viewport pixels, for DOM overlays (chat bubbles) that have to sit
+   * over a canvas fish.
+   *
+   * There is no stored letterbox rect to reuse like the other games' fixed
+   * arenas , this camera follows the local player and `draw()` recomputes the
+   * scale and offset fresh every frame, so this mirrors that exact chain
+   * (letterbox, then the eased camera translate) rather than a snapshot of it,
+   * or a bubble over a *remote* fish would drift the moment the local player
+   * moved the camera out from under it.
+   */
+  toClient(x: number, y: number, rect: DOMRect): { x: number; y: number } {
+    const cw = this.ctx.canvas.width;
+    const ch = this.ctx.canvas.height;
+    const scale = Math.min(cw / this.effViewW, ch / this.effViewH);
+    const offX = (cw - this.effViewW * scale) / 2;
+    const offY = (ch - this.effViewH * scale) / 2;
+    // Backing-store px per CSS px, recovered from the canvas itself rather
+    // than re-reading devicePixelRatio , the governor's maxDpr cap means the
+    // ratio resize() actually used can be lower than the raw device value.
+    const dpr = cw / Math.max(1, rect.width);
+    return {
+      x: rect.left + (offX + scale * (x + this.effViewW / 2 - this.cameraX)) / dpr,
+      y: rect.top + (offY + scale * (y + this.effViewH / 2 - this.cameraY)) / dpr,
+    };
+  }
 
   private viewRadius() {
     return Math.hypot(this.effViewW, this.effViewH) / 2;

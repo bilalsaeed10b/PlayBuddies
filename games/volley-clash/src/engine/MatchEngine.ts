@@ -261,6 +261,7 @@ export class MatchEngine {
   private scale = 1;
   private offX = 0;
   private offY = 0;
+  private dpr = 1;
 
   /**
    * Where the network says things are, kept live.
@@ -1465,6 +1466,7 @@ export class MatchEngine {
     // four times the pixels of the same court at dpr 1, for no change in what
     // the player can actually see happening.
     const dpr = Math.min(window.devicePixelRatio || 1, q.maxDpr);
+    this.dpr = dpr;
     canvas.width = Math.round(cssW * dpr);
     canvas.height = Math.round(cssH * dpr);
     canvas.style.width = `${cssW}px`;
@@ -1472,6 +1474,14 @@ export class MatchEngine {
     this.scale = Math.min(cssW / this.arena.w, cssH / this.arena.h) * dpr;
     this.offX = (canvas.width - this.arena.w * this.scale) / 2;
     this.offY = (canvas.height - this.arena.h * this.scale) / 2;
+  }
+
+  /** World → viewport pixels, for DOM overlays (chat bubbles) that have to sit over a canvas body. */
+  toClient(x: number, y: number, rect: DOMRect): { x: number; y: number } {
+    return {
+      x: rect.left + (this.offX + x * this.scale) / this.dpr,
+      y: rect.top + (this.offY + y * this.scale) / this.dpr,
+    };
   }
 
   render(ctx: CanvasRenderingContext2D, q: Quality) {

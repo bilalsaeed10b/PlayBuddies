@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Wifi, WifiOff } from 'lucide-react';
-import { GameEngine } from '../engine/GameEngine';
+import { GameEngine, bodyRadius } from '../engine/GameEngine';
 import Joystick from '../components/Joystick';
 import { GameSettings, NetMessage, PlayerPacket } from '../types/game';
 // Type-only: the runtime value is pulled in by the dynamic import below, so
@@ -10,6 +10,9 @@ import { audioService } from '../services/audio';
 import ControlsTray from '@shared/controls/ControlsTray';
 import { isStaleChunkError, recoverFromStaleChunk } from '@shared/net/staleChunk';
 import { createLogger } from '@shared/log/logger';
+import { ChatLayer } from '@shared/chat/ChatLayer';
+import { useBubbleFeed } from '@shared/chat/useBubbleFeed';
+import { SpeechBubble } from '@shared/ui/SpeechBubble';
 
 const log = createLogger('players-eat-fish');
 
@@ -91,6 +94,8 @@ export default function GameView({
   const rootRef = useRef<HTMLDivElement>(null);
   const engineRef = useRef<GameEngine | null>(null);
   const meshRef = useRef<Mesh | null>(null);
+  /** Keyed by fish id , the same uid/local-id string every other lookup here already uses. */
+  const { bubbles, show: showBubble } = useBubbleFeed();
 
   const [progress, setProgress] = useState(0);
   const [ready, setReady] = useState(false);
@@ -249,6 +254,9 @@ export default function GameView({
               if (e.localFish(msg.by)) e.creditKill(msg.by, msg.size);
               break;
             }
+            case 'c':
+              showBubble(from, msg.msg);
+              break;
           }
         },
         (connected) => {
@@ -420,6 +428,13 @@ export default function GameView({
     else audioService.stopBackgroundMusic();
   }, [ready, settings.bgmVolume]);
 
+  /** Shown over the sender's own fish the instant it's typed , the round trip only needs to reach everyone else. */
+  const sendChat = (text: string) => {
+    const mine = localIds[0];
+    if (mine !== undefined) showBubble(mine, text);
+    meshRef.current?.broadcast({ t: 'c', msg: text, n: Date.now() } satisfies NetMessage);
+  };
+
   const respawn = () => {
     setDefeat(null);
     localIds.forEach((id) => engineRef.current?.respawn(id));
@@ -436,6 +451,21 @@ export default function GameView({
         ref={canvasRef}
         className={`block w-full h-full transition-opacity duration-500 ${ready ? 'opacity-100' : 'opacity-0'}`}
       />
+
+      {/* ── chat bubbles, anchored over the speaker's own fish ── */}
+      {Object.entries(bubbles).map(([id, text]) => {
+        const engine = engineRef.current;
+        const canvas = canvasRef.current;
+        const fish = engine?.fishAt(id);
+        if (!engine || !canvas || !fish) return null;
+        const pos = engine.toClient(fish.x, fish.y - bodyRadius(fish.size) * 0.95 - 40, canvas.getBoundingClientRect());
+        return <SpeechBubble key={id} text={text} style={{ left: pos.x, top: pos.y }} />;
+      })}
+
+      {/* Bottom-left, clear of the top HUD row's opaque Size/leaderboard cards
+          and the top-right ControlsTray , the default top-left slot sits right
+          under the Size card here. */}
+      {online && ready && <ChatLayer onSend={sendChat} buttonClassName="absolute left-2 bottom-2 z-30" />}
 
       {ready && (!defeat || online) && (
         <Joystick

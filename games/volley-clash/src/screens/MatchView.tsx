@@ -8,10 +8,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Trophy, Wifi, WifiOff } from 'lucide-react';
 import TouchPad, { PadState } from '../components/TouchPad';
-import { IN_IFRAME, toggleFullscreen } from '../fullscreen';
 import ControlsTray from '@shared/controls/ControlsTray';
 import { createLogger } from '@shared/log/logger';
 import { isStaleChunkError, recoverFromStaleChunk } from '@shared/net/staleChunk';
+import { ChatLayer } from '@shared/chat/ChatLayer';
+import { useBubbleFeed } from '@shared/chat/useBubbleFeed';
+import { SpeechBubble } from '@shared/ui/SpeechBubble';
 import { CHARACTERS } from '../game/characters';
 import { BALANCE, POWER_META, TEAM_COLORS, arenaFor } from '../game/rules';
 import { MatchEngine, Seat } from '../engine/MatchEngine';
@@ -121,6 +123,8 @@ export default function MatchView({
   const shellRef = useRef<HTMLDivElement>(null);
   const engineRef = useRef<MatchEngine | null>(null);
   const linkRef = useRef<Link | null>(null);
+  /** Keyed by seat id, the same key every other player-lookup in this file already uses. */
+  const { bubbles, show: showBubble } = useBubbleFeed();
 
   const [score, setScore] = useState<[number, number]>([0, 0]);
   const [powers, setPowers] = useState<{ kind: string; team: Team; left: number }[]>([]);
@@ -287,6 +291,16 @@ export default function MatchView({
   // rebuilds the engine, and rebuilding the engine resets the score mid-match.
   const readInputRef = useRef(readInput);
   readInputRef.current = readInput;
+
+  /** Shown over the sender's own body the instant it's typed , the round trip only needs to reach everyone else. */
+  const sendChat = useCallback(
+    (text: string) => {
+      const mine = config.localIds[0];
+      if (mine !== undefined) showBubble(mine, text);
+      linkRef.current?.send({ t: 'c', msg: text, n: Date.now() });
+    },
+    [config.localIds, showBubble],
+  );
 
   // ── the engine ───────────────────────────────────────────────────────────
   useEffect(() => {
@@ -614,6 +628,9 @@ export default function MatchView({
                 engine.forget(msg.id);
                 engine.handOverToAI(msg.id);
                 break;
+              case 'c':
+                showBubble(from, msg.msg);
+                break;
             }
           },
           (status: LinkStatus) =>
@@ -717,6 +734,18 @@ export default function MatchView({
     <div ref={shellRef} className="relative h-[100dvh] w-full overflow-hidden bg-[#06182a]">
       <canvas ref={canvasRef} className="absolute inset-0 h-full w-full touch-none" />
 
+      {/* ── chat bubbles, anchored over the speaker's own body ── */}
+      {Object.entries(bubbles).map(([seatId, text]) => {
+        const engine = engineRef.current;
+        const canvas = canvasRef.current;
+        const p = engine?.players.find((q) => q.id === seatId);
+        if (!engine || !canvas || !p) return null;
+        const pos = engine.toClient(p.x, p.y - p.r * 2.9, canvas.getBoundingClientRect());
+        return <SpeechBubble key={seatId} text={text} style={{ left: pos.x, top: pos.y }} />;
+      })}
+
+      {online && !over && <ChatLayer onSend={sendChat} />}
+
       {/* ── scoreboard ── */}
       <div className="pointer-events-none absolute left-1/2 top-3 z-20 flex -translate-x-1/2 items-stretch gap-1 rounded-2xl border border-white/20 bg-black/45 p-1 backdrop-blur-md">
         {([0, 1] as Team[]).map((team) => (
@@ -810,22 +839,7 @@ export default function MatchView({
 
       {/* ── touch controls ── */}
       {touch && !over && (
-        <TouchPad
-          state={padRef}
-          hintKey={0}
-          onFirstTouch={() => {
-            // The Fullscreen API only grants a request that is handling a real
-            // user gesture, and the first touch of the match is one. Once only,
-            // so quitting fullscreen on purpose is respected.
-            //
-            // Skipped when embedded: PlayBuddies drives fullscreen for the whole
-            // frame, and a game that grabs it from underneath leaves the two
-            // disagreeing about what is fullscreen and strands the host's bar
-            // on top of the court.
-            if (IN_IFRAME || document.fullscreenElement) return;
-            toggleFullscreen(shellRef.current ?? document.documentElement, true);
-          }}
-        />
+        <TouchPad state={padRef} hintKey={0} />
       )}
 
       {/* ── result ── */}

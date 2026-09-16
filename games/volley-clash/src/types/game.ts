@@ -274,4 +274,6 @@ export type NetMessage =
   /** Host → everyone: a point was scored, with the shout to display. */
   | { t: 'pt'; team: Team; sc: [number, number]; call: string }
   /** Anyone → everyone: I am leaving, hand my seat to the AI. */
-  | { t: 'bye'; id: string };
+  | { t: 'bye'; id: string }
+  /** A line of chat, shown as a bubble over the sender's own body rather than in a log. */
+  | { t: 'c'; msg: string; n: number };

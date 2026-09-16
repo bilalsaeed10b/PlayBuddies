@@ -93,4 +93,6 @@ export type NetMessage =
   | { t: 'e'; d: EnemyPacket[]; b: EnemyPacket | null; n: number }
   | { t: 'x'; id: number }
   | { t: 'k'; ids: number[] }
-  | { t: 'd'; by: string; size: number };
+  | { t: 'd'; by: string; size: number }
+  /** A line of chat, shown as a bubble over the sender's own fish rather than in a log. */
+  | { t: 'c'; msg: string; n: number };
