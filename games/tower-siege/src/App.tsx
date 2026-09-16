@@ -16,7 +16,7 @@ import {
   Users,
   User,
 } from 'lucide-react';
-import { askHostToEndGame, askToLeaveLobby, toggleFullscreen } from './fullscreen';
+import { askHostToEndGame, askToLeaveLobby, toggleFullscreen, useAutoFullscreen } from './fullscreen';
 import { GameWallet, reportResult } from './platform/wallet';
 import { TIERS } from './engine/ai';
 import { SEATS, DEFAULT_RULES, packRules, unpackRules } from './game/rules';
@@ -70,6 +70,7 @@ export default function App() {
   const online = Boolean(handoff.room);
 
   const [view, setView] = useState<View>(online ? 'room' : 'menu');
+  useAutoFullscreen(view === 'game');
   const [showSettings, setShowSettings] = useState(false);
   const [showShop, setShowShop] = useState(false);
   const [uid, setUid] = useState<string | null>(null);

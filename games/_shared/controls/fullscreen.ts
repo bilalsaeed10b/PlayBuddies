@@ -20,6 +20,8 @@
  * three of them never actually called requestFullscreen() at all , which is
  * exactly the bug this file existing once is meant to make impossible.
  */
+import { useEffect } from 'react';
+import type { RefObject } from 'react';
 
 export const IN_IFRAME: boolean = (() => {
   try {
@@ -97,6 +99,38 @@ export function toggleFullscreen(el: HTMLElement, on: boolean) {
   } else {
     applyImmersive(el);
   }
+}
+
+/**
+ * Requests fullscreen the moment a match actually starts, instead of making a
+ * player find the tray's own button first.
+ *
+ * A request only succeeds on a real, recent user gesture. `active` flipping
+ * true is usually still inside one , the host's own "Start Game" click, or a
+ * guest's most recent tap while readying up , so it is tried immediately. When
+ * that gesture has gone stale (a guest who has been idle), the browser simply
+ * ignores the call and `toggleFullscreen`'s own CSS fallback takes over rather
+ * than throwing, and the first tap anywhere on the match screen tries again,
+ * same as a player reaching for the tray button themselves would.
+ */
+export function useAutoFullscreen(active: boolean, shellRef?: RefObject<HTMLElement | null>) {
+  useEffect(() => {
+    if (!active || document.fullscreenElement) return;
+    const target = () => shellRef?.current ?? document.documentElement;
+    toggleFullscreen(target(), true);
+    if (document.fullscreenElement) return;
+
+    const onFirstTouch = () => {
+      if (!document.fullscreenElement) toggleFullscreen(target(), true);
+    };
+    window.addEventListener('pointerdown', onFirstTouch, { once: true });
+    window.addEventListener('keydown', onFirstTouch, { once: true });
+    return () => {
+      window.removeEventListener('pointerdown', onFirstTouch);
+      window.removeEventListener('keydown', onFirstTouch);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active]);
 }
 
 function applyImmersive(el: HTMLElement) {

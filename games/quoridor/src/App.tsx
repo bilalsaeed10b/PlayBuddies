@@ -16,7 +16,7 @@ import {
   Settings as SettingsIcon,
   Users,
 } from 'lucide-react';
-import { askHostToEndGame, askToLeaveLobby, toggleFullscreen } from './fullscreen';
+import { askHostToEndGame, askToLeaveLobby, toggleFullscreen, useAutoFullscreen } from './fullscreen';
 import { FREE_PAWNS, PAWNS, drawPawn } from './game/pawns';
 import useShortScreen from '@shared/ui/useShortScreen';
 import { DEFAULT_SIDES, TEAMS, layoutFor, wallsFor } from './game/rules';
@@ -77,6 +77,7 @@ export default function App() {
   const online = Boolean(handoff.room);
 
   const [view, setView] = useState<View>(online ? 'room' : 'menu');
+  useAutoFullscreen(view === 'game');
   const [showSettings, setShowSettings] = useState(false);
   const [showRules, setShowRules] = useState(false);
   const [uid, setUid] = useState<string | null>(null);

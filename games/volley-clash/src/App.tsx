@@ -15,7 +15,7 @@ import {
   Users,
   Volleyball,
 } from 'lucide-react';
-import { askHostToEndGame, askToLeaveLobby, toggleFullscreen } from './fullscreen';
+import { askHostToEndGame, askToLeaveLobby, toggleFullscreen, useAutoFullscreen } from './fullscreen';
 import { CHARACTERS, Character, FREE_CHARACTERS, drawCharacter } from './game/characters';
 import { BALANCE, TEAM_COLORS } from './game/rules';
 import { TIERS } from './engine/ai';
@@ -78,6 +78,7 @@ export default function App() {
   const online = Boolean(handoff.room);
 
   const [view, setView] = useState<View>(online ? 'room' : 'menu');
+  useAutoFullscreen(view === 'game');
   const [showSettings, setShowSettings] = useState(false);
   const [uid, setUid] = useState<string | null>(null);
   const [authChecked, setAuthChecked] = useState(false);

@@ -16,9 +16,11 @@ import { BattleEngine, Seat } from '../engine/BattleEngine';
 import { Brain, chooseShot, newBrain } from '../engine/ai';
 import { BALANCE, CardId, TEAM_COLORS, angleOf, clamp, elevOf, elevRange } from '../game/rules';
 import { QualityGovernor } from '../game/quality';
-import { IN_IFRAME, toggleFullscreen } from '../fullscreen';
 import ControlsTray from '@shared/controls/ControlsTray';
 import { isStaleChunkError, recoverFromStaleChunk } from '@shared/net/staleChunk';
+import { ChatLayer } from '@shared/chat/ChatLayer';
+import { useBubbleFeed } from '@shared/chat/useBubbleFeed';
+import { SpeechBubble } from '@shared/ui/SpeechBubble';
 import { audioService } from '../services/audio';
 import { packRules, unpackRules } from '../types/game';
 import { createLogger } from '@shared/log/logger';
@@ -83,6 +85,8 @@ export default function BattleView({
   const shellRef = useRef<HTMLDivElement>(null);
   const engineRef = useRef<BattleEngine | null>(null);
   const linkRef = useRef<TurnLink | null>(null);
+  /** Keyed by ship index rather than uid , a couch seat has no uid at all. */
+  const { bubbles, show: showBubble } = useBubbleFeed();
 
   const online = Boolean(config.roomId && config.uid && config.peerUids.length > 0);
   /**
@@ -356,6 +360,11 @@ export default function BattleView({
         engineRef.current?.applySync(packet);
         return;
       }
+      if (packet.t === 'chat') {
+        const ship = shipOfUid.get(from);
+        if (ship !== undefined) showBubble(String(ship), packet.msg);
+        return;
+      }
       if (packet.t !== 'fire' && packet.t !== 'shot') return;
       // A turn doubles as a start packet. The host's document holds exactly one
       // write at a time, so a guest that arrives after the opening shot finds a
@@ -377,7 +386,17 @@ export default function BattleView({
       else engine.applyShot(packet, from);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [shipOfUid, aiLevel],
+    [shipOfUid, aiLevel, showBubble],
+  );
+
+  /** Shown over the sender's own hull the instant it's typed , the round trip only needs to reach everyone else. */
+  const sendChat = useCallback(
+    (text: string) => {
+      const mine = config.localShips[0];
+      if (mine !== undefined) showBubble(String(mine), text);
+      linkRef.current?.send({ t: 'chat', n: Date.now(), msg: text });
+    },
+    [config.localShips, showBubble],
   );
 
   useEffect(() => {
@@ -970,6 +989,18 @@ export default function BattleView({
         </div>
       ))}
 
+      {/* -- chat bubbles, anchored over the speaker's own hull -- */}
+      {Object.entries(bubbles).map(([shipKey, text]) => {
+        const i = Number(shipKey);
+        const engine = engineRef.current;
+        const canvas = canvasRef.current;
+        if (!engine || !canvas || !engine.ships[i]) return null;
+        const p = engine.toClient(engine.ships[i].x, engine.shipY(i) - 130, canvas.getBoundingClientRect());
+        return <SpeechBubble key={shipKey} text={text} style={{ left: p.x, top: p.y }} />;
+      })}
+
+      {online && !over && <ChatLayer onSend={sendChat} />}
+
       {/* -- turn and clock -- */}
       <div className="pointer-events-none absolute inset-x-0 top-2 z-20 flex flex-col items-center gap-1.5">
         {turnLabel && (
@@ -1028,15 +1059,7 @@ export default function BattleView({
         onAim={onAim}
         onDragChange={onDragChange}
         onFire={onFire}
-        onFirstTouch={() => {
-          audioService.unlock();
-          // The Fullscreen API only grants a request that is handling a real
-          // user gesture, and the first touch of a match is one. Skipped while
-          // embedded: PlayBuddies drives fullscreen for the whole frame, and a
-          // game that grabs it from underneath leaves the two disagreeing.
-          if (IN_IFRAME || document.fullscreenElement) return;
-          toggleFullscreen(shellRef.current ?? document.documentElement, true);
-        }}
+        onFirstTouch={() => audioService.unlock()}
       />
 
       {targetingSpecial && canAim && (

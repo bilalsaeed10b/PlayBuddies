@@ -504,6 +504,13 @@ export interface TakeoverPacket {
   name: string;
 }
 
+/** A line of chat, shown as a bubble over the sender's own hull rather than in a log. */
+export interface ChatPacket {
+  t: 'chat';
+  n: number;
+  msg: string;
+}
+
 export type NetPacket =
   | StartPacket
   | FirePacket
@@ -512,4 +519,5 @@ export type NetPacket =
   | ByePacket
   | HelloPacket
   | TakeoverPacket
-  | IdlePacket;
+  | IdlePacket
+  | ChatPacket;

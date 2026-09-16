@@ -18,7 +18,7 @@ import {
   Trophy,
   Users,
 } from 'lucide-react';
-import { askHostToEndGame, askToLeaveLobby, toggleFullscreen } from './fullscreen';
+import { askHostToEndGame, askToLeaveLobby, toggleFullscreen, useAutoFullscreen } from './fullscreen';
 import { FREE_SHIPS, SHIPS, drawShip } from './game/ships';
 import { WEATHER_CHOICES, weatherFor, wetWeather } from './game/weather';
 import { DEFAULT_HULL_INDEX, HULLS, getHullStatDots } from './game/hulls';
@@ -120,6 +120,7 @@ export default function App() {
   const online = Boolean(handoff.room);
 
   const [view, setView] = useState<View>(online ? 'room' : 'menu');
+  useAutoFullscreen(view === 'game');
   const [showSettings, setShowSettings] = useState(false);
   const [uid, setUid] = useState<string | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
