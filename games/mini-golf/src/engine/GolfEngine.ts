@@ -580,6 +580,23 @@ export class GolfEngine {
     return { x: this.sx(b.x), y: this.sy(b.y) };
   }
 
+  /**
+   * Any ball's screen position, canvas-local , not only the one currently
+   * being played (see `activeBallScreenPos`). Every seat's ball has a resting
+   * spot on the green at all times, whether or not it is their turn, which is
+   * what makes it a fine anchor for a chat bubble.
+   */
+  ballScreen(seat: number): { x: number; y: number } | null {
+    const b = this.balls[seat];
+    if (!b) return null;
+    return { x: this.sx(b.x), y: this.sy(b.y) };
+  }
+
+  /** A canvas-local point, converted to the page's viewport. */
+  toClient(x: number, y: number, rect: DOMRect): { x: number; y: number } {
+    return { x: rect.left + x, y: rect.top + y };
+  }
+
   // -- the loop ---------------------------------------------------------------
 
   draw(dtMs: number) {

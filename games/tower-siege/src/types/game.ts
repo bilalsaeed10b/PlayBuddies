@@ -167,6 +167,13 @@ export interface IdlePacket {
   n: number;
 }
 
+/** A line of chat, shown as a bubble over the sender's own machines rather than in a log. */
+export interface ChatPacket {
+  t: 'chat';
+  n: number;
+  msg: string;
+}
+
 export type NetPacket =
   | StartPacket
   | BuildPacket
@@ -175,4 +182,5 @@ export type NetPacket =
   | StatePacket
   | ByePacket
   | HelloPacket
-  | IdlePacket;
+  | IdlePacket
+  | ChatPacket;

@@ -228,4 +228,11 @@ export interface IdlePacket {
   n: number;
 }
 
-export type NetPacket = StartPacket | FirePacket | ShotPacket | ByePacket | HelloPacket | IdlePacket;
+/** A line of chat, shown as a bubble over the sender's own ball rather than in a log. */
+export interface ChatPacket {
+  t: 'chat';
+  n: number;
+  msg: string;
+}
+
+export type NetPacket = StartPacket | FirePacket | ShotPacket | ByePacket | HelloPacket | IdlePacket | ChatPacket;

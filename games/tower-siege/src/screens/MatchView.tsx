@@ -15,6 +15,9 @@ import { Coins, Gauge, Heart, Loader2, Play, Swords, Trophy, X } from 'lucide-re
 import ControlsTray from '@shared/controls/ControlsTray';
 import { createLogger } from '@shared/log/logger';
 import { isStaleChunkError, recoverFromStaleChunk } from '@shared/net/staleChunk';
+import { ChatLayer } from '@shared/chat/ChatLayer';
+import { useBubbleFeed } from '@shared/chat/useBubbleFeed';
+import { SpeechBubble } from '@shared/ui/SpeechBubble';
 import { SiegeEngine } from '../engine/SiegeEngine';
 import type { BuildOrder } from '../engine/SiegeEngine';
 import { decide } from '../engine/ai';
@@ -35,7 +38,6 @@ import { COLS, ROWS, WORLD_H, WORLD_W, isBuildable } from '../game/map';
 import { drawKeep, drawTowerHead, enemySprite, towerBase } from '../game/art';
 import { bakeGround, drawPlots } from '../game/ground';
 import { audioService } from '../services/audio';
-import { IN_IFRAME, toggleFullscreen } from '../fullscreen';
 import type { GameSettings, NetPacket } from '../types/game';
 // Type only: the runtime value arrives through the dynamic import below, which
 // is what keeps the Firebase SDK out of an offline player's bundle.
@@ -93,6 +95,8 @@ export default function MatchView({
   const shellRef = useRef<HTMLDivElement>(null);
   const boardRef = useRef<HTMLDivElement>(null);
   const linkRef = useRef<TurnLink | null>(null);
+  /** Keyed by seat index rather than uid , a couch seat has no uid at all. */
+  const { bubbles, show: showBubble } = useBubbleFeed();
 
   const online = Boolean(config.roomId && config.uid && config.peerUids.length > 0);
   const rulesBits = packRules(config.rules);
@@ -189,6 +193,10 @@ export default function MatchView({
       }
       const seat = seatOfUid.get(from);
 
+      if (packet.t === 'chat') {
+        if (seat !== undefined) showBubble(String(seat), packet.msg);
+        return;
+      }
       if (packet.t === 'bye') {
         if (seat === undefined) return;
         if (config.seats[seat]?.control === 'remote') {
@@ -241,7 +249,16 @@ export default function MatchView({
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [seatOfUid, mine, shout, broadcastSnapshot, config.isHost],
+    [seatOfUid, mine, shout, broadcastSnapshot, config.isHost, showBubble],
+  );
+
+  /** Shown over the sender's own machines the instant it's typed , the round trip only needs to reach everyone else. */
+  const sendChat = useCallback(
+    (text: string) => {
+      showBubble(String(mine), text);
+      linkRef.current?.send({ t: 'chat', n: Date.now(), msg: text });
+    },
+    [mine, showBubble],
   );
 
   useEffect(() => {
@@ -589,6 +606,38 @@ export default function MatchView({
   const speedRef = useRef(speed);
   speedRef.current = speed;
   const viewRef = useRef({ scale: 1, offX: 0, offY: 0, dpr: 1 });
+
+  /**
+   * World point to a viewport pixel point.
+   *
+   * Camera math lives in this file rather than in `SiegeEngine`, which owns no
+   * canvas or rendering code of its own , see the file's own header comment.
+   * Mirrors `render`'s own `ctx.setTransform(scale, 0, 0, scale, offX, offY)`.
+   */
+  const toClient = useCallback((wx: number, wy: number, rect: DOMRect): { x: number; y: number } => {
+    const { scale, offX, offY, dpr } = viewRef.current;
+    return { x: rect.left + (offX + wx * scale) / dpr, y: rect.top + (offY + wy * scale) / dpr };
+  }, []);
+
+  /**
+   * Where this seat's chat bubble should point.
+   *
+   * There is no per-player avatar on this shared board , only towers, each
+   * with an `owner`. Their most recently built machine is the closest thing
+   * to "where they are"; before they've built anything at all, a fixed spot
+   * along the top of the field, one per seat, gives the bubble somewhere to
+   * point during the build phase.
+   */
+  const chatAnchor = useCallback(
+    (seat: number): { x: number; y: number } => {
+      const towers = enginesRef.current[0]?.towers ?? [];
+      for (let i = towers.length - 1; i >= 0; i--) {
+        if (towers[i].owner === seat) return { x: towers[i].x, y: towers[i].y - 46 };
+      }
+      return { x: ((seat + 1) / (config.seats.length + 1)) * WORLD_W, y: 34 };
+    },
+    [config.seats.length],
+  );
 
   // -- rendering --------------------------------------------------------------
 
@@ -956,6 +1005,18 @@ export default function MatchView({
 
       {/* ── whose keep is on screen ── */}
 
+      {/* ── chat bubbles, anchored over the speaker's own machines ── */}
+      {Object.entries(bubbles).map(([seatKey, text]) => {
+        const i = Number(seatKey);
+        const canvas = canvasRef.current;
+        if (!canvas) return null;
+        const anchor = chatAnchor(i);
+        const p = toClient(anchor.x, anchor.y, canvas.getBoundingClientRect());
+        return <SpeechBubble key={seatKey} text={text} style={{ left: p.x, top: p.y }} />;
+      })}
+
+      {online && !over && <ChatLayer onSend={sendChat} />}
+
       {/* ── the board ── */}
       <div ref={boardRef} className="relative min-h-0 flex-1">
         <canvas ref={canvasRef} onPointerDown={onTap} className="absolute inset-0 h-full w-full touch-none" />
@@ -1103,14 +1164,10 @@ export default function MatchView({
         </div>
       )}
 
-      {/* First touch unlocks audio and, when not embedded, goes fullscreen. */}
+      {/* First touch unlocks audio. */}
       <div
         className="pointer-events-none absolute inset-0"
-        onPointerDown={() => {
-          audioService.unlock();
-          if (IN_IFRAME || document.fullscreenElement) return;
-          toggleFullscreen(shellRef.current ?? document.documentElement, true);
-        }}
+        onPointerDown={() => audioService.unlock()}
       />
     </div>
   );

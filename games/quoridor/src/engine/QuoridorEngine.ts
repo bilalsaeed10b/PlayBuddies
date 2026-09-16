@@ -374,6 +374,23 @@ export class QuoridorEngine {
     return this.squareY(r) + this.view.cell / 2;
   }
 
+  /**
+   * This seat's pawn, in CSS pixels inside the canvas's own box.
+   *
+   * Live continuously rather than only on this seat's own turn , a pawn's
+   * square is always known, which is what makes Quoridor the easiest of the
+   * three games to anchor a chat bubble to.
+   */
+  pawnCenter(seat: number): { x: number; y: number } {
+    const at = this.pos.pawns[seat] ?? 0;
+    return { x: this.centreX(colOf(at)), y: this.centreY(rowOf(at)) };
+  }
+
+  /** A CSS-pixel point inside the canvas's own box, converted to the page's viewport. */
+  toClient(x: number, y: number, rect: DOMRect): { x: number; y: number } {
+    return { x: rect.left + x, y: rect.top + y };
+  }
+
   /** The square under a point, or -1 when the point is in a groove or off the board. */
   pickCell(px: number, py: number): number {
     const { x0, y0, cell, gap } = this.view;

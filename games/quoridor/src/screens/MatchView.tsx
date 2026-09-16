@@ -10,6 +10,9 @@ import { Blocks, Coins, Flag, Footprints, Loader2, RotateCw, Trophy } from 'luci
 import ControlsTray from '@shared/controls/ControlsTray';
 import { createLogger } from '@shared/log/logger';
 import { isStaleChunkError, recoverFromStaleChunk } from '@shared/net/staleChunk';
+import { ChatLayer } from '@shared/chat/ChatLayer';
+import { useBubbleFeed } from '@shared/chat/useBubbleFeed';
+import { SpeechBubble } from '@shared/ui/SpeechBubble';
 import BoardPad from '../components/BoardPad';
 import { QuoridorEngine } from '../engine/QuoridorEngine';
 import type { Seat } from '../engine/QuoridorEngine';
@@ -17,7 +20,6 @@ import { TIERS, chooseMove, fallbackMove, newBrain } from '../engine/ai';
 import type { Brain } from '../engine/ai';
 import { HORIZONTAL, TEAMS, VERTICAL, layoutFor, teamOf } from '../game/rules';
 import type { Orientation, PlayerCount, SideMeta } from '../game/rules';
-import { IN_IFRAME, toggleFullscreen } from '../fullscreen';
 import { audioService } from '../services/audio';
 import { TURN_SECONDS, packRules, unpackRules } from '../types/game';
 import type { GameSettings, MatchRules, NetPacket } from '../types/game';
@@ -97,6 +99,8 @@ export default function MatchView({
   const boardRef = useRef<HTMLDivElement>(null);
   const engineRef = useRef<QuoridorEngine | null>(null);
   const linkRef = useRef<TurnLink | null>(null);
+  /** Keyed by seat index rather than uid , a couch seat has no uid at all. */
+  const { bubbles, show: showBubble } = useBubbleFeed();
 
   const online = Boolean(config.roomId && config.uid && config.peerUids.length > 0);
   /**
@@ -269,6 +273,11 @@ export default function MatchView({
         if (wasBot) setNotice(`${engineRef.current?.seats[seat]?.name ?? 'A player'} is back.`);
         return;
       }
+      if (packet.t === 'chat') {
+        const seat = seatOfUid.get(from);
+        if (seat !== undefined) showBubble(String(seat), packet.msg);
+        return;
+      }
       if (packet.t !== 'move') return;
 
       // A move doubles as a start packet. Each document holds exactly one write
@@ -292,7 +301,17 @@ export default function MatchView({
       engine.syncHistory(packet.h);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [seatOfUid, aiLevel],
+    [seatOfUid, aiLevel, showBubble],
+  );
+
+  /** Shown over the sender's own pawn the instant it's typed , the round trip only needs to reach everyone else. */
+  const sendChat = useCallback(
+    (text: string) => {
+      const mine = roster.localSeats[0];
+      if (mine !== undefined) showBubble(String(mine), text);
+      linkRef.current?.send({ t: 'chat', n: Date.now(), msg: text });
+    },
+    [roster.localSeats, showBubble],
   );
 
   useEffect(() => {
@@ -790,6 +809,19 @@ export default function MatchView({
         </div>
       </div>
 
+      {/* ── chat bubbles, anchored over the speaker's own pawn ── */}
+      {Object.entries(bubbles).map(([seatKey, text]) => {
+        const i = Number(seatKey);
+        const engine = engineRef.current;
+        const canvas = canvasRef.current;
+        if (!engine || !canvas) return null;
+        const at = engine.pawnCenter(i);
+        const p = engine.toClient(at.x, at.y - 46, canvas.getBoundingClientRect());
+        return <SpeechBubble key={seatKey} text={text} style={{ left: p.x, top: p.y }} />;
+      })}
+
+      {online && !over && <ChatLayer onSend={sendChat} />}
+
       {/* ── the board ── */}
       <div ref={boardRef} className="relative min-h-0 flex-1">
         <canvas ref={canvasRef} className="absolute inset-0 h-full w-full touch-none" />
@@ -798,15 +830,7 @@ export default function MatchView({
           enabled={myTurn}
           forced={mode === 'wall' ? forced : undefined}
           onSettled={settled}
-          onFirstTouch={() => {
-            audioService.unlock();
-            // The Fullscreen API only grants a request handling a real user
-            // gesture, and the first touch is one. Skipped while embedded:
-            // PlayBuddies drives fullscreen for the whole frame, and a game
-            // that grabs it from underneath leaves the two disagreeing.
-            if (IN_IFRAME || document.fullscreenElement) return;
-            toggleFullscreen(shellRef.current ?? document.documentElement, true);
-          }}
+          onFirstTouch={() => audioService.unlock()}
         />
 
         {turnLabel && (
