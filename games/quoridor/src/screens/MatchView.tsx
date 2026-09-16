@@ -820,7 +820,7 @@ export default function MatchView({
         return <SpeechBubble key={seatKey} text={text} style={{ left: p.x, top: p.y }} />;
       })}
 
-      {online && !over && <ChatLayer onSend={sendChat} />}
+      {!over && <ChatLayer onSend={sendChat} />}
 
       {/* ── the board ── */}
       <div ref={boardRef} className="relative min-h-0 flex-1">

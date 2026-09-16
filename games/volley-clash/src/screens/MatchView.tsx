@@ -744,7 +744,7 @@ export default function MatchView({
         return <SpeechBubble key={seatId} text={text} style={{ left: pos.x, top: pos.y }} />;
       })}
 
-      {online && !over && <ChatLayer onSend={sendChat} />}
+      {!over && <ChatLayer onSend={sendChat} />}
 
       {/* ── scoreboard ── */}
       <div className="pointer-events-none absolute left-1/2 top-3 z-20 flex -translate-x-1/2 items-stretch gap-1 rounded-2xl border border-white/20 bg-black/45 p-1 backdrop-blur-md">

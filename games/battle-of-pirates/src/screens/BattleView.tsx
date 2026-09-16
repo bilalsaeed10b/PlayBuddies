@@ -999,7 +999,7 @@ export default function BattleView({
         return <SpeechBubble key={shipKey} text={text} style={{ left: p.x, top: p.y }} />;
       })}
 
-      {online && !over && <ChatLayer onSend={sendChat} />}
+      {!over && <ChatLayer onSend={sendChat} />}
 
       {/* -- turn and clock -- */}
       <div className="pointer-events-none absolute inset-x-0 top-2 z-20 flex flex-col items-center gap-1.5">

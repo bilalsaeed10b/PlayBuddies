@@ -18,7 +18,7 @@ import {
   Trophy,
   Users,
 } from 'lucide-react';
-import { askHostToEndGame, askToLeaveLobby, toggleFullscreen, useAutoFullscreen } from './fullscreen';
+import { askHostToEndGame, askToLeaveLobby, isNativeFullscreen, toggleFullscreen, useAutoFullscreen } from './fullscreen';
 import { FREE_SHIPS, SHIPS, drawShip } from './game/ships';
 import { WEATHER_CHOICES, weatherFor, wetWeather } from './game/weather';
 import { DEFAULT_HULL_INDEX, HULLS, getHullStatDots } from './game/hulls';
@@ -120,7 +120,7 @@ export default function App() {
   const online = Boolean(handoff.room);
 
   const [view, setView] = useState<View>(online ? 'room' : 'menu');
-  useAutoFullscreen(view === 'game');
+  useAutoFullscreen(online || view === 'game');
   const [showSettings, setShowSettings] = useState(false);
   const [uid, setUid] = useState<string | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
@@ -805,7 +805,7 @@ export default function App() {
           onSettings={() => setShowSettings(true)}
           onRules={() => setShowRules(true)}
           onStats={() => setShowStats(true)}
-          onFullscreen={() => toggleFullscreen(document.documentElement, !document.fullscreenElement)}
+          onFullscreen={() => toggleFullscreen(document.documentElement, !isNativeFullscreen())}
           onExit={askToLeaveLobby}
           rules={rules}
           onBack={view === 'offline_menu' ? () => setView('room') : undefined}
@@ -848,7 +848,7 @@ export default function App() {
           onStats={() => setShowStats(true)}
           stats={stats}
           rules={rules}
-          onFullscreen={() => toggleFullscreen(document.documentElement, !document.fullscreenElement)}
+          onFullscreen={() => toggleFullscreen(document.documentElement, !isNativeFullscreen())}
           onPlayOffline={() => {
             audioService.unlock();
             setView('offline_menu');

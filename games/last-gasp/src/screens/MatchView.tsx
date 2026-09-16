@@ -777,7 +777,7 @@ export default function MatchView({
       {/* T is already spoken for here , see the input-focus guard on the
           letter-guess listener above , so the hotkey stays off and the button
           is the only way in. */}
-      {online && engine.phase !== 'over' && <ChatLayer onSend={sendChat} hotkeyEnabled={false} />}
+      {engine.phase !== 'over' && <ChatLayer onSend={sendChat} hotkeyEnabled={false} />}
 
       {/* ── the body ──
           Two explicit arrangements rather than one tree bent with `order`:

@@ -7,7 +7,7 @@
 import { useEffect, useState } from 'react';
 import type { ReactNode, RefObject } from 'react';
 import { ArrowLeft, LogOut, Maximize2, Minimize2, Settings as SettingsIcon } from 'lucide-react';
-import { askHostToEndGame, toggleFullscreen } from './fullscreen';
+import { askHostToEndGame, isNativeFullscreen, onFullscreenChange, toggleFullscreen } from './fullscreen';
 
 export type TrayTheme = 'dark' | 'light';
 
@@ -38,16 +38,14 @@ const THEME: Record<TrayTheme, { icon: string; labelled: string }> = {
  * `fullscreenchange` never fires at all.
  */
 export function useFullscreenTray(shellRef: RefObject<HTMLElement | null>, onChange?: (isFull: boolean) => void) {
-  const [isFull, setIsFull] = useState(false);
+  const [isFull, setIsFull] = useState(isNativeFullscreen);
 
   useEffect(() => {
-    const handle = () => {
-      const now = Boolean(document.fullscreenElement);
+    return onFullscreenChange(() => {
+      const now = isNativeFullscreen();
       setIsFull(now);
       onChange?.(now);
-    };
-    document.addEventListener('fullscreenchange', handle);
-    return () => document.removeEventListener('fullscreenchange', handle);
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

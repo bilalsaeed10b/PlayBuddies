@@ -14,7 +14,7 @@ import {
   Settings as SettingsIcon,
   Users,
 } from 'lucide-react';
-import { askHostToEndGame, askToLeaveLobby, toggleFullscreen, useAutoFullscreen } from './fullscreen';
+import { askHostToEndGame, askToLeaveLobby, isNativeFullscreen, toggleFullscreen, useAutoFullscreen } from './fullscreen';
 import { FREE_OUTLAWS, OUTLAWS } from './game/outlaws';
 import useShortScreen from '@shared/ui/useShortScreen';
 import OutlawToken from './components/OutlawToken';
@@ -84,7 +84,7 @@ export default function App() {
   const online = Boolean(handoff.room);
 
   const [view, setView] = useState<View>(online ? 'room' : 'menu');
-  useAutoFullscreen(view === 'game');
+  useAutoFullscreen(online || view === 'game');
   const [showSettings, setShowSettings] = useState(false);
   const [showRules, setShowRules] = useState(false);
   const [uid, setUid] = useState<string | null>(null);
@@ -465,7 +465,7 @@ export default function App() {
           onCouch={() => openOffline(2)}
           onSettings={() => setShowSettings(true)}
           onRules={() => setShowRules(true)}
-          onFullscreen={() => toggleFullscreen(document.documentElement, !document.fullscreenElement)}
+          onFullscreen={() => toggleFullscreen(document.documentElement, !isNativeFullscreen())}
           onExit={askToLeaveLobby}
           rules={rules}
           onBack={view === 'offline_menu' ? () => setView('room') : undefined}
@@ -502,7 +502,7 @@ export default function App() {
           onStart={startMatch}
           onSettings={() => setShowSettings(true)}
           onRules={() => setShowRules(true)}
-          onFullscreen={() => toggleFullscreen(document.documentElement, !document.fullscreenElement)}
+          onFullscreen={() => toggleFullscreen(document.documentElement, !isNativeFullscreen())}
           onPlayOffline={() => {
             audioService.unlock();
             setView('offline_menu');

@@ -166,7 +166,17 @@ function LobbyContent() {
     // starts (see below) -- closing it here too means a sidebar left open
     // from picking the game can't sit over the iframe with no way left to
     // dismiss it.
-    if (playing) setShowSidebar(false);
+    // The game fills the screen the moment a match starts, for everyone. Only
+    // the host's own Start click can grant real fullscreen (see startGame); a
+    // guest gets the frame stretched over the page now, and the game asks for
+    // the real thing on their first tap inside it.
+    if (playing) {
+      setShowSidebar(false);
+      setIsPseudoFull(true);
+    } else {
+      setIsPseudoFull(false);
+      if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+    }
     return () => useGameplayStore.getState().setIsPlaying(false);
   }, [lobby?.status]);
 
@@ -644,6 +654,10 @@ function LobbyContent() {
 
   const startGame = async () => {
     if (!isHost || !lobby?.gameId || !everyoneReady) return;
+    // Before the first await: the browser only grants fullscreen while it is
+    // still handling this click.
+    setIsPseudoFull(true);
+    if (!document.fullscreenElement) document.documentElement.requestFullscreen?.().catch(() => {});
     try {
       const startPlayers = players.length > 0 ? players : Object.values(lobby.players || {});
       const activeUids = new Set(startPlayers.map((p) => p.uid));

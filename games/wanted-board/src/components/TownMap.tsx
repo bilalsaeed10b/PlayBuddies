@@ -187,10 +187,17 @@ export default function TownMap({
               {bubbleText && (
                 <span
                   key={`${i}-${bubbleText}`}
-                  className="absolute -top-2 left-1/2 z-10 w-max max-w-[38vw] -translate-x-1/2 -translate-y-full animate-[bubble_1.7s_ease-out] rounded-xl border border-amber-900/20 bg-white px-2 py-1 text-[10px] font-bold leading-tight text-amber-950 shadow-md sm:max-w-[220px] sm:text-[11px]"
+                  className="absolute -top-2 left-1/2 z-10 w-max max-w-[38vw] -translate-x-1/2 -translate-y-full animate-[bubble_1.7s_ease-out] rounded-xl border border-black/20 bg-white px-2.5 py-1 text-[10px] font-bold leading-tight text-black shadow-md sm:max-w-[220px] sm:text-[11px]"
+                  style={{
+                    backgroundColor: '#ffffff',
+                    color: '#000000',
+                  }}
                 >
                   {bubbleText}
-                  <span className="absolute left-1/2 top-full h-2 w-2 -translate-x-1/2 -translate-y-1/2 rotate-45 border-b border-r border-amber-900/20 bg-white" />
+                  <span
+                    className="absolute left-1/2 top-full h-2 w-2 -translate-x-1/2 -translate-y-1/2 rotate-45 border-b border-r border-black/20 bg-white"
+                    style={{ backgroundColor: '#ffffff' }}
+                  />
                 </span>
               )}
               <OutlawToken

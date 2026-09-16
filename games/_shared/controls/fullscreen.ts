@@ -41,8 +41,28 @@ export function askHostForFullscreen(on: boolean) {
   window.parent.postMessage({ source: 'playbuddies-game', type: 'fullscreen', value: on }, '*');
 }
 
+/**
+ * The lobby page can be the fullscreen document rather than this frame: the
+ * host's own Start Game click is the one gesture that can grant it, and that
+ * click happens out there. Same origin, so its document is readable.
+ */
+function topDocument(): Document | null {
+  try {
+    return window.top && window.top !== window ? window.top.document : null;
+  } catch {
+    return null;
+  }
+}
+
 export function isNativeFullscreen(): boolean {
-  return Boolean(document.fullscreenElement);
+  return Boolean(document.fullscreenElement || topDocument()?.fullscreenElement);
+}
+
+/** Both documents, so a listener hears fullscreen change whichever one owns it. */
+export function onFullscreenChange(handler: () => void): () => void {
+  const docs = [document, topDocument()].filter((d): d is Document => Boolean(d));
+  docs.forEach((d) => d.addEventListener('fullscreenchange', handler));
+  return () => docs.forEach((d) => d.removeEventListener('fullscreenchange', handler));
 }
 
 /**
@@ -81,6 +101,7 @@ export function toggleFullscreen(el: HTMLElement, on: boolean) {
 
   if (!on) {
     if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
+    else topDocument()?.exitFullscreen?.().catch(() => {});
     el.style.cssText = el.style.cssText.replace(IMMERSIVE, '');
     unlockOrientation();
     return;
@@ -102,26 +123,21 @@ export function toggleFullscreen(el: HTMLElement, on: boolean) {
 }
 
 /**
- * Requests fullscreen the moment a match actually starts, instead of making a
- * player find the tray's own button first.
+ * Goes fullscreen without the player having to find the tray's button.
  *
- * A request only succeeds on a real, recent user gesture. `active` flipping
- * true is usually still inside one , the host's own "Start Game" click, or a
- * guest's most recent tap while readying up , so it is tried immediately. When
- * that gesture has gone stale (a guest who has been idle), the browser simply
- * ignores the call and `toggleFullscreen`'s own CSS fallback takes over rather
- * than throwing, and the first tap anywhere on the match screen tries again,
- * same as a player reaching for the tray button themselves would.
+ * The host is normally already there: the lobby requests it inside their own
+ * Start Game click. Everyone else has no gesture of their own yet, and the
+ * browser refuses a request without one, so it is tried now (which at least
+ * stretches the frame) and again on their first tap anywhere in the game.
  */
 export function useAutoFullscreen(active: boolean, shellRef?: RefObject<HTMLElement | null>) {
   useEffect(() => {
-    if (!active || document.fullscreenElement) return;
+    if (!active || isNativeFullscreen()) return;
     const target = () => shellRef?.current ?? document.documentElement;
     toggleFullscreen(target(), true);
-    if (document.fullscreenElement) return;
 
     const onFirstTouch = () => {
-      if (!document.fullscreenElement) toggleFullscreen(target(), true);
+      if (!isNativeFullscreen()) toggleFullscreen(target(), true);
     };
     window.addEventListener('pointerdown', onFirstTouch, { once: true });
     window.addEventListener('keydown', onFirstTouch, { once: true });

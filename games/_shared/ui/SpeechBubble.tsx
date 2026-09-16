@@ -26,7 +26,19 @@ function ensureStyle() {
   10% { transform: scale(1); opacity: 1; }
   82% { transform: scale(1); opacity: 1; }
   100% { transform: scale(0.94) translateY(-6px); opacity: 0; }
-}`;
+}
+.pb-speech-bubble-box {
+  background-color: #ffffff !important;
+  color: #000000 !important;
+  border: 1px solid rgba(0, 0, 0, 0.18) !important;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.28), 0 1px 3px rgba(0, 0, 0, 0.15) !important;
+}
+.pb-speech-bubble-tail {
+  background-color: #ffffff !important;
+  border-right: 1px solid rgba(0, 0, 0, 0.18) !important;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.18) !important;
+}
+`;
   document.head.appendChild(style);
 }
 
@@ -51,11 +63,25 @@ export function SpeechBubble({
         // changes , a second message while the first is still fading must
         // restart the pop-in, not jump-cut mid-fade-out.
         key={text}
-        className={`relative block w-max max-w-[50vw] rounded-2xl border border-black/10 bg-white px-2.5 py-1.5 text-[11px] font-bold leading-tight text-slate-900 shadow-lg sm:max-w-[220px] sm:text-xs ${className}`}
-        style={{ animation: `pb-bubble-pop ${LIFETIME_MS}ms ease-out forwards`, transformOrigin: 'bottom center' }}
+        className={`pb-speech-bubble-box relative block w-max max-w-[50vw] rounded-2xl px-3 py-1.5 text-[11px] font-bold leading-tight shadow-lg sm:max-w-[220px] sm:text-xs ${className}`}
+        style={{
+          backgroundColor: '#ffffff',
+          color: '#000000',
+          border: '1px solid rgba(0, 0, 0, 0.18)',
+          boxShadow: '0 4px 14px rgba(0, 0, 0, 0.28), 0 1px 3px rgba(0, 0, 0, 0.15)',
+          animation: `pb-bubble-pop ${LIFETIME_MS}ms ease-out forwards`,
+          transformOrigin: 'bottom center',
+        }}
       >
         {text}
-        <span className="absolute left-1/2 top-full h-2 w-2 -translate-x-1/2 -translate-y-1/2 rotate-45 border-b border-r border-black/10 bg-white" />
+        <span
+          className="pb-speech-bubble-tail absolute left-1/2 top-full h-2 w-2 -translate-x-1/2 -translate-y-1/2 rotate-45"
+          style={{
+            backgroundColor: '#ffffff',
+            borderRight: '1px solid rgba(0, 0, 0, 0.18)',
+            borderBottom: '1px solid rgba(0, 0, 0, 0.18)',
+          }}
+        />
       </span>
     </div>
   );

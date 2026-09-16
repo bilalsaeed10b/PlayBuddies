@@ -15,7 +15,7 @@ import {
   Users,
   Volleyball,
 } from 'lucide-react';
-import { askHostToEndGame, askToLeaveLobby, toggleFullscreen, useAutoFullscreen } from './fullscreen';
+import { askHostToEndGame, askToLeaveLobby, isNativeFullscreen, toggleFullscreen, useAutoFullscreen } from './fullscreen';
 import { CHARACTERS, Character, FREE_CHARACTERS, drawCharacter } from './game/characters';
 import { BALANCE, TEAM_COLORS } from './game/rules';
 import { TIERS } from './engine/ai';
@@ -78,7 +78,7 @@ export default function App() {
   const online = Boolean(handoff.room);
 
   const [view, setView] = useState<View>(online ? 'room' : 'menu');
-  useAutoFullscreen(view === 'game');
+  useAutoFullscreen(online || view === 'game');
   const [showSettings, setShowSettings] = useState(false);
   const [uid, setUid] = useState<string | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
@@ -429,7 +429,7 @@ export default function App() {
             setView('couch');
           }}
           onSettings={() => setShowSettings(true)}
-          onFullscreen={() => toggleFullscreen(document.documentElement, !document.fullscreenElement)}
+          onFullscreen={() => toggleFullscreen(document.documentElement, !isNativeFullscreen())}
           onExit={askToLeaveLobby}
           aiLevel={aiLevel}
           onAiLevel={setAiLevel}
@@ -454,7 +454,7 @@ export default function App() {
             setView('couch');
           }}
           onSettings={() => setShowSettings(true)}
-          onFullscreen={() => toggleFullscreen(document.documentElement, !document.fullscreenElement)}
+          onFullscreen={() => toggleFullscreen(document.documentElement, !isNativeFullscreen())}
           onExit={askToLeaveLobby}
           aiLevel={aiLevel}
           onAiLevel={setAiLevel}
@@ -490,7 +490,7 @@ export default function App() {
           onPick={pickOnline}
           onStart={startMatch}
           onSettings={() => setShowSettings(true)}
-          onFullscreen={() => toggleFullscreen(document.documentElement, !document.fullscreenElement)}
+          onFullscreen={() => toggleFullscreen(document.documentElement, !isNativeFullscreen())}
           onPlayOffline={() => { audioService.unlock(); setView('offline_menu'); }}
         />
       )}

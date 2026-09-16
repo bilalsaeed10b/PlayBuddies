@@ -465,7 +465,7 @@ export default function GameView({
       {/* Bottom-left, clear of the top HUD row's opaque Size/leaderboard cards
           and the top-right ControlsTray , the default top-left slot sits right
           under the Size card here. */}
-      {online && ready && <ChatLayer onSend={sendChat} buttonClassName="absolute left-2 bottom-2 z-30" />}
+      {ready && <ChatLayer onSend={sendChat} buttonClassName="absolute left-2 bottom-2 z-30" />}
 
       {ready && (!defeat || online) && (
         <Joystick

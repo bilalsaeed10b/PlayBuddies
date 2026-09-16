@@ -16,7 +16,7 @@ import {
   Users,
   User,
 } from 'lucide-react';
-import { askHostToEndGame, askToLeaveLobby, toggleFullscreen, useAutoFullscreen } from './fullscreen';
+import { askHostToEndGame, askToLeaveLobby, isNativeFullscreen, toggleFullscreen, useAutoFullscreen } from './fullscreen';
 import { GameWallet, reportResult } from './platform/wallet';
 import { TIERS } from './engine/ai';
 import { SEATS, DEFAULT_RULES, packRules, unpackRules } from './game/rules';
@@ -70,7 +70,7 @@ export default function App() {
   const online = Boolean(handoff.room);
 
   const [view, setView] = useState<View>(online ? 'room' : 'menu');
-  useAutoFullscreen(view === 'game');
+  useAutoFullscreen(online || view === 'game');
   const [showSettings, setShowSettings] = useState(false);
   const [showShop, setShowShop] = useState(false);
   const [uid, setUid] = useState<string | null>(null);
@@ -369,7 +369,7 @@ export default function App() {
           onMultiplayer={() => (online ? setView('room') : askToLeaveLobby())}
           onSettings={() => setShowSettings(true)}
           onShop={() => setShowShop(true)}
-          onFullscreen={() => toggleFullscreen(document.documentElement, !document.fullscreenElement)}
+          onFullscreen={() => toggleFullscreen(document.documentElement, !isNativeFullscreen())}
           onExit={askToLeaveLobby}
           onBack={view === 'offline_menu' ? () => setView('room') : undefined}
         />
@@ -388,7 +388,7 @@ export default function App() {
           onMode={(mode, players) => setRules((r) => ({ ...r, mode, players, sends: false }))}
           onSettings={() => setShowSettings(true)}
           onStart={startMatch}
-          onFullscreen={() => toggleFullscreen(document.documentElement, !document.fullscreenElement)}
+          onFullscreen={() => toggleFullscreen(document.documentElement, !isNativeFullscreen())}
           onExit={askToLeaveLobby}
           onPlayOffline={() => {
             audioService.unlock();
