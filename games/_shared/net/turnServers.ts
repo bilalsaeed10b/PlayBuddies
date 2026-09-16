@@ -15,8 +15,7 @@
  * make one better.
  */
 
-/** Set this to the deployed Worker's URL. Empty until it's deployed. */
-const TURN_ENDPOINT = '';
+const TURN_ENDPOINT = 'https://playbuddies-turn.playwithbuddies.workers.dev';
 
 export async function fetchTurnServers(timeoutMs = 4000): Promise<RTCIceServer[]> {
   if (!TURN_ENDPOINT) return [];
