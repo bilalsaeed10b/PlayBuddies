@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { Bug, X, Upload, Camera, Check, Loader2, ImageOff, Trash2 } from "lucide-react";
+import { Bug, X, Upload, Camera, Check, Loader2, ImageOff, Trash2, ChevronDown } from "lucide-react";
 import { useAuthStore } from "@/store/useAuthStore";
 import { PLAYABLE_GAMES } from "@/lib/games";
 import { BUG_INBOX_EMAIL } from "@/lib/admin";
@@ -25,6 +25,16 @@ const SEVERITY_STYLE: Record<BugSeverity, string> = {
   high: "border-orange-400/50 text-orange-300",
   critical: "border-red-500/60 text-red-300",
 };
+
+const GAME_OPTIONS = [
+  { value: "", label: "Platform / not a game" },
+  ...PLAYABLE_GAMES.map((g) => ({ value: g.id, label: g.name })),
+];
+
+const CATEGORY_OPTIONS = BUG_CATEGORIES.map((c) => ({
+  value: c,
+  label: c.charAt(0).toUpperCase() + c.slice(1),
+}));
 
 /**
  * The floating "Report a bug" entry point and its form.
@@ -254,38 +264,18 @@ function BugReportModal({ onClose }: { onClose: () => void }) {
 
             <div className="grid grid-cols-2 gap-3">
               <Field label="Game">
-                <select
+                <CustomSelect
                   value={gameId}
-                  onChange={(e) => setGameId(e.target.value)}
-                  // The popup list for a native <select> is browser/OS chrome,
-                  // not something Tailwind's dark classes touch. Explicitly
-                  // pinning color-scheme here (rather than relying on the
-                  // inherited `html { color-scheme: dark }`) is what actually
-                  // keeps that popup dark on Windows Chrome/Edge.
-                  style={{ colorScheme: "dark" }}
-                  className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-white outline-none text-sm"
-                >
-                  <option value="">Platform / not a game</option>
-                  {PLAYABLE_GAMES.map((g) => (
-                    <option key={g.id} value={g.id}>
-                      {g.name}
-                    </option>
-                  ))}
-                </select>
+                  onChange={setGameId}
+                  options={GAME_OPTIONS}
+                />
               </Field>
               <Field label="Area">
-                <select
+                <CustomSelect
                   value={category}
-                  onChange={(e) => setCategory(e.target.value as BugCategory)}
-                  style={{ colorScheme: "dark" }}
-                  className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-white outline-none text-sm capitalize"
-                >
-                  {BUG_CATEGORIES.map((c) => (
-                    <option key={c} value={c}>
-                      {c}
-                    </option>
-                  ))}
-                </select>
+                  onChange={(v) => setCategory(v as BugCategory)}
+                  options={CATEGORY_OPTIONS}
+                />
               </Field>
             </div>
 
@@ -389,6 +379,89 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
         {label}
       </label>
       {children}
+    </div>
+  );
+}
+
+function CustomSelect<T extends string>({
+  value,
+  onChange,
+  options,
+  placeholder,
+}: {
+  value: T;
+  onChange: (val: T) => void;
+  options: { value: T; label: string }[];
+  placeholder?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+    if (open) {
+      document.addEventListener("mousedown", handleClickOutside);
+      return () => document.removeEventListener("mousedown", handleClickOutside);
+    }
+  }, [open]);
+
+  const selectedOption = options.find((o) => o.value === value);
+
+  return (
+    <div ref={ref} className="relative w-full">
+      <button
+        type="button"
+        onClick={() => setOpen((prev) => !prev)}
+        className="w-full bg-white/5 hover:bg-white/10 border border-white/10 focus:border-primary/50 rounded-xl px-3 py-2.5 text-white outline-none text-sm flex items-center justify-between transition-colors text-left"
+      >
+        <span className="truncate">
+          {selectedOption ? selectedOption.label : placeholder || "Select..."}
+        </span>
+        <ChevronDown
+          size={16}
+          className={`text-text-muted transition-transform duration-200 shrink-0 ml-1.5 ${
+            open ? "rotate-180 text-white" : ""
+          }`}
+        />
+      </button>
+
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            initial={{ opacity: 0, y: -4, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -4, scale: 0.98 }}
+            transition={{ duration: 0.12 }}
+            className="absolute z-50 left-0 right-0 top-full mt-1.5 bg-[#141423] border border-white/15 rounded-2xl shadow-2xl backdrop-blur-xl p-1 max-h-56 overflow-y-auto"
+          >
+            {options.map((opt) => {
+              const isSelected = opt.value === value;
+              return (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => {
+                    onChange(opt.value);
+                    setOpen(false);
+                  }}
+                  className={`w-full flex items-center justify-between px-3 py-2 text-sm rounded-xl transition-colors text-left ${
+                    isSelected
+                      ? "bg-primary/20 text-primary font-bold"
+                      : "text-white/90 hover:bg-white/10 hover:text-white"
+                  }`}
+                >
+                  <span className="truncate">{opt.label}</span>
+                  {isSelected && <Check size={14} className="text-primary shrink-0 ml-2" />}
+                </button>
+              );
+            })}
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

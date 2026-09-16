@@ -93,6 +93,14 @@ function LobbyContent() {
   const [isPseudoFull, setIsPseudoFull] = useState(false);
   const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
   const [inviteSent, setInviteSent] = useState<string | null>(null);
+  const [inviteAllCooldown, setInviteAllCooldown] = useState(0);
+  const lobbyCooldownRef = useRef<NodeJS.Timeout | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (lobbyCooldownRef.current) clearInterval(lobbyCooldownRef.current);
+    };
+  }, []);
   /** "Add a friend by code" inside the invite modal , separate from the invite list below it. */
   const [addCode, setAddCode] = useState("");
   const [addBusy, setAddBusy] = useState(false);
@@ -702,6 +710,8 @@ function LobbyContent() {
 
   const sendInvite = async (friendId: string) => {
     if (!user || !roomId) return;
+    setInviteSent(friendId);
+    setTimeout(() => setInviteSent(null), 2500);
     try {
       await addDoc(collection(db, "invites"), {
         targetId: friendId,
@@ -710,8 +720,43 @@ function LobbyContent() {
         roomId,
         ...inviteTimestamps(),
       });
-      setInviteSent(friendId);
-      setTimeout(() => setInviteSent(null), 2000);
+    } catch (e) {
+      console.error("Invite error:", e);
+    }
+  };
+
+  const inviteAllFriends = async () => {
+    if (!user || !roomId || inviteAllCooldown > 0) return;
+    const targets = invitees.filter((f) => !f.joined && inviteSent !== f.uid);
+    if (targets.length === 0) return;
+
+    setAddNotice(`Invites sent to all friends!`);
+    setTimeout(() => setAddNotice(""), 3500);
+
+    setInviteAllCooldown(5);
+    if (lobbyCooldownRef.current) clearInterval(lobbyCooldownRef.current);
+    lobbyCooldownRef.current = setInterval(() => {
+      setInviteAllCooldown((prev) => {
+        if (prev <= 1) {
+          if (lobbyCooldownRef.current) clearInterval(lobbyCooldownRef.current);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    try {
+      await Promise.allSettled(
+        targets.map((f) =>
+          addDoc(collection(db, "invites"), {
+            targetId: f.uid,
+            fromUid: user.uid,
+            fromName: user.displayName || "A friend",
+            roomId,
+            ...inviteTimestamps(),
+          })
+        )
+      );
     } catch (e) {
       console.error("Invite error:", e);
     }
@@ -1022,6 +1067,18 @@ function LobbyContent() {
               </div>
 
               <div className="p-4 max-h-[60vh] overflow-y-auto space-y-2">
+                {invitees.filter((f) => !f.joined).length > 1 && (
+                  <div className="flex justify-end pb-1">
+                    <button
+                      onClick={inviteAllFriends}
+                      disabled={inviteAllCooldown > 0 || roomFull}
+                      className="text-xs font-bold bg-white/10 hover:bg-white/20 text-white px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                      title="Invite all friends"
+                    >
+                      <Users size={14} /> {inviteAllCooldown > 0 ? `Sent to all (${inviteAllCooldown}s)` : "Invite All"}
+                    </button>
+                  </div>
+                )}
                 {invitees.length === 0 ? (
                   <div className="text-center py-10 text-text-muted">
                     <Users size={48} className="mx-auto opacity-20 mb-4" />

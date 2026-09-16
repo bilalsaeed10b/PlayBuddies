@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, startTransition } from "react";
+import { useEffect, useMemo, useState, useRef, startTransition } from "react";
 
 const sleep = (ms: number) => new Promise<void>((res) => setTimeout(res, ms));
 import { usePathname } from "next/navigation";
@@ -51,6 +51,14 @@ export default function FriendsSidebar() {
   const myCode = codeProfile.uid === user?.uid ? codeProfile.code : "";
   const [sentTo, setSentTo] = useState<string | null>(null);
   const [notice, setNotice] = useState<string>("");
+  const [inviteAllCooldown, setInviteAllCooldown] = useState<number>(0);
+  const cooldownTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (cooldownTimerRef.current) clearInterval(cooldownTimerRef.current);
+    };
+  }, []);
 
   // The friends-list listener only runs while the panel is open , it used to
   // stay open on every page for every signed-in user, including during
@@ -131,6 +139,57 @@ export default function FriendsSidebar() {
       console.error("Invite error:", e);
       setNotice("Couldn't send that invite.");
       setTimeout(() => setNotice(""), 2500);
+    }
+  };
+
+  const inviteAllFriends = async () => {
+    if (!user || inviteAllCooldown > 0) return;
+    const room = normalizeRoomCode(new URLSearchParams(window.location.search).get("room") || "");
+    if (!room) {
+      setNotice("Join or create a lobby first, then invite.");
+      setTimeout(() => setNotice(""), 3000);
+      return;
+    }
+
+    const targets = friends.filter((f) => sentTo !== f.uid);
+    if (targets.length === 0) {
+      setNotice("No friends to invite right now.");
+      setTimeout(() => setNotice(""), 2500);
+      return;
+    }
+
+    // Immediately notify so the user knows invites are sent and doesn't spam
+    setNotice(`Invites sent to all friends!`);
+    setTimeout(() => setNotice(""), 3500);
+
+    // Immediately trigger 5-second disable cooldown
+    setInviteAllCooldown(5);
+    if (cooldownTimerRef.current) clearInterval(cooldownTimerRef.current);
+    cooldownTimerRef.current = setInterval(() => {
+      setInviteAllCooldown((prev) => {
+        if (prev <= 1) {
+          if (cooldownTimerRef.current) clearInterval(cooldownTimerRef.current);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    // Fire all invite requests concurrently in parallel
+    try {
+      await Promise.allSettled(
+        targets.map((f) =>
+          addDoc(collection(db, "invites"), {
+            targetId: f.uid,
+            fromUid: user.uid,
+            fromName: user.displayName || "A friend",
+            roomId: room,
+            ...inviteTimestamps(),
+          })
+        )
+      );
+    } catch (e) {
+      console.error("Invite error:", e);
     }
   };
 
@@ -233,41 +292,12 @@ export default function FriendsSidebar() {
                     {friends.length > 0 && (
                       <div className="flex justify-end mb-2">
                         <button
-                          onClick={async () => {
-                            if (!user) return;
-                            const room = normalizeRoomCode(new URLSearchParams(window.location.search).get("room") || "");
-                            if (!room) {
-                              setNotice("Join or create a lobby first, then invite.");
-                              setTimeout(() => setNotice(""), 3000);
-                              return;
-                            }
-                            let count = 0;
-                            for (const f of friends) {
-                              if (sentTo === f.uid) continue;
-                              try {
-                                await addDoc(collection(db, "invites"), {
-                                  targetId: f.uid,
-                                  fromUid: user.uid,
-                                  fromName: user.displayName || "A friend",
-                                  roomId: room,
-                                  ...inviteTimestamps(),
-                                });
-                                count++;
-                                // Stagger writes to avoid Firestore rate limits.
-                                await sleep(150);
-                              } catch (e) {
-                                console.error("Invite error:", e);
-                              }
-                            }
-                            if (count > 0) {
-                              setNotice(`Invited ${count} friend${count > 1 ? "s" : ""}!`);
-                              setTimeout(() => setNotice(""), 2500);
-                            }
-                          }}
-                          className="text-xs font-bold bg-white/10 hover:bg-white/20 text-white px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1"
+                          onClick={inviteAllFriends}
+                          disabled={inviteAllCooldown > 0}
+                          className="text-xs font-bold bg-white/10 hover:bg-white/20 text-white px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
                           title="Invite all friends"
                         >
-                          <Users size={14} /> Invite All
+                          <Users size={14} /> {inviteAllCooldown > 0 ? `Sent to all (${inviteAllCooldown}s)` : "Invite All"}
                         </button>
                       </div>
                     )}

@@ -35,6 +35,11 @@ html {
   color-scheme: dark;
 }
 
+select option {
+  background-color: #141423;
+  color: #ffffff;
+}
+
 body {
   background: var(--color-bg);
   color: var(--color-text);
