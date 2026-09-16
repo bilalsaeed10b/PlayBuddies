@@ -216,7 +216,7 @@ export default function DashboardPage() {
         />
 
         {/* Dashboard Nav */}
-        <nav className="relative z-10 glass border-b border-white/5 px-6 py-4 flex items-center justify-between">
+        <nav className="relative z-40 glass border-b border-white/5 px-6 py-4 flex items-center justify-between">
           <div
             className="flex items-center gap-3 cursor-pointer"
             onClick={() => router.push("/")}

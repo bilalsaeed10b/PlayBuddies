@@ -317,7 +317,7 @@ export default function ProfilePage() {
         />
 
         {/* Nav */}
-        <nav className="relative z-10 glass border-b border-white/5 px-6 py-4 flex items-center gap-4">
+        <nav className="relative z-40 glass border-b border-white/5 px-6 py-4 flex items-center gap-4">
           <button
             onClick={() => router.back()}
             className="p-2 rounded-xl hover:bg-white/10 text-text-muted hover:text-white transition-colors"
