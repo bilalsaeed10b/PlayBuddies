@@ -504,7 +504,11 @@ service cloud.firestore {
       // — and any account can already create its own lobbies.
       match /updates/{playerId} {
         allow read: if signedIn();
-        allow write: if isSelf(playerId) && incoming().size() <= 20;
+        // 30, not 20: a host's beacon reply to a stalled peer's resync
+        // request (state snapshot + ack + host terms + recent-action queue)
+        // tops out at 21 fields once a match is a few turns in, and used to
+        // get silently rejected right when a client needed it most.
+        allow write: if isSelf(playerId) && incoming().size() <= 30;
       }
     }
 
