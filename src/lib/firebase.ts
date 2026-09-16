@@ -2,6 +2,7 @@ import { initializeApp, getApps, getApp } from "firebase/app";
 import { getAuth, GoogleAuthProvider } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 import { getDatabase } from "firebase/database";
+import { getStorage } from "firebase/storage";
 
 // Firebase web config is public by design , it identifies the project, it does
 // not authorise anything. Access is controlled by firestore.rules and
@@ -25,6 +26,7 @@ const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 export const db = getFirestore(app);
 export const auth = getAuth(app);
 export const rtdb = getDatabase(app);
+export const storage = getStorage(app);
 export const googleProvider = new GoogleAuthProvider();
 
 export default app;

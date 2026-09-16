@@ -8,22 +8,19 @@ import FriendRequestListener from "@/components/FriendRequestListener";
 /**
  * Global overlays, mounted only where they make sense.
  *
- * These used to render on every route including the landing page, so every
- * signed-in visitor held open Firestore listeners before they had even chosen
- * to do anything.
+ * InviteListener and FriendRequestListener always render for signed-in users
+ * so an invite or friend request toast fires even on the landing page.
+ * FriendsSidebar (the floating FAB + slide-out panel) is suppressed on the
+ * landing and profile pages where it would feel out of place.
  */
 export default function AppChrome() {
   const pathname = usePathname();
 
-  const isLanding = pathname === "/";
-  if (isLanding) return null;
+  const hideSidebar = pathname === "/" || pathname?.startsWith("/profile");
 
-  // The lobby has its own invite UI, but a friend request can land at any
-  // time , including mid-lobby , so the friends panel (and its accept/deny
-  // controls) has to be reachable there too, not just from the dashboard.
   return (
     <>
-      <FriendsSidebar />
+      {!hideSidebar && <FriendsSidebar />}
       <FriendRequestListener />
       <InviteListener />
     </>

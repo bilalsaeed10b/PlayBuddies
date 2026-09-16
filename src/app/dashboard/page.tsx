@@ -29,6 +29,7 @@ import {
   Play,
   Users,
   ChevronDown,
+  User,
 } from "lucide-react";
 
 const CREATE_LOBBY_TIMEOUT_MS = 12_000;
@@ -297,7 +298,14 @@ export default function DashboardPage() {
                   </div>
 
                   {/* Actions */}
-                  <div className="p-2">
+                  <div className="p-2 space-y-0.5">
+                    <button
+                      onClick={() => { setProfileOpen(false); router.push("/profile"); }}
+                      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-white/80 hover:bg-white/10 hover:text-white transition-colors"
+                    >
+                      <User size={16} />
+                      View Profile
+                    </button>
                     <button
                       onClick={() => { setProfileOpen(false); handleSignOut(); }}
                       className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-red-400 hover:bg-red-500/10 hover:text-red-300 transition-colors"

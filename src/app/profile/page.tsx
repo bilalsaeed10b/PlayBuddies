@@ -1,0 +1,651 @@
+"use client";
+
+import { useState, useEffect, useRef, useCallback } from "react";
+import { useRouter } from "next/navigation";
+import { motion, AnimatePresence } from "framer-motion";
+import { auth, db, storage } from "@/lib/firebase";
+import { updateProfile } from "firebase/auth";
+import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
+import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
+import { useAuthStore } from "@/store/useAuthStore";
+import AuthGuard from "@/components/AuthGuard";
+import {
+  Camera,
+  Check,
+  X,
+  ArrowLeft,
+  Pencil,
+  Gamepad2,
+  Trophy,
+  Star,
+  Zap,
+  Crown,
+  Shield,
+  Target,
+  Loader2,
+  Copy,
+  Lock,
+  Sparkles,
+} from "lucide-react";
+
+// ─── Badge definitions ───────────────────────────────────────────────────────
+
+interface Badge {
+  id: string;
+  icon: React.ReactNode;
+  label: string;
+  description: string;
+  color: string;
+  /** null = always unlocked (signed up = earned) */
+  gamesNeeded: number | null;
+  winsNeeded: number | null;
+  premium?: boolean;
+}
+
+const BADGES: Badge[] = [
+  {
+    id: "first_boot",
+    icon: <Gamepad2 size={28} />,
+    label: "First Boot",
+    description: "Welcome to PlayBuddies!",
+    color: "from-violet-500 to-purple-600",
+    gamesNeeded: null,
+    winsNeeded: null,
+  },
+  {
+    id: "rookie",
+    icon: <Star size={28} />,
+    label: "Rookie",
+    description: "Played your first game",
+    color: "from-blue-500 to-cyan-500",
+    gamesNeeded: 1,
+    winsNeeded: null,
+  },
+  {
+    id: "first_win",
+    icon: <Target size={28} />,
+    label: "First Win",
+    description: "Won your first match",
+    color: "from-emerald-500 to-green-500",
+    gamesNeeded: null,
+    winsNeeded: 1,
+  },
+  {
+    id: "veteran",
+    icon: <Shield size={28} />,
+    label: "Veteran",
+    description: "Played 5 games",
+    color: "from-orange-500 to-amber-500",
+    gamesNeeded: 5,
+    winsNeeded: null,
+  },
+  {
+    id: "sharp_shooter",
+    icon: <Zap size={28} />,
+    label: "Sharp Shooter",
+    description: "Won 5 matches",
+    color: "from-yellow-400 to-orange-500",
+    gamesNeeded: null,
+    winsNeeded: 5,
+  },
+  {
+    id: "champion",
+    icon: <Trophy size={28} />,
+    label: "Champion",
+    description: "Played 10 games",
+    color: "from-pink-500 to-rose-500",
+    gamesNeeded: 10,
+    winsNeeded: null,
+  },
+  {
+    id: "legend",
+    icon: <Crown size={28} />,
+    label: "Legend",
+    description: "Won 10 matches",
+    color: "from-violet-600 to-pink-600",
+    gamesNeeded: null,
+    winsNeeded: 10,
+  },
+  {
+    id: "premium",
+    icon: <Sparkles size={28} />,
+    label: "PlayBuddies+",
+    description: "Premium member — coming soon",
+    color: "from-amber-400 to-yellow-500",
+    gamesNeeded: null,
+    winsNeeded: null,
+    premium: true,
+  },
+];
+
+function earnedBadge(badge: Badge, gamesPlayed: number, wins: number): boolean {
+  if (badge.premium) return false;
+  if (badge.gamesNeeded === null && badge.winsNeeded === null) return true; // first_boot
+  if (badge.gamesNeeded !== null && gamesPlayed < badge.gamesNeeded) return false;
+  if (badge.winsNeeded !== null && wins < badge.winsNeeded) return false;
+  return true;
+}
+
+// ─── Image resize helper ──────────────────────────────────────────────────────
+
+async function resizeImageFile(file: File, maxPx = 200): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const size = Math.min(img.naturalWidth, img.naturalHeight, maxPx);
+      const canvas = document.createElement("canvas");
+      canvas.width = size;
+      canvas.height = size;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return reject(new Error("No canvas context"));
+      // Centre-crop to square
+      const srcX = (img.naturalWidth - size) / 2;
+      const srcY = (img.naturalHeight - size) / 2;
+      ctx.drawImage(img, srcX, srcY, size, size, 0, 0, size, size);
+      canvas.toBlob(
+        (blob) => {
+          if (!blob) return reject(new Error("Canvas toBlob failed"));
+          resolve(blob);
+        },
+        "image/webp",
+        0.82,
+      );
+    };
+    img.onerror = reject;
+    img.src = url;
+  });
+}
+
+// ─── Main page ────────────────────────────────────────────────────────────────
+
+export default function ProfilePage() {
+  const router = useRouter();
+  const user = useAuthStore((s) => s.user);
+
+  const [displayName, setDisplayName] = useState("");
+  const [editingName, setEditingName] = useState(false);
+  const [nameInput, setNameInput] = useState("");
+  const [savingName, setSavingName] = useState(false);
+
+  const [photoURL, setPhotoURL] = useState("");
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const [photoError, setPhotoError] = useState("");
+
+  const [friendCode, setFriendCode] = useState("");
+  const [codeCopied, setCodeCopied] = useState(false);
+
+  const [gamesPlayed, setGamesPlayed] = useState(0);
+  const [wins, setWins] = useState(0);
+  const [loadingStats, setLoadingStats] = useState(true);
+
+  const [notice, setNotice] = useState("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // ── Load profile & stats ──
+  useEffect(() => {
+    if (!user) return;
+    setDisplayName(user.displayName || "Player");
+    setPhotoURL(
+      user.photoURL ||
+        `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.uid}`,
+    );
+
+    let cancelled = false;
+
+    (async () => {
+      try {
+        // Public profile for friendCode
+        const profileSnap = await getDoc(doc(db, "profiles", user.uid));
+        if (!cancelled && profileSnap.exists()) {
+          setFriendCode(profileSnap.data().friendCode || "");
+          // Use profile photoURL if it differs (updated from profile page)
+          const pPhoto = profileSnap.data().photoURL;
+          if (pPhoto) setPhotoURL(pPhoto);
+        }
+
+        // Private stats
+        const userSnap = await getDoc(doc(db, "users", user.uid));
+        if (!cancelled && userSnap.exists()) {
+          const data = userSnap.data();
+          setGamesPlayed(data.stats?.gamesPlayed ?? 0);
+          setWins(data.stats?.wins ?? 0);
+        }
+      } catch (e) {
+        console.error("Profile load error:", e);
+      } finally {
+        if (!cancelled) setLoadingStats(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user]);
+
+  // ── Save display name ──
+  const saveName = async () => {
+    const name = nameInput.trim().slice(0, 60);
+    if (!name || !user) return;
+    setSavingName(true);
+    try {
+      await updateProfile(auth.currentUser!, { displayName: name });
+      await setDoc(
+        doc(db, "profiles", user.uid),
+        { displayName: name, updatedAt: serverTimestamp() },
+        { merge: true },
+      );
+      setDisplayName(name);
+      setEditingName(false);
+      flash("Display name updated!");
+    } catch (e) {
+      console.error("Name save error:", e);
+      flash("Could not save name. Try again.");
+    } finally {
+      setSavingName(false);
+    }
+  };
+
+  // ── Upload avatar ──
+  const handleFileChange = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file || !user) return;
+      setPhotoError("");
+      setUploadingPhoto(true);
+      try {
+        const blob = await resizeImageFile(file, 200);
+        const storageRef = ref(storage, `avatars/${user.uid}/avatar.webp`);
+        await uploadBytes(storageRef, blob, { contentType: "image/webp" });
+        const url = await getDownloadURL(storageRef);
+
+        await updateProfile(auth.currentUser!, { photoURL: url });
+        await setDoc(
+          doc(db, "profiles", user.uid),
+          { photoURL: url, updatedAt: serverTimestamp() },
+          { merge: true },
+        );
+        setPhotoURL(url);
+        flash("Photo updated!");
+      } catch (err) {
+        console.error("Photo upload error:", err);
+        setPhotoError("Upload failed. Please try again.");
+      } finally {
+        setUploadingPhoto(false);
+        if (fileInputRef.current) fileInputRef.current.value = "";
+      }
+    },
+    [user],
+  );
+
+  const flash = (msg: string) => {
+    setNotice(msg);
+    setTimeout(() => setNotice(""), 3000);
+  };
+
+  const copyCode = () => {
+    navigator.clipboard.writeText(friendCode).catch(() => {});
+    setCodeCopied(true);
+    setTimeout(() => setCodeCopied(false), 2000);
+  };
+
+  if (!user) return null;
+
+  const earnedCount = BADGES.filter(
+    (b) => !b.premium && earnedBadge(b, gamesPlayed, wins),
+  ).length;
+
+  return (
+    <AuthGuard>
+      <div className="min-h-screen bg-background relative overflow-hidden">
+        {/* Background */}
+        <div className="absolute inset-0 bg-grid animate-grid-pulse opacity-30" />
+        <div
+          className="absolute top-0 left-0 w-[600px] h-[600px] rounded-full pointer-events-none"
+          style={{
+            background:
+              "radial-gradient(circle, rgba(139,92,246,0.1) 0%, transparent 70%)",
+          }}
+        />
+        <div
+          className="absolute bottom-0 right-0 w-[400px] h-[400px] rounded-full pointer-events-none"
+          style={{
+            background:
+              "radial-gradient(circle, rgba(236,72,153,0.08) 0%, transparent 70%)",
+          }}
+        />
+
+        {/* Nav */}
+        <nav className="relative z-10 glass border-b border-white/5 px-6 py-4 flex items-center gap-4">
+          <button
+            onClick={() => router.back()}
+            className="p-2 rounded-xl hover:bg-white/10 text-text-muted hover:text-white transition-colors"
+            aria-label="Go back"
+          >
+            <ArrowLeft size={20} />
+          </button>
+          <h1 className="text-xl font-bold text-white">My Profile</h1>
+        </nav>
+
+        {/* Notice toast */}
+        <AnimatePresence>
+          {notice && (
+            <motion.div
+              initial={{ opacity: 0, y: -20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              className="fixed top-20 left-1/2 -translate-x-1/2 z-50 bg-primary text-white px-6 py-3 rounded-2xl shadow-2xl text-sm font-bold"
+            >
+              {notice}
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        <main className="relative z-10 max-w-3xl mx-auto px-4 sm:px-6 py-10 space-y-8">
+
+          {/* ── Avatar + name card ─────────────────────── */}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="glass rounded-3xl border border-white/10 overflow-hidden"
+          >
+            {/* Banner strip */}
+            <div className="h-28 bg-gradient-to-br from-primary/40 via-accent/20 to-secondary/30 relative">
+              <div className="absolute inset-0 bg-grid opacity-20" />
+            </div>
+
+            <div className="px-6 pb-6">
+              {/* Avatar */}
+              <div className="relative -mt-14 mb-4 w-fit">
+                <div className="w-28 h-28 rounded-3xl border-4 border-[#0A0A14] overflow-hidden relative group">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={photoURL}
+                    alt="Avatar"
+                    onError={(e) => {
+                      e.currentTarget.src = `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.uid}`;
+                    }}
+                    className="w-full h-full object-cover"
+                  />
+                  {/* Upload overlay */}
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={uploadingPhoto}
+                    className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1 cursor-pointer"
+                    aria-label="Change avatar"
+                  >
+                    {uploadingPhoto ? (
+                      <Loader2 size={24} className="animate-spin text-white" />
+                    ) : (
+                      <>
+                        <Camera size={22} className="text-white" />
+                        <span className="text-[10px] text-white font-bold">Change</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={handleFileChange}
+                  aria-label="Upload profile photo"
+                />
+                {photoError && (
+                  <p className="text-xs text-error mt-1">{photoError}</p>
+                )}
+              </div>
+
+              {/* Name + edit */}
+              <div className="flex items-start justify-between gap-4 flex-wrap">
+                <div className="min-w-0">
+                  {editingName ? (
+                    <div className="flex items-center gap-2">
+                      <input
+                        autoFocus
+                        maxLength={60}
+                        value={nameInput}
+                        onChange={(e) => setNameInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") saveName();
+                          if (e.key === "Escape") setEditingName(false);
+                        }}
+                        className="bg-white/5 border border-primary/50 rounded-xl px-3 py-2 text-white text-xl font-bold focus:outline-none w-48"
+                        aria-label="Display name input"
+                      />
+                      <button
+                        onClick={saveName}
+                        disabled={savingName}
+                        className="p-2 bg-primary rounded-xl hover:bg-primary/80 transition-colors"
+                        aria-label="Save name"
+                      >
+                        {savingName ? (
+                          <Loader2 size={16} className="animate-spin text-white" />
+                        ) : (
+                          <Check size={16} className="text-white" />
+                        )}
+                      </button>
+                      <button
+                        onClick={() => setEditingName(false)}
+                        className="p-2 bg-white/10 rounded-xl hover:bg-white/20 transition-colors"
+                        aria-label="Cancel"
+                      >
+                        <X size={16} className="text-text-muted" />
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-3">
+                      <h2 className="text-2xl font-black text-white truncate">
+                        {displayName}
+                      </h2>
+                      <button
+                        onClick={() => {
+                          setNameInput(displayName);
+                          setEditingName(true);
+                        }}
+                        className="p-1.5 rounded-lg hover:bg-white/10 text-text-muted hover:text-white transition-colors"
+                        aria-label="Edit display name"
+                      >
+                        <Pencil size={14} />
+                      </button>
+                    </div>
+                  )}
+                  <p className="text-sm text-text-muted mt-0.5">{user.email}</p>
+                </div>
+
+                {/* Friend code */}
+                <div className="flex flex-col items-end gap-1">
+                  <p className="text-[10px] uppercase tracking-widest text-text-muted font-bold">
+                    Friend Code
+                  </p>
+                  <button
+                    onClick={copyCode}
+                    className="flex items-center gap-2 font-mono text-lg font-black text-white hover:text-primary transition-colors"
+                    title="Copy friend code"
+                  >
+                    {friendCode || "—"}
+                    {codeCopied ? (
+                      <Check size={14} className="text-success" />
+                    ) : (
+                      <Copy size={14} className="text-text-muted" />
+                    )}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </motion.div>
+
+          {/* ── Stats row ─────────────────────────────── */}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.05 }}
+            className="grid grid-cols-2 sm:grid-cols-2 gap-4"
+          >
+            {[
+              {
+                label: "Games Played",
+                value: loadingStats ? "—" : gamesPlayed,
+                icon: <Gamepad2 size={22} />,
+                color: "text-blue-400",
+                bg: "bg-blue-500/10 border-blue-500/20",
+              },
+              {
+                label: "Wins",
+                value: loadingStats ? "—" : wins,
+                icon: <Trophy size={22} />,
+                color: "text-amber-400",
+                bg: "bg-amber-500/10 border-amber-500/20",
+              },
+            ].map((stat) => (
+              <div
+                key={stat.label}
+                className={`glass rounded-2xl p-5 border flex items-center gap-4 ${stat.bg}`}
+              >
+                <div className={`${stat.color}`}>{stat.icon}</div>
+                <div>
+                  <p className="text-2xl font-black text-white">{stat.value}</p>
+                  <p className="text-xs text-text-muted">{stat.label}</p>
+                </div>
+              </div>
+            ))}
+          </motion.div>
+
+          {/* ── Badges ────────────────────────────────── */}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.1 }}
+          >
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                <Star size={18} className="text-primary" />
+                Badges
+              </h3>
+              <span className="text-xs text-text-muted bg-white/5 border border-white/10 rounded-full px-3 py-1">
+                {earnedCount} / {BADGES.filter((b) => !b.premium).length} earned
+              </span>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              {BADGES.map((badge, i) => {
+                const earned = badge.premium
+                  ? false
+                  : earnedBadge(badge, gamesPlayed, wins);
+                return (
+                  <motion.div
+                    key={badge.id}
+                    initial={{ opacity: 0, scale: 0.8 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    transition={{ delay: 0.15 + i * 0.04 }}
+                    title={badge.description}
+                    className={`glass rounded-2xl p-4 border flex flex-col items-center gap-2 text-center transition-all relative overflow-hidden ${
+                      earned
+                        ? "border-white/15 hover:border-white/30"
+                        : "border-white/5 opacity-50"
+                    }`}
+                  >
+                    {/* Glow for earned */}
+                    {earned && (
+                      <div
+                        className={`absolute inset-0 bg-gradient-to-br ${badge.color} opacity-10`}
+                      />
+                    )}
+
+                    {/* Lock overlay for premium */}
+                    {badge.premium && (
+                      <div className="absolute inset-0 bg-black/40 flex items-center justify-center rounded-2xl z-10">
+                        <Lock size={20} className="text-amber-400" />
+                      </div>
+                    )}
+
+                    <div
+                      className={`relative z-0 w-12 h-12 rounded-xl flex items-center justify-center bg-gradient-to-br ${badge.color} ${earned ? "" : "grayscale"}`}
+                    >
+                      <div className="text-white">{badge.icon}</div>
+                    </div>
+                    <div className="relative z-0">
+                      <p className="text-xs font-bold text-white leading-tight">
+                        {badge.label}
+                      </p>
+                      {badge.premium && (
+                        <p className="text-[10px] text-amber-400 font-bold mt-0.5">
+                          Coming Soon
+                        </p>
+                      )}
+                    </div>
+                  </motion.div>
+                );
+              })}
+            </div>
+          </motion.div>
+
+          {/* ── Achievements (placeholder) ─────────────── */}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.18 }}
+          >
+            <h3 className="text-lg font-bold text-white flex items-center gap-2 mb-4">
+              <Trophy size={18} className="text-amber-400" />
+              Achievements
+            </h3>
+            <div className="glass rounded-2xl border border-white/10 p-6 flex flex-col items-center justify-center text-center gap-3 min-h-[120px]">
+              <div className="w-10 h-10 rounded-xl bg-white/5 flex items-center justify-center text-text-muted">
+                <Trophy size={22} />
+              </div>
+              <div>
+                <p className="text-sm font-bold text-white">Coming Soon</p>
+                <p className="text-xs text-text-muted mt-0.5">
+                  Achievements track your in-game milestones — launching with the next update.
+                </p>
+              </div>
+            </div>
+          </motion.div>
+
+          {/* ── Premium tier card ─────────────────────── */}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.22 }}
+            className="relative overflow-hidden rounded-3xl border border-amber-500/30 bg-gradient-to-br from-amber-500/10 via-yellow-500/5 to-transparent p-6"
+          >
+            {/* Shimmer */}
+            <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/5 to-transparent -skew-x-12 animate-pulse" />
+
+            <div className="relative z-10 flex flex-col sm:flex-row items-start sm:items-center gap-4 justify-between">
+              <div className="flex items-center gap-4">
+                <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-amber-400 to-yellow-500 flex items-center justify-center shadow-lg shadow-amber-500/30 shrink-0">
+                  <Crown size={28} className="text-white" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2 mb-0.5">
+                    <h3 className="text-lg font-black text-white">
+                      PlayBuddies
+                      <span className="text-amber-400">+</span>
+                    </h3>
+                    <span className="text-[10px] font-black bg-amber-500/20 text-amber-300 border border-amber-500/30 rounded-full px-2 py-0.5 uppercase tracking-widest">
+                      Coming Soon
+                    </span>
+                  </div>
+                  <p className="text-sm text-text-muted max-w-xs">
+                    Exclusive badges, in-game benefits, custom avatars, and more — launching soon.
+                  </p>
+                </div>
+              </div>
+              <button
+                disabled
+                className="shrink-0 px-5 py-2.5 rounded-xl bg-amber-500/20 border border-amber-500/30 text-amber-300 text-sm font-bold cursor-not-allowed opacity-60"
+              >
+                Get Plus
+              </button>
+            </div>
+          </motion.div>
+
+        </main>
+      </div>
+    </AuthGuard>
+  );
+}
