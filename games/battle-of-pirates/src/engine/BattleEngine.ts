@@ -1517,6 +1517,26 @@ export class BattleEngine {
     this.botTimer = 0;
   }
 
+  /**
+   * A captain whose own hull is gone takes the wheel of a still-afloat bot on
+   * their own side, instead of watching the rest of the match from a wreck.
+   *
+   * `asLocal` is true only on the device making the claim; every other
+   * client runs this with `false`, which is the same `ai` -> ordinary-human
+   * transition `reclaimControl` makes for a returning captain. Once this
+   * runs, the hull is no longer `ai`, so a second dead teammate who tries to
+   * claim the same bot finds `ship.control !== 'ai'` and is turned away --
+   * first claim to land wins, nothing more to arbitrate.
+   */
+  takeOverBot(i: number, driverName: string, asLocal: boolean): boolean {
+    const ship = this.ships[i];
+    if (ship.control !== 'ai' || ship.hp <= 0) return false;
+    ship.control = asLocal ? 'local' : 'remote';
+    ship.name = `${ship.name} (${driverName})`;
+    this.botTimer = 0;
+    return true;
+  }
+
   // -- simulation -------------------------------------------------------------
 
   update(dt: number, decide?: (ship: number) => Shot) {

@@ -486,6 +486,24 @@ export interface IdlePacket {
   n: number;
 }
 
+/**
+ * Sent by a captain whose own hull is gone, claiming a still-afloat bot on
+ * their own side rather than watching the rest of the match from a wreck.
+ *
+ * `ship` is the bot being claimed and `name` is the claimer's own display
+ * name, appended to the hull's so the rest of the crew can see who has the
+ * wheel now. Every client -- the sender included, applied locally the moment
+ * the button is pressed -- runs the same `ai` -> human transition, so
+ * whichever claim for a given `ship` a client sees first wins; nothing here
+ * arbitrates a tie beyond that.
+ */
+export interface TakeoverPacket {
+  t: 'takeover';
+  n: number;
+  ship: number;
+  name: string;
+}
+
 export type NetPacket =
   | StartPacket
   | FirePacket
@@ -493,4 +511,5 @@ export type NetPacket =
   | SyncPacket
   | ByePacket
   | HelloPacket
+  | TakeoverPacket
   | IdlePacket;

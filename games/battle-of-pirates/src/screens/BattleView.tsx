@@ -22,7 +22,7 @@ import { isStaleChunkError, recoverFromStaleChunk } from '@shared/net/staleChunk
 import { audioService } from '../services/audio';
 import { packRules, unpackRules } from '../types/game';
 import { createLogger } from '@shared/log/logger';
-import type { GameSettings, MatchRules, NetPacket, Phase, Team } from '../types/game';
+import type { Control, GameSettings, MatchRules, NetPacket, Phase, Team } from '../types/game';
 // Type only: the runtime value arrives through the dynamic import below, which
 // is what keeps the Firebase SDK out of an offline player's bundle.
 import { hullAt } from '../game/hulls';
@@ -159,6 +159,20 @@ export default function BattleView({
   }, []);
   const [dragging, setDragging] = useState(false);
   const [charges, setCharges] = useState<number[]>([]);
+  /**
+   * Live control and name per hull, read straight off the engine.
+   *
+   * `config.seats` is fixed for the whole match and never learns that "Gunner
+   * Bot" became "Gunner Bot (Ayesha)" , this is the one place that does.
+   */
+  const [roster, setRoster] = useState<{ control: Control; name: string }[]>([]);
+  /**
+   * Bots this device has taken the wheel of after its own seat went down,
+   * keyed by which of `config.localShips` did the taking , so a couch match
+   * with two dead captains can offer the prompt to each independently, and
+   * neither sees it again once they have somewhere else to stand.
+   */
+  const [adoptions, setAdoptions] = useState<Record<number, number>>({});
   const [resyncing, setResyncing] = useState(false);
   const [specialOpen, setSpecialOpen] = useState(false);
   const specialOpenRef = useRef(false);
@@ -212,8 +226,19 @@ export default function BattleView({
   const localShipsKey = config.localShips.join(',');
   const peerKey = config.peerUids.join(',');
   const { aiLevel } = config;
+  /**
+   * `config.localShips` plus whatever bots this device has since taken over.
+   *
+   * Kept separate from the memo below on purpose: `adoptions` is real React
+   * state that changes mid-match, and folding it into the same `useMemo` that
+   * depends on `localShipsKey` would need that key recomputed carefully to
+   * avoid the exact identity-churn hazard the comment above warns about.
+   */
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const localShips = useMemo(() => new Set(config.localShips), [localShipsKey]);
+  const localShips = useMemo(
+    () => new Set([...config.localShips, ...Object.values(adoptions)]),
+    [localShipsKey, adoptions],
+  );
   /**
    * Which hull each remote player is sailing, so a `bye` can be pinned on the
    * ship its sender was actually driving rather than on "the other one".
@@ -309,6 +334,19 @@ export default function BattleView({
         engineRef.current?.reclaimControl(ship);
         if (wasAdrift) {
           setNotice(`${config.seats[ship]?.name ?? 'A captain'} is back at the wheel.`);
+        }
+        return;
+      }
+      if (packet.t === 'takeover') {
+        // Applied with asLocal=false: this ship becomes an ordinary human on
+        // the wire from every client's view but the one that sent the claim,
+        // which already applied it locally the instant the button was
+        // pressed. A no-op if the bot was already taken -- see the note on
+        // takeOverBot for why that is enough to settle two claims at once.
+        const wasBot = engineRef.current?.ships[packet.ship]?.control === 'ai';
+        engineRef.current?.takeOverBot(packet.ship, packet.name, false);
+        if (wasBot) {
+          setNotice(`${packet.name} took the wheel of ${config.seats[packet.ship]?.name ?? 'a bot'}.`);
         }
         return;
       }
@@ -530,6 +568,7 @@ export default function BattleView({
       hand: '',
       charges: '',
       resyncing: false,
+      roster: '' as string,
     };
 
     let skip = false;
@@ -576,6 +615,15 @@ export default function BattleView({
       if (hpKey !== shown.hp) {
         shown.hp = hpKey;
         setHp(engine.hp);
+      }
+      // Control and name together: a takeover changes both in the same
+      // stroke (see BattleEngine.takeOverBot), and `seats` -- fixed for the
+      // whole match -- is not where a live rename like "Gunner Bot (Ayesha)"
+      // would show up.
+      const rosterKey = engine.ships.map((s) => `${s.control}:${s.name}`).join('|');
+      if (rosterKey !== shown.roster) {
+        shown.roster = rosterKey;
+        setRoster(engine.ships.map((s) => ({ control: s.control, name: s.name })));
       }
       // Only ever changes when a new engine is built, so this compares a
       // joined string like the rest rather than pushing a render per frame.
@@ -761,12 +809,52 @@ export default function BattleView({
     setRematch((n) => n + 1);
   }, []);
 
+  /**
+   * `mySunkShip` hops into `botShip`, a still-afloat bot on the same team.
+   *
+   * Applied to this device's own engine immediately -- the button that fired
+   * this already means the click cannot be for anyone else's ship -- and only
+   * then broadcast, the same optimistic-local-then-wire order every shot in
+   * this file already follows.
+   */
+  const claimBot = useCallback(
+    (mySunkShip: number, botShip: number) => {
+      const driverName = config.seats[mySunkShip]?.name ?? 'A castaway';
+      if (!engineRef.current?.takeOverBot(botShip, driverName, true)) return;
+      setAdoptions((prev) => ({ ...prev, [mySunkShip]: botShip }));
+      if (online) linkRef.current?.send({ t: 'takeover', n: Date.now(), ship: botShip, name: driverName });
+    },
+    [config.seats, online],
+  );
+
   // -- render -----------------------------------------------------------------
 
   const myTurn = localShips.has(turn) && (phase === 'aim' || phase === 'deal');
   const canAim = phase === 'aim' && myTurn && !over && !resyncing;
   /** My side, for colouring the HUD , the first hull this device sails. */
   const myTeam: Team = config.seats[config.localShips[0] ?? 0]?.team ?? 0;
+  /**
+   * Which of my sunk seats can hop into which still-afloat bot on the same
+   * team, recomputed every render off the live roster , so a bot another dead
+   * teammate just claimed drops out of the list the instant their packet
+   * lands, with nothing here needing to know a claim happened at all.
+   */
+  const takeoverPrompts = over
+    ? []
+    : config.localShips
+        .filter((mySunkShip) => (hp[mySunkShip] ?? 0) <= 0 && adoptions[mySunkShip] === undefined)
+        .map((mySunkShip) => ({
+          mySunkShip,
+          candidates: config.seats
+            .map((_, i) => i)
+            .filter(
+              (i) =>
+                config.seats[i]?.team === myTeam &&
+                (hp[i] ?? 0) > 0 &&
+                (roster[i]?.control ?? config.seats[i]?.control) === 'ai',
+            ),
+        }))
+        .filter((prompt) => prompt.candidates.length > 0);
   const turnTeam: Team = config.seats[turn]?.team ?? 0;
   const facing: 1 | -1 = turnTeam === 0 ? 1 : -1;
   const handHeight = compact ? HAND_HEIGHT_COMPACT : HAND_HEIGHT;
@@ -779,10 +867,13 @@ export default function BattleView({
     if (targetingSpecial && !canAim) cancelTargeting();
   }, [targetingSpecial, canAim, cancelTargeting]);
 
-  // A seat handed to a bot keeps its owner's name, so this line has to read
-  // properly for "Alice (adrift)" and for the solo seat, which is called "You".
-  const shooter = config.seats[turn]?.name ?? 'Someone';
-  const turnLabel = resyncing ? 'Rejoining the fleet…' : phase === 'special' ? `${config.seats[turn]?.name ?? 'Captain'} · special attack` : over
+  // A seat handed to a bot, or taken over from one, changes its name after
+  // the match starts -- `roster` is what actually tracks that; `config.seats`
+  // is fixed from kickoff and would still say "Gunner Bot" forever. This line
+  // has to read properly for "Alice (adrift)", "Gunner Bot (Alice)", and the
+  // solo seat, which is called "You".
+  const shooter = roster[turn]?.name ?? config.seats[turn]?.name ?? 'Someone';
+  const turnLabel = resyncing ? 'Rejoining the fleet…' : phase === 'special' ? `${shooter || 'Captain'} · special attack` : over
     ? ''
     : myTurn || shooter.toLowerCase() === 'you'
       ? config.localShips.length > 1
@@ -855,7 +946,7 @@ export default function BattleView({
               seat.team !== team ? null : (
                 <HullMeter
                   key={i}
-                  name={seat.name}
+                  name={roster[i]?.name ?? seat.name}
                   hp={hp[i] ?? 0}
                   maxHp={maxHp[i] ?? BALANCE.MAX_HP}
                   hull={hullNames[i] ?? hullAt(seat.hull).name}
@@ -1005,6 +1096,36 @@ export default function BattleView({
           </div>
         </div>
       )}
+
+      {/* -- take the wheel of a bot --
+          Shown while this device has a sunk seat with nowhere else to stand
+          and the fleet still has a still-afloat bot on the same side. Placed
+          high enough to stay clear of the card hand and aim pad, which a
+          captain in this state has no use for anyway , their own hull fires
+          nothing until they pick one of these. */}
+      {takeoverPrompts.map(({ mySunkShip, candidates }) => (
+        <div
+          key={mySunkShip}
+          className="pointer-events-none absolute inset-x-0 top-24 z-30 flex justify-center px-4"
+        >
+          <div className="pointer-events-auto max-w-xs rounded-2xl border border-amber-400/40 bg-slate-950/85 p-3 text-center backdrop-blur-md">
+            <p className="mb-2 text-[11px] font-black uppercase tracking-wide text-amber-300">
+              {config.seats[mySunkShip]?.name ?? 'Your ship'} is sunk , take a bot's wheel?
+            </p>
+            <div className="flex flex-wrap justify-center gap-2">
+              {candidates.map((i) => (
+                <button
+                  key={i}
+                  onClick={() => claimBot(mySunkShip, i)}
+                  className="rounded-xl bg-amber-400 px-3 py-1.5 text-xs font-black text-slate-900 transition-transform active:scale-95"
+                >
+                  {roster[i]?.name ?? config.seats[i]?.name ?? 'Bot'}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      ))}
 
       {/* -- result -- */}
       {over && (
