@@ -22,6 +22,29 @@ service cloud.firestore {
       return signedIn() && request.auth.uid == uid;
     }
 
+    /**
+     * The admin panel's only real door.
+     *
+     * The allowlist is duplicated in src/lib/admin.ts and storage.rules. The
+     * copy in the bundle decides what to render; this one decides what the
+     * database will answer, and it is the one that matters , anybody can edit
+     * the shipped JavaScript, nobody can edit this.
+     *
+     * Addresses rather than uids so the first admin can sign in without
+     * someone first copying a uid out of the Firebase console, and
+     * `email_verified` because an unverified address on a token is a claim,
+     * not a fact. Google verifies its own accounts, so this costs real admins
+     * nothing.
+     */
+    function isAdmin() {
+      return signedIn()
+             && request.auth.token.email_verified == true
+             && request.auth.token.email in [
+               'bilalsaeed10b@gmail.com',
+               'bilalsaeed12b@gmail.com'
+             ];
+    }
+
     /** Keys this write actually changes. */
     function touched() {
       return request.resource.data.diff(resource.data).affectedKeys();
@@ -47,12 +70,21 @@ service cloud.firestore {
     // user's email address. Anything other players need to see now lives in
     // /profiles instead.
     match /users/{userId} {
-      allow get: if isSelf(userId);
-      allow list: if false;
+      allow get: if isSelf(userId) || isAdmin();
+      // Listing every user is exactly the scrape this rule was written to stop.
+      // The admin panel's player table is the one caller that legitimately
+      // needs it, and it can only ever be an admin asking.
+      allow list: if isAdmin();
 
       allow create: if isSelf(userId)
                     && incoming().email is string
                     && incoming().email.size() <= 320;
+
+      // An admin crediting an approved report writes to the reporter's
+      // document, which merges into a create if that document was never
+      // written. Without this the credit fails after the status change has
+      // already been saved, leaving the two halves out of step.
+      allow create: if isAdmin();
 
       /**
        * A match result: one game played, at most one win.
@@ -106,10 +138,37 @@ service cloud.firestore {
                && unlocks.size() <= 12;
       }
 
+      /**
+       * One filed bug report.
+       *
+       * `submitted` is the reporter's own running total and may step by one.
+       * `approved` is the number the tester badges are actually built on, so
+       * it is pinned here: a reporter may not move it, and the only writer
+       * that can is an admin approving a report. Without that pin the badge
+       * would be self-serve.
+       */
+      function bugStatsStep() {
+        let before = resource.data.get('bugStats', { 'submitted': 0, 'approved': 0 });
+        let after = incoming().bugStats;
+        return after.keys().hasOnly(['submitted', 'approved'])
+               && after.get('submitted', 0) is int
+               && after.get('submitted', 0) == before.get('submitted', 0) + 1
+               && after.get('approved', 0) == before.get('approved', 0);
+      }
+
       allow update: if isSelf(userId)
                     && !touched().hasAny(['uid', 'createdAt', 'friendCode'])
+                    // Badges an admin hands out, and the count they are earned
+                    // from, are never writable by the account that wears them.
+                    && !touched().hasAny(['grants'])
                     && (!touched().hasAny(['stats']) || statsStep())
+                    && (!touched().hasAny(['bugStats']) || bugStatsStep())
                     && (!touched().hasAny(['coins', 'unlocks']) || walletStep());
+
+      // Grants, bug counters, coin corrections: the panel's side of the same
+      // document. Deliberately unconstrained in shape , an admin editing a
+      // record by hand is the trusted path, not the one being defended against.
+      allow update: if isAdmin();
 
       allow delete: if false;
     }
@@ -121,16 +180,42 @@ service cloud.firestore {
       allow get: if signedIn();
       // Bounded so enumeration can't be used to scrape the whole user base
       // cheaply. Friend search fetches a single exact-match document.
-      allow list: if signedIn() && request.query.limit <= 20;
+      allow list: if isAdmin() || (signedIn() && request.query.limit <= 20);
+
+      /** Does this account actually hold the grant behind a badge? */
+      function holdsGrant(key) {
+        return get(/databases/$(database)/documents/users/$(userId))
+               .data.get('grants', {}).get(key, false) == true;
+      }
+
+      /**
+       * `badge` is the one shown beside this player's name wherever other
+       * people see it, which is why it is checked rather than trusted.
+       *
+       * Stat badges pass straight through: they are derived from counters the
+       * account can already nudge, so verifying them here would cost a read
+       * and prove nothing. The three that mean something , both tester tiers
+       * and premium , are only wearable if an admin actually granted them.
+       */
+      function badgeClaimOk() {
+        let badge = incoming().get('badge', '');
+        return badge is string
+               && badge.size() <= 24
+               && (badge == 'tester' ? holdsGrant('tester')
+                  : badge == 'tester_plus' ? holdsGrant('testerPlus')
+                  : badge == 'premium' ? holdsGrant('premium')
+                  : true);
+      }
 
       allow write: if isSelf(userId)
-                   && incoming().keys().hasOnly(['uid', 'displayName', 'photoURL', 'friendCode', 'updatedAt'])
+                   && incoming().keys().hasOnly(['uid', 'displayName', 'photoURL', 'friendCode', 'updatedAt', 'badge'])
                    && incoming().displayName is string
                    && incoming().displayName.size() <= 60
                    && incoming().photoURL is string
                    && incoming().photoURL.size() <= 500
                    && incoming().friendCode is string
-                   && incoming().friendCode.size() == 8;
+                   && incoming().friendCode.size() == 8
+                   && badgeClaimOk();
     }
 
     // Aim totals are intentionally tiny and get-only: the ship picker reads
@@ -158,6 +243,75 @@ service cloud.firestore {
                             && validAim(incoming().allTime)
                             && validWeek(incoming().week);
       allow delete: if false;
+    }
+
+    // ─── Bug reports ───
+    // Filed by any signed-in player, triaged only by an admin.
+    //
+    // The split matters more than it looks. A report is the raw claim, and the
+    // status on it is the admin's verdict; if a reporter could edit either one
+    // after the fact, approving ten reports would mean nothing and the tester
+    // badge behind that count would mean less.
+    match /bugReports/{reportId} {
+      function validNewReport() {
+        return incoming().keys().hasOnly([
+                 'uid', 'reporterName', 'reporterEmail', 'reporterPhoto',
+                 'title', 'description', 'gameId', 'roomId', 'severity',
+                 'category', 'status', 'screenshotPath', 'screenshotURL',
+                 'context', 'adminNotes', 'countedForBadge',
+                 'createdAt', 'updatedAt', 'resolvedAt', 'resolvedBy'
+               ])
+               && incoming().uid == request.auth.uid
+               && incoming().title is string
+               && incoming().title.size() > 0
+               && incoming().title.size() <= 120
+               && incoming().description is string
+               && incoming().description.size() <= 2000
+               && incoming().reporterName is string && incoming().reporterName.size() <= 60
+               && incoming().reporterEmail is string && incoming().reporterEmail.size() <= 320
+               && incoming().reporterPhoto is string && incoming().reporterPhoto.size() <= 500
+               && incoming().gameId is string && incoming().gameId.size() <= 48
+               && incoming().roomId is string && incoming().roomId.size() <= 6
+               && incoming().severity in ['low', 'medium', 'high', 'critical']
+               && incoming().category in ['gameplay', 'graphics', 'audio', 'network',
+                                          'ui', 'performance', 'crash', 'other']
+               // A report always starts in the queue. Filing one pre-approved
+               // would hand the reporter the badge outright.
+               && incoming().status == 'new'
+               && incoming().countedForBadge == false
+               && incoming().adminNotes == ''
+               && incoming().resolvedBy == ''
+               && incoming().createdAt == request.time
+               && incoming().context is map
+               && incoming().context.size() <= 20;
+      }
+
+      /**
+       * The one edit a reporter may make to their own report, and only while
+       * it is still untouched: attaching the screenshot, which cannot be
+       * written until the document exists and has an id to name the file by.
+       */
+      function attachingOwnScreenshot() {
+        return isSelf(resource.data.uid)
+               && resource.data.status == 'new'
+               && touched().hasOnly(['screenshotPath', 'screenshotURL'])
+               && incoming().screenshotPath is string
+               && incoming().screenshotPath.size() <= 300
+               && incoming().screenshotURL is string
+               && incoming().screenshotURL.size() <= 1000;
+      }
+
+      allow get: if isAdmin() || (signedIn() && request.auth.uid == resource.data.uid);
+      // List rules are evaluated per returned document, so a query that could
+      // return somebody else's report fails as a whole rather than quietly
+      // filtering. That makes this the entire enforcement for "your reports
+      // only": bugs.ts asks with where('uid','==',me), and any wider query is
+      // refused outright.
+      allow list: if isAdmin() || (signedIn() && resource.data.uid == request.auth.uid);
+
+      allow create: if signedIn() && validNewReport();
+      allow update: if isAdmin() || attachingOwnScreenshot();
+      allow delete: if isAdmin();
     }
 
     // ─── Friend connections ───
@@ -259,7 +413,10 @@ service cloud.firestore {
       // every player's uid, name and photo — enough to walk into any game on
       // the platform.
       allow get: if signedIn();
-      allow list: if false;
+      // Still refused for players , see above. The admin panel's live-rooms
+      // board is the one caller that needs the whole list, and it is the one
+      // caller that can be trusted with every room code on the platform.
+      allow list: if isAdmin();
 
       allow create: if signedIn()
                     && incoming().hostId == request.auth.uid

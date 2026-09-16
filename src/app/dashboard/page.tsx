@@ -30,7 +30,9 @@ import {
   Users,
   ChevronDown,
   User,
+  ShieldAlert,
 } from "lucide-react";
+import { isAdminUser } from "@/lib/admin";
 
 const CREATE_LOBBY_TIMEOUT_MS = 12_000;
 
@@ -306,6 +308,15 @@ export default function DashboardPage() {
                       <User size={16} />
                       View Profile
                     </button>
+                    {isAdminUser(user) && (
+                      <button
+                        onClick={() => { setProfileOpen(false); router.push("/admin"); }}
+                        className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-amber-300 hover:bg-amber-500/10 transition-colors"
+                      >
+                        <ShieldAlert size={16} />
+                        Admin Panel
+                      </button>
+                    )}
                     <button
                       onClick={() => { setProfileOpen(false); handleSignOut(); }}
                       className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-red-400 hover:bg-red-500/10 hover:text-red-300 transition-colors"

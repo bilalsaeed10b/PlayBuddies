@@ -6,6 +6,16 @@ import { motion, AnimatePresence } from "framer-motion";
 import { auth, db, storage } from "@/lib/firebase";
 import { updateProfile } from "firebase/auth";
 import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
+import {
+  BADGES,
+  EMPTY_PROGRESS,
+  TESTER_THRESHOLD,
+  hasBadge,
+  testerProgress,
+  topBadge,
+  type BadgeProgress,
+} from "@/lib/badges";
+import BadgeChip, { BadgeIcon } from "@/components/BadgeChip";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { useAuthStore } from "@/store/useAuthStore";
 import AuthGuard from "@/components/AuthGuard";
@@ -18,113 +28,12 @@ import {
   Gamepad2,
   Trophy,
   Star,
-  Zap,
   Crown,
-  Shield,
-  Target,
   Loader2,
   Copy,
   Lock,
-  Sparkles,
+  Bug,
 } from "lucide-react";
-
-// ─── Badge definitions ───────────────────────────────────────────────────────
-
-interface Badge {
-  id: string;
-  icon: React.ReactNode;
-  label: string;
-  description: string;
-  color: string;
-  /** null = always unlocked (signed up = earned) */
-  gamesNeeded: number | null;
-  winsNeeded: number | null;
-  premium?: boolean;
-}
-
-const BADGES: Badge[] = [
-  {
-    id: "first_boot",
-    icon: <Gamepad2 size={28} />,
-    label: "First Boot",
-    description: "Welcome to PlayBuddies!",
-    color: "from-violet-500 to-purple-600",
-    gamesNeeded: null,
-    winsNeeded: null,
-  },
-  {
-    id: "rookie",
-    icon: <Star size={28} />,
-    label: "Rookie",
-    description: "Played your first game",
-    color: "from-blue-500 to-cyan-500",
-    gamesNeeded: 1,
-    winsNeeded: null,
-  },
-  {
-    id: "first_win",
-    icon: <Target size={28} />,
-    label: "First Win",
-    description: "Won your first match",
-    color: "from-emerald-500 to-green-500",
-    gamesNeeded: null,
-    winsNeeded: 1,
-  },
-  {
-    id: "veteran",
-    icon: <Shield size={28} />,
-    label: "Veteran",
-    description: "Played 5 games",
-    color: "from-orange-500 to-amber-500",
-    gamesNeeded: 5,
-    winsNeeded: null,
-  },
-  {
-    id: "sharp_shooter",
-    icon: <Zap size={28} />,
-    label: "Sharp Shooter",
-    description: "Won 5 matches",
-    color: "from-yellow-400 to-orange-500",
-    gamesNeeded: null,
-    winsNeeded: 5,
-  },
-  {
-    id: "champion",
-    icon: <Trophy size={28} />,
-    label: "Champion",
-    description: "Played 10 games",
-    color: "from-pink-500 to-rose-500",
-    gamesNeeded: 10,
-    winsNeeded: null,
-  },
-  {
-    id: "legend",
-    icon: <Crown size={28} />,
-    label: "Legend",
-    description: "Won 10 matches",
-    color: "from-violet-600 to-pink-600",
-    gamesNeeded: null,
-    winsNeeded: 10,
-  },
-  {
-    id: "premium",
-    icon: <Sparkles size={28} />,
-    label: "PlayBuddies+",
-    description: "Premium member — coming soon",
-    color: "from-amber-400 to-yellow-500",
-    gamesNeeded: null,
-    winsNeeded: null,
-    premium: true,
-  },
-];
-
-function earnedBadge(badge: Badge, gamesPlayed: number, wins: number): boolean {
-  if (badge.premium) return false;
-  if (badge.gamesNeeded === null && badge.winsNeeded === null) return true; // first_boot
-  if (badge.gamesNeeded !== null && gamesPlayed < badge.gamesNeeded) return false;
-  if (badge.winsNeeded !== null && wins < badge.winsNeeded) return false;
-  return true;
-}
 
 // ─── Image resize helper ──────────────────────────────────────────────────────
 
@@ -176,9 +85,10 @@ export default function ProfilePage() {
   const [friendCode, setFriendCode] = useState("");
   const [codeCopied, setCodeCopied] = useState(false);
 
-  const [gamesPlayed, setGamesPlayed] = useState(0);
-  const [wins, setWins] = useState(0);
+  const [progress, setProgress] = useState<BadgeProgress>(EMPTY_PROGRESS);
   const [loadingStats, setLoadingStats] = useState(true);
+  const gamesPlayed = progress.gamesPlayed;
+  const wins = progress.wins;
 
   const [notice, setNotice] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -209,8 +119,12 @@ export default function ProfilePage() {
         const userSnap = await getDoc(doc(db, "users", user.uid));
         if (!cancelled && userSnap.exists()) {
           const data = userSnap.data();
-          setGamesPlayed(data.stats?.gamesPlayed ?? 0);
-          setWins(data.stats?.wins ?? 0);
+          setProgress({
+            gamesPlayed: data.stats?.gamesPlayed ?? 0,
+            wins: data.stats?.wins ?? 0,
+            bugsApproved: data.bugStats?.approved ?? 0,
+            grants: data.grants ?? {},
+          });
         }
       } catch (e) {
         console.error("Profile load error:", e);
@@ -292,9 +206,9 @@ export default function ProfilePage() {
 
   if (!user) return null;
 
-  const earnedCount = BADGES.filter(
-    (b) => !b.premium && earnedBadge(b, gamesPlayed, wins),
-  ).length;
+  const earnedCount = BADGES.filter((b) => hasBadge(b, progress)).length;
+  const tester = testerProgress(progress.bugsApproved);
+  const wearing = topBadge(progress);
 
   return (
     <AuthGuard>
@@ -440,6 +354,7 @@ export default function ProfilePage() {
                       <h2 className="text-2xl font-black text-white truncate">
                         {displayName}
                       </h2>
+                      <BadgeChip badge={wearing} />
                       <button
                         onClick={() => {
                           setNameInput(displayName);
@@ -519,21 +434,42 @@ export default function ProfilePage() {
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.1 }}
           >
-            <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center justify-between mb-4 gap-3">
               <h3 className="text-lg font-bold text-white flex items-center gap-2">
                 <Star size={18} className="text-primary" />
                 Badges
               </h3>
-              <span className="text-xs text-text-muted bg-white/5 border border-white/10 rounded-full px-3 py-1">
-                {earnedCount} / {BADGES.filter((b) => !b.premium).length} earned
+              <span className="text-xs text-text-muted bg-white/5 border border-white/10 rounded-full px-3 py-1 whitespace-nowrap">
+                {earnedCount} / {BADGES.length} earned
               </span>
+            </div>
+
+            {/* Tester progress. Shown to everyone, because the point of the
+                bar is to tell a player the badge exists and is reachable. */}
+            <div className="glass rounded-2xl border border-white/10 p-4 mb-4">
+              <div className="flex items-center justify-between gap-3 mb-2">
+                <p className="text-sm font-bold text-white flex items-center gap-2">
+                  <Bug size={15} className="text-lime-400" />
+                  Tester badge
+                </p>
+                <span className="text-[11px] text-text-muted tabular-nums">{tester.label}</span>
+              </div>
+              <div className="h-2 rounded-full bg-white/10 overflow-hidden">
+                <div
+                  className="h-full rounded-full bg-gradient-to-r from-lime-400 to-emerald-500 transition-[width] duration-500"
+                  style={{ width: `${tester.ratio * 100}%` }}
+                />
+              </div>
+              <p className="text-[11px] text-text-muted mt-2">
+                {tester.next === null
+                  ? "Every tier unlocked. Thanks for the reports."
+                  : `Report bugs with the bug button. ${TESTER_THRESHOLD} approved reports earns Tester.`}
+              </p>
             </div>
 
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               {BADGES.map((badge, i) => {
-                const earned = badge.premium
-                  ? false
-                  : earnedBadge(badge, gamesPlayed, wins);
+                const earned = hasBadge(badge, progress);
                 return (
                   <motion.div
                     key={badge.id}
@@ -547,15 +483,15 @@ export default function ProfilePage() {
                         : "border-white/5 opacity-50"
                     }`}
                   >
-                    {/* Glow for earned */}
                     {earned && (
                       <div
                         className={`absolute inset-0 bg-gradient-to-br ${badge.color} opacity-10`}
                       />
                     )}
 
-                    {/* Lock overlay for premium */}
-                    {badge.premium && (
+                    {/* Granted badges nobody has yet read as locked, not as
+                        missing , they are given out, not ground out. */}
+                    {!earned && badge.source !== "stat" && (
                       <div className="absolute inset-0 bg-black/40 flex items-center justify-center rounded-2xl z-10">
                         <Lock size={20} className="text-amber-400" />
                       </div>
@@ -564,17 +500,15 @@ export default function ProfilePage() {
                     <div
                       className={`relative z-0 w-12 h-12 rounded-xl flex items-center justify-center bg-gradient-to-br ${badge.color} ${earned ? "" : "grayscale"}`}
                     >
-                      <div className="text-white">{badge.icon}</div>
+                      <div className="text-white">
+                        <BadgeIcon name={badge.icon} size={28} />
+                      </div>
                     </div>
                     <div className="relative z-0">
-                      <p className="text-xs font-bold text-white leading-tight">
-                        {badge.label}
+                      <p className="text-xs font-bold text-white leading-tight">{badge.label}</p>
+                      <p className="text-[10px] text-text-muted mt-0.5 leading-tight">
+                        {badge.description}
                       </p>
-                      {badge.premium && (
-                        <p className="text-[10px] text-amber-400 font-bold mt-0.5">
-                          Coming Soon
-                        </p>
-                      )}
                     </div>
                   </motion.div>
                 );

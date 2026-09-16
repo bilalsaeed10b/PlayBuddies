@@ -2,6 +2,18 @@ rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
 
+    // Same allowlist as firestore.rules and src/lib/admin.ts. Storage rules
+    // cannot read Firestore, so the list is spelled out a third time rather
+    // than looked up.
+    function isAdmin() {
+      return request.auth != null
+             && request.auth.token.email_verified == true
+             && request.auth.token.email in [
+               'bilalsaeed10b@gmail.com',
+               'bilalsaeed12b@gmail.com'
+             ];
+    }
+
     // Each user may only read and write their own avatar.
     // The file is always stored at avatars/{uid}/avatar.webp.
     // Size is capped at 512 KB to stop abuse.
@@ -11,6 +23,23 @@ service firebase.storage {
                    && request.auth.uid == userId
                    && request.resource.size <= 512 * 1024
                    && request.resource.contentType.matches('image/.*');
+    }
+
+    // Bug report screenshots, one per report, named after the report id.
+    //
+    // Readable by the reporter and by an admin, and by nobody else: a
+    // screenshot is whatever happened to be on someone's screen, which can be
+    // a private chat or a half-typed message as easily as a broken sprite.
+    // Writes are create-only in effect , the client uploads once, right after
+    // the report document is created.
+    match /bugShots/{userId}/{fileName} {
+      allow read: if request.auth != null
+                  && (request.auth.uid == userId || isAdmin());
+      allow write: if request.auth != null
+                   && request.auth.uid == userId
+                   && request.resource.size <= 2 * 1024 * 1024
+                   && request.resource.contentType.matches('image/.*');
+      allow delete: if isAdmin();
     }
   }
 }
