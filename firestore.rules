@@ -432,7 +432,11 @@ service cloud.firestore {
         || canClaimHost()
       );
 
-      allow delete: if isLobbyHost();
+      // An admin can also close a room outright , the case this covers is a
+      // host who disconnected and never came back, which canClaimHost() only
+      // resolves after 30 quiet seconds and only for a member still present
+      // to claim it. A room nobody is left in has no such member.
+      allow delete: if isLobbyHost() || isAdmin();
 
       // ─── Lobby chat ───
       // A subcollection so messages never bloat the room document.

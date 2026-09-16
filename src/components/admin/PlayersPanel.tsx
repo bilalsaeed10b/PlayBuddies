@@ -1,21 +1,20 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Bug, Coins, Loader2, Search, Sparkles, Trophy, Users } from "lucide-react";
+import { Bug, ChevronRight, Coins, Loader2, Search, Trophy, Users } from "lucide-react";
 import { BADGES, TESTER_PLUS_THRESHOLD, TESTER_THRESHOLD, topBadge } from "@/lib/badges";
-import { setGrant } from "@/lib/bugs";
 import type { BugReport } from "@/lib/bugs";
 import { timeAgo, type AdminUser } from "@/lib/adminMetrics";
 import BadgeChip from "@/components/BadgeChip";
+import PlayerDetailModal from "./PlayerDetailModal";
 import { Avatar, Card, Empty, Pill, Stat } from "./ui";
 
 /**
- * Every account, what they have earned, and the manual overrides.
+ * Every account, at a glance. Click one to open it.
  *
- * The grant switches here are the only way premium is ever awarded, and the
- * only way a tester tier is given out without the ten approved reports behind
- * it. They write to `users/{uid}.grants`, which the rules make admin-only ,
- * that is what stops the badge from being self-serve.
+ * The row itself is read-only , grants and coin corrections live behind the
+ * click, in PlayerDetailModal, so a row can be scanned without accidentally
+ * flipping a switch meant for the player you're actually looking at.
  */
 export default function PlayersPanel({
   users,
@@ -32,8 +31,7 @@ export default function PlayersPanel({
 }) {
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<"recent" | "games" | "wins" | "bugs">("games");
-  const [busyUid, setBusyUid] = useState("");
-  const [error, setError] = useState("");
+  const [selectedUid, setSelectedUid] = useState("");
 
   const reportsByUid = useMemo(() => {
     const map = new Map<string, number>();
@@ -59,18 +57,7 @@ export default function PlayersPanel({
     return filtered.sort((a, b) => key(b) - key(a));
   }, [users, search, sort]);
 
-  const toggleGrant = async (uid: string, key: "premium" | "tester" | "testerPlus", next: boolean) => {
-    setBusyUid(uid);
-    setError("");
-    try {
-      await setGrant(uid, key, next);
-      onChanged();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not change that grant.");
-    } finally {
-      setBusyUid("");
-    }
-  };
+  const selected = selectedUid ? users.find((u) => u.uid === selectedUid) ?? null : null;
 
   const testers = users.filter((u) => u.grants.tester === true).length;
   const premium = users.filter((u) => u.grants.premium === true).length;
@@ -120,8 +107,6 @@ export default function PlayersPanel({
           </div>
         }
       >
-        {error && <p className="text-xs text-red-400 mb-3">{error}</p>}
-
         {loading ? (
           <div className="py-12 flex justify-center">
             <Loader2 size={26} className="animate-spin text-primary" />
@@ -139,9 +124,10 @@ export default function PlayersPanel({
               });
               const coins = Object.values(u.coins ?? {}).reduce((a, b) => a + Number(b ?? 0), 0);
               return (
-                <div
+                <button
                   key={u.uid}
-                  className="rounded-2xl border border-white/10 bg-white/[0.03] p-3 flex flex-wrap items-center gap-3"
+                  onClick={() => setSelectedUid(u.uid)}
+                  className="w-full text-left rounded-2xl border border-white/10 bg-white/[0.03] hover:border-white/25 hover:bg-white/5 p-3 flex flex-wrap items-center gap-3 transition-colors"
                 >
                   <div className="relative">
                     <Avatar src={u.photoURL} uid={u.uid} size={36} />
@@ -180,31 +166,11 @@ export default function PlayersPanel({
 
                   <div className="flex items-center gap-1.5 ml-auto">
                     {u.bugStats.approved > 0 && u.bugStats.approved < TESTER_THRESHOLD && (
-                      <Pill tone="info">
-                        {TESTER_THRESHOLD - u.bugStats.approved} to Tester
-                      </Pill>
+                      <Pill tone="info">{TESTER_THRESHOLD - u.bugStats.approved} to Tester</Pill>
                     )}
-                    <GrantToggle
-                      label="Tester"
-                      on={u.grants.tester === true}
-                      busy={busyUid === u.uid}
-                      onToggle={(next) => toggleGrant(u.uid, "tester", next)}
-                    />
-                    <GrantToggle
-                      label="Tester+"
-                      on={u.grants.testerPlus === true}
-                      busy={busyUid === u.uid}
-                      onToggle={(next) => toggleGrant(u.uid, "testerPlus", next)}
-                    />
-                    <GrantToggle
-                      label="Premium"
-                      icon={<Sparkles size={10} />}
-                      on={u.grants.premium === true}
-                      busy={busyUid === u.uid}
-                      onToggle={(next) => toggleGrant(u.uid, "premium", next)}
-                    />
+                    <ChevronRight size={16} className="text-text-muted" />
                   </div>
-                </div>
+                </button>
               );
             })}
           </div>
@@ -231,39 +197,20 @@ export default function PlayersPanel({
         </div>
         <p className="text-[11px] text-text-muted mt-3">
           Tester unlocks itself at {TESTER_THRESHOLD} approved reports, Tester+ at{" "}
-          {TESTER_PLUS_THRESHOLD}. The switches above override that either way.
+          {TESTER_PLUS_THRESHOLD}. Open a player to override either by hand.
         </p>
       </Card>
+
+      {selected && (
+        <PlayerDetailModal
+          user={selected}
+          online={onlineUids.has(selected.uid)}
+          reports={reports}
+          onClose={() => setSelectedUid("")}
+          onChanged={onChanged}
+        />
+      )}
     </div>
   );
 }
 
-function GrantToggle({
-  label,
-  on,
-  busy,
-  icon,
-  onToggle,
-}: {
-  label: string;
-  on: boolean;
-  busy: boolean;
-  icon?: React.ReactNode;
-  onToggle: (next: boolean) => void;
-}) {
-  return (
-    <button
-      disabled={busy}
-      onClick={() => onToggle(!on)}
-      title={`${on ? "Remove" : "Grant"} ${label}`}
-      className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold border transition-colors disabled:opacity-40 ${
-        on
-          ? "border-amber-400/50 bg-amber-400/15 text-amber-300"
-          : "border-white/10 text-text-muted hover:border-white/25"
-      }`}
-    >
-      {icon}
-      {label}
-    </button>
-  );
-}

@@ -11,13 +11,16 @@ import {
   Gauge,
   Gamepad2,
   Loader2,
+  Moon,
   RefreshCw,
   ShieldAlert,
   Signal,
+  Sun,
   Users,
 } from "lucide-react";
 import { useAuthStore } from "@/store/useAuthStore";
 import { isAdminUser } from "@/lib/admin";
+import { useAdminTheme } from "@/lib/useAdminTheme";
 import AuthGuard from "@/components/AuthGuard";
 import BugQueuePanel from "@/components/admin/BugQueuePanel";
 import PlayersPanel from "@/components/admin/PlayersPanel";
@@ -61,6 +64,7 @@ function AdminShell() {
   const router = useRouter();
   const [tab, setTab] = useState<TabId>("overview");
   const [refreshKey, setRefreshKey] = useState(0);
+  const [theme, toggleTheme] = useAdminTheme();
 
   const allowed = isAdminUser(user);
 
@@ -98,7 +102,11 @@ function AdminShell() {
   const errors = [reportsError, lobbyError, usersError].filter(Boolean);
 
   return (
-    <div className="min-h-screen bg-background relative">
+    <div
+      data-theme={theme}
+      style={{ colorScheme: theme }}
+      className="adm-bg min-h-screen relative"
+    >
       <div className="absolute inset-0 bg-grid opacity-40 pointer-events-none" />
 
       <nav className="relative z-30 glass border-b border-white/5 px-4 sm:px-6 py-4 flex items-center justify-between gap-4">
@@ -121,6 +129,14 @@ function AdminShell() {
 
         <div className="flex items-center gap-3 shrink-0">
           <LiveDot online={health.rtdbConnected} />
+          <button
+            onClick={toggleTheme}
+            title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+            aria-label="Toggle theme"
+            className="w-9 h-9 rounded-xl glass border border-white/10 hover:border-white/25 flex items-center justify-center text-text-secondary transition-colors"
+          >
+            {theme === "dark" ? <Sun size={14} /> : <Moon size={14} />}
+          </button>
           <button
             onClick={() => setRefreshKey((k) => k + 1)}
             className="flex items-center gap-2 px-3 py-2 rounded-xl glass border border-white/10 hover:border-white/25 text-xs font-bold text-text-secondary transition-colors"
@@ -199,7 +215,15 @@ function AdminShell() {
                 onChanged={() => setRefreshKey((k) => k + 1)}
               />
             )}
-            {tab === "live" && <LivePanel lobbies={lobbies} onlineUids={onlineSet} health={health} />}
+            {tab === "live" && (
+              <LivePanel
+                lobbies={lobbies}
+                onlineUids={onlineSet}
+                totalPlayers={users.length}
+                health={health}
+                onChanged={() => setRefreshKey((k) => k + 1)}
+              />
+            )}
             {tab === "players" && (
               <PlayersPanel
                 users={users}

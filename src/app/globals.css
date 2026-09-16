@@ -840,3 +840,113 @@ body {
   }
 }
 
+/* ─── Admin panel theme ──────────────────────────────────────────────────────
+ *
+ * Scoped entirely to `[data-theme="light"]`, which only ever sits on the
+ * admin page's own root div (see src/lib/useAdminTheme.ts). Every rule below
+ * is a descendant selector rooted there, so none of it can leak onto the
+ * dashboard, lobby, or any game , the rest of the site stays dark-only.
+ *
+ * The approach is a set of light-mode overrides for the *exact* utility
+ * classes the admin components already use, rather than editing every
+ * className in eight files. Tailwind's own utilities are single-class
+ * selectors; an attribute-prefixed selector like `[data-theme="light"]
+ * .bg-white\/10` is more specific and wins without touching a single
+ * component. New admin UI that reaches for a class not listed here will just
+ * render in its dark colors under the light theme , add a line here when
+ * that happens, rather than reaching for `dark:`/`light:` variants, which
+ * this codebase has never used and isn't configured for.
+ */
+
+.adm-bg {
+  background: var(--color-bg);
+}
+
+[data-theme="light"] {
+  --color-bg: #F1F5F9;
+  --color-text: #0F172A;
+  --color-text-secondary: #475569;
+  --color-text-muted: #64748B;
+  --color-border: rgba(15, 23, 42, 0.08);
+  color: var(--color-text);
+}
+
+[data-theme="light"] .glass {
+  background: rgba(15, 23, 42, 0.035);
+  border-color: rgba(15, 23, 42, 0.08);
+}
+[data-theme="light"] .glass-strong {
+  background: rgba(15, 23, 42, 0.05);
+  border-color: rgba(15, 23, 42, 0.1);
+}
+[data-theme="light"] .glass-solid {
+  background: #FFFFFF;
+  border-color: rgba(15, 23, 42, 0.1);
+}
+[data-theme="light"] .bg-\[\#141423\] {
+  background-color: #FFFFFF;
+}
+
+[data-theme="light"] .bg-grid {
+  background-image:
+    linear-gradient(to right, rgba(139, 92, 246, 0.07) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(139, 92, 246, 0.07) 1px, transparent 1px);
+}
+
+/* Neutrals */
+[data-theme="light"] .text-white { color: #0F172A; }
+[data-theme="light"] .bg-white\/5 { background-color: rgba(15, 23, 42, 0.04); }
+[data-theme="light"] .bg-white\/10 { background-color: rgba(15, 23, 42, 0.06); }
+[data-theme="light"] .bg-white\/20 { background-color: rgba(15, 23, 42, 0.1); }
+[data-theme="light"] .border-white\/5 { border-color: rgba(15, 23, 42, 0.08); }
+[data-theme="light"] .border-white\/10 { border-color: rgba(15, 23, 42, 0.12); }
+[data-theme="light"] .border-white\/15 { border-color: rgba(15, 23, 42, 0.16); }
+[data-theme="light"] .border-white\/25 { border-color: rgba(15, 23, 42, 0.22); }
+[data-theme="light"] .hover\:bg-white\/5:hover { background-color: rgba(15, 23, 42, 0.05); }
+[data-theme="light"] .hover\:bg-white\/10:hover { background-color: rgba(15, 23, 42, 0.07); }
+[data-theme="light"] .hover\:bg-white\/20:hover { background-color: rgba(15, 23, 42, 0.12); }
+[data-theme="light"] .hover\:border-white\/25:hover { border-color: rgba(15, 23, 42, 0.28); }
+[data-theme="light"] .hover\:text-white:hover { color: #0F172A; }
+
+/* Error / critical tones */
+[data-theme="light"] .text-red-200\/60,
+[data-theme="light"] .text-red-200\/80,
+[data-theme="light"] .text-red-300 { color: #B91C1C; }
+[data-theme="light"] .text-red-400 { color: #DC2626; }
+[data-theme="light"] .bg-red-500\/5 { background-color: rgba(220, 38, 38, 0.06); }
+[data-theme="light"] .bg-red-500\/10 { background-color: rgba(220, 38, 38, 0.08); }
+[data-theme="light"] .bg-red-500\/15 { background-color: rgba(220, 38, 38, 0.1); }
+[data-theme="light"] .bg-red-500\/20,
+[data-theme="light"] .bg-red-500\/25 { background-color: rgba(220, 38, 38, 0.14); }
+[data-theme="light"] .border-red-500\/30 { border-color: rgba(220, 38, 38, 0.35); }
+[data-theme="light"] .hover\:bg-red-500\/10:hover { background-color: rgba(220, 38, 38, 0.1); }
+[data-theme="light"] .hover\:bg-red-500\/15:hover { background-color: rgba(220, 38, 38, 0.14); }
+[data-theme="light"] .hover\:bg-red-500\/25:hover { background-color: rgba(220, 38, 38, 0.18); }
+[data-theme="light"] .hover\:text-red-300:hover { color: #B91C1C; }
+
+/* Warning tones */
+[data-theme="light"] .text-amber-100,
+[data-theme="light"] .text-amber-300 { color: #92400E; }
+[data-theme="light"] .text-amber-400 { color: #B45309; }
+[data-theme="light"] .bg-amber-400\/15 { background-color: rgba(217, 119, 6, 0.12); }
+[data-theme="light"] .bg-amber-500\/10 { background-color: rgba(217, 119, 6, 0.1); }
+[data-theme="light"] .bg-amber-500\/20 { background-color: rgba(217, 119, 6, 0.16); }
+[data-theme="light"] .border-amber-400\/50,
+[data-theme="light"] .border-amber-500\/30 { border-color: rgba(217, 119, 6, 0.4); }
+
+/* Success tones */
+[data-theme="light"] .text-emerald-300,
+[data-theme="light"] .text-emerald-400 { color: #047857; }
+[data-theme="light"] .bg-emerald-500\/20,
+[data-theme="light"] .bg-emerald-500\/30 { background-color: rgba(4, 120, 87, 0.14); }
+[data-theme="light"] .hover\:bg-emerald-500\/30:hover { background-color: rgba(4, 120, 87, 0.2); }
+
+/* Info tones */
+[data-theme="light"] .text-sky-100\/80,
+[data-theme="light"] .text-sky-300 { color: #0369A1; }
+[data-theme="light"] .bg-sky-500\/10 { background-color: rgba(3, 105, 161, 0.08); }
+[data-theme="light"] .bg-sky-500\/20 { background-color: rgba(3, 105, 161, 0.14); }
+[data-theme="light"] .border-sky-500\/20 { border-color: rgba(3, 105, 161, 0.3); }
+
+[data-theme="light"] .text-orange-400 { color: #C2410C; }
+

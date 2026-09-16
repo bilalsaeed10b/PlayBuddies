@@ -61,75 +61,37 @@ export type GrantKey = "premium" | "tester" | "testerPlus";
 export const TESTER_THRESHOLD = 10;
 export const TESTER_PLUS_THRESHOLD = 30;
 
+/**
+ * Deliberately five badges, not ten.
+ *
+ * The original catalog handed out First Boot, Rookie and First Win for doing
+ * nothing more than existing, so within a day of playing almost every account
+ * wore three or four badges , a badge that describes the median player
+ * describes nobody. Only the two that take real, sustained play (Champion,
+ * Legend) and the three an admin actually controls (Tester, Tester+,
+ * Premium+) remain, and the two stat badges were pushed well past a first
+ * sitting's worth of games.
+ */
 export const BADGES: BadgeDef[] = [
-  {
-    id: "first_boot",
-    label: "First Boot",
-    description: "Welcome to PlayBuddies!",
-    icon: "gamepad",
-    color: "from-violet-500 to-purple-600",
-    source: "stat",
-    rank: 1,
-  },
-  {
-    id: "rookie",
-    label: "Rookie",
-    description: "Played your first game",
-    icon: "star",
-    color: "from-blue-500 to-cyan-500",
-    source: "stat",
-    gamesNeeded: 1,
-    rank: 2,
-  },
-  {
-    id: "first_win",
-    label: "First Win",
-    description: "Won your first match",
-    icon: "target",
-    color: "from-emerald-500 to-green-500",
-    source: "stat",
-    winsNeeded: 1,
-    rank: 3,
-  },
-  {
-    id: "veteran",
-    label: "Veteran",
-    description: "Played 5 games",
-    icon: "shield",
-    color: "from-orange-500 to-amber-500",
-    source: "stat",
-    gamesNeeded: 5,
-    rank: 4,
-  },
-  {
-    id: "sharp_shooter",
-    label: "Sharp Shooter",
-    description: "Won 5 matches",
-    icon: "zap",
-    color: "from-yellow-400 to-orange-500",
-    source: "stat",
-    winsNeeded: 5,
-    rank: 5,
-  },
   {
     id: "champion",
     label: "Champion",
-    description: "Played 10 games",
+    description: "Played 150 games",
     icon: "trophy",
     color: "from-pink-500 to-rose-500",
     source: "stat",
-    gamesNeeded: 10,
-    rank: 6,
+    gamesNeeded: 150,
+    rank: 1,
   },
   {
     id: "legend",
     label: "Legend",
-    description: "Won 10 matches",
+    description: "Won 75 matches",
     icon: "crown",
     color: "from-violet-600 to-pink-600",
     source: "stat",
-    winsNeeded: 10,
-    rank: 7,
+    winsNeeded: 75,
+    rank: 2,
   },
   {
     id: "tester",
@@ -140,7 +102,7 @@ export const BADGES: BadgeDef[] = [
     source: "bug",
     bugsNeeded: TESTER_THRESHOLD,
     grantKey: "tester",
-    rank: 8,
+    rank: 3,
   },
   {
     id: "tester_plus",
@@ -151,17 +113,17 @@ export const BADGES: BadgeDef[] = [
     source: "bug",
     bugsNeeded: TESTER_PLUS_THRESHOLD,
     grantKey: "testerPlus",
-    rank: 9,
+    rank: 4,
   },
   {
     id: "premium",
-    label: "PlayBuddies+",
+    label: "Premium+",
     description: "Premium member",
     icon: "sparkles",
     color: "from-amber-400 to-yellow-500",
     source: "grant",
     grantKey: "premium",
-    rank: 10,
+    rank: 5,
   },
 ];
 

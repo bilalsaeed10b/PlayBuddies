@@ -257,6 +257,12 @@ function BugReportModal({ onClose }: { onClose: () => void }) {
                 <select
                   value={gameId}
                   onChange={(e) => setGameId(e.target.value)}
+                  // The popup list for a native <select> is browser/OS chrome,
+                  // not something Tailwind's dark classes touch. Explicitly
+                  // pinning color-scheme here (rather than relying on the
+                  // inherited `html { color-scheme: dark }`) is what actually
+                  // keeps that popup dark on Windows Chrome/Edge.
+                  style={{ colorScheme: "dark" }}
                   className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-white outline-none text-sm"
                 >
                   <option value="">Platform / not a game</option>
@@ -271,6 +277,7 @@ function BugReportModal({ onClose }: { onClose: () => void }) {
                 <select
                   value={category}
                   onChange={(e) => setCategory(e.target.value as BugCategory)}
+                  style={{ colorScheme: "dark" }}
                   className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-white outline-none text-sm capitalize"
                 >
                   {BUG_CATEGORIES.map((c) => (

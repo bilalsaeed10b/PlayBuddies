@@ -362,15 +362,6 @@ async function creditApprovedReport(uid: string): Promise<void> {
   if (Object.keys(patch).length > 0) await setDoc(userRef, { grants: patch }, { merge: true });
 }
 
-/** Admin override for the grant badges that have no automatic trigger. */
-export async function setGrant(
-  uid: string,
-  key: "premium" | "tester" | "testerPlus",
-  value: boolean,
-): Promise<void> {
-  await setDoc(doc(db, "users", uid), { grants: { [key]: value } }, { merge: true });
-}
-
 /** One-shot count for panels that do not need a live subscription. */
 export async function countReportsByStatus(): Promise<Record<BugStatus, number>> {
   const snap = await getDocs(query(collection(db, "bugReports"), qLimit(1000)));
