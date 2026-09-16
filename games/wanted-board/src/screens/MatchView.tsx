@@ -16,6 +16,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Loader2, Trophy } from 'lucide-react';
 import ControlsTray from '@shared/controls/ControlsTray';
 import { isStaleChunkError, recoverFromStaleChunk } from '@shared/net/staleChunk';
+import { ChatLayer } from '@shared/chat/ChatLayer';
+import { useBubbleFeed } from '@shared/chat/useBubbleFeed';
 import CardRack from '../components/CardRack';
 import TownMap from '../components/TownMap';
 import OutlawToken from '../components/OutlawToken';
@@ -64,6 +66,8 @@ export default function MatchView({
 }) {
   const shellRef = useRef<HTMLDivElement>(null);
   const linkRef = useRef<TurnLink | null>(null);
+  /** Keyed by seat index rather than uid , a couch seat has no uid at all. Named apart from `bubbles` below, which is TownMap's combined feed. */
+  const { bubbles: chatFeed, show: showBubble } = useBubbleFeed();
 
   const online = Boolean(config.roomId && config.uid && config.peerUids.length > 0);
   const rulesBits = packRules(config.rules);
@@ -338,10 +342,27 @@ export default function MatchView({
         setNotice(`${config.seats[seat].name} rode out. A bot has the reins.`);
         repaint();
         tryResolve();
+        return;
+      }
+
+      if (packet.t === 'chat') {
+        const seat = seatOfUid.get(from);
+        if (seat !== undefined) showBubble(String(seat), packet.msg);
+        return;
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [config.isHost, config.seed, engine, seatOfUid, tryResolve, repaint, playReveal],
+    [config.isHost, config.seed, engine, seatOfUid, tryResolve, repaint, playReveal, showBubble],
+  );
+
+  /** Shown over the sender's own pawn the instant it's typed , the round trip only needs to reach everyone else. */
+  const sendChat = useCallback(
+    (text: string) => {
+      const mine = config.localSeats[0];
+      if (mine !== undefined) showBubble(String(mine), text);
+      linkRef.current?.send({ t: 'chat', n: Date.now(), msg: text });
+    },
+    [config.localSeats, showBubble],
   );
 
   useEffect(() => {
@@ -512,7 +533,16 @@ export default function MatchView({
   // The event that most recently landed , same one `soundFor` just played a
   // beat ago , is what the pawns are reacting to right now.
   const activeEvent = phase === 'reveal' ? engine.lastEvents[revealStep - 1] : undefined;
-  const bubbles = bubbleFor(activeEvent);
+  /**
+   * Live chat first, so a player's own deliberate line wins the one bubble
+   * slot TownMap draws per seat (it takes the first match for a seat , see
+   * its own `bubbles?.find`) over an automatic round-reveal reaction still
+   * playing out for the same pawn.
+   */
+  const bubbles = [
+    ...Object.entries(chatFeed).map(([seat, text]) => ({ seat: Number(seat), text })),
+    ...bubbleFor(activeEvent),
+  ];
 
   const townBlock = (
     <TownMap
@@ -670,6 +700,8 @@ export default function MatchView({
           <div className="shrink-0 p-2 sm:p-3">{rackBlock}</div>
         </>
       )}
+
+      {online && phase !== 'over' && <ChatLayer onSend={sendChat} />}
 
       {notice && (
         <div className="pointer-events-none absolute inset-x-0 bottom-24 z-30 flex justify-center px-4">

@@ -16,6 +16,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Loader2, Send, ThumbsUp, Trophy, Zap } from 'lucide-react';
 import ControlsTray from '@shared/controls/ControlsTray';
 import { isStaleChunkError, recoverFromStaleChunk } from '@shared/net/staleChunk';
+import { ChatLayer } from '@shared/chat/ChatLayer';
+import { useBubbleFeed } from '@shared/chat/useBubbleFeed';
+import { SpeechBubble } from '@shared/ui/SpeechBubble';
 import Gallows from '../components/Gallows';
 import Keyboard from '../components/Keyboard';
 import WordBoard from '../components/WordBoard';
@@ -63,6 +66,8 @@ export default function MatchView({
 }) {
   const shellRef = useRef<HTMLDivElement>(null);
   const linkRef = useRef<TurnLink | null>(null);
+  /** Keyed by seat index rather than uid , a couch seat has no uid at all. */
+  const { bubbles, show: showBubble } = useBubbleFeed();
 
   const online = Boolean(config.roomId && config.uid && config.peerUids.length > 0);
   const rulesBits = packRules(config.rules);
@@ -280,10 +285,27 @@ export default function MatchView({
         config.seats[seat].aiLevel = 1;
         setNotice(`${config.seats[seat].name} walked out. A bot has their chalk.`);
         repaint();
+        return;
+      }
+
+      if (packet.t === 'chat') {
+        const seat = seatOfUid.get(from);
+        if (seat !== undefined) showBubble(String(seat), packet.msg);
+        return;
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [config.isHost, engine, seatOfUid, commit, applyLocal, repaint],
+    [config.isHost, engine, seatOfUid, commit, applyLocal, repaint, showBubble],
+  );
+
+  /** Shown over the sender's own face the instant it's typed , the round trip only needs to reach everyone else. */
+  const sendChat = useCallback(
+    (text: string) => {
+      const mine = config.localSeats[0];
+      if (mine !== undefined) showBubble(String(mine), text);
+      linkRef.current?.send({ t: 'chat', n: Date.now(), msg: text });
+    },
+    [config.localSeats, showBubble],
   );
 
   useEffect(() => {
@@ -729,7 +751,10 @@ export default function MatchView({
                   background: acting ? `${colors.main}1f` : 'rgba(15,23,42,0.55)',
                 }}
               >
-                <FaceToken skin={seat.skin} size={26} ring={colors.main} />
+                <div className="relative shrink-0">
+                  <FaceToken skin={seat.skin} size={26} ring={colors.main} />
+                  {bubbles[String(i)] && <SpeechBubble text={bubbles[String(i)]} style={{ left: '50%', top: 0 }} />}
+                </div>
                 <div className="min-w-0 flex-1">
                   <p className="flex items-center gap-1 truncate text-[10px] font-black uppercase tracking-wide text-slate-100">
                     {mine ? 'You' : seat.name}
@@ -748,6 +773,11 @@ export default function MatchView({
           })}
         </div>
       </div>
+
+      {/* T is already spoken for here , see the input-focus guard on the
+          letter-guess listener above , so the hotkey stays off and the button
+          is the only way in. */}
+      {online && engine.phase !== 'over' && <ChatLayer onSend={sendChat} hotkeyEnabled={false} />}
 
       {/* ── the body ──
           Two explicit arrangements rather than one tree bent with `order`:

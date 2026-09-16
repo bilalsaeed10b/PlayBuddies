@@ -254,4 +254,11 @@ export interface IdlePacket {
   n: number;
 }
 
-export type NetPacket = StartPacket | PickPacket | RoundPacket | ByePacket | IdlePacket;
+/** A line of chat, shown as a bubble over the sender's own pawn rather than in a log. */
+export interface ChatPacket {
+  t: 'chat';
+  n: number;
+  msg: string;
+}
+
+export type NetPacket = StartPacket | PickPacket | RoundPacket | ByePacket | IdlePacket | ChatPacket;
