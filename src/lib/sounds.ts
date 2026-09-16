@@ -40,16 +40,16 @@ export function playPop(): void {
   gain.connect(ac.destination);
 
   osc.type = "sine";
-  // Start at 600 Hz and quickly drop — gives a friendly "pop" shape.
-  osc.frequency.setValueAtTime(600, now);
-  osc.frequency.exponentialRampToValueAtTime(300, now + 0.08);
+  // Start at 820 Hz and drop to 420 Hz — clear, punchy bubble pop that cuts through.
+  osc.frequency.setValueAtTime(820, now);
+  osc.frequency.exponentialRampToValueAtTime(420, now + 0.08);
 
   gain.gain.setValueAtTime(0, now);
-  gain.gain.linearRampToValueAtTime(0.18, now + 0.01);
-  gain.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+  gain.gain.linearRampToValueAtTime(0.55, now + 0.008);
+  gain.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
 
   osc.start(now);
-  osc.stop(now + 0.15);
+  osc.stop(now + 0.18);
 }
 
 /**
