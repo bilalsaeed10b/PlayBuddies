@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import { Bell, Bug, Check, Coins, Gift, Sparkles, X } from "lucide-react";
@@ -8,6 +8,8 @@ import { useAuthStore } from "@/store/useAuthStore";
 import { BADGES_BY_ID } from "@/lib/badges";
 import { markAllRead, markRead, watchInbox, type InboxMessage } from "@/lib/inbox";
 import { BadgeIcon } from "@/components/BadgeChip";
+
+const emptySubscribe = () => () => {};
 
 /**
  * The player's side of everything an admin does to their account.
@@ -32,14 +34,14 @@ function InboxFor({ uid }: { uid: string }) {
   const [messages, setMessages] = useState<InboxMessage[]>([]);
   const [open, setOpen] = useState(false);
   const [popup, setPopup] = useState<InboxMessage[] | null>(null);
-  const [mounted, setMounted] = useState(false);
+  const isMounted = useSyncExternalStore(
+    emptySubscribe,
+    () => true,
+    () => false
+  );
   // A ref, not state: this must not cause a render of its own, and the first
   // snapshot to arrive is the only one that can ever set it.
   const greeted = useRef(false);
-
-  useEffect(() => {
-    setMounted(true);
-  }, []);
 
   useEffect(() => {
     return watchInbox(
@@ -86,7 +88,7 @@ function InboxFor({ uid }: { uid: string }) {
         )}
       </button>
 
-      {mounted && typeof document !== "undefined" && createPortal(
+      {isMounted && typeof document !== "undefined" && createPortal(
         <>
           <AnimatePresence>
             {open && (

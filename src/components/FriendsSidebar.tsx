@@ -1,8 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useState, useRef, startTransition } from "react";
-
-const sleep = (ms: number) => new Promise<void>((res) => setTimeout(res, ms));
 import { usePathname } from "next/navigation";
 import { doc, onSnapshot, addDoc, collection } from "firebase/firestore";
 import { db } from "@/lib/firebase";
