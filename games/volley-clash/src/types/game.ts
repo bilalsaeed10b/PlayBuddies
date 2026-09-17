@@ -125,6 +125,15 @@ export interface FloatingPower {
   spin: number;
 }
 
+/**
+ * This device, and nothing else.
+ *
+ * How loud it is, how hard it draws, and which end of the keyboard player one
+ * sits at. Nothing here changes what a match *is*, which is the whole test for
+ * whether something belongs in the settings panel: two people in the same
+ * match may hold different opinions about every field below and still be
+ * playing the same game. The ones that failed that test moved to MatchRules.
+ */
 export interface GameSettings {
   bgmVolume: number;
   sfxVolume: number;
@@ -137,6 +146,16 @@ export interface GameSettings {
   lowPower: boolean;
   /** 0 = player one on WASD, 1 = player one on the arrows. */
   controlScheme: number;
+}
+
+/**
+ * What the match is: how long, how many, and what falls out of the sky.
+ *
+ * One copy per *match*, not per device. Online the host owns it and publishes
+ * it to the lobby; see game/matchRules.ts for the packing and App.tsx for the
+ * wire. Offline the player sets it on the same page and it never leaves.
+ */
+export interface MatchRules {
   /** Points needed to win: 5, 7 or 11. */
   targetPoints: number;
   /**
@@ -153,6 +172,18 @@ export interface GameSettings {
    * stock pace; 2 is twice as often; 0.5 is half.
    */
   powerRate: number;
+  /** Rank of every bot that fills an empty spot. Index into engine/ai TIERS. */
+  aiLevel: number;
+  /**
+   * Two a side on the wide court, rather than one on the standard one.
+   *
+   * Used to be read off the roster , three or more in the room meant doubles
+   * , which left a room of two with no way to ask for a 2v2 against bots, and
+   * no way to see which one they were about to play before the whistle. It is
+   * a choice now, with the old rule kept as a floor: three humans is always
+   * doubles, because a 2v1 is not a match this game can lay out.
+   */
+  doubles: boolean;
 }
 
 /** One character's state on the wire. Order matters , see MatchEngine.snapshot. */

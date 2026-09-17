@@ -3,21 +3,28 @@ import { scrimProps, useEscape } from '@shared/ui/dismiss';
 import useShortScreen from '@shared/ui/useShortScreen';
 import {
   ArrowLeft,
+  Bot,
   Check,
   Circle,
   Coins,
   Crown,
+  Eye,
   Flag,
   Loader2,
   Lock,
   LogOut,
   Maximize2,
   Play,
-  ScrollText,
   Settings as SettingsIcon,
   Users,
 } from 'lucide-react';
 import { askHostToEndGame, askToLeaveLobby, isNativeFullscreen, toggleFullscreen, useAutoFullscreen } from './fullscreen';
+import { MainMenu } from '@shared/menu/MainMenu';
+import { ActionBar, HostBadge, StageFrame } from '@shared/menu/StageFrame';
+import { ModeCard, OptionGroup, RuleSection, ToggleOption } from '@shared/menu/MatchControls';
+import { MENU_STAGE_FIELD, parseStage } from '@shared/menu/stage';
+import type { MenuStage } from '@shared/menu/stage';
+import type { MenuTheme } from '@shared/menu/theme';
 import { BALLS, FREE_BALLS, drawBall } from './game/balls';
 import { SEATS } from './game/rules';
 import { TIERS } from './engine/ai';
@@ -26,8 +33,8 @@ import { GameWallet, reportResult } from './platform/wallet';
 import MatchView from './screens/MatchView';
 import type { MatchConfig } from './screens/MatchView';
 import type { Seat } from './engine/GolfEngine';
-import { DEFAULT_RULES, PLAYER_CODES } from './types/game';
-import type { GameSettings, HoleCount, MatchRules } from './types/game';
+import { DEFAULT_RULES, PLAYER_CODES, TURN_SECONDS, packRules, unpackRules } from './types/game';
+import type { GameSettings, HoleCount, MatchRules, PlayerCount } from './types/game';
 import { createLogger } from '@shared/log/logger';
 
 const log = createLogger('mini-golf');
@@ -63,7 +70,16 @@ const DEFAULT_SETTINGS: GameSettings = {
   shouts: true,
 };
 
-type View = 'menu' | 'pick' | 'room' | 'game' | 'offline_menu';
+/** Everything before the round is one of the shared menu stages; see `stage` in App. */
+type View = 'shell' | 'game';
+
+/** The same greens and glass the course itself is drawn in. */
+const THEME: MenuTheme = {
+  tone: 'dark',
+  primary: 'bg-emerald-400 text-emerald-950',
+  selected: 'border-emerald-300 bg-emerald-400/15',
+  accent: 'text-emerald-300',
+};
 
 interface LobbyPerson {
   uid: string;
@@ -76,12 +92,22 @@ interface LobbyPerson {
   fishIndex?: number | null;
 }
 
+interface Lobby {
+  hostId: string;
+  players: Record<string, LobbyPerson>;
+  matchStarted?: boolean;
+  /** The host's rules, packed by `packRules`. Written live while the host is on the match page. */
+  matchRules?: number;
+  /** Where the room is in the pre-match flow. Host-written; see @shared/menu/stage. */
+  menuStage?: string;
+}
+
 const randomSeed = () => (Math.random() * 0x7fffffff) | 0;
 
 /**
  * The bot rank for any ball this device fills in automatically online.
  *
- * The tier picker in the Menu is only ever reached offline, so `aiLevel` there
+ * The tier picker on the match page is only offered offline, so `aiLevel` there
  * is really "how hard should the *practice* bot be" , a preference for solo
  * and couch play. Online it must not leak: picking Pro once to test a round
  * alone and then playing a real one with friends should not quietly make every
@@ -93,17 +119,14 @@ export default function App() {
   const [handoff] = useState(readHandoff);
   const online = Boolean(handoff.room);
 
-  const [view, setView] = useState<View>(online ? 'room' : 'menu');
+  const [view, setView] = useState<View>('shell');
   useAutoFullscreen(online || view === 'game');
+  /** The stage for a flow this device runs alone. Online, the lobby's `menuStage` is the one that counts. */
+  const [localStage, setLocalStage] = useState<MenuStage>('menu');
   const [showSettings, setShowSettings] = useState(false);
-  const [showRules, setShowRules] = useState(false);
   const [uid, setUid] = useState<string | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
-  const [lobby, setLobby] = useState<{
-    hostId: string;
-    players: Record<string, LobbyPerson>;
-    matchStarted?: boolean;
-  } | null>(null);
+  const [lobby, setLobby] = useState<Lobby | null>(null);
   const [lobbyError, setLobbyError] = useState<string | null>(null);
 
   /** Offline setup: how many people are at this device, and with what ball. */
@@ -157,16 +180,14 @@ export default function App() {
    *
    * Remembered between rounds so a host who prefers six holes does not re-set
    * it every time, but never merged with anything a guest has stored: a
-   * guest's copy is only ever a placeholder until the host's rules arrive on
-   * the wire.
+   * guest's copy is only ever a placeholder until the host's rules arrive from
+   * the lobby. Saved further down, once this device knows whether it is the
+   * one setting them.
    */
   const [rules, setRules] = useState<MatchRules>(() => {
     const saved = localStorage.getItem('golf_rules');
     return saved ? { ...DEFAULT_RULES, ...JSON.parse(saved) } : DEFAULT_RULES;
   });
-  useEffect(() => {
-    localStorage.setItem('golf_rules', JSON.stringify(rules));
-  }, [rules]);
 
   // The coin balance is shared with the rest of PlayBuddies on purpose. Coins
   // earned in one game are worth something in the next, which is the only
@@ -223,11 +244,7 @@ export default function App() {
             setLobbyError('That lobby is gone.');
             return;
           }
-          const data = snap.data() as {
-            hostId: string;
-            players: Record<string, LobbyPerson>;
-            matchStarted?: boolean;
-          };
+          const data = snap.data() as Lobby;
           if (!data.players?.[uid]) {
             setLobbyError('You are not in this lobby.');
             return;
@@ -239,8 +256,21 @@ export default function App() {
             iAmHost: data.hostId === uid,
             players: Object.keys(data.players ?? {}).length,
             matchStarted: Boolean(data.matchStarted),
+            menuStage: data.menuStage,
+            matchRules: data.matchRules,
           });
           setLobby(data);
+          // The host's rules, applied the moment they land rather than only when
+          // the round's start packet arrives. A guest's locked match page shows
+          // what the host is choosing as they choose it, and `people` below is
+          // sliced by the same player count on every client, so nobody builds a
+          // different number of balls from a stale local copy. Compared against
+          // `data.hostId` directly: `isHost` still reflects the previous snapshot
+          // inside this callback.
+          const hostRules = data.matchRules;
+          if (typeof hostRules === 'number' && data.hostId !== uid) {
+            setRules((current) => (packRules(current) === hostRules ? current : unpackRules(hostRules)));
+          }
         },
         () => {
           log.error('lobby:lost');
@@ -255,30 +285,44 @@ export default function App() {
   }, [online, uid, handoff.room]);
 
   /**
-   * Who is playing, and in what order.
+   * Everyone in the room, in seat order: the host first, then by uid.
    *
-   * Sorted by uid so every client computes the identical answer from data it
-   * already has , arrival order would give two players different ideas about
-   * who is the red ball. Anyone past the host's chosen count is in the room
-   * but not in the round: four balls is as many as a small green stays
-   * readable with.
+   * Every client has to compute the identical order from data it already has,
+   * because a seat index *is* a ball on the wire , a putt names its seat by
+   * number, and so does the toss. Arrival order would give two players
+   * different ideas about who is the red ball, and so did the "this device
+   * first" order this replaces: it made sure the person who pressed Start got
+   * a ball, but it also put every client in seat one on its own screen, so a
+   * putt from the host landed on a guest's own ball. The host first keeps the
+   * guarantee and agrees everywhere.
    */
-  const people = useMemo(() => {
+  const roomPeople = useMemo(() => {
+    const hostId = lobby?.hostId;
     return Object.values(lobby?.players ?? {})
-      // The player on this device must always receive a ball. A stale roster
-      // entry sorting ahead of the host used to fill every available seat and
-      // turn the person who pressed Start into a spectator.
-      .sort((a, b) => Number(b.uid === uid) - Number(a.uid === uid) || a.uid.localeCompare(b.uid))
-      .slice(0, rules.players)
+      .sort((a, b) => Number(b.uid === hostId) - Number(a.uid === hostId) || a.uid.localeCompare(b.uid))
       .map((p) => ({
         uid: p.uid,
         displayName: p.displayName || 'Player',
         skin: p.fishIndex,
       }));
-  }, [lobby, rules.players, uid]);
+  }, [lobby]);
+
+  /**
+   * Who is playing. Anyone past the host's chosen count is in the room but not
+   * in the round: four balls is as many as a small green stays readable with.
+   */
+  const people = useMemo(() => roomPeople.slice(0, rules.players), [roomPeople, rules.players]);
 
   const mySkin = uid ? lobby?.players?.[uid]?.fishIndex : undefined;
   const isHost = Boolean(uid && lobby && lobby.hostId === uid);
+
+  // Saved only by the device that sets them. A guest's copy is the host's,
+  // applied from the lobby; saving it would quietly replace this player's own
+  // preference for the next room they host or the next round they play alone.
+  useEffect(() => {
+    if (online && !offlineMatch && !isHost) return;
+    localStorage.setItem('golf_rules', JSON.stringify(rules));
+  }, [rules, online, offlineMatch, isHost]);
 
   /**
    * The host's chosen player count follows the room, not the other way round.
@@ -288,16 +332,18 @@ export default function App() {
    * friends found the seats already decided one of them would be watching,
    * with nothing on screen to say so before Start. This raises it to the
    * smallest count the room actually fits the moment somebody new joins, and
-   * never on its own lowers a count the host (or an earlier run of this same
-   * effect) already set -- so choosing fewer seats than the room on purpose,
-   * bots filling the rest, still works exactly as before for whoever wants it.
+   * never lowers one. It is also why the match page offers no count below the
+   * room's size: those cards are locked there rather than left to snap back a
+   * moment after the host presses them.
    */
   useEffect(() => {
-    if (!online || !isHost || !lobby) return;
+    // Not for a round this device is playing on its own: the room's size says
+    // nothing about how many balls a solo or couch round wants.
+    if (!online || offlineMatch || !isHost || !lobby) return;
     const roomSize = Object.keys(lobby.players ?? {}).length;
     const fits = PLAYER_CODES.find((n) => n >= roomSize) ?? PLAYER_CODES[PLAYER_CODES.length - 1];
     if (fits > rules.players) setRules((r) => ({ ...r, players: fits }));
-  }, [online, isHost, lobby, rules.players]);
+  }, [online, offlineMatch, isHost, lobby, rules.players]);
 
   useEffect(() => {
     // An offline round is the player's own; the room does not get to start or
@@ -305,7 +351,7 @@ export default function App() {
     // bouncing a couch round straight back to the room.
     if (!online || offlineMatch) return;
     if (lobby?.matchStarted && mySkin !== undefined && mySkin !== null) setView('game');
-    else if (view === 'game') setView('room');
+    else if (view === 'game') setView('shell');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lobby?.matchStarted, mySkin, online, offlineMatch]);
 
@@ -321,15 +367,16 @@ export default function App() {
    * render after the green has already mounted, so the engine keeps the course
    * it was built with while the start packet goes out carrying a different
    * seed , and the guest then plays a hole nobody else can see.
+   *
+   * The toss is kept as a fraction and only becomes a seat when the round is
+   * built (see `tossSeat`), because it is drawn before the match page, where
+   * the ball count can still change: a seat drawn against the old count would
+   * never hand the honour to a ball added since, and clamping one that is now
+   * out of range would land on the last ball every time.
    */
-  const [session, setSession] = useState(() => ({
-    seed: randomSeed(),
-    first: Math.floor(Math.random() * rules.players),
-  }));
-  const rollSession = useCallback(
-    () => setSession({ seed: randomSeed(), first: Math.floor(Math.random() * rules.players) }),
-    [rules.players],
-  );
+  const [session, setSession] = useState(() => ({ seed: randomSeed(), toss: Math.random() }));
+  const rollSession = useCallback(() => setSession({ seed: randomSeed(), toss: Math.random() }), []);
+  const tossSeat = (players: number) => Math.min(players - 1, Math.floor(session.toss * players));
 
   const buy = useCallback(
     (index: number) => {
@@ -363,12 +410,15 @@ export default function App() {
     if (!isHost) return;
     try {
       const { db, doc, updateDoc } = await import('./firebase');
-      await updateDoc(doc(db, 'lobbies', handoff.room), { matchStarted: true });
+      // The rules ride with the go-signal in the same write, so every guest's
+      // snapshot that opens the green also carries the ball count it is built
+      // from, even if the live sync below had not landed yet.
+      await updateDoc(doc(db, 'lobbies', handoff.room), { matchStarted: true, matchRules: packRules(rules) });
     } catch (e) {
       log.error('match:start-failed', { message: String((e as Error)?.message ?? e) });
       console.error('Could not start the round', e);
     }
-  }, [isHost, handoff.room]);
+  }, [isHost, handoff.room, rules]);
 
   const award = useCallback(
     (won: boolean, strokes: number) => {
@@ -381,9 +431,36 @@ export default function App() {
     [rules.holes],
   );
 
+  /** Host only: any room-wide change, from moving the flow on to publishing the rules. */
+  const writeLobby = useCallback(
+    async (fields: Record<string, string | number | boolean>) => {
+      if (!online || !isHost) return;
+      try {
+        const { db, doc, updateDoc } = await import('./firebase');
+        await updateDoc(doc(db, 'lobbies', handoff.room), fields);
+      } catch (e) {
+        console.error('Could not update the room', e);
+      }
+    },
+    [online, isHost, handoff.room],
+  );
+
+  const remoteStage = parseStage(lobby?.menuStage);
+
   /**
-   * Leaving the round, online: back to the room, and, for the host, the
-   * go-signal comes down with it.
+   * The rules go to the room the moment the host changes them on the match
+   * page, not only with the start signal, so every guest's locked copy of that
+   * page shows what the host is choosing while they choose it.
+   */
+  useEffect(() => {
+    if (!online || offlineMatch || !isHost || remoteStage !== 'modes' || !lobby) return;
+    const packed = packRules(rules);
+    if (lobby.matchRules !== packed) void writeLobby({ matchRules: packed });
+  }, [online, offlineMatch, isHost, remoteStage, lobby, rules, writeLobby]);
+
+  /**
+   * Leaving the round: back to the match page for a rematch, and, online, the
+   * host's go-signal comes down with it.
    *
    * `matchStarted` left set breaks a rematch two ways: pressing Start again
    * does nothing, because true to true is not a change the effect above reacts
@@ -392,14 +469,18 @@ export default function App() {
    * quitting mid-round, which is what the platform's own End Game does.
    */
   const leaveMatch = useCallback(() => {
-    setOfflineMatch(false);
-    setView(online ? 'room' : 'menu');
+    setView('shell');
     rollSession();
+    // Offline, the flow is this device's: straight back to its own match page.
+    // Online, the room's stage never left the match page, so clearing the flag
+    // is all it takes to bring everyone back there.
+    if (offlineMatch) {
+      setLocalStage('modes');
+      return;
+    }
     if (!online || !isHost) return;
-    void import('./firebase')
-      .then(({ db, doc, updateDoc }) => updateDoc(doc(db, 'lobbies', handoff.room), { matchStarted: false }))
-      .catch((e) => console.error('Could not reset the match flag', e));
-  }, [online, isHost, handoff.room, rollSession]);
+    void writeLobby({ matchStarted: false });
+  }, [online, isHost, offlineMatch, rollSession, writeLobby]);
 
   const matchConfig = useMemo(
     () => (online && uid && !offlineMatch ? onlineConfig() : offlineConfig()),
@@ -491,7 +572,7 @@ export default function App() {
       localSeats,
       aiLevel: ONLINE_AI_LEVEL,
       seed: session.seed,
-      first: session.first,
+      first: tossSeat(rules.players),
       rules,
     };
   }
@@ -533,89 +614,247 @@ export default function App() {
       localSeats,
       aiLevel,
       seed: session.seed,
-      first: session.first,
+      first: tossSeat(rules.players),
       rules,
     };
   }
 
-  // -- shells -----------------------------------------------------------------
+  // -- the pre-match flow -----------------------------------------------------
 
   const openOffline = (locals: number) => {
     audioService.unlock();
     rollSession();
     setOfflineMatch(true);
-    setSeatCount(Math.min(locals, rules.players));
+    setSeatCount(locals);
     setSeatSkin({});
-    setView('pick');
+    // Everybody at this device needs a ball of their own; the match page will
+    // not offer fewer, so start from a count that already fits.
+    if (rules.players < locals) setRules((r) => ({ ...r, players: locals as PlayerCount }));
+    setLocalStage('customize');
   };
+
+  const closeOffline = () => {
+    setOfflineMatch(false);
+    setLocalStage('menu');
+  };
+
+  /** Solo, couch, or a game opened on its own: the flow lives on this device alone. */
+  const local = !online || offlineMatch;
+  const stage: MenuStage = local ? localStage : remoteStage;
+  const goStage = (next: MenuStage) => {
+    if (local) setLocalStage(next);
+    else void writeLobby({ [MENU_STAGE_FIELD]: next });
+  };
+  const hostName = lobby ? lobby.players?.[lobby.hostId]?.displayName : undefined;
+  const fullscreen = () => toggleFullscreen(document.documentElement, !isNativeFullscreen());
+
+  const coinChip = (
+    <div className="panel flex items-center gap-1.5 rounded-2xl px-3 py-2.5 font-bold text-amber-300 short:py-2">
+      <Coins className="h-4 w-4" /> {coins}
+    </div>
+  );
+  const toolButton = (label: string, icon: React.ReactNode, onClick: () => void) => (
+    <button onClick={onClick} aria-label={label} title={label} className="panel rounded-2xl p-2.5 short:p-2">
+      {icon}
+    </button>
+  );
+  /** The same tray on both setup pages: purse, fullscreen, settings, and the host's switch that ends it for everyone. */
+  const stageToolbar = (
+    <>
+      <span className="hidden sm:block">{coinChip}</span>
+      {toolButton('Full screen', <Maximize2 className="h-5 w-5" />, fullscreen)}
+      {toolButton('Settings', <SettingsIcon className="h-5 w-5" />, () => setShowSettings(true))}
+      {!local && isHost && toolButton('End the round for everyone', <LogOut className="h-5 w-5" />, askHostToEndGame)}
+    </>
+  );
+
+  let screen: React.ReactNode;
+  if (!local && lobbyError) {
+    screen = (
+      <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center">
+        <h2 className="text-2xl font-black">{lobbyError}</h2>
+        <p className="text-sm text-white/60">Head back to the PlayBuddies lobby and try again.</p>
+      </div>
+    );
+  } else if (!local && (!authChecked || !uid || !lobby)) {
+    screen = (
+      <div className="flex h-full flex-col items-center justify-center gap-3">
+        <Loader2 className="h-10 w-10 animate-spin text-emerald-300" />
+        <p className="font-bold text-white/80">Checking in at the pro shop…</p>
+      </div>
+    );
+  } else if (stage === 'menu') {
+    screen = (
+      <MainMenu
+        theme={THEME}
+        online={online}
+        isHost={isHost}
+        hostName={hostName}
+        onSingle={() => openOffline(1)}
+        onMulti={
+          online && !handoff.solo
+            ? () => {
+                audioService.unlock();
+                goStage('customize');
+              }
+            : undefined
+        }
+        onSettings={() => setShowSettings(true)}
+        multiHint={`Everyone in this room · ${roomPeople.length} on the tee`}
+        toolbar={
+          <>
+            {coinChip}
+            {toolButton('Full screen', <Maximize2 className="h-5 w-5" />, fullscreen)}
+            {toolButton('Leave', <LogOut className="h-5 w-5" />, askToLeaveLobby)}
+          </>
+        }
+        title={
+          <>
+            <div className="mb-3 inline-block rounded-3xl bg-emerald-400/20 p-4 short:hidden">
+              <Flag className="h-12 w-12 text-emerald-200" />
+            </div>
+            <h1 className="text-4xl font-black leading-none tracking-tighter drop-shadow-lg sm:text-6xl short:text-3xl">
+              MINI <span className="text-emerald-300">GOLF</span>
+            </h1>
+            <p className="mt-2 text-[11px] font-bold uppercase tracking-[0.3em] text-white/70">
+              Top-down, one putt at a time
+            </p>
+          </>
+        }
+        secondary={
+          <button
+            onClick={() => openOffline(2)}
+            disabled={online && !isHost}
+            className="w-full rounded-2xl border border-white/15 bg-white/5 py-2.5 text-sm font-black text-white/80 transition-colors hover:bg-white/10 disabled:opacity-40 short:py-1.5"
+          >
+            Two players, one device
+            <span className="block text-[10px] font-bold text-white/45">
+              Turns alternate. Whoever is up drags back and lets go.
+            </span>
+          </button>
+        }
+        footer={
+          <p className="max-w-md text-center text-[11px] leading-relaxed text-white/45 short:hidden">
+            Drag back from anywhere and release. Further back is harder; the line is the line. Bank off the blocks,
+            stay out of the ponds, and get down in fewer than everybody else.
+            {!online && (
+              <span className="mt-1 block text-white/35">
+                Playing online? Start a lobby on PlayBuddies and pick this game.
+              </span>
+            )}
+          </p>
+        }
+      />
+    );
+  } else if (stage === 'customize') {
+    const slots: BallSlot[] = local
+      ? Array.from({ length: seatCount }, (_, i) => ({
+          key: String(i),
+          label: seatCount > 1 ? `Player ${i + 1}` : 'You',
+          skin: seatSkin[i],
+          editable: true,
+        }))
+      : roomPeople.map((p) => ({
+          key: p.uid,
+          label: p.displayName,
+          skin: p.skin,
+          editable: p.uid === uid,
+          isHost: p.uid === lobby?.hostId,
+        }));
+    // Only balls actually in the round hold the room up. Anyone past the count
+    // can still pick one, but nobody waits on them to.
+    const waiting = local
+      ? slots.filter((s) => !hasBall(s.skin)).length
+      : people.filter((p) => !hasBall(p.skin)).length;
+    screen = (
+      <CustomizeScreen
+        slots={slots}
+        owned={owned}
+        coins={coins}
+        toolbar={stageToolbar}
+        leads={local || isHost}
+        hostName={hostName}
+        waiting={waiting}
+        onPick={(key, index) => {
+          if (!local) return void pickOnline(index);
+          if (!owned.includes(index) && !buy(index)) return;
+          setSeatSkin((s) => ({ ...s, [Number(key)]: index }));
+        }}
+        onBack={local ? closeOffline : isHost ? () => goStage('menu') : undefined}
+        onNext={() => goStage('modes')}
+      />
+    );
+  } else {
+    // Built the same way onlineConfig and offlineConfig build the round, so the
+    // page shows exactly who Tee off is about to put on the green.
+    const crew = handoff.solo ? people.filter((p) => p.uid === uid) : people;
+    const lineup: TeeSlot[] = [];
+    for (let i = 0; i < rules.players; i++) {
+      const person = local ? undefined : crew[i];
+      if (local && i < seatCount) {
+        lineup.push({ key: `seat-${i}`, name: seatCount > 1 ? `Player ${i + 1}` : 'You', skin: seatSkin[i] });
+      } else if (person) {
+        lineup.push({
+          key: person.uid,
+          name: person.displayName,
+          skin: person.skin,
+          you: person.uid === uid,
+          host: person.uid === lobby?.hostId,
+        });
+      } else {
+        const tier = TIERS[local ? aiLevel : ONLINE_AI_LEVEL].label;
+        lineup.push({ key: `bot-${i}`, name: local && rules.players > 2 ? `${tier} ${i}` : `${tier} Bot`, bot: true });
+      }
+    }
+    const watching = local ? [] : roomPeople.slice(rules.players).map((p) => p.displayName);
+    const bots = lineup.filter((s) => s.bot).length;
+    const waitingFor = local ? 0 : crew.filter((p) => !hasBall(p.skin)).length;
+    // The auto-fit effect above never lets an online round seat fewer balls
+    // than the room fills, so the page does not offer those counts either.
+    const roomFits = PLAYER_CODES.find((n) => n >= roomPeople.length) ?? PLAYER_CODES[PLAYER_CODES.length - 1];
+    screen = (
+      <ModesScreen
+        rules={rules}
+        locked={!local && !isHost}
+        local={local}
+        minPlayers={local ? seatCount : roomFits}
+        hostName={hostName}
+        toolbar={stageToolbar}
+        lineup={lineup}
+        watching={watching}
+        onRules={setRules}
+        aiLevel={aiLevel}
+        onAiLevel={local && bots > 0 ? setAiLevel : undefined}
+        onBack={local || isHost ? () => goStage('customize') : undefined}
+        onStart={
+          local || isHost
+            ? () => {
+                audioService.unlock();
+                if (local) setView('game');
+                else void startMatch();
+              }
+            : undefined
+        }
+        startDisabled={waitingFor > 0}
+        startNote={
+          !local && !isHost
+            ? `${hostName || 'The host'} tees off when everyone is set.`
+            : waitingFor > 0
+              ? `Waiting on ${waitingFor} more to pick a ball. Go back a step so they can.`
+              : bots > 0
+                ? `Bots play ${bots} of the ${rules.players} balls. Who tees off first is drawn at the start.`
+                : 'Who tees off first is drawn at the start.'
+        }
+      />
+    );
+  }
 
   return (
     <div className="relative h-[100dvh] w-full overflow-hidden">
-      {(view === 'menu' || view === 'offline_menu') && (
-        <Menu
-          coins={coins}
-          aiLevel={aiLevel}
-          onAiLevel={setAiLevel}
-          rules={rules}
-          onSolo={() => openOffline(1)}
-          onCouch={() => openOffline(2)}
-          onSettings={() => setShowSettings(true)}
-          onRules={() => setShowRules(true)}
-          onFullscreen={() => toggleFullscreen(document.documentElement, !isNativeFullscreen())}
-          onExit={askToLeaveLobby}
-          onBack={view === 'offline_menu' ? () => setView('room') : undefined}
-        />
-      )}
-
-      {view === 'pick' && (
-        <OfflinePick
-          seatCount={seatCount}
-          owned={owned}
-          coins={coins}
-          onBack={() => setView(online ? 'offline_menu' : 'menu')}
-          onBuy={buy}
-          onDone={(picks) => {
-            setSeatSkin(picks);
-            setView('game');
-          }}
-        />
-      )}
-
-      {view === 'room' && (
-        <RoomScreen
-          ready={authChecked}
-          error={lobbyError}
-          uid={uid}
-          people={people}
-          hostId={lobby?.hostId ?? null}
-          mine={mySkin}
-          owned={owned}
-          coins={coins}
-          isHost={isHost}
-          rules={rules}
-          onPick={pickOnline}
-          onStart={startMatch}
-          onSettings={() => setShowSettings(true)}
-          onRules={() => setShowRules(true)}
-          onFullscreen={() => toggleFullscreen(document.documentElement, !isNativeFullscreen())}
-          onPlayOffline={() => {
-            audioService.unlock();
-            setView('offline_menu');
-          }}
-        />
-      )}
+      {screen}
 
       {showSettings && (
         <SettingsPanel settings={settings} onChange={setSettings} onClose={() => setShowSettings(false)} />
-      )}
-
-      {showRules && (
-        <RulesPanel
-          rules={rules}
-          editable={!online || isHost}
-          onChange={setRules}
-          onClose={() => setShowRules(false)}
-        />
       )}
     </div>
   );
@@ -627,8 +866,13 @@ function rulesSummary(rules: MatchRules): string {
     `${rules.holes} ${rules.holes === 1 ? 'hole' : 'holes'}`,
     `${rules.players} ${rules.players === 1 ? 'ball' : 'balls'}`,
     rules.hazards ? 'water and sand' : 'clean greens',
-    rules.turnTimer ? '20s turns' : 'no clock',
+    rules.turnTimer ? `${TURN_SECONDS}s turns` : 'no clock',
   ].join(' · ');
+}
+
+/** Whether a lobby slot or a seat at this device has chosen a ball yet. */
+function hasBall(skin: number | null | undefined): skin is number {
+  return skin !== undefined && skin !== null;
 }
 
 /** A bot plays something other than the ball the player picked. */
@@ -638,128 +882,6 @@ function otherBall(playerChoice: number) {
 }
 
 // -- pieces -------------------------------------------------------------------
-
-function Menu({
-  coins,
-  aiLevel,
-  onAiLevel,
-  rules,
-  onSolo,
-  onCouch,
-  onSettings,
-  onRules,
-  onFullscreen,
-  onExit,
-  onBack,
-}: {
-  coins: number;
-  aiLevel: number;
-  onAiLevel: (n: number) => void;
-  rules: MatchRules;
-  onSolo: () => void;
-  onCouch: () => void;
-  onSettings: () => void;
-  onRules: () => void;
-  onFullscreen: () => void;
-  onExit: () => void;
-  onBack?: () => void;
-}) {
-  return (
-    <div className="flex h-full flex-col gap-4 overflow-y-auto overscroll-contain p-6">
-      {/* A real row, not an overlay -- so a long title on a short screen pushes
-          the content down instead of running under these buttons. */}
-      <div className="flex shrink-0 items-start justify-between gap-2">
-        <div>
-          {onBack && (
-            <button onClick={onBack} aria-label="Back" className="panel rounded-2xl p-3">
-              <ArrowLeft className="h-5 w-5" />
-            </button>
-          )}
-        </div>
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          <div className="panel flex items-center gap-2 rounded-2xl px-3 py-2.5 font-bold text-amber-300">
-            <Coins className="h-4 w-4" /> {coins}
-          </div>
-          <button onClick={onRules} className="panel flex items-center gap-2 rounded-2xl px-3 py-2.5 font-bold text-white/70">
-            <ScrollText className="h-4 w-4" /> Rules
-          </button>
-          <button onClick={onFullscreen} aria-label="Full screen" className="panel rounded-2xl p-2.5">
-            <Maximize2 className="h-5 w-5" />
-          </button>
-          <button onClick={onSettings} aria-label="Settings" className="panel rounded-2xl p-2.5">
-            <SettingsIcon className="h-5 w-5" />
-          </button>
-          <button onClick={onExit} aria-label="Leave" className="panel rounded-2xl p-2.5">
-            <LogOut className="h-5 w-5" />
-          </button>
-        </div>
-      </div>
-
-      <div className="flex flex-1 flex-col items-center justify-center gap-6">
-      <div className="text-center">
-        <div className="mb-4 inline-block rounded-3xl bg-emerald-400/20 p-4">
-          <Flag className="h-12 w-12 text-emerald-200" />
-        </div>
-        <h1 className="text-4xl font-black leading-none tracking-tighter drop-shadow-lg sm:text-6xl">
-          MINI <span className="text-emerald-300">GOLF</span>
-        </h1>
-        <p className="mt-2 text-[11px] font-bold uppercase tracking-[0.3em] text-white/70">
-          Top-down, one putt at a time
-        </p>
-      </div>
-
-      <div className="panel w-full max-w-md space-y-5 rounded-[2rem] p-6">
-        <button
-          onClick={onSolo}
-          className="flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-400 py-4 text-lg font-black text-emerald-950 transition-transform active:scale-95"
-        >
-          <Play className="h-5 w-5 fill-current" /> Solo , you against the bot
-        </button>
-
-        <div className="space-y-2">
-          <p className="text-[11px] font-black uppercase tracking-[0.2em] text-white/50">Bot rank</p>
-          <div className="flex gap-1 rounded-xl bg-black/30 p-1">
-            {TIERS.map((tier, i) => (
-              <button
-                key={tier.label}
-                onClick={() => onAiLevel(i)}
-                className={`flex-1 rounded-lg py-2 text-xs font-black uppercase tracking-wider transition-colors ${
-                  aiLevel === i ? 'bg-emerald-400 text-emerald-950' : 'text-white/60'
-                }`}
-              >
-                {tier.label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <button
-          onClick={onCouch}
-          className="w-full rounded-2xl border border-white/25 bg-white/10 py-4 font-black transition-colors hover:bg-white/20"
-        >
-          Two players, one device
-          <span className="mt-1 block text-[11px] font-bold normal-case tracking-normal text-white/50">
-            Turns alternate. Whoever is up drags back and lets go.
-          </span>
-        </button>
-
-        <div className="rounded-2xl bg-black/25 p-3 text-center text-xs leading-relaxed text-white/50">
-          <p className="mb-1 font-black uppercase tracking-[0.15em] text-white/40">How it works</p>
-          <p>Drag back from anywhere and release. Further back is harder; the line is the line.</p>
-          <p className="mt-1">
-            Bank off the blocks, stay out of the ponds, and get down in fewer than everybody else.
-          </p>
-          <p className="mt-2 text-white/40">
-            Playing online? Start a lobby on PlayBuddies and pick this game.
-          </p>
-        </div>
-      </div>
-
-      <p className="text-center text-[11px] font-semibold text-white/35">{rulesSummary(rules)}</p>
-      </div>
-    </div>
-  );
-}
 
 /** A ball card, drawn with the same code the green uses. */
 function Portrait({ index, seat = 0, size = 72 }: { index: number; seat?: number; size?: number }) {
@@ -789,12 +911,15 @@ function Portrait({ index, seat = 0, size = 72 }: { index: number; seat?: number
 function BallGrid({
   owned,
   coins,
+  seat = 0,
   selected,
   pickedBy,
   onPick,
 }: {
   owned: number[];
   coins: number;
+  /** Which ball in the round this player is putting: the card rings match the green. */
+  seat?: number;
   selected: number | null;
   /**
    * Everyone else who has also picked this ball. Purely informational , the
@@ -837,7 +962,7 @@ function BallGrid({
                 {!affordable && <span className="text-[9px] font-bold text-rose-300">not enough</span>}
               </div>
             )}
-            <Portrait index={index} size={short ? 42 : 72} />
+            <Portrait index={index} seat={seat} size={short ? 42 : 72} />
             <span
               className={`font-black uppercase tracking-wide ${short ? 'text-[10px] leading-tight' : 'text-sm'}`}
             >
@@ -867,355 +992,411 @@ function BallGrid({
   );
 }
 
-function Shell({
-  title,
-  coins,
-  onBack,
-  children,
-}: {
-  title: string;
-  coins: number;
-  onBack: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="mx-auto flex h-full w-full max-w-6xl flex-col overflow-y-auto overscroll-contain gap-3 p-3 sm:gap-4 sm:p-6">
-      <div className="flex shrink-0 items-center justify-between gap-2">
-        <button onClick={onBack} aria-label="Back" className="panel shrink-0 rounded-2xl p-3">
-          <ArrowLeft className="h-5 w-5" />
-        </button>
-        <h2 className="min-w-0 truncate text-center text-base font-black tracking-tight sm:text-2xl">{title}</h2>
-        <div className="panel flex shrink-0 items-center gap-2 rounded-2xl px-3 py-2 font-bold text-amber-300">
-          <Coins className="h-4 w-4" /> {coins}
-        </div>
-      </div>
-      {/* Explicit min-h-0 is what lets the child actually scroll instead of
-          growing the flex column past the viewport. */}
-      <div className="panel min-h-0 flex-1 overflow-y-auto overscroll-contain rounded-[2rem] p-3 sm:p-6">
-        {children}
-      </div>
-    </div>
-  );
+/** One person choosing a ball: a player in the room, or a seat at this device. */
+interface BallSlot {
+  key: string;
+  label: string;
+  skin: number | null | undefined;
+  /** Whether this device picks for this slot. */
+  editable: boolean;
+  isHost?: boolean;
 }
 
-function OfflinePick({
-  seatCount,
+/**
+ * Stage 2: the ball.
+ *
+ * The same screen online and offline. Online each player fills only their own
+ * slot and watches everyone else's appear in the strip along the top; on a
+ * couch every seat belongs to this device, and the turn to choose passes along
+ * on its own as each one is filled.
+ */
+function CustomizeScreen({
+  slots,
   owned,
   coins,
-  onBack,
-  onBuy,
-  onDone,
-}: {
-  seatCount: number;
-  owned: number[];
-  coins: number;
-  onBack: () => void;
-  onBuy: (index: number) => boolean;
-  onDone: (picks: Record<number, number>) => void;
-}) {
-  const [picks, setPicks] = useState<Record<number, number>>({});
-  const seat = Object.keys(picks).length;
-
-  const pickedBy = useMemo(() => {
-    const map: Record<number, string[]> = {};
-    Object.entries(picks).forEach(([id, index]) => {
-      (map[index] ??= []).push(`P${Number(id) + 1}`);
-    });
-    return map;
-  }, [picks]);
-
-  const pick = (index: number) => {
-    if (!owned.includes(index) && !onBuy(index)) return;
-    const next = { ...picks, [seat]: index };
-    setPicks(next);
-    if (Object.keys(next).length >= seatCount) onDone(next);
-  };
-
-  const title = seatCount > 1 ? `Player ${seat + 1} , pick a ball` : 'Pick your ball';
-  return (
-    <Shell title={title} coins={coins} onBack={onBack}>
-      <BallGrid owned={owned} coins={coins} selected={null} pickedBy={pickedBy} onPick={pick} />
-    </Shell>
-  );
-}
-
-function RoomScreen({
-  ready,
-  error,
-  uid,
-  people,
-  hostId,
-  mine,
-  owned,
-  coins,
-  isHost,
-  rules,
+  toolbar,
+  leads,
+  hostName,
+  waiting,
   onPick,
-  onStart,
-  onSettings,
-  onRules,
-  onFullscreen,
-  onPlayOffline,
+  onBack,
+  onNext,
 }: {
-  ready: boolean;
-  error: string | null;
-  uid: string | null;
-  people: { uid: string; displayName: string; skin?: number | null }[];
-  hostId: string | null;
-  mine: number | null | undefined;
+  slots: BallSlot[];
   owned: number[];
   coins: number;
-  isHost: boolean;
-  rules: MatchRules;
-  onPick: (index: number) => void;
-  onStart: () => void;
-  onSettings: () => void;
-  onRules: () => void;
-  onFullscreen: () => void;
-  onPlayOffline: () => void;
+  toolbar: React.ReactNode;
+  /** This device moves the flow on: offline, or the host. */
+  leads: boolean;
+  hostName?: string;
+  /** Balls in the round still to be chosen, by anybody. */
+  waiting: number;
+  onPick: (key: string, index: number) => void;
+  onBack?: () => void;
+  onNext: () => void;
 }) {
+  const mine = slots.filter((s) => s.editable);
+  const [activeKey, setActiveKey] = useState(() => mine[0]?.key ?? '');
+  const active = mine.find((s) => s.key === activeKey) ?? mine[0];
+  const activeSeat = active ? slots.indexOf(active) : 0;
+
+  // On a couch, the next player's turn to choose comes round on its own , the
+  // old flow's one real convenience, kept.
+  useEffect(() => {
+    if (mine.length < 2) return;
+    const current = mine.find((s) => s.key === activeKey);
+    if (current && !hasBall(current.skin)) return;
+    const next = mine.find((s) => !hasBall(s.skin));
+    if (next && next.key !== activeKey) setActiveKey(next.key);
+  }, [mine, activeKey]);
+
   const pickedBy = useMemo(() => {
     const map: Record<number, string[]> = {};
-    for (const p of people) {
-      if (p.uid !== uid && p.skin !== undefined && p.skin !== null) (map[p.skin] ??= []).push(p.displayName);
-    }
+    for (const s of slots) if (s !== active && hasBall(s.skin)) (map[s.skin] ??= []).push(s.label);
     return map;
-  }, [people, uid]);
+  }, [slots, active]);
 
-  if (error) {
-    return (
-      <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center">
-        <h2 className="text-2xl font-black">{error}</h2>
-        <p className="text-sm text-white/60">Head back to the PlayBuddies lobby and try again.</p>
-      </div>
-    );
-  }
-
-  if (!ready || !uid) {
-    return (
-      <div className="flex h-full flex-col items-center justify-center gap-3">
-        <Loader2 className="h-10 w-10 animate-spin text-emerald-300" />
-        <p className="font-bold text-white/80">Checking in at the pro shop…</p>
-      </div>
-    );
-  }
-
-  const iAmReady = mine !== undefined && mine !== null;
-  /** Balls the rules call for that nobody has taken; bots play these. */
-  const emptySeats = Math.max(0, rules.players - people.length);
-  /**
-   * Nobody tees off until everybody has chosen.
-   *
-   * The host used to be able to start the moment its *own* ball was picked,
-   * which dropped anyone still choosing onto a green playing a ball the lobby
-   * had never recorded , their opponent saw a colour they had not chosen, and
-   * the shop was still open over the top of it.
-   */
-  const everyonePicked = people.every((p) => p.skin !== undefined && p.skin !== null);
-  const canStart = iAmReady && everyonePicked;
-  const waitingFor = people.filter((p) => p.skin === undefined || p.skin === null).length;
+  const mineWaiting = mine.filter((s) => !hasBall(s.skin)).length;
+  const iAmReady = mineWaiting === 0;
+  /** Nobody is waiting on anybody else while the only empty balls are this device's. */
+  const leadNote =
+    waiting === 0
+      ? 'Everyone has a ball. Next, the course.'
+      : mineWaiting >= waiting
+        ? mineWaiting > 1
+          ? `Pick a ball for each of the ${mineWaiting} players at this device.`
+          : 'Pick a ball to carry on.'
+        : `Waiting on ${waiting} more to pick a ball.`;
 
   return (
-    <div className="mx-auto flex h-full w-full max-w-6xl flex-col overflow-y-auto overscroll-contain gap-3 p-3 sm:gap-4 sm:p-6">
-      <div className="flex shrink-0 items-center justify-between gap-2">
-        <div className="min-w-0">
-          <h2 className="truncate text-lg font-black tracking-tight sm:text-2xl">Pick your ball</h2>
-          <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-emerald-300/80">
-            {rules.holes} {rules.holes === 1 ? 'hole' : 'holes'} · {rules.players}{' '}
-            {rules.players === 1 ? 'ball' : 'balls'}
-            {emptySeats > 0 && ` · ${emptySeats} to bots`}
-          </p>
-        </div>
-        {/* The same tray the green itself carries: purse, fullscreen, settings,
-            and , for the host only , the switch that ends it for everyone. */}
-        <div className="flex shrink-0 items-center gap-2">
-          <div className="panel flex items-center gap-2 rounded-2xl px-3 py-2 font-bold text-amber-300">
-            <Coins className="h-4 w-4" /> {coins}
-          </div>
-          <button onClick={onFullscreen} className="panel rounded-2xl p-2.5" title="Full screen">
-            <Maximize2 className="h-5 w-5" />
-          </button>
-          <button onClick={onSettings} aria-label="Settings" className="panel rounded-2xl p-2.5">
-            <SettingsIcon className="h-5 w-5" />
-          </button>
-          {isHost && (
+    <StageFrame
+      theme={THEME}
+      step={2}
+      title={active && mine.length > 1 ? `${active.label}, pick a ball` : 'Pick your ball'}
+      subtitle={`${slots.length} ${slots.length === 1 ? 'golfer' : 'golfers'} · paint only, every ball putts the same`}
+      onBack={onBack}
+      toolbar={toolbar}
+      status={
+        !leads ? (
+          <HostBadge theme={THEME}>{hostName || 'The host'} sets the course once everyone has a ball</HostBadge>
+        ) : undefined
+      }
+      footer={
+        <ActionBar
+          theme={THEME}
+          label="Next: the course"
+          onAction={leads ? onNext : undefined}
+          disabled={waiting > 0}
+          note={
+            leads
+              ? leadNote
+              : iAmReady
+                ? `Ready. Waiting for ${hostName || 'the host'} to set the course up...`
+                : 'Pick a ball to be ready.'
+          }
+        />
+      }
+    >
+      <div className="flex h-full flex-col gap-3 short:gap-2">
+        <div className="flex shrink-0 gap-2 overflow-x-auto overscroll-contain pb-1">
+          {slots.map((s, i) => (
             <button
-              onClick={askHostToEndGame}
-              aria-label="End game"
-              className="panel rounded-2xl p-2.5"
-              title="End the round for everyone"
+              key={s.key}
+              type="button"
+              disabled={!s.editable || mine.length < 2}
+              onClick={() => setActiveKey(s.key)}
+              className={`flex shrink-0 items-center gap-2 rounded-2xl border px-2 py-1.5 text-left disabled:cursor-default ${
+                s === active && mine.length > 1 ? THEME.selected : 'border-white/10 bg-black/20'
+              }`}
             >
-              <LogOut className="h-5 w-5" />
+              <span className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-xl bg-black/25">
+                {hasBall(s.skin) ? (
+                  <Portrait index={s.skin} seat={i} size={36} />
+                ) : (
+                  <Circle className="h-4 w-4 text-white/35" />
+                )}
+              </span>
+              <span className="min-w-0">
+                <span className="flex max-w-[120px] items-center gap-1 truncate text-xs font-black">
+                  {s.label}
+                  {s.isHost && <Crown className="h-3 w-3 shrink-0 text-amber-300" />}
+                </span>
+                <span
+                  className={`block text-[9px] font-black uppercase tracking-wider ${
+                    hasBall(s.skin) ? 'text-emerald-300' : 'text-white/40'
+                  }`}
+                >
+                  {hasBall(s.skin) ? `Ready · ${BALLS[s.skin]?.name ?? 'Ball'}` : 'Choosing...'}
+                </span>
+              </span>
             </button>
+          ))}
+        </div>
+
+        {/* The purse rides in the toolbar from `sm:` up, where there is room for it. */}
+        <p className="flex shrink-0 items-center justify-center gap-1.5 text-[11px] font-black text-amber-300 sm:hidden">
+          <Coins className="h-3.5 w-3.5" /> {coins}
+        </p>
+
+        <div className="min-h-0 flex-1">
+          {active ? (
+            <BallGrid
+              owned={owned}
+              coins={coins}
+              seat={activeSeat}
+              selected={active.skin ?? null}
+              pickedBy={pickedBy}
+              onPick={(index) => onPick(active.key, index)}
+            />
+          ) : (
+            <p className="py-10 text-center text-sm font-bold text-white/55">
+              Every ball in this round is spoken for. You can watch it from the clubhouse.
+            </p>
           )}
         </div>
       </div>
+    </StageFrame>
+  );
+}
 
-      {/* Loud on purpose. "Game rules" further down read as maintenance --
-          the same plain box as "Play offline" beside it -- so nothing said
-          a round only ends when everyone has holed out, or how a wall's
-          bounce actually works, before a first round taught it the slow way. */}
-      <button
-        onClick={onRules}
-        className="relative flex shrink-0 items-center gap-3 overflow-hidden rounded-2xl border-2 border-emerald-400/60 bg-emerald-400/10 px-4 py-3 text-left transition-transform active:scale-[0.99]"
-      >
-        <span className="absolute -right-6 -top-6 h-16 w-16 animate-pulse rounded-full bg-emerald-400/20" aria-hidden />
-        <ScrollText className="h-6 w-6 shrink-0 text-emerald-300" />
-        <div className="min-w-0 flex-1">
-          <p className="text-sm font-black uppercase tracking-wide text-emerald-200">
-            {isHost ? 'New here? Read the rules' : 'How par and bounces work'}
-          </p>
-          <p className="text-[11px] font-bold text-emerald-300/70">Worth 30 seconds before the first putt.</p>
-        </div>
-        <span className="shrink-0 rounded-xl bg-emerald-400 px-3 py-1.5 text-[11px] font-black uppercase tracking-wide text-emerald-950">
-          Guide
-        </span>
-      </button>
+/** One ball in the round, in seat order: a player, or the bot that fills it. */
+interface TeeSlot {
+  key: string;
+  name: string;
+  skin?: number | null;
+  bot?: boolean;
+  you?: boolean;
+  host?: boolean;
+}
 
-      {/* On a phone the start button would otherwise sit below the fold, which
-          is exactly what made it unreachable in the earlier games. */}
-      <div className="panel shrink-0 rounded-2xl p-3 lg:hidden">
-        {isHost ? (
-          <button
-            onClick={onStart}
-            disabled={!canStart}
-            className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-400 py-2.5 text-sm font-black text-emerald-950 disabled:opacity-40"
+/**
+ * How many balls the round is played with , the only thing here that changes
+ * the shape of a match rather than a detail of it, so it gets the cards.
+ *
+ * There is no stroke play versus skins versus speed golf, because there is one
+ * way to win a round: the lowest card after the last hole. Inventing the other
+ * two here would be inventing them in the menu only.
+ */
+const BALL_MODES: { players: PlayerCount; title: string; description: string }[] = [
+  { players: 1, title: 'Solo card', description: 'Just you and the card. Beat par and take the coins.' },
+  { players: 2, title: 'Head to head', description: 'One other ball. The lower card takes the round.' },
+  { players: 3, title: 'Group of three', description: 'The green widens a little so nobody tees off inside anybody else.' },
+  { players: 4, title: 'Group of four', description: 'As many balls as a small green stays readable with.' },
+];
+
+const HOLE_OPTIONS: { value: HoleCount; label: string; sub: string }[] = [
+  { value: 1, label: '1 hole', sub: 'one and done' },
+  { value: 3, label: '3 holes', sub: 'a quick round' },
+  { value: 6, label: '6 holes', sub: 'the full round' },
+];
+
+/**
+ * Stage 3: the whole round on one page, never a popup.
+ *
+ * The host's copy is the controls; a guest's copy is the same page with every
+ * control locked, kept current from the lobby as the host clicks. See
+ * MatchControls for the pieces, and the `matchRules` effect in App for the
+ * wire that keeps the two in step.
+ */
+function ModesScreen({
+  rules,
+  locked,
+  local,
+  minPlayers,
+  hostName,
+  toolbar,
+  lineup,
+  watching,
+  onRules,
+  aiLevel,
+  onAiLevel,
+  onBack,
+  onStart,
+  startDisabled,
+  startNote,
+}: {
+  rules: MatchRules;
+  locked: boolean;
+  /** This device's own round: solo, couch, or the game opened on its own. */
+  local: boolean;
+  /** The fewest balls this round can be played with: everyone here, or everyone in the room. */
+  minPlayers: number;
+  hostName?: string;
+  toolbar: React.ReactNode;
+  lineup: TeeSlot[];
+  /** Anyone in the room past the last ball. */
+  watching: string[];
+  onRules: (rules: MatchRules) => void;
+  aiLevel: number;
+  /** Omitted online, where bots always putt at Club, and when no bot is playing. */
+  onAiLevel?: (level: number) => void;
+  onBack?: () => void;
+  onStart?: () => void;
+  startDisabled?: boolean;
+  startNote: string;
+}) {
+  const set = (patch: Partial<MatchRules>) => onRules({ ...rules, ...patch });
+
+  return (
+    <StageFrame
+      theme={THEME}
+      step={3}
+      title="Course setup"
+      subtitle={rulesSummary(rules)}
+      onBack={onBack}
+      toolbar={toolbar}
+      status={
+        locked ? <HostBadge theme={THEME}>{hostName || 'The host'} is setting the course up...</HostBadge> : undefined
+      }
+      footer={
+        <ActionBar
+          theme={THEME}
+          label="Tee off"
+          icon={<Play className="h-4 w-4 fill-current" />}
+          onAction={onStart}
+          disabled={startDisabled}
+          note={startNote}
+        />
+      }
+    >
+      <div className="grid gap-5 lg:grid-cols-3 short:gap-3">
+        <div className="space-y-5 lg:col-span-2 short:space-y-3">
+          <RuleSection
+            theme={THEME}
+            title="Balls on the green"
+            hint={
+              local
+                ? minPlayers > 1
+                  ? 'Everybody at this device needs one. Any left over are played by bots.'
+                  : 'Any ball nobody takes is played by a bot.'
+                : 'Everyone in the room gets one, up to four. Any left over are played by bots.'
+            }
+            locked={locked}
           >
-            <Play className="h-5 w-5 fill-current" /> TEE OFF
-          </button>
-        ) : (
-          <p className="text-center text-sm font-bold text-white/60">
-            {!iAmReady
-              ? 'Pick a ball to be ready.'
-              : !everyonePicked
-                ? 'Waiting for everyone to pick…'
-                : 'Waiting for the host…'}
-          </p>
-        )}
-        <button
-          onClick={onRules}
-          className="mt-2 flex w-full flex-col items-center gap-0.5 rounded-xl border border-white/20 bg-white/5 py-2 text-sm font-black text-white/70 transition-colors hover:bg-white/15"
-        >
-          <span className="flex items-center gap-2">
-            <ScrollText className="h-4 w-4" /> {isHost ? 'Round rules' : 'Round rules (host sets these)'}
-          </span>
-          <span className="px-2 text-[10px] font-semibold leading-tight text-white/45">{rulesSummary(rules)}</span>
-        </button>
-        <button
-          onClick={onPlayOffline}
-          className="mt-2 w-full rounded-xl border border-white/20 bg-white/5 py-2.5 text-sm font-black text-white/70 transition-colors hover:bg-white/15"
-        >
-          Play offline
-        </button>
-      </div>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+              {BALL_MODES.map((mode) => (
+                <ModeCard
+                  key={mode.players}
+                  theme={THEME}
+                  title={mode.title}
+                  badge={`${mode.players} ${mode.players === 1 ? 'ball' : 'balls'}`}
+                  description={mode.description}
+                  icon={mode.players === 1 ? <Flag className="h-4 w-4" /> : <Users className="h-4 w-4" />}
+                  selected={rules.players === mode.players}
+                  locked={locked || mode.players < minPlayers}
+                  onSelect={() => set({ players: mode.players })}
+                />
+              ))}
+            </div>
+          </RuleSection>
 
-      {/* `min-h-0 flex-1` on this grid used to be unconditional. Both do
-          real work at `lg:` -- they are what lets the picker's own column
-          scroll inside a bounded three-column row -- but on a phone they were
-          the actual bug: with four rows of chrome stacked above (header,
-          rules banner, ready panel, roster), a flex item is allowed to
-          shrink below its own content once `min-h-0` says it may, and
-          `flex-1` just decides how much. It shrank the picker to whatever
-          sliver was left, sometimes slicing a locked card's price clean
-          through with no visible way to tell the panel was scrollable at all
-          rather than simply broken. Neither class runs on a phone now, so
-          this grid can never be smaller than its own content, and the *page*
-          -- already `overflow-y-auto` above -- scrolls the rest, which is the
-          swipe a phone always tries first rather than a small nested
-          scrollport that is easy to miss. */}
-      <div className="grid grid-cols-1 gap-3 sm:gap-4 lg:min-h-0 lg:flex-1 lg:grid-cols-3 lg:grid-rows-[minmax(0,1fr)]">
-        <div className="panel order-2 min-h-0 overflow-y-auto overscroll-contain rounded-[2rem] p-3 sm:p-6 lg:order-1 lg:col-span-2">
-          <BallGrid owned={owned} coins={coins} selected={mine ?? null} pickedBy={pickedBy} onPick={onPick} />
+          <RuleSection
+            theme={THEME}
+            title="Holes"
+            hint="Every one is built fresh from the round's seed. Cards run cumulatively; the lowest total takes it."
+            locked={locked}
+          >
+            <OptionGroup
+              theme={THEME}
+              locked={locked}
+              value={rules.holes}
+              onChange={(holes) => set({ holes })}
+              options={HOLE_OPTIONS}
+            />
+          </RuleSection>
+
+          <RuleSection theme={THEME} title="The course" locked={locked}>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <ToggleOption
+                theme={THEME}
+                label="Water and sand"
+                hint="Ponds cost a stroke and a drop on the bank; bunkers just kill the roll. Off leaves the blocks, which are the ones worth banking off."
+                value={rules.hazards}
+                locked={locked}
+                onChange={(hazards) => set({ hazards })}
+              />
+              <ToggleOption
+                theme={THEME}
+                label={`Turn clock · ${TURN_SECONDS}s`}
+                hint="A putt goes off on its own after twenty seconds, straight at the flag at a sane weight. Off lets a turn take as long as it takes."
+                value={rules.turnTimer}
+                locked={locked}
+                onChange={(turnTimer) => set({ turnTimer })}
+              />
+            </div>
+          </RuleSection>
+
+          {onAiLevel && (
+            <RuleSection theme={THEME} title="Bot rank" hint="How well the bots on the empty balls putt.">
+              <OptionGroup
+                theme={THEME}
+                value={aiLevel}
+                onChange={onAiLevel}
+                options={TIERS.map((tier, i) => ({ value: i, label: tier.label }))}
+              />
+            </RuleSection>
+          )}
         </div>
 
-        <div className="order-1 flex min-h-0 flex-col gap-3 sm:gap-4 lg:order-2">
-          <div className="panel flex max-h-44 min-h-0 flex-col rounded-[2rem] p-4 sm:p-5 lg:max-h-none lg:flex-1">
-            <h3 className="mb-3 flex shrink-0 items-center gap-2 text-[11px] font-black uppercase tracking-[0.2em] text-white/50">
-              <Users className="h-4 w-4" /> On the tee ({people.length})
-            </h3>
-            <div className="min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain pr-1">
-              {people.map((p, i) => (
+        <div className="space-y-4 short:space-y-2">
+          <RuleSection
+            theme={THEME}
+            title={`On the tee · ${lineup.length}`}
+            hint="Who plays which ball. Who tees off on hole one is drawn at the start; after that, honours."
+            locked={locked}
+          >
+            <div className="space-y-1.5">
+              {lineup.map((s, i) => (
                 <div
-                  key={p.uid}
-                  className="flex items-center gap-3 rounded-2xl border p-2.5"
+                  key={s.key}
+                  className="flex items-center gap-2 rounded-xl border p-1.5"
                   style={{
                     borderColor: `${SEATS[i % SEATS.length].main}55`,
                     background: `${SEATS[i % SEATS.length].main}18`,
                   }}
                 >
-                  <div className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-black/25">
-                    {p.skin !== undefined && p.skin !== null ? (
-                      <Portrait index={p.skin} seat={i} size={40} />
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-black/25">
+                    {hasBall(s.skin) ? (
+                      <Portrait index={s.skin} seat={i} size={36} />
+                    ) : s.bot ? (
+                      <Bot className="h-4 w-4 text-white/45" />
                     ) : (
-                      <Circle className="h-5 w-5 text-white/40" />
+                      <Circle className="h-4 w-4 text-white/35" />
                     )}
-                  </div>
-                  <div className="min-w-0">
-                    <p className="flex items-center gap-1 truncate text-sm font-bold">
-                      {p.displayName}
-                      {p.uid === hostId && <Crown className="h-3.5 w-3.5 shrink-0 text-amber-300" />}
-                    </p>
-                    <p
-                      className="text-[10px] font-black uppercase tracking-widest"
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className={`flex items-center gap-1 truncate text-xs font-bold ${s.bot ? 'text-white/55' : ''}`}>
+                      {s.name}
+                      {s.you && <span className="shrink-0 text-white/45"> · you</span>}
+                      {s.host && <Crown className="h-3 w-3 shrink-0 text-amber-300" />}
+                    </span>
+                    <span
+                      className="block text-[9px] font-black uppercase tracking-widest"
                       style={{ color: SEATS[i % SEATS.length].light }}
                     >
                       {SEATS[i % SEATS.length].name}
-                      {p.uid === uid ? ' , you' : ''}
-                    </p>
-                  </div>
+                      {!s.bot && !hasBall(s.skin) && ' · choosing'}
+                    </span>
+                  </span>
                 </div>
               ))}
             </div>
-          </div>
-
-          <div className="panel hidden shrink-0 rounded-[2rem] p-5 lg:block">
-            {isHost ? (
-              <>
-                <button
-                  onClick={onStart}
-                  disabled={!canStart}
-                  className="flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-400 py-4 text-lg font-black text-emerald-950 disabled:opacity-40"
-                >
-                  <Play className="h-5 w-5 fill-current" /> TEE OFF
-                </button>
-                <p className="mt-2 text-center text-[11px] text-white/50">
-                  {!iAmReady
-                    ? 'Pick your own ball first.'
-                    : !everyonePicked
-                      ? `Waiting on ${waitingFor} more to pick.`
-                      : emptySeats > 0
-                        ? `Bots will play ${emptySeats} of the ${rules.players} balls.`
-                        : 'Who tees off first is drawn at the start.'}
-                </p>
-              </>
-            ) : (
-              <p className="text-center text-sm font-bold text-white/60">
-                {!iAmReady
-                  ? 'Pick a ball to be ready.'
-                  : !everyonePicked
-                    ? 'Waiting for everyone to pick…'
-                    : 'Waiting for the host…'}
+            {watching.length > 0 && (
+              <p className="flex items-start gap-1.5 rounded-xl bg-black/25 px-2 py-1.5 text-[10px] font-bold leading-snug text-white/45">
+                <Eye className="mt-0.5 h-3 w-3 shrink-0" /> Watching this one: {watching.join(', ')}
               </p>
             )}
-            <button
-              onClick={onRules}
-              className="mt-3 flex w-full flex-col items-center gap-1 rounded-2xl border border-white/20 bg-white/5 py-3 font-black text-white/60 transition-colors hover:bg-white/15"
-            >
-              <span className="flex items-center gap-2">
-                <ScrollText className="h-4 w-4" /> {isHost ? 'Round rules' : 'Round rules (host sets these)'}
-              </span>
-              <span className="px-3 text-[10px] font-semibold leading-tight text-white/45">{rulesSummary(rules)}</span>
-            </button>
-            <button
-              onClick={onPlayOffline}
-              className="mt-3 w-full rounded-2xl border border-white/20 bg-white/5 py-3 font-black text-white/60 transition-colors hover:bg-white/15"
-            >
-              Play offline
-            </button>
+          </RuleSection>
+
+          <div className="rounded-2xl bg-black/25 p-3 text-[11px] leading-relaxed text-white/50 short:hidden">
+            <p className="mb-1 font-black uppercase tracking-[0.15em] text-white/40">Always true</p>
+            <p>Every green is a rectangle or a half-round, and every one of them can be finished.</p>
+            <p className="mt-1">A ball rolling too fast rides straight over the cup. Weight matters as much as line.</p>
+            <p className="mt-1">Five over par and the ball is picked up, scored, and the round moves on.</p>
           </div>
         </div>
       </div>
-    </div>
+    </StageFrame>
   );
 }
 
@@ -1279,151 +1460,6 @@ function SettingsPanel({
             className="h-6 w-6 shrink-0 accent-emerald-400"
           />
         </label>
-      </div>
-    </div>
-  );
-}
-
-/**
- * The rules of the round, set once by the host and obeyed by everyone.
- *
- * Separate from Settings on purpose. Settings are this device's business ,
- * volume, whether the commentary shows , and nobody else is affected. These
- * change what the round *is*, so everyone has to be playing the same one: they
- * travel to a guest over the wire (see `packRules`) and its greens are built
- * from whatever arrives, not from anything stored locally.
- *
- * A guest can open this panel and read it, but every control is dead. Letting
- * them change a copy that gets overwritten the moment the host presses start
- * would be a lie about who is in charge.
- */
-function RulesPanel({
-  rules,
-  editable,
-  onChange,
-  onClose,
-}: {
-  rules: MatchRules;
-  editable: boolean;
-  onChange: (r: MatchRules) => void;
-  onClose: () => void;
-}) {
-  // Escape closes it too. See @shared/ui/dismiss.
-  useEscape(true, onClose);
-  return (
-    <div {...scrimProps(onClose)} className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm">
-      <div className="panel max-h-[88dvh] w-full max-w-md space-y-6 overflow-y-auto overscroll-contain rounded-[2rem] bg-slate-900/90 p-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h3 className="text-xl font-black">Round rules</h3>
-            <p className="text-[11px] font-semibold text-white/45">
-              {editable ? 'Applies to everyone. Takes effect next round.' : 'Set by the host.'}
-            </p>
-          </div>
-          <button onClick={onClose} aria-label="Close" className="rounded-xl p-2 hover:bg-white/10">
-            <ArrowLeft className="h-5 w-5" />
-          </button>
-        </div>
-
-        <div className="space-y-2">
-          <p className="text-sm font-bold">
-            Holes
-            <span className="block text-[11px] font-normal text-white/50">
-              Every one is built fresh from the round's seed. Cards run cumulatively; the lowest total takes
-              it.
-            </span>
-          </p>
-          <div className="grid grid-cols-3 gap-2">
-            {([1, 3, 6] as HoleCount[]).map((option) => (
-              <button
-                key={option}
-                disabled={!editable}
-                onClick={() => onChange({ ...rules, holes: option })}
-                className={`rounded-xl border px-2 py-2.5 text-xs font-black transition-colors disabled:opacity-50 ${
-                  rules.holes === option
-                    ? 'border-emerald-300 bg-emerald-400/20 text-emerald-200'
-                    : 'border-white/15 bg-white/5 text-white/60 hover:bg-white/10'
-                }`}
-              >
-                {option}
-                <span className="block text-[10px] font-bold text-white/40">
-                  {option === 1 ? 'one and done' : option === 3 ? 'a quick nine' : 'the full round'}
-                </span>
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="space-y-2">
-          <p className="text-sm font-bold">
-            Balls on the green
-            <span className="block text-[11px] font-normal text-white/50">
-              Anyone in the room beyond this watches. Empty balls are played by bots.
-            </span>
-          </p>
-          <div className="grid grid-cols-4 gap-2">
-            {PLAYER_CODES.map((option) => (
-              <button
-                key={option}
-                disabled={!editable}
-                onClick={() => onChange({ ...rules, players: option })}
-                className={`rounded-xl border px-2 py-2.5 text-xs font-black transition-colors disabled:opacity-50 ${
-                  rules.players === option
-                    ? 'border-emerald-300 bg-emerald-400/20 text-emerald-200'
-                    : 'border-white/15 bg-white/5 text-white/60 hover:bg-white/10'
-                }`}
-              >
-                {option}
-              </button>
-            ))}
-          </div>
-          <p className="text-[11px] text-white/40">
-            {rules.players === 1
-              ? 'Just you and the card. Beat par and take the coins.'
-              : 'The green widens a little for a crowd, so nobody tees off inside somebody else.'}
-          </p>
-        </div>
-
-        <label className="flex items-center justify-between gap-3">
-          <span className="text-sm font-bold">
-            Water and sand
-            <span className="block text-[11px] font-normal text-white/50">
-              Ponds cost a stroke and a drop on the bank; bunkers just kill the roll. Off leaves the blocks,
-              which are the ones worth banking off.
-            </span>
-          </span>
-          <input
-            type="checkbox"
-            disabled={!editable}
-            checked={rules.hazards}
-            onChange={(e) => onChange({ ...rules, hazards: e.target.checked })}
-            className="h-6 w-6 shrink-0 accent-emerald-400 disabled:opacity-50"
-          />
-        </label>
-
-        <label className="flex items-center justify-between gap-3">
-          <span className="text-sm font-bold">
-            Turn clock
-            <span className="block text-[11px] font-normal text-white/50">
-              A putt goes off on its own after twenty seconds, straight at the flag at a sane weight. Off lets
-              a turn take as long as it takes.
-            </span>
-          </span>
-          <input
-            type="checkbox"
-            disabled={!editable}
-            checked={rules.turnTimer}
-            onChange={(e) => onChange({ ...rules, turnTimer: e.target.checked })}
-            className="h-6 w-6 shrink-0 accent-emerald-400 disabled:opacity-50"
-          />
-        </label>
-
-        <div className="rounded-2xl bg-black/25 p-3 text-xs leading-relaxed text-white/50">
-          <p className="mb-1 font-black uppercase tracking-[0.15em] text-white/40">Always true</p>
-          <p>Every green is a rectangle or a half-round, and every one of them can be finished.</p>
-          <p className="mt-1">A ball rolling too fast rides straight over the cup. Weight matters as much as line.</p>
-          <p className="mt-1">Five over par and the ball is picked up, scored, and the round moves on.</p>
-        </div>
       </div>
     </div>
   );

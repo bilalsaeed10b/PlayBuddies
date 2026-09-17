@@ -45,6 +45,12 @@
     @apply bg-white/40 backdrop-blur-2xl border border-white/40 shadow-[0_8px_32px_rgba(0,0,0,0.15)];
   }
 
+  /* The surface the shared menu screens (games/_shared/menu) draw on. Same
+     frosted-glass recipe as `.glass-dark`, so the stages match the reef. */
+  .panel {
+    @apply bg-white/40 backdrop-blur-2xl border border-white/40 shadow-[0_8px_32px_rgba(0,0,0,0.15)];
+  }
+
   .text-glow-emerald {
     text-shadow: 0 0 20px rgba(16, 185, 129, 0.5);
   }
@@ -74,6 +80,11 @@
 
 .animate-float {
   animation: float 6s ease-in-out infinite;
+}
+
+/* The title screen's fish hold still for anyone who asked for less motion. */
+@media (prefers-reduced-motion: reduce) {
+  .animate-float { animation: none; }
 }
 
 .bubble {

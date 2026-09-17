@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import type { ReactNode } from 'react';
 import { scrimProps, useEscape } from '@shared/ui/dismiss';
 import {
   ArrowLeft,
   Blocks,
+  Bot,
   Check,
   Coins,
   Crown,
@@ -14,13 +16,20 @@ import {
   Play,
   ScrollText,
   Settings as SettingsIcon,
+  Swords,
   Users,
 } from 'lucide-react';
 import { askHostToEndGame, askToLeaveLobby, isNativeFullscreen, toggleFullscreen, useAutoFullscreen } from './fullscreen';
+import { MainMenu } from '@shared/menu/MainMenu';
+import { ActionBar, HostBadge, StageFrame } from '@shared/menu/StageFrame';
+import { ModeCard, OptionGroup, RuleSection, ToggleOption } from '@shared/menu/MatchControls';
+import { MENU_STAGE_FIELD, parseStage } from '@shared/menu/stage';
+import type { MenuStage } from '@shared/menu/stage';
+import type { MenuTheme } from '@shared/menu/theme';
 import { FREE_PAWNS, PAWNS, drawPawn } from './game/pawns';
 import useShortScreen from '@shared/ui/useShortScreen';
-import { DEFAULT_SIDES, TEAMS, layoutFor, wallsFor } from './game/rules';
-import type { SideMeta } from './game/rules';
+import { DEFAULT_SIDES, TEAMS, colOf, layoutFor, rowOf, teamOf } from './game/rules';
+import type { Layout, SideMeta } from './game/rules';
 import { balancedTeams, orderedRoomPlayers, teamSeatOrder } from './game/roomRoster';
 import type { RoomPlayer as LobbyPerson, Team } from './game/roomRoster';
 import { TIERS } from './engine/ai';
@@ -29,7 +38,7 @@ import { GameWallet, reportResult } from './platform/wallet';
 import MatchView from './screens/MatchView';
 import type { MatchConfig } from './screens/MatchView';
 import type { Seat } from './engine/QuoridorEngine';
-import { DEFAULT_RULES, PLAYER_CODES, packRules, unpackRules } from './types/game';
+import { DEFAULT_RULES, PLAYER_CODES, TURN_SECONDS, packRules, unpackRules } from './types/game';
 import { createLogger } from '@shared/log/logger';
 import type { GameSettings, MatchRules, PlayerCount } from './types/game';
 
@@ -66,29 +75,92 @@ const DEFAULT_SETTINGS: GameSettings = {
   hints: true,
 };
 
-type View = 'menu' | 'pick' | 'room' | 'game' | 'offline_menu';
+/** Everything before the match is one of the shared menu stages; see `stage` in App. */
+type View = 'shell' | 'game';
+
+/**
+ * Quoridor is daylight on a table: pale paper, warm wood, amber ink. `light`
+ * is what tells the shared screens to put dark text on this game's own pale
+ * `.panel`, and amber-700 rather than the brighter 500 is what keeps their
+ * small uppercase labels legible on it.
+ */
+const THEME: MenuTheme = {
+  tone: 'light',
+  primary: 'bg-amber-400 text-slate-900',
+  selected: 'border-amber-400 bg-amber-400/20',
+  accent: 'text-amber-700',
+};
+
+/**
+ * The three boards this engine actually has.
+ *
+ * Each one is a `players` + `teams` pair and nothing more, because that pair
+ * is all a Quoridor match is made of , `layoutFor` turns it into a board size,
+ * a set of starting edges and a wall allowance, and every number shown on a
+ * mode card below is read back out of that rather than typed in again.
+ */
+type ModeId = 'duel' | 'ffa' | 'teams';
+
+const MODES: {
+  id: ModeId;
+  players: PlayerCount;
+  teams: boolean;
+  title: string;
+  description: string;
+}[] = [
+  {
+    id: 'duel',
+    players: 2,
+    teams: false,
+    title: 'Classic Duel',
+    description: 'Two pawns, opposite edges, ten walls apiece. Enough to build a real maze between you.',
+  },
+  {
+    id: 'ffa',
+    players: 4,
+    teams: false,
+    title: 'Four-Way Free-for-All',
+    description: 'A pawn on every edge and nobody on your side. Five walls each, so every one has to matter.',
+  },
+  {
+    id: 'teams',
+    players: 4,
+    teams: true,
+    title: '2v2 Teams',
+    description: 'Two pairs on a wider board, each pair running the same way. Either partner crossing takes it for both.',
+  },
+];
+
+const modeOf = (rules: MatchRules): ModeId => (rules.players === 2 ? 'duel' : rules.teams ? 'teams' : 'ffa');
+
+/** Which edge a seat is running at, for a roster line that says where it is going. */
+const OPPOSITE = { south: 'north', north: 'south', west: 'east', east: 'west' } as const;
+
+/** The lobby document, as this game reads it. Only the host writes anything but its own slot. */
+interface LobbyDoc {
+  hostId: string;
+  players: Record<string, LobbyPerson>;
+  matchStarted?: boolean;
+  matchRules?: number;
+  quoridorTeams?: Record<string, number>;
+  menuStage?: string;
+}
 
 const randomSeed = () => (Math.random() * 0x7fffffff) | 0;
-
-
 
 export default function App() {
   const [handoff] = useState(readHandoff);
   const online = Boolean(handoff.room);
 
-  const [view, setView] = useState<View>(online ? 'room' : 'menu');
+  const [view, setView] = useState<View>('shell');
   useAutoFullscreen(online || view === 'game');
+  /** The stage for a flow this device runs alone. Online, the lobby's `menuStage` is the one that counts. */
+  const [localStage, setLocalStage] = useState<MenuStage>('menu');
   const [showSettings, setShowSettings] = useState(false);
-  const [showRules, setShowRules] = useState(false);
+  const [showGuide, setShowGuide] = useState(false);
   const [uid, setUid] = useState<string | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
-  const [lobby, setLobby] = useState<{
-    hostId: string;
-    players: Record<string, LobbyPerson>;
-    matchStarted?: boolean;
-    matchRules?: number;
-    quoridorTeams?: Record<string, number>;
-  } | null>(null);
+  const [lobby, setLobby] = useState<LobbyDoc | null>(null);
   const [lobbyError, setLobbyError] = useState<string | null>(null);
 
   /** Offline setup: how many people are at this device, and as what. */
@@ -98,13 +170,15 @@ export default function App() {
    * The player deliberately asked for an offline game.
    *
    * Being signed into a lobby is not the same as wanting to play in it, and
-   * the offline menu is reachable from *inside* the room. Without this flag the
+   * the offline flow is reachable from *inside* the room. Without this flag the
    * branch below would rebuild the online config for it anyway , one local
    * seat rather than two, so the second player at the keyboard drove nothing,
    * with the whole Firebase path still running underneath a game that has no
    * peers to talk to.
    */
   const [offlineMatch, setOfflineMatch] = useState(false);
+  /** Solo, couch, or a game opened on its own: the flow lives on this device alone. */
+  const local = !online || offlineMatch;
   const [aiLevel, setAiLevel] = useState(1);
 
   /**
@@ -141,9 +215,10 @@ export default function App() {
    * How the next game is played. The host's copy is the one that counts.
    *
    * Remembered between games so a host who prefers a four-hander does not
-   * re-set it every round, but never merged with anything a guest has stored:
-   * a guest's copy is only ever a placeholder until the host's rules arrive on
-   * the wire.
+   * re-set it every round. A guest's copy is a placeholder until the host
+   * reaches the match setup page, at which point the snapshot handler below
+   * replaces it with the host's , which is what lets a guest watch the board
+   * being set rather than find out what they are playing at the first move.
    */
   const [rules, setRules] = useState<MatchRules>(() => {
     const saved = localStorage.getItem('quoridor_rules');
@@ -208,13 +283,7 @@ export default function App() {
             setLobbyError('That lobby is gone.');
             return;
           }
-          const data = snap.data() as {
-            hostId: string;
-            players: Record<string, LobbyPerson>;
-            matchStarted?: boolean;
-            matchRules?: number;
-            quoridorTeams?: Record<string, number>;
-          };
+          const data = snap.data() as LobbyDoc;
           if (!data.players?.[uid]) {
             setLobbyError('You are not in this lobby.');
             return;
@@ -227,9 +296,28 @@ export default function App() {
             players: Object.keys(data.players ?? {}).length,
             matchStarted: Boolean(data.matchStarted),
             matchRules: data.matchRules,
+            menuStage: data.menuStage,
             quoridorTeams: data.quoridorTeams,
           });
           setLobby(data);
+
+          // The host's rules, live, on the one channel every client already
+          // has open. Only from the match setup page onward: `matchRules` is
+          // one field of a lobby document that outlives a game, so the number
+          // sitting in it before the host gets there can be last night's
+          // Quoridor match , or another game's packing of something else
+          // entirely. Compared against `data.hostId` rather than the `isHost`
+          // variable, which still describes the *previous* snapshot inside
+          // this callback.
+          const roomStage = parseStage(data.menuStage);
+          if (
+            data.hostId !== uid &&
+            typeof data.matchRules === 'number' &&
+            (roomStage === 'modes' || data.matchStarted)
+          ) {
+            const theirs = unpackRules(data.matchRules);
+            setRules((current) => (packRules(current) === data.matchRules ? current : theirs));
+          }
         },
         () => setLobbyError('Lost contact with the lobby.'),
       );
@@ -244,8 +332,8 @@ export default function App() {
    * Who is playing, and in what order.
    *
    * Keep all four possible players here. A guest does not know the host's
-   * player count until the start packet arrives, so slicing by the guest's
-   * saved local rules would turn real players into bots before that packet.
+   * player count until the host publishes it, so slicing by the guest's saved
+   * local rules would turn real players into bots before that.
    * `seatsFor(hostCount)` below is the only place that chooses active seats.
    */
   const people = useMemo(() => {
@@ -272,13 +360,16 @@ export default function App() {
    * changes. That goes both ways: if four people picked Quoridor and two leave
    * before launch, the next match has to be a duel, not a four-seat board
    * waiting on ghosts from the old roster.
+   *
+   * Skipped while the host is playing an offline game inside the room: that
+   * board is this device's alone, and the room's size has no say in it.
    */
   useEffect(() => {
-    if (!online || !isHost || !lobby) return;
+    if (!online || offlineMatch || !isHost || !lobby) return;
     const roomSize = Object.keys(lobby.players ?? {}).length;
     const fits = PLAYER_CODES.find((n) => n >= roomSize) ?? PLAYER_CODES[PLAYER_CODES.length - 1];
     if (fits !== rules.players) setRules((r) => ({ ...r, players: fits }));
-  }, [online, isHost, lobby, rules.players]);
+  }, [online, offlineMatch, isHost, lobby, rules.players]);
 
   useEffect(() => {
     // An offline game is the player's own; the room does not get to start or
@@ -286,7 +377,7 @@ export default function App() {
     // bouncing a couch game straight back to the room.
     if (!online || offlineMatch) return;
     if (lobby?.matchStarted && mySkin !== undefined && mySkin !== null) setView('game');
-    else if (view === 'game') setView('room');
+    else if (view === 'game') setView('shell');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lobby?.matchStarted, mySkin, online, offlineMatch]);
 
@@ -297,12 +388,12 @@ export default function App() {
    * who moves first, and the seed exists so a document left over from the last
    * game is obviously stale rather than replayable.
    *
-   * They are rolled at the door, on the way *out* of a game, and never while
-   * one is running: rolling them from an effect keyed on the view fires one
-   * render after the board has already mounted, so the engine keeps the toss
-   * it was built with while the start packet goes out carrying a different
-   * one , and the guest then builds a game whose turn order disagrees with
-   * every move that arrives.
+   * They are rolled at the door: on the way *out* of a game, and once more as
+   * a local game is started, never while one is running. Rolling them from an
+   * effect keyed on the view fires one render after the board has already
+   * mounted, so the engine keeps the toss it was built with while the start
+   * packet goes out carrying a different one , and the guest then builds a
+   * game whose turn order disagrees with every move that arrives.
    */
   const [session, setSession] = useState(() => ({
     seed: randomSeed(),
@@ -325,10 +416,9 @@ export default function App() {
     [owned, coins],
   );
 
-  const pickOnline = useCallback(
+  const savePawn = useCallback(
     async (index: number) => {
       if (!uid) return;
-      if (!owned.includes(index) && !buy(index)) return;
       try {
         // Already loaded by the session effect on this path; the import cache
         // makes this a lookup rather than a second fetch.
@@ -338,7 +428,25 @@ export default function App() {
         console.error('Could not save your pawn', e);
       }
     },
-    [uid, owned, buy, handoff.room],
+    [uid, handoff.room],
+  );
+
+  /**
+   * One person's own pawn, bought first if it has to be.
+   *
+   * Online that is this player's own lobby slot , the only field a guest is
+   * allowed to write , and offline it is whichever seat at this device is
+   * choosing. Returns whether the pick actually landed, so the couch flow
+   * knows whether to pass the device to the next player.
+   */
+  const choosePawn = useCallback(
+    (key: string, index: number) => {
+      if (!owned.includes(index) && !buy(index)) return false;
+      if (local) setSeatSkin((s) => ({ ...s, [Number(key)]: index }));
+      else void savePawn(index);
+      return true;
+    },
+    [owned, buy, local, savePawn],
   );
 
   const assignTeam = useCallback(
@@ -391,9 +499,36 @@ export default function App() {
     reportResult(won);
   }, []);
 
+  /** Host only: any room-wide change, from moving the flow on to publishing the rules. */
+  const writeLobby = useCallback(
+    async (fields: Record<string, string | number | boolean>) => {
+      if (!online || !isHost) return;
+      try {
+        const { db, doc, updateDoc } = await import('./firebase');
+        await updateDoc(doc(db, 'lobbies', handoff.room), fields);
+      } catch (e) {
+        console.error('Could not update the room', e);
+      }
+    },
+    [online, isHost, handoff.room],
+  );
+
+  const remoteStage = parseStage(lobby?.menuStage);
+
   /**
-   * Leaving the game, online: back to the room, and, for the host, the
-   * go-signal comes down with it.
+   * The rules go to the room the moment the host changes them on the setup
+   * page, not only with the start signal, so every guest's locked copy of that
+   * page shows what the host is choosing while they choose it.
+   */
+  useEffect(() => {
+    if (local || !isHost || remoteStage !== 'modes' || !lobby) return;
+    const packed = packRules(rules);
+    if (lobby.matchRules !== packed) void writeLobby({ matchRules: packed });
+  }, [local, isHost, remoteStage, lobby, rules, writeLobby]);
+
+  /**
+   * Leaving the game: back to the setup page for a rematch, and, for the host
+   * online, the go-signal comes down with it.
    *
    * `matchStarted` left set breaks a rematch two ways: pressing Start again
    * does nothing, because true to true is not a change the effect above reacts
@@ -402,14 +537,15 @@ export default function App() {
    * quitting mid-game, which is what the platform's own End Game does.
    */
   const leaveMatch = useCallback(() => {
-    setOfflineMatch(false);
-    setView(online ? 'room' : 'menu');
+    setView('shell');
     rollSession();
+    if (offlineMatch) {
+      setLocalStage('modes');
+      return;
+    }
     if (!online || !isHost) return;
-    void import('./firebase')
-      .then(({ db, doc, updateDoc }) => updateDoc(doc(db, 'lobbies', handoff.room), { matchStarted: false }))
-      .catch((e) => console.error('Could not reset the match flag', e));
-  }, [online, isHost, handoff.room, rollSession]);
+    void writeLobby({ matchStarted: false });
+  }, [online, isHost, offlineMatch, rollSession, writeLobby]);
 
   // -- into the game ----------------------------------------------------------
 
@@ -451,8 +587,8 @@ export default function App() {
 
     // Taken as a function of the player count rather than read off `rules`,
     // because a guest's `rules` is its own saved copy until the host's reach
-    // it over the wire -- and the seat list has to be the length the *host*
-    // decided or the board has seats nobody is sitting in.
+    // it -- and the seat list has to be the length the *host* decided or the
+    // board has seats nobody is sitting in.
     const seatsFor = (count: PlayerCount) => {
       const seats: Seat[] = [];
       const localSeats: number[] = [];
@@ -550,92 +686,327 @@ export default function App() {
       localSeats,
       aiLevel,
       seed: session.seed,
-      first: session.first,
+      // A mode chosen after the toss was drawn can be smaller than the toss:
+      // four seats down to two leaves `first` pointing at a seat that no
+      // longer exists, and a board waiting on a pawn nobody can move.
+      first: Math.min(session.first, rules.players - 1),
       rules,
     };
   }
 
-  // -- shells -----------------------------------------------------------------
+  // -- the pre-match flow -----------------------------------------------------
 
   const openOffline = (locals: number) => {
     audioService.unlock();
-    rollSession();
     setOfflineMatch(true);
-    setSeatCount(Math.min(locals, rules.players));
+    setSeatCount(locals);
     setSeatSkin({});
-    setView('pick');
+    setLocalStage('customize');
   };
+
+  const closeOffline = () => {
+    setOfflineMatch(false);
+    setLocalStage('menu');
+  };
+
+  const stage: MenuStage = local ? localStage : remoteStage;
+  const goStage = (next: MenuStage) => {
+    if (local) {
+      setLocalStage(next);
+      return;
+    }
+    // The rules travel with the move onto the setup page. Published a moment
+    // later instead, every guest would spend that moment reading whatever
+    // number the last game in this room left behind.
+    void writeLobby(
+      next === 'modes'
+        ? { [MENU_STAGE_FIELD]: next, matchRules: packRules(rules) }
+        : { [MENU_STAGE_FIELD]: next },
+    );
+  };
+
+  const hostName = lobby ? lobby.players?.[lobby.hostId]?.displayName : undefined;
+  const fullscreen = () => toggleFullscreen(document.documentElement, !isNativeFullscreen());
+
+  const coinChip = (
+    <div className="panel flex items-center gap-1.5 rounded-2xl px-3 py-2.5 font-bold text-amber-600 short:py-2">
+      <Coins className="h-4 w-4" /> {coins}
+    </div>
+  );
+  const toolButton = (label: string, icon: ReactNode, onClick: () => void, extra = '') => (
+    <button onClick={onClick} aria-label={label} title={label} className={`panel rounded-2xl p-2.5 short:p-2 ${extra}`}>
+      {icon}
+    </button>
+  );
+  const guideButton = (extra = '') =>
+    toolButton('How to play', <ScrollText className="h-5 w-5 text-amber-600" />, () => setShowGuide(true), extra);
+  const stageToolbar = (
+    <>
+      <span className="hidden sm:block">{coinChip}</span>
+      {guideButton('hidden sm:block')}
+      {toolButton('Full screen', <Maximize2 className="h-5 w-5" />, fullscreen)}
+      {toolButton('Settings', <SettingsIcon className="h-5 w-5" />, () => setShowSettings(true))}
+      {!local &&
+        (isHost
+          ? toolButton('End the game for everyone', <LogOut className="h-5 w-5" />, askHostToEndGame)
+          : toolButton('Leave lobby', <LogOut className="h-5 w-5" />, askToLeaveLobby))}
+    </>
+  );
+
+  let screen: ReactNode;
+  if (!local && lobbyError) {
+    screen = (
+      <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center">
+        <h2 className="text-2xl font-black">{lobbyError}</h2>
+        <p className="text-sm text-slate-500">Head back to the PlayBuddies lobby and try again.</p>
+      </div>
+    );
+  } else if (!local && (!authChecked || !uid || !lobby)) {
+    screen = (
+      <div className="flex h-full flex-col items-center justify-center gap-3">
+        <Loader2 className="h-10 w-10 animate-spin text-amber-500" />
+        <p className="font-bold text-slate-600">Pulling up a chair…</p>
+      </div>
+    );
+  } else if (stage === 'menu') {
+    screen = (
+      <MainMenu
+        theme={THEME}
+        online={online}
+        isHost={isHost}
+        hostName={hostName}
+        onSingle={() => openOffline(1)}
+        onMulti={online && !handoff.solo ? () => goStage('customize') : undefined}
+        onSettings={() => setShowSettings(true)}
+        singleHint="You against the bots"
+        multiHint={`Everyone in this room · ${people.length} at the board`}
+        toolbar={
+          <>
+            {coinChip}
+            {guideButton()}
+            {toolButton('Full screen', <Maximize2 className="h-5 w-5" />, fullscreen)}
+            {toolButton('Leave', <LogOut className="h-5 w-5" />, askToLeaveLobby)}
+          </>
+        }
+        title={
+          <>
+            <div className="mb-4 inline-block rounded-3xl bg-amber-400/25 p-4 short:hidden">
+              <Grid3x3 className="h-12 w-12 text-amber-600" />
+            </div>
+            <h1 className="text-4xl font-black leading-none tracking-tighter sm:text-6xl short:text-3xl">
+              QUORI<span className="text-amber-500">DOR</span>
+            </h1>
+            <p className="mt-2 text-[11px] font-bold uppercase tracking-[0.3em] text-slate-500">
+              Run the gauntlet, build the maze
+            </p>
+          </>
+        }
+        secondary={
+          <button
+            onClick={() => openOffline(2)}
+            disabled={online && !isHost}
+            className="w-full rounded-2xl border border-black/10 bg-white/60 py-2.5 text-sm font-black text-slate-600 transition-colors hover:bg-white disabled:opacity-40 short:py-1.5"
+          >
+            Two players, one device
+            <span className="block text-[10px] font-bold text-slate-400">
+              Turns alternate. Whoever is up taps a square, or drops a wall.
+            </span>
+          </button>
+        }
+        footer={
+          <p className="max-w-md text-center text-[11px] leading-relaxed text-slate-500 short:hidden">
+            One step a turn, up, down, left or right, or spend a wall instead.
+            {!online && ' Playing with friends? Start a lobby on PlayBuddies and pick this game.'}
+          </p>
+        }
+      />
+    );
+  } else if (stage === 'customize') {
+    const slots: PawnSlot[] = local
+      ? Array.from({ length: seatCount }, (_, i) => ({
+          key: String(i),
+          label: seatCount > 1 ? `Player ${i + 1}` : 'You',
+          skin: seatSkin[i],
+          editable: true,
+        }))
+      : people.map((p) => ({
+          key: p.uid,
+          label: p.displayName,
+          skin: p.skin,
+          editable: p.uid === uid,
+          isHost: p.uid === lobby?.hostId,
+        }));
+    // Anyone past the four seats still gets to choose one. The board only
+    // opens for a player the lobby holds a pawn for, and a watcher has to be
+    // able to watch.
+    if (!local && uid && !people.some((p) => p.uid === uid)) {
+      slots.push({
+        key: uid,
+        label: handoff.displayName || 'You',
+        skin: mySkin,
+        editable: true,
+        watching: true,
+      });
+    }
+    screen = (
+      <CustomizeScreen
+        slots={slots}
+        owned={owned}
+        coins={coins}
+        toolbar={stageToolbar}
+        local={local}
+        leads={local || isHost}
+        hostName={hostName}
+        onPick={choosePawn}
+        onBack={local ? closeOffline : isHost ? () => goStage('menu') : undefined}
+        onNext={() => goStage('modes')}
+      />
+    );
+  } else {
+    const layout = layoutFor(rules);
+    const botLabel = TIERS[(local ? aiLevel : rules.aiLevel ?? 3)].label;
+    const seats: SeatRow[] = [];
+    const watchers: SeatRow[] = [];
+
+    if (local) {
+      for (let i = 0; i < rules.players; i++) {
+        seats.push(
+          i < seatCount
+            ? {
+                key: `seat-${i}`,
+                seat: i,
+                name: seatCount > 1 ? `Player ${i + 1}` : 'You',
+                skin: seatSkin[i],
+                you: true,
+              }
+            : {
+                key: `bot-${i}`,
+                seat: i,
+                name: rules.players > 2 ? `${botLabel} ${i}` : `${botLabel} Bot`,
+                bot: true,
+              },
+        );
+      }
+    } else {
+      // The same seating the board will build: in a pairs game the roster is
+      // the team order, so what is on screen here is what sits where.
+      const crew = layout.teams ? teamSeatOrder(people, teamAssignments) : people;
+      for (let i = 0; i < rules.players; i++) {
+        const person = crew[i];
+        seats.push(
+          person
+            ? {
+                key: person.uid,
+                uid: person.uid,
+                seat: i,
+                name: person.displayName,
+                skin: person.skin,
+                you: person.uid === uid,
+                host: person.uid === lobby?.hostId,
+              }
+            : { key: `bot-${i}`, seat: i, name: `${botLabel} Bot`, bot: true },
+        );
+      }
+      const seated = new Set(seats.map((s) => s.uid).filter(Boolean));
+      for (const p of people) {
+        if (!seated.has(p.uid)) {
+          watchers.push({ key: p.uid, uid: p.uid, seat: -1, name: p.displayName, skin: p.skin, you: p.uid === uid });
+        }
+      }
+    }
+
+    const roomSize = lobby ? Object.keys(lobby.players ?? {}).length : 0;
+    const iAmReady = mySkin !== undefined && mySkin !== null;
+    const everyonePicked = people.every((p) => p.skin !== undefined && p.skin !== null);
+    // Let the host's room-size effect finish raising a stale two-player
+    // setting before Start can publish the match flag.
+    const hasSeatForEveryone = people.length <= rules.players;
+    const waitingFor = people.filter((p) => p.skin === undefined || p.skin === null).length;
+    const bots = seats.filter((s) => s.bot).length;
+    /** Somebody stepped out of a match the rest of the room is still playing. */
+    const running = Boolean(!local && lobby?.matchStarted);
+
+    screen = (
+      <ModesScreen
+        rules={rules}
+        locked={!local && !isHost}
+        hostName={hostName}
+        toolbar={stageToolbar}
+        seats={seats}
+        watchers={watchers}
+        // Online the mode follows the room, so a card the room cannot seat is
+        // shown with the reason rather than quietly snapped back after a tap.
+        fits={local ? undefined : PLAYER_CODES.find((n) => n >= roomSize) ?? PLAYER_CODES[PLAYER_CODES.length - 1]}
+        roomSize={roomSize}
+        onRules={setRules}
+        onAssignTeam={!local && isHost && layout.teams && people.length > 2 ? assignTeam : undefined}
+        botLevel={local ? aiLevel : rules.aiLevel ?? 3}
+        onBotLevel={
+          local
+            ? setAiLevel
+            : isHost
+              ? (level: number) => setRules((r) => ({ ...r, aiLevel: level }))
+              : undefined
+        }
+        showBots={!local || bots > 0}
+        onBack={local || isHost ? () => goStage('customize') : undefined}
+        startLabel={running ? 'Rejoin match' : 'Place pawns'}
+        onStart={
+          running
+            ? iAmReady
+              ? () => {
+                  audioService.unlock();
+                  setView('game');
+                }
+              : undefined
+            : local
+              ? () => {
+                  audioService.unlock();
+                  rollSession();
+                  setView('game');
+                }
+              : isHost
+                ? () => {
+                    audioService.unlock();
+                    void startMatch();
+                  }
+                : undefined
+        }
+        startDisabled={!running && !local && !(iAmReady && everyonePicked && hasSeatForEveryone)}
+        startNote={
+          running
+            ? 'The match is already running. A bot is playing your pawn until you are back.'
+            : local
+              ? bots > 0
+                ? `Bots play ${bots} of the ${rules.players} pawns. Who moves first is drawn at the start.`
+                : 'Who moves first is drawn at the start.'
+              : !isHost
+                ? iAmReady
+                  ? `${hostName || 'The host'} starts the game when everyone is set.`
+                  : 'You have no pawn yet. The host can step back to the loadout.'
+                : !iAmReady
+                  ? 'Pick your own pawn first, back on the loadout page.'
+                  : !hasSeatForEveryone
+                    ? 'Preparing four player seats…'
+                    : !everyonePicked
+                      ? `Waiting on ${waitingFor} more to pick a pawn.`
+                      : bots > 0
+                        ? `Bots play ${bots} of the ${rules.players} pawns. Who moves first is drawn at the start.`
+                        : 'Who moves first is drawn at the start.'
+        }
+      />
+    );
+  }
 
   return (
     <div className="relative h-[100dvh] w-full overflow-hidden">
-      {(view === 'menu' || view === 'offline_menu') && (
-        <Menu
-          coins={coins}
-          aiLevel={aiLevel}
-          onAiLevel={setAiLevel}
-          rules={rules}
-          onSolo={() => openOffline(1)}
-          onCouch={() => openOffline(2)}
-          onSettings={() => setShowSettings(true)}
-          onRules={() => setShowRules(true)}
-          onFullscreen={() => toggleFullscreen(document.documentElement, !isNativeFullscreen())}
-          onExit={askToLeaveLobby}
-          onBack={view === 'offline_menu' ? () => setView('room') : undefined}
-        />
-      )}
-
-      {view === 'pick' && (
-        <OfflinePick
-          seatCount={seatCount}
-          owned={owned}
-          coins={coins}
-          onBack={() => setView(online ? 'offline_menu' : 'menu')}
-          onBuy={buy}
-          onDone={(picks) => {
-            setSeatSkin(picks);
-            setView('game');
-          }}
-        />
-      )}
-
-      {view === 'room' && (
-        <RoomScreen
-          ready={authChecked}
-          error={lobbyError}
-          uid={uid}
-          people={people}
-          hostId={lobby?.hostId ?? null}
-          mine={mySkin}
-          owned={owned}
-          coins={coins}
-          isHost={isHost}
-          rules={rules}
-          teamAssignments={teamAssignments}
-          onPick={pickOnline}
-          onAssignTeam={assignTeam}
-          onStart={startMatch}
-          onSettings={() => setShowSettings(true)}
-          onRules={() => setShowRules(true)}
-          onFullscreen={() => toggleFullscreen(document.documentElement, !isNativeFullscreen())}
-          onPlayOffline={() => {
-            audioService.unlock();
-            setView('offline_menu');
-          }}
-        />
-      )}
+      {screen}
 
       {showSettings && (
         <SettingsPanel settings={settings} onChange={setSettings} onClose={() => setShowSettings(false)} />
       )}
 
-      {showRules && (
-        <RulesPanel
-          rules={rules}
-          editable={!online || isHost}
-          onChange={setRules}
-          onClose={() => setShowRules(false)}
-        />
-      )}
+      {showGuide && <GuidePanel onClose={() => setShowGuide(false)} />}
     </div>
   );
 }
@@ -647,7 +1018,7 @@ function rulesSummary(rules: MatchRules): string {
     rules.players === 2 ? 'Two players' : layout.teams ? 'Two against two' : 'Four-way free-for-all',
     `${layout.walls} walls each`,
     `${layout.size}×${layout.size} board`,
-    rules.turnTimer ? '30s turns' : 'no clock',
+    rules.turnTimer ? `${TURN_SECONDS}s turns` : 'no clock',
   ].join(' · ');
 }
 
@@ -657,144 +1028,515 @@ function otherPawn(playerChoice: number) {
   return options[Math.floor(Math.random() * options.length)] ?? 0;
 }
 
-// -- pieces -------------------------------------------------------------------
+// -- stage 2 ------------------------------------------------------------------
 
-function Menu({
+/** One person choosing a pawn: an online player, or a seat at this device. */
+interface PawnSlot {
+  key: string;
+  label: string;
+  skin: number | null | undefined;
+  /** Whether this device picks for this slot. */
+  editable: boolean;
+  isHost?: boolean;
+  /** Past the four seats: still picks a pawn, but is not holding anyone up. */
+  watching?: boolean;
+}
+
+/**
+ * Stage 2: everybody's pawn.
+ *
+ * The same screen online and offline. Online, each player writes only their
+ * own lobby slot and watches everyone else's appear in the roster strip; on a
+ * couch, every seat is this device's to pick for, one at a time.
+ */
+function CustomizeScreen({
+  slots,
+  owned,
   coins,
-  aiLevel,
-  onAiLevel,
-  rules,
-  onSolo,
-  onCouch,
-  onSettings,
-  onRules,
-  onFullscreen,
-  onExit,
+  toolbar,
+  local,
+  leads,
+  hostName,
+  onPick,
   onBack,
+  onNext,
 }: {
+  slots: PawnSlot[];
+  owned: number[];
   coins: number;
-  aiLevel: number;
-  onAiLevel: (n: number) => void;
-  rules: MatchRules;
-  onSolo: () => void;
-  onCouch: () => void;
-  onSettings: () => void;
-  onRules: () => void;
-  onFullscreen: () => void;
-  onExit: () => void;
+  toolbar: ReactNode;
+  local: boolean;
+  /** This device moves the flow on: offline, or the host. */
+  leads: boolean;
+  hostName?: string;
+  onPick: (key: string, index: number) => boolean;
   onBack?: () => void;
+  onNext: () => void;
 }) {
+  const mine = slots.filter((s) => s.editable);
+  const [activeKey, setActiveKey] = useState(() => mine[0]?.key ?? '');
+  const active = mine.find((s) => s.key === activeKey) ?? mine[0];
+
+  const picked = (s: PawnSlot) => s.skin !== undefined && s.skin !== null;
+  const others = slots.filter((s) => s !== active);
+  const pickedBy = useMemo(() => {
+    const map: Record<number, string[]> = {};
+    for (const s of others) if (picked(s)) (map[s.skin as number] ??= []).push(s.label);
+    return map;
+  }, [others]);
+
+  const waiting = slots.filter((s) => !picked(s) && !s.watching).length;
+  const iAmReady = mine.every(picked);
+
+  const pick = (index: number) => {
+    if (!active || !onPick(active.key, index)) return;
+    // A couch pair passes the device along: the next seat still without a pawn
+    // becomes the one being chosen for.
+    const next = mine.find((s) => s.key !== active.key && !picked(s));
+    if (next) setActiveKey(next.key);
+  };
+
   return (
-    <div className="flex h-full flex-col gap-4 overflow-y-auto overscroll-contain p-6">
-      {/* A real row, not an overlay -- so a long title on a short screen pushes
-          the content down instead of running under these buttons. */}
-      <div className="flex shrink-0 items-start justify-between gap-2">
-        <div>
-          {onBack && (
-            <button onClick={onBack} aria-label="Back" className="panel rounded-2xl p-3">
-              <ArrowLeft className="h-5 w-5" />
-            </button>
-          )}
-        </div>
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          <div className="panel flex items-center gap-2 rounded-2xl px-3 py-2.5 font-bold text-amber-600">
-            <Coins className="h-4 w-4" /> {coins}
-          </div>
-          <button onClick={onRules} className="panel flex items-center gap-2 rounded-2xl px-3 py-2.5 font-bold text-slate-600">
-            <ScrollText className="h-4 w-4" /> Rules
-          </button>
-          <button onClick={onFullscreen} aria-label="Full screen" className="panel rounded-2xl p-2.5">
-            <Maximize2 className="h-5 w-5" />
-          </button>
-          <button onClick={onSettings} aria-label="Settings" className="panel rounded-2xl p-2.5">
-            <SettingsIcon className="h-5 w-5" />
-          </button>
-          <button onClick={onExit} aria-label="Leave" className="panel rounded-2xl p-2.5">
-            <LogOut className="h-5 w-5" />
-          </button>
-        </div>
-      </div>
-
-      <div className="flex flex-1 flex-col items-center justify-center gap-6">
-      <div className="text-center">
-        <div className="mb-4 inline-block rounded-3xl bg-amber-400/25 p-4">
-          <Grid3x3 className="h-12 w-12 text-amber-600" />
-        </div>
-        <h1 className="text-4xl font-black leading-none tracking-tighter sm:text-6xl">
-          QUORI<span className="text-amber-500">DOR</span>
-        </h1>
-        <p className="mt-2 text-[11px] font-bold uppercase tracking-[0.3em] text-slate-500">
-          Run the gauntlet, build the maze
-        </p>
-      </div>
-
-      <div className="panel w-full max-w-md space-y-5 rounded-[2rem] p-6">
-        <button
-          onClick={onSolo}
-          className="flex w-full items-center justify-center gap-2 rounded-2xl bg-amber-400 py-4 text-lg font-black text-slate-900 transition-transform active:scale-95"
-        >
-          <Play className="h-5 w-5 fill-current" /> Solo , you against the bot
-        </button>
-
-        <div className="space-y-2">
-          <p className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-400">Bot rank</p>
-          <div className="grid grid-cols-2 gap-1 rounded-xl bg-slate-900/5 p-1 sm:grid-cols-3">
-            {TIERS.map((tier, i) => (
+    <StageFrame
+      theme={THEME}
+      step={2}
+      title={active?.watching ? 'Pick a pawn to watch with' : 'Pick your pawn'}
+      subtitle={`${slots.length} at the board · shape only, the seat is the colour`}
+      onBack={onBack}
+      toolbar={toolbar}
+      status={
+        !leads ? (
+          <HostBadge theme={THEME}>{hostName || 'The host'} sets the board up when everyone is ready</HostBadge>
+        ) : undefined
+      }
+      footer={
+        <ActionBar
+          theme={THEME}
+          label="Next: Board setup"
+          onAction={leads ? onNext : undefined}
+          disabled={waiting > 0}
+          note={
+            leads
+              ? waiting > 0
+                ? local
+                  ? 'Every player at this device needs a pawn.'
+                  : `Waiting on ${waiting} more to pick a pawn.`
+                : 'Everyone is set. Next, the board and the rules.'
+              : iAmReady
+                ? `Ready. Waiting for ${hostName || 'the host'} to set the board...`
+                : 'Pick a pawn to be ready.'
+          }
+        />
+      }
+    >
+      <div className="flex h-full flex-col gap-3 short:gap-2">
+        <div className="flex shrink-0 gap-2 overflow-x-auto overscroll-contain pb-1">
+          {slots.map((s) => {
+            const selectable = s.editable && mine.length > 1;
+            return (
               <button
-                key={tier.label}
-                onClick={() => onAiLevel(i)}
-                className={`min-w-0 rounded-lg px-1 py-2 text-[10px] font-black uppercase tracking-wide transition-colors ${
-                  aiLevel === i ? 'bg-slate-900 text-white' : 'text-slate-500'
+                key={s.key}
+                type="button"
+                disabled={!selectable}
+                onClick={() => setActiveKey(s.key)}
+                className={`flex shrink-0 items-center gap-2 rounded-2xl border px-2 py-1.5 text-left disabled:cursor-default ${
+                  s === active && mine.length > 1 ? THEME.selected : 'border-black/10 bg-white/60'
                 }`}
               >
-                {tier.label}
+                <span className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-xl bg-white/70">
+                  {picked(s) ? (
+                    <Portrait index={s.skin as number} size={34} />
+                  ) : (
+                    <Blocks className="h-4 w-4 text-slate-300" />
+                  )}
+                </span>
+                <span className="min-w-0">
+                  <span className="flex max-w-[120px] items-center gap-1 truncate text-xs font-black">
+                    {s.label}
+                    {s.isHost && <Crown className="h-3 w-3 shrink-0 text-amber-500" />}
+                  </span>
+                  <span
+                    className={`block text-[9px] font-black uppercase tracking-wider ${
+                      picked(s) ? 'text-emerald-600' : 'text-slate-400'
+                    }`}
+                  >
+                    {s.watching ? 'Watching' : picked(s) ? 'Ready' : 'Choosing...'}
+                  </span>
+                </span>
               </button>
-            ))}
+            );
+          })}
+        </div>
+
+        <p className="flex shrink-0 items-center gap-1.5 text-[11px] font-black uppercase tracking-wider text-amber-700 sm:hidden">
+          <Coins className="h-3.5 w-3.5" /> {coins}
+        </p>
+
+        {active ? (
+          <div className="min-h-0 flex-1">
+            <PawnGrid
+              owned={owned}
+              coins={coins}
+              selected={active.skin ?? null}
+              pickedBy={pickedBy}
+              onPick={pick}
+            />
           </div>
+        ) : (
+          <p className="py-10 text-center text-sm font-bold text-slate-500">
+            The seats are full for this game. You can watch from beside the board.
+          </p>
+        )}
+      </div>
+    </StageFrame>
+  );
+}
+
+// -- stage 3 ------------------------------------------------------------------
+
+/** One seat on the board about to be played, or somebody waiting beside it. */
+interface SeatRow {
+  key: string;
+  name: string;
+  /** Index into the layout's sides, so a row is the edge it starts on. -1 for a watcher. */
+  seat: number;
+  skin?: number | null;
+  bot?: boolean;
+  you?: boolean;
+  host?: boolean;
+  /** Online humans only, so the host can move them between the two pairs. */
+  uid?: string;
+}
+
+/**
+ * Stage 3: the whole match on one page.
+ *
+ * The host's copy is the controls; a guest's copy is the same page locked,
+ * kept current from the lobby as the host clicks. See MatchControls.
+ */
+function ModesScreen({
+  rules,
+  locked,
+  hostName,
+  toolbar,
+  seats,
+  watchers,
+  fits,
+  roomSize,
+  onRules,
+  onAssignTeam,
+  botLevel,
+  onBotLevel,
+  showBots,
+  onBack,
+  onStart,
+  startLabel,
+  startDisabled,
+  startNote,
+}: {
+  rules: MatchRules;
+  locked: boolean;
+  hostName?: string;
+  toolbar: ReactNode;
+  seats: SeatRow[];
+  watchers: SeatRow[];
+  /** Online: the seat count the room fits. Offline every mode is open. */
+  fits?: PlayerCount;
+  roomSize: number;
+  onRules: (update: (rules: MatchRules) => MatchRules) => void;
+  /** Host only, and only in a pairs game with more than two humans in it. */
+  onAssignTeam?: (uid: string, team: Team) => void;
+  botLevel: number;
+  /** Omitted for a guest: the host's bots, set by the host. */
+  onBotLevel?: (level: number) => void;
+  showBots: boolean;
+  onBack?: () => void;
+  onStart?: () => void;
+  startLabel: string;
+  startDisabled?: boolean;
+  startNote: ReactNode;
+}) {
+  const layout = layoutFor(rules);
+  const chosen = modeOf(rules);
+  /**
+   * Through an updater rather than a spread of the props copy: two controls
+   * touched in the same tick would otherwise both build on the render they
+   * were drawn from, and the second would quietly undo the first.
+   */
+  const set = (patch: Partial<MatchRules>) => onRules((current) => ({ ...current, ...patch }));
+
+  return (
+    <StageFrame
+      theme={THEME}
+      step={3}
+      title="Board setup"
+      subtitle={rulesSummary(rules)}
+      onBack={onBack}
+      toolbar={toolbar}
+      status={
+        locked ? <HostBadge theme={THEME}>{hostName || 'The host'} is setting the board...</HostBadge> : undefined
+      }
+      footer={
+        <ActionBar
+          theme={THEME}
+          label={startLabel}
+          icon={<Play className="h-4 w-4 fill-current" />}
+          onAction={onStart}
+          disabled={startDisabled}
+          note={startNote}
+        />
+      }
+    >
+      <div className="grid gap-5 lg:grid-cols-3 short:gap-3">
+        <div className="space-y-5 lg:col-span-2 short:space-y-3">
+          <RuleSection
+            theme={THEME}
+            title="Game mode"
+            hint={
+              fits === undefined
+                ? 'Seats nobody is sitting in are played by bots.'
+                : `The seats follow the room: ${roomSize} here, so ${fits} of them. Any that are spare go to bots.`
+            }
+            locked={locked}
+          >
+            <div className="grid gap-2 sm:grid-cols-3">
+              {MODES.map((mode) => {
+                const board = layoutFor(mode);
+                const unfit = fits !== undefined && mode.players !== fits;
+                return (
+                  <ModeCard
+                    key={mode.id}
+                    theme={THEME}
+                    title={mode.title}
+                    badge={`${mode.players}P · ${board.size}×${board.size} · ${board.walls} walls`}
+                    description={
+                      unfit
+                        ? mode.players === 2
+                          ? `Needs a room of one or two. ${roomSize} are here.`
+                          : `Needs three or four in the room. ${roomSize} ${roomSize === 1 ? 'is' : 'are'} here.`
+                        : mode.description
+                    }
+                    icon={
+                      mode.id === 'duel' ? (
+                        <Swords className="h-4 w-4" />
+                      ) : mode.id === 'ffa' ? (
+                        <Grid3x3 className="h-4 w-4" />
+                      ) : (
+                        <Users className="h-4 w-4" />
+                      )
+                    }
+                    selected={chosen === mode.id}
+                    locked={locked || unfit}
+                    onSelect={() => set({ players: mode.players, teams: mode.teams })}
+                  />
+                );
+              })}
+            </div>
+          </RuleSection>
+
+          <RuleSection theme={THEME} title="Match rules" locked={locked}>
+            <ToggleOption
+              theme={THEME}
+              label={`Turn clock · ${TURN_SECONDS}s`}
+              hint="A move goes in on its own when the clock runs out: a step along that pawn's own shortest route, never a wall. Off lets a turn take as long as it takes."
+              value={rules.turnTimer}
+              locked={locked}
+              onChange={(turnTimer) => set({ turnTimer })}
+            />
+          </RuleSection>
+
+          {showBots && (
+            <RuleSection
+              theme={THEME}
+              title="Bot rank"
+              hint="How well the bots play the seats nobody is in, and any seat whose player steps out."
+              locked={locked || !onBotLevel}
+            >
+              <OptionGroup
+                theme={THEME}
+                columns={3}
+                locked={locked || !onBotLevel}
+                value={botLevel}
+                onChange={(level) => onBotLevel?.(level)}
+                options={TIERS.map((tier, i) => ({ value: i, label: tier.label }))}
+              />
+            </RuleSection>
+          )}
         </div>
 
-        <button
-          onClick={onCouch}
-          className="w-full rounded-2xl border border-black/10 bg-white/70 py-4 font-black transition-colors hover:bg-white"
+        <RuleSection
+          theme={THEME}
+          title={`At the board · ${layout.size}×${layout.size}`}
+          hint={onAssignTeam ? 'Move anyone to the other pair; the board reseats itself.' : undefined}
+          locked={locked}
         >
-          Two players, one device
-          <span className="mt-1 block text-[11px] font-bold normal-case tracking-normal text-slate-500">
-            Turns alternate. Whoever is up taps a square, or drops a wall.
-          </span>
+          <BoardPreview layout={layout} />
+
+          {layout.teams ? (
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-1">
+              {([0, 1] as const).map((team) => (
+                <div
+                  key={team}
+                  className="space-y-1.5 rounded-2xl border p-2"
+                  style={{ borderColor: `${TEAMS[team].main}55`, background: `${TEAMS[team].main}14` }}
+                >
+                  <p
+                    className="px-1 text-[10px] font-black uppercase tracking-widest"
+                    style={{ color: TEAMS[team].dark }}
+                  >
+                    {TEAMS[team].name}
+                  </p>
+                  {seats
+                    .filter((row) => teamOf(row.seat) === team)
+                    .map((row) => (
+                      <SeatChip
+                        key={row.key}
+                        row={row}
+                        side={layout.sides[row.seat]}
+                        onSwap={
+                          onAssignTeam && row.uid
+                            ? () => onAssignTeam(row.uid as string, team === 0 ? 1 : 0)
+                            : undefined
+                        }
+                        swapTo={TEAMS[team === 0 ? 1 : 0].name}
+                      />
+                    ))}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="space-y-1.5">
+              {seats.map((row) => (
+                <SeatChip key={row.key} row={row} side={layout.sides[row.seat]} />
+              ))}
+            </div>
+          )}
+
+          {watchers.length > 0 && (
+            <div className="mt-2 space-y-1.5">
+              <p className="px-1 text-[10px] font-black uppercase tracking-widest text-slate-400">
+                Watching ({watchers.length})
+              </p>
+              {watchers.map((row) => (
+                <SeatChip key={row.key} row={row} />
+              ))}
+            </div>
+          )}
+        </RuleSection>
+      </div>
+    </StageFrame>
+  );
+}
+
+/** One line of the roster: who it is, which edge they start on, and their pawn. */
+function SeatChip({
+  row,
+  side,
+  onSwap,
+  swapTo,
+}: {
+  row: SeatRow;
+  /** Absent for a watcher, who has no edge of their own. */
+  side?: SideMeta;
+  onSwap?: () => void;
+  swapTo?: string;
+}) {
+  const ink = side ?? DEFAULT_SIDES[0];
+  const known = row.skin !== undefined && row.skin !== null;
+  return (
+    <div
+      className="flex items-center gap-2 rounded-xl border p-1.5"
+      style={
+        side
+          ? { borderColor: `${ink.main}55`, background: `${ink.main}12` }
+          : { borderColor: 'rgba(0,0,0,0.08)', background: 'rgba(0,0,0,0.03)' }
+      }
+    >
+      <span className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-white/70">
+        {known ? (
+          <Portrait index={row.skin as number} size={34} ink={ink} />
+        ) : row.bot ? (
+          <Bot className="h-4 w-4 text-slate-400" />
+        ) : (
+          <Blocks className="h-4 w-4 text-slate-300" />
+        )}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="flex items-center gap-1 truncate text-xs font-bold">
+          <span className={`truncate ${row.bot ? 'text-slate-500' : ''}`}>{row.name}</span>
+          {row.you && <span className="shrink-0 text-slate-400">· you</span>}
+          {row.host && <Crown className="h-3 w-3 shrink-0 text-amber-500" />}
+        </span>
+        <span
+          className="block text-[9px] font-black uppercase tracking-widest"
+          style={{ color: side ? ink.dark : '#94a3b8' }}
+        >
+          {side ? `${ink.name} · ${ink.home} to ${OPPOSITE[ink.home]}` : 'Beside the board'}
+        </span>
+      </span>
+      {onSwap && (
+        <button
+          type="button"
+          onClick={onSwap}
+          title={`Move to ${swapTo}`}
+          className="shrink-0 rounded-lg border border-black/10 bg-white/70 px-2 py-1 text-[9px] font-black uppercase tracking-wide text-slate-500 transition-colors hover:bg-white"
+        >
+          Swap
         </button>
-
-        <div className="rounded-2xl bg-slate-900/5 p-3 text-center text-xs leading-relaxed text-slate-500">
-          <p className="mb-1 font-black uppercase tracking-[0.15em] text-slate-400">How it works</p>
-          <p>One step a turn , up, down, left or right, never diagonally , or spend a wall instead.</p>
-          <p className="mt-1">
-            Face another pawn with nothing between you and you may jump straight over it; if a wall or the
-            board's edge is right behind them, the jump bends to either side.
-          </p>
-          <p className="mt-2 text-slate-400">
-            Playing online? Start a lobby on PlayBuddies and pick this game.
-          </p>
-        </div>
-      </div>
-
-      <p className="text-center text-[11px] font-semibold text-slate-400">{rulesSummary(rules)}</p>
-      </div>
+      )}
     </div>
   );
 }
 
+/**
+ * The board these rules make, at a glance: how big it is, and who starts
+ * where. Drawn from `layoutFor` rather than from a picture, so it cannot
+ * disagree with the board that opens.
+ */
+function BoardPreview({ layout }: { layout: Layout }) {
+  const step = 100 / layout.size;
+  return (
+    <svg
+      viewBox="0 0 100 100"
+      className="mb-2 w-full rounded-xl border border-black/10 bg-[#fdf6e9] short:hidden"
+      role="img"
+      aria-label={`${layout.size} by ${layout.size} board, ${layout.players} pawns`}
+    >
+      {Array.from({ length: layout.size + 1 }, (_, i) => (
+        <g key={i} stroke="#dbc7a6" strokeWidth={0.4}>
+          <line x1={i * step} y1={0} x2={i * step} y2={100} />
+          <line x1={0} y1={i * step} x2={100} y2={i * step} />
+        </g>
+      ))}
+      {layout.sides.map((side, i) => (
+        <circle
+          key={i}
+          cx={(colOf(side.start) + 0.5) * step}
+          cy={(rowOf(side.start) + 0.5) * step}
+          r={step * 0.36}
+          fill={side.main}
+          stroke={side.dark}
+          strokeWidth={0.7}
+        />
+      ))}
+    </svg>
+  );
+}
+
+// -- pieces -------------------------------------------------------------------
+
 /** A pawn card, drawn with the same code the board uses. */
 function Portrait({
   index,
-  seat = 0,
   size = 84,
-  sides = DEFAULT_SIDES,
+  /** The seat colour this pawn is wearing. A skin is shape; the seat is colour. */
+  ink = DEFAULT_SIDES[0],
 }: {
   index: number;
-  seat?: number;
   size?: number;
-  /** The seating this card belongs to, so a 2v2 lobby shows its own colours. */
-  sides?: readonly SideMeta[];
+  ink?: { main: string; light: string; dark: string };
 }) {
+  const { main, light, dark } = ink;
   const ref = useCallback(
     (canvas: HTMLCanvasElement | null) => {
       if (!canvas) return;
@@ -805,18 +1547,17 @@ function Portrait({
       if (!ctx) return;
       ctx.scale(dpr, dpr);
       ctx.clearRect(0, 0, size, size);
-      const side = sides[seat % sides.length];
       drawPawn(ctx, {
         skin: index,
         x: size * 0.5,
         y: size * 0.56,
         r: size * 0.3,
-        main: side.main,
-        light: side.light,
-        dark: side.dark,
+        main,
+        light,
+        dark,
       });
     },
-    [index, seat, size],
+    [index, size, main, light, dark],
   );
   return <canvas ref={ref} style={{ width: size, height: size }} />;
 }
@@ -903,437 +1644,6 @@ function PawnGrid({
   );
 }
 
-function Shell({
-  title,
-  coins,
-  onBack,
-  children,
-}: {
-  title: string;
-  coins: number;
-  onBack: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="mx-auto flex h-full w-full max-w-6xl flex-col overflow-y-auto overscroll-contain gap-3 p-3 sm:gap-4 sm:p-6">
-      <div className="flex shrink-0 items-center justify-between gap-2">
-        <button onClick={onBack} aria-label="Back" className="panel shrink-0 rounded-2xl p-3">
-          <ArrowLeft className="h-5 w-5" />
-        </button>
-        <h2 className="min-w-0 truncate text-center text-base font-black tracking-tight sm:text-2xl">{title}</h2>
-        <div className="panel flex shrink-0 items-center gap-2 rounded-2xl px-3 py-2 font-bold text-amber-600">
-          <Coins className="h-4 w-4" /> {coins}
-        </div>
-      </div>
-      {/* Explicit min-h-0 is what lets the child actually scroll instead of
-          growing the flex column past the viewport. */}
-      <div className="panel min-h-0 flex-1 overflow-y-auto overscroll-contain rounded-[2rem] p-3 sm:p-6">
-        {children}
-      </div>
-    </div>
-  );
-}
-
-function OfflinePick({
-  seatCount,
-  owned,
-  coins,
-  onBack,
-  onBuy,
-  onDone,
-}: {
-  seatCount: number;
-  owned: number[];
-  coins: number;
-  onBack: () => void;
-  onBuy: (index: number) => boolean;
-  onDone: (picks: Record<number, number>) => void;
-}) {
-  const [picks, setPicks] = useState<Record<number, number>>({});
-  const seat = Object.keys(picks).length;
-
-  const pickedBy = useMemo(() => {
-    const map: Record<number, string[]> = {};
-    Object.entries(picks).forEach(([id, index]) => {
-      (map[index] ??= []).push(`P${Number(id) + 1}`);
-    });
-    return map;
-  }, [picks]);
-
-  const pick = (index: number) => {
-    if (!owned.includes(index) && !onBuy(index)) return;
-    const next = { ...picks, [seat]: index };
-    setPicks(next);
-    if (Object.keys(next).length >= seatCount) onDone(next);
-  };
-
-  const title = seatCount > 1 ? `Player ${seat + 1} , pick a pawn` : 'Pick your pawn';
-  return (
-    <Shell title={title} coins={coins} onBack={onBack}>
-      <PawnGrid owned={owned} coins={coins} selected={null} pickedBy={pickedBy} onPick={pick} />
-    </Shell>
-  );
-}
-
-function RoomScreen({
-  ready,
-  error,
-  uid,
-  people,
-  hostId,
-  mine,
-  owned,
-  coins,
-  isHost,
-  rules,
-  teamAssignments,
-  onPick,
-  onAssignTeam,
-  onStart,
-  onSettings,
-  onRules,
-  onFullscreen,
-  onPlayOffline,
-}: {
-  ready: boolean;
-  error: string | null;
-  uid: string | null;
-  people: { uid: string; displayName: string; skin?: number | null }[];
-  hostId: string | null;
-  mine: number | null | undefined;
-  owned: number[];
-  coins: number;
-  isHost: boolean;
-  rules: MatchRules;
-  teamAssignments: Record<string, Team>;
-  onPick: (index: number) => void;
-  onAssignTeam: (uid: string, team: Team) => void;
-  onStart: () => void;
-  onSettings: () => void;
-  onRules: () => void;
-  onFullscreen: () => void;
-  onPlayOffline: () => void;
-}) {
-  const pickedBy = useMemo(() => {
-    const map: Record<number, string[]> = {};
-    for (const p of people) {
-      if (p.uid !== uid && p.skin !== undefined && p.skin !== null) (map[p.skin] ??= []).push(p.displayName);
-    }
-    return map;
-  }, [people, uid]);
-
-  if (error) {
-    return (
-      <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center">
-        <h2 className="text-2xl font-black">{error}</h2>
-        <p className="text-sm text-slate-500">Head back to the PlayBuddies lobby and try again.</p>
-      </div>
-    );
-  }
-
-  if (!ready || !uid) {
-    return (
-      <div className="flex h-full flex-col items-center justify-center gap-3">
-        <Loader2 className="h-10 w-10 animate-spin text-amber-500" />
-        <p className="font-bold text-slate-600">Pulling up a chair…</p>
-      </div>
-    );
-  }
-
-  const iAmReady = mine !== undefined && mine !== null;
-  /** Seats the rules call for that nobody has taken; bots play these. */
-  const emptySeats = Math.max(0, rules.players - people.length);
-  /**
-   * Nobody starts until everybody has chosen.
-   *
-   * The host used to be able to start the moment its *own* pawn was picked,
-   * which dropped anyone still choosing onto a board playing a pawn the lobby
-   * had never recorded , their opponent saw a piece they had not chosen, and
-   * the shop was still open over the top of it.
-   */
-  const everyonePicked = people.every((p) => p.skin !== undefined && p.skin !== null);
-  // Let the host's room-size effect finish raising a stale two-player setting
-  // before Start can publish the match flag.
-  const hasSeatForEveryone = people.length <= rules.players;
-  const canStart = iAmReady && everyonePicked && hasSeatForEveryone;
-  const waitingFor = people.filter((p) => p.skin === undefined || p.skin === null).length;
-
-  const seatLayout = layoutFor(rules);
-
-  return (
-    <div className="mx-auto flex h-full w-full max-w-6xl flex-col overflow-y-auto overscroll-contain gap-3 p-3 sm:gap-4 sm:p-6">
-      <div className="flex shrink-0 items-center justify-between gap-2">
-        <div className="min-w-0">
-          <h2 className="truncate text-lg font-black tracking-tight sm:text-2xl short:text-base">Pick your pawn</h2>
-          <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-amber-600/90">
-            {rules.players} across a {seatLayout.size}×{seatLayout.size} board · {seatLayout.walls} walls each
-            {emptySeats > 0 && ` · ${emptySeats} ${emptySeats === 1 ? 'seat' : 'seats'} to bots`}
-          </p>
-        </div>
-        {/* The same tray the board itself carries: purse, fullscreen, settings,
-            and , for the host only , the switch that ends it for everyone. */}
-        <div className="flex shrink-0 items-center gap-2">
-          <div className="panel flex items-center gap-2 rounded-xl px-3 py-2 font-bold text-amber-600">
-            <Coins className="h-4 w-4" /> {coins}
-          </div>
-          <button onClick={onFullscreen} className="panel rounded-xl p-2" title="Full screen">
-            <Maximize2 className="h-5 w-5" />
-          </button>
-          <button onClick={onSettings} aria-label="Settings" className="panel rounded-xl p-2">
-            <SettingsIcon className="h-5 w-5" />
-          </button>
-          {isHost ? (
-            <button
-              onClick={askHostToEndGame}
-              aria-label="End game"
-              className="panel rounded-xl p-2"
-              title="End the game for everyone"
-            >
-              <LogOut className="h-5 w-5" />
-            </button>
-          ) : (
-            <button
-              onClick={askToLeaveLobby}
-              aria-label="Leave game"
-              className="panel rounded-xl p-2"
-              title="Leave Lobby"
-            >
-              <LogOut className="h-5 w-5" />
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Loud on purpose. "Game rules" further down read as maintenance --
-          the same plain grey box as "Play offline" right next to it -- so
-          nothing on screen said a wall that seals someone in isn't legal, or
-          that a jump bends sideways when it's blocked, before a first game
-          taught it the slow way. This is the thing actually worth reading,
-          so it looks like it. */}
-      <button
-        onClick={onRules}
-        className="relative flex shrink-0 items-center gap-3 overflow-hidden rounded-2xl border-2 border-amber-400/70 bg-amber-400/10 px-4 py-3 short:py-1.5 text-left transition-transform active:scale-[0.99]"
-      >
-        <span className="absolute -right-6 -top-6 h-16 w-16 animate-pulse rounded-full bg-amber-400/20" aria-hidden />
-        <ScrollText className="h-6 w-6 short:h-5 short:w-5 shrink-0 text-amber-600" />
-        <div className="min-w-0 flex-1">
-          <p className="text-sm font-black uppercase tracking-wide text-amber-700">
-            {isHost ? 'New to Quoridor? Read the rules' : 'How walls and jumps work'}
-          </p>
-          <p className="text-[11px] font-bold text-amber-700/70 short:hidden">
-            Worth 30 seconds before the walls start going down.
-          </p>
-        </div>
-        <span className="shrink-0 rounded-xl bg-amber-500 px-3 py-1.5 text-[11px] font-black uppercase tracking-wide text-slate-900 short:hidden">
-          Guide
-        </span>
-      </button>
-
-      {rules.players === 4 && rules.teams && people.length > 2 && (
-        <div className="panel shrink-0 rounded-2xl p-3 sm:p-4">
-          <div className="mb-2 flex items-center justify-between gap-3">
-            <div>
-              <h3 className="text-sm font-black uppercase tracking-wide">Choose 2v2 teams</h3>
-              <p className="text-[10px] font-semibold text-slate-500">
-                {isHost ? 'Tap Gold or Blue for each player.' : 'The host is arranging the teams.'}
-              </p>
-            </div>
-            <span className="rounded-full bg-slate-900/5 px-2.5 py-1 text-[10px] font-black uppercase text-slate-500">
-              {Object.values(teamAssignments).filter((team) => team === 0).length} /{' '}
-              {Object.values(teamAssignments).filter((team) => team === 1).length}
-            </span>
-          </div>
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-            {people.map((person) => (
-              <div key={person.uid} className="flex items-center gap-2 rounded-xl border border-black/10 bg-white/55 p-2">
-                <span className="min-w-0 flex-1 truncate text-xs font-bold">
-                  {person.displayName}{person.uid === uid ? ' · you' : ''}
-                </span>
-                {([0, 1] as const).map((team) => {
-                  const selected = teamAssignments[person.uid] === team;
-                  return (
-                    <button
-                      key={team}
-                      type="button"
-                      disabled={!isHost}
-                      onClick={() => onAssignTeam(person.uid, team)}
-                      className={`rounded-lg border px-2.5 py-1 text-[10px] font-black uppercase transition-transform enabled:active:scale-95 disabled:cursor-default ${
-                        selected ? 'text-white shadow-sm' : 'border-black/10 bg-white/70 text-slate-400'
-                      }`}
-                      style={selected ? { borderColor: TEAMS[team].dark, background: TEAMS[team].main } : undefined}
-                    >
-                      {TEAMS[team].name}
-                    </button>
-                  );
-                })}
-              </div>
-            ))}
-          </div>
-          {people.length === 3 && (
-            <p className="mt-2 text-center text-[10px] font-semibold text-slate-400">
-              A bot joins the team with one player.
-            </p>
-          )}
-        </div>
-      )}
-
-      {/* On a phone the start button would otherwise sit below the fold, which
-          is exactly what made it unreachable in the earlier games. */}
-      <div className="panel shrink-0 rounded-2xl p-3 lg:hidden">
-        {isHost ? (
-          <button
-            onClick={onStart}
-            disabled={!canStart}
-            className="flex w-full items-center justify-center gap-2 rounded-xl bg-amber-400 py-2.5 text-sm font-black text-slate-900 disabled:opacity-40"
-          >
-            <Play className="h-5 w-5 fill-current" /> START
-          </button>
-        ) : (
-          <p className="text-center text-sm font-bold text-slate-500">
-            {!iAmReady
-              ? 'Pick a pawn to be ready.'
-              : !hasSeatForEveryone
-                ? 'Preparing four player seats…'
-                : !everyonePicked
-                ? 'Waiting for everyone to pick…'
-                : 'Waiting for the host…'}
-          </p>
-        )}
-        <button
-          onClick={onRules}
-          className="mt-2 flex w-full flex-col items-center gap-0.5 rounded-xl border border-black/10 bg-white/60 py-2 text-sm font-black text-slate-600 transition-colors hover:bg-white"
-        >
-          <span className="flex items-center gap-2">
-            <ScrollText className="h-4 w-4" /> {isHost ? 'Game rules' : 'Game rules (host sets these)'}
-          </span>
-          <span className="px-2 text-[10px] font-semibold leading-tight text-slate-400">{rulesSummary(rules)}</span>
-        </button>
-        <button
-          onClick={onPlayOffline}
-          className="mt-2 w-full rounded-xl border border-black/10 bg-white/60 py-2.5 text-sm font-black text-slate-600 transition-colors hover:bg-white"
-        >
-          Play offline
-        </button>
-      </div>
-
-      {/* `min-h-0 flex-1` on this grid used to be unconditional. Both do
-          real work at `lg:` -- they are what lets the picker's own column
-          scroll inside a bounded three-column row -- but on a phone they were
-          the actual bug: with four rows of chrome stacked above (header,
-          rules banner, ready panel, roster), a flex item is allowed to
-          shrink below its own content once `min-h-0` says it may, and
-          `flex-1` just decides how much. It shrank the picker to whatever
-          sliver was left, sometimes slicing a locked card's price clean
-          through with no visible way to tell the panel was scrollable at all
-          rather than simply broken. Neither class runs on a phone now, so
-          this grid can never be smaller than its own content, and the *page*
-          -- already `overflow-y-auto` above -- scrolls the rest, which is the
-          swipe a phone always tries first rather than a small nested
-          scrollport that is easy to miss. */}
-      <div className="grid grid-cols-1 gap-3 sm:gap-4 lg:min-h-0 lg:flex-1 lg:grid-cols-3 lg:grid-rows-[minmax(0,1fr)]">
-        <div className="panel order-2 min-h-0 overflow-y-auto overscroll-contain rounded-[2rem] p-3 sm:p-6 lg:order-1 lg:col-span-2">
-          <PawnGrid owned={owned} coins={coins} selected={mine ?? null} pickedBy={pickedBy} onPick={onPick} />
-        </div>
-
-        <div className="order-1 flex min-h-0 flex-col gap-3 sm:gap-4 lg:order-2">
-          <div className="panel flex max-h-44 min-h-0 flex-col rounded-[2rem] p-4 sm:p-5 lg:max-h-none lg:flex-1">
-            <h3 className="mb-3 flex shrink-0 items-center gap-2 text-[11px] font-black uppercase tracking-[0.2em] text-slate-400">
-              <Users className="h-4 w-4" /> At the board ({people.length})
-            </h3>
-            <div className="min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain pr-1">
-              {people.map((p, i) => {
-                const team = teamAssignments[p.uid] ?? ((i % 2) as Team);
-                const colour = rules.teams && rules.players === 4 ? TEAMS[team] : seatLayout.sides[i];
-                const teamOrdinal = people.slice(0, i).filter((person) => teamAssignments[person.uid] === team).length;
-                const portraitSeat = rules.teams && rules.players === 4 ? team + teamOrdinal * 2 : i;
-                return (
-                  <div
-                    key={p.uid}
-                    className="flex items-center gap-3 rounded-2xl border p-2.5"
-                    style={{
-                      borderColor: `${colour?.main ?? '#94a3b8'}55`,
-                      background: `${colour?.main ?? '#94a3b8'}14`,
-                    }}
-                  >
-                  <div className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-white/70">
-                    {p.skin !== undefined && p.skin !== null ? (
-                      <Portrait index={p.skin} seat={portraitSeat} size={42} sides={seatLayout.sides} />
-                    ) : (
-                      <Blocks className="h-5 w-5 text-slate-300" />
-                    )}
-                  </div>
-                  <div className="min-w-0">
-                    <p className="flex items-center gap-1 truncate text-sm font-bold">
-                      {p.displayName}
-                      {p.uid === hostId && <Crown className="h-3.5 w-3.5 shrink-0 text-amber-500" />}
-                    </p>
-                    <p
-                      className="text-[10px] font-black uppercase tracking-widest"
-                      style={{ color: colour?.dark }}
-                    >
-                      {rules.teams && rules.players === 4 ? `${TEAMS[team].name} team` : seatLayout.sides[i]?.name}
-                      {p.uid === uid ? ' , you' : ''}
-                    </p>
-                  </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="panel hidden shrink-0 rounded-[2rem] p-5 lg:block">
-            {isHost ? (
-              <>
-                <button
-                  onClick={onStart}
-                  disabled={!canStart}
-                  className="flex w-full items-center justify-center gap-2 rounded-2xl bg-amber-400 py-4 text-lg font-black text-slate-900 disabled:opacity-40"
-                >
-                  <Play className="h-5 w-5 fill-current" /> START
-                </button>
-                <p className="mt-2 text-center text-[11px] text-slate-500">
-                  {!iAmReady
-                    ? 'Pick your own pawn first.'
-                    : !hasSeatForEveryone
-                      ? 'Preparing four player seats.'
-                    : !everyonePicked
-                      ? `Waiting on ${waitingFor} more to pick.`
-                      : emptySeats > 0
-                        ? `Bots will play ${emptySeats} of the ${rules.players} pawns.`
-                        : 'Who moves first is drawn at the start.'}
-                </p>
-              </>
-            ) : (
-              <p className="text-center text-sm font-bold text-slate-500">
-                {!iAmReady
-                  ? 'Pick a pawn to be ready.'
-                  : !everyonePicked
-                    ? 'Waiting for everyone to pick…'
-                    : 'Waiting for the host…'}
-              </p>
-            )}
-            <button
-              onClick={onRules}
-              className="mt-3 flex w-full flex-col items-center gap-1 rounded-2xl border border-black/10 bg-white/60 py-3 font-black text-slate-600 transition-colors hover:bg-white"
-            >
-              <span className="flex items-center gap-2">
-                <ScrollText className="h-4 w-4" /> {isHost ? 'Game rules' : 'Game rules (host sets these)'}
-              </span>
-              <span className="px-3 text-[10px] font-semibold leading-tight text-slate-400">{rulesSummary(rules)}</span>
-            </button>
-            <button
-              onClick={onPlayOffline}
-              className="mt-3 w-full rounded-2xl border border-black/10 bg-white/60 py-3 font-black text-slate-600 transition-colors hover:bg-white"
-            >
-              Play offline
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function SettingsPanel({
   settings,
   onChange,
@@ -1346,10 +1656,11 @@ function SettingsPanel({
   /**
    * This device only.
    *
-   * The player count and the turn clock used to live here and no longer do:
-   * they change what the game *is*, so everybody has to agree on them. They
-   * are Game Rules now, set by the host. What is left is genuinely local , how
-   * loud it is, and how much the board is willing to tell you.
+   * The player count, the turn clock and the bots used to live here and no
+   * longer do: they change what the game *is*, so everybody has to agree on
+   * them. They are the board setup now, set by the host on stage three. What
+   * is left is genuinely local , how loud it is, and how much the board is
+   * willing to tell you.
    */
   const toggles: { key: 'hints'; label: string; hint: string }[] = [
     {
@@ -1365,7 +1676,10 @@ function SettingsPanel({
     <div {...scrimProps(onClose)} className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-4 backdrop-blur-sm">
       <div className="panel max-h-[88dvh] w-full max-w-md space-y-6 overflow-y-auto overscroll-contain rounded-[2rem] bg-white/95 p-6">
         <div className="flex items-center justify-between">
-          <h3 className="text-xl font-black">Settings</h3>
+          <div>
+            <h3 className="text-xl font-black">Settings</h3>
+            <p className="text-[11px] font-semibold text-slate-400">This device only. Nobody else is affected.</p>
+          </div>
           <button onClick={onClose} aria-label="Close" className="rounded-xl p-2 hover:bg-black/5">
             <ArrowLeft className="h-5 w-5" />
           </button>
@@ -1407,152 +1721,66 @@ function SettingsPanel({
 }
 
 /**
- * The rules of the game, set once by the host and obeyed by everyone.
+ * How Quoridor is played. Nothing here is a setting.
  *
- * Separate from Settings on purpose. Settings are this device's business ,
- * volume, how much help the board offers , and nobody else is affected. These
- * change what the game *is*, so everyone has to be playing the same one: they
- * travel to a guest over the wire (see `packRules`) and its board is built
- * from whatever arrives, not from anything stored locally.
- *
- * A guest can open this panel and read it, but every control is dead. Letting
- * them change a copy that gets overwritten the moment the host presses start
- * would be a lie about who is in charge.
+ * What the match is , how many pawns, how many walls, whether there is a
+ * clock , is the host's, and lives on the board setup page where everyone can
+ * watch it being decided. This is the part that is true in every game, and it
+ * is worth thirty seconds before the walls start going down.
  */
-function RulesPanel({
-  rules,
-  editable,
-  onChange,
-  onClose,
-}: {
-  rules: MatchRules;
-  editable: boolean;
-  onChange: (r: MatchRules) => void;
-  onClose: () => void;
-}) {
+function GuidePanel({ onClose }: { onClose: () => void }) {
   // Escape closes it too. See @shared/ui/dismiss.
   useEscape(true, onClose);
   return (
     <div {...scrimProps(onClose)} className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-4 backdrop-blur-sm">
-      <div className="panel max-h-[88dvh] w-full max-w-md space-y-6 overflow-y-auto overscroll-contain rounded-[2rem] bg-white/95 p-6">
+      <div className="panel max-h-[88dvh] w-full max-w-md space-y-5 overflow-y-auto overscroll-contain rounded-[2rem] bg-white/95 p-6">
         <div className="flex items-center justify-between">
           <div>
-            <h3 className="text-xl font-black">Game rules</h3>
-            <p className="text-[11px] font-semibold text-slate-400">
-              {editable ? 'Applies to everyone. Takes effect next game.' : 'Set by the host.'}
-            </p>
+            <h3 className="flex items-center gap-2 text-xl font-black">
+              <ScrollText className="h-5 w-5 text-amber-600" /> How to play
+            </h3>
+            <p className="text-[11px] font-semibold text-slate-400">True in every mode.</p>
           </div>
           <button onClick={onClose} aria-label="Close" className="rounded-xl p-2 hover:bg-black/5">
             <ArrowLeft className="h-5 w-5" />
           </button>
         </div>
 
-        <div className="space-y-2">
-          <p className="text-sm font-bold">
-            Players
-            <span className="block text-[11px] font-normal text-slate-500">
-              Two sit opposite each other; four take all sides of the board. Anyone in the room beyond this
-              watches , the seats are fixed edges, not a queue. Empty seats are played by bots.
-            </span>
+        <section className="space-y-1">
+          <h4 className="text-sm font-black">A turn</h4>
+          <p className="text-[13px] leading-relaxed text-slate-600">
+            One step , up, down, left or right, never diagonally , or spend a wall instead. Never both.
           </p>
-          <div className="grid grid-cols-2 gap-2">
-            {PLAYER_CODES.map((option) => (
-              <button
-                key={option}
-                disabled={!editable}
-                onClick={() => onChange({ ...rules, players: option })}
-                className={`rounded-xl border px-2 py-2.5 text-xs font-black transition-colors disabled:opacity-50 ${
-                  rules.players === option
-                    ? 'border-amber-400 bg-amber-400/20 text-amber-700'
-                    : 'border-black/10 bg-white/60 text-slate-500 hover:bg-white'
-                }`}
-              >
-                {option} players
-                <span className="block text-[10px] font-bold text-slate-400">
-                  {wallsFor(option, rules.teams)} walls each
-                </span>
-              </button>
-            ))}
-          </div>
-          <p className="text-[11px] text-slate-400">
-            {rules.players === 2
-              ? 'The duel. Ten walls apiece , enough to build a real maze between you.'
-              : rules.teams
-                ? 'Two pairs on a bigger board. Seven walls each, and a partner who wins it for you.'
-                : 'Four corners of the same board, every pawn for itself. Five walls each, so every one of them has to matter.'}
+        </section>
+
+        <section className="space-y-1">
+          <h4 className="text-sm font-black">Jumps</h4>
+          <p className="text-[13px] leading-relaxed text-slate-600">
+            Face another pawn with nothing between you and you may jump straight over it. If a wall or the
+            board's edge is right behind them, the jump bends to either side.
           </p>
-        </div>
+        </section>
 
-        {/* Only at four: a pair needs four pawns to be a pair. */}
-        {rules.players === 4 && (
-          <label className="flex items-center justify-between gap-3">
-            <span className="text-sm font-bold">
-              Two against two
-              <span className="block text-[11px] font-normal text-slate-500">
-                Amber and Ember line up along the south edge, Azure and Indigo along the north, and each
-                pair runs for the far side together. Played on a bigger 11×11 board with seven walls each,
-                because two pawns starting on one edge need lanes of their own to run in. The turn passes
-                between the pairs every single move, and either partner crossing takes it for both.
-              </span>
-            </span>
-            <input
-              type="checkbox"
-              disabled={!editable}
-              checked={rules.teams}
-              onChange={(e) => onChange({ ...rules, teams: e.target.checked })}
-              className="h-6 w-6 shrink-0 accent-amber-500 disabled:opacity-50"
-            />
-          </label>
-        )}
-
-        <label className="flex items-center justify-between gap-3">
-          <span className="text-sm font-bold">
-            Turn clock
-            <span className="block text-[11px] font-normal text-slate-500">
-              A move goes in on its own after thirty seconds , a step along that pawn's own shortest route,
-              never a wall. Off lets a turn take as long as it takes.
-            </span>
-          </span>
-          <input
-            type="checkbox"
-            disabled={!editable}
-            checked={rules.turnTimer}
-            onChange={(e) => onChange({ ...rules, turnTimer: e.target.checked })}
-            className="h-6 w-6 shrink-0 accent-amber-500 disabled:opacity-50"
-          />
-        </label>
-
-        <div className="space-y-2">
-          <p className="text-sm font-bold">
-            Bot Level
-            <span className="block text-[11px] font-normal text-slate-500">
-              How smart the bots will be when filling empty seats.
-            </span>
+        <section className="space-y-1">
+          <h4 className="text-sm font-black">Walls</h4>
+          <p className="text-[13px] leading-relaxed text-slate-600">
+            A wall covers two squares of groove and may not cross or overlap another. No wall may leave any pawn
+            with no route at all to its goal, so the board can never be sealed , only made longer.
           </p>
-          <div className="grid grid-cols-2 gap-1 rounded-xl bg-slate-900/5 p-1 sm:grid-cols-3">
-            {TIERS.map((tier, i) => (
-              <button
-                key={tier.label}
-                disabled={!editable}
-                onClick={() => onChange({ ...rules, aiLevel: i })}
-                className={`min-w-0 rounded-lg px-1 py-2 text-[10px] font-black uppercase tracking-wide transition-colors disabled:opacity-50 ${
-                  (rules.aiLevel ?? 3) === i ? 'bg-amber-400 text-slate-900' : 'text-slate-500 hover:bg-white'
-                }`}
-              >
-                {tier.label}
-              </button>
-            ))}
-          </div>
-        </div>
+        </section>
+
+        <section className="space-y-1">
+          <h4 className="text-sm font-black">Winning</h4>
+          <p className="text-[13px] leading-relaxed text-slate-600">
+            Reach the far edge from the one you started on. In a pairs game either partner getting there takes it
+            for both.
+          </p>
+        </section>
 
         <div className="rounded-2xl bg-slate-900/5 p-3 text-xs leading-relaxed text-slate-500">
-          <p className="mb-1 font-black uppercase tracking-[0.15em] text-slate-400">Always true</p>
-          <p>A pawn moves one square up, down, left or right. Never diagonally, except out of a jump.</p>
-          <p className="mt-1">A wall covers two squares of groove and may not cross or overlap another.</p>
-          <p className="mt-1">
-            No wall may leave any pawn with no route at all to its goal, so the board can never be sealed ,
-            only made longer.
-          </p>
+          <p className="mb-1 font-black uppercase tracking-[0.15em] text-slate-400">Controls</p>
+          <p>Tap a glowing square to step. Switch to walls and drag to a groove to drop one.</p>
+          <p className="mt-1">Arrow keys move, W toggles walls, R rotates, Enter confirms.</p>
         </div>
       </div>
     </div>

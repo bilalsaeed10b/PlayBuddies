@@ -598,7 +598,7 @@ export default function GameView({
                 onClick={onExit}
                 className="w-full rounded-2xl bg-slate-900/5 py-3 font-bold text-slate-700 transition-colors hover:bg-slate-900/10"
               >
-                Main menu
+                Back to match setup
               </button>
             </div>
           </div>

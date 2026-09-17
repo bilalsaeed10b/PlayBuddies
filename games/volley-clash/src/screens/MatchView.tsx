@@ -26,6 +26,7 @@ import {
   BodyMessage,
   GameSettings,
   Input,
+  MatchRules,
   NO_INPUT,
   Snapshot,
   Team,
@@ -109,12 +110,23 @@ const KEYSETS = [
 export default function MatchView({
   config,
   settings,
+  rules,
   onOpenSettings,
   onExit,
   onResult,
 }: {
   config: MatchConfig;
   settings: GameSettings;
+  /**
+   * The match's own rules, the same on every machine playing it.
+   *
+   * Separate from `settings` on purpose. These used to be fields of it, which
+   * meant each device brought its own: the host scored to its target while a
+   * guest that took a stalled match over finished to a different one, and a
+   * guest with power-ups switched off drew none of the ones the host was
+   * dropping on the court. They come from the lobby now.
+   */
+  rules: MatchRules;
   onOpenSettings: () => void;
   onExit: () => void;
   onResult: (won: boolean, score: [number, number]) => void;
@@ -218,13 +230,15 @@ export default function MatchView({
   const stalledRef = useRef(false);
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
+  const rulesRef = useRef(rules);
+  rulesRef.current = rules;
 
   // Power-up frequency is the one match rule that can be retuned mid-game: the
   // rest (target score, win-by-two) would change what the players are already
   // playing for, so those are read once when the engine is built.
   useEffect(() => {
-    engineRef.current?.setPowerRate(settings.powerRate);
-  }, [settings.powerRate]);
+    engineRef.current?.setPowerRate(rules.powerRate);
+  }, [rules.powerRate]);
 
   // ── keyboard ─────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -312,10 +326,10 @@ export default function MatchView({
     const engine = new MatchEngine({
       arena: arenaFor(seats.length),
       seats,
-      targetPoints: settingsRef.current.targetPoints,
-      winByTwo: settingsRef.current.winByTwo,
-      powerUps: settingsRef.current.powerUps,
-      powerRate: settingsRef.current.powerRate,
+      targetPoints: rulesRef.current.targetPoints,
+      winByTwo: rulesRef.current.winByTwo,
+      powerUps: rulesRef.current.powerUps,
+      powerRate: rulesRef.current.powerRate,
       isHost,
       onPoint: (_team, sc) => setScore(sc),
       onOver: (winner) => {

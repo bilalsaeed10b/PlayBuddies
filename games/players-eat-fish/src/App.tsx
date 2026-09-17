@@ -1,28 +1,19 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { scrimProps, useEscape } from '@shared/ui/dismiss';
-import {
-  ArrowLeft,
-  Check,
-  Coins,
-  Crown,
-  Fish as FishIcon,
-  Loader2,
-  Lock,
-  LogOut,
-  Maximize2,
-  Play,
-  Settings as SettingsIcon,
-  Users,
-} from 'lucide-react';
+import { ArrowLeft, Coins, Loader2, LogOut, Maximize2, Settings as SettingsIcon } from 'lucide-react';
 import { askHostToEndGame, askToLeaveLobby, isNativeFullscreen, toggleFullscreen, useAutoFullscreen } from './fullscreen';
-import {
-  FISH_ASSETS,
-  FISH_CATEGORIES,
-  STARTER_FISH,
-  fishSrc,
-} from './game/fish';
+import { MainMenu } from '@shared/menu/MainMenu';
+import { MENU_STAGE_FIELD, parseStage } from '@shared/menu/stage';
+import type { MenuStage } from '@shared/menu/stage';
+import { FISH_ASSETS, STARTER_FISH, fishSrc } from './game/fish';
 import { GameSettings } from './types/game';
 import GameView, { LobbyPerson } from './screens/GameView';
+import CustomizeScreen from './screens/CustomizeScreen';
+import type { FishSlot } from './screens/CustomizeScreen';
+import ModesScreen from './screens/ModesScreen';
+import type { ReefMember } from './screens/ModesScreen';
+import FishGrid from './components/FishGrid';
+import { THEME } from './screens/menuTheme';
 import { audioService } from './services/audio';
 import { GameWallet, reportResult } from './platform/wallet';
 
@@ -56,18 +47,25 @@ function readHandoff(): Handoff {
 
 const DEFAULT_SETTINGS: GameSettings = { bgmVolume: 0.4, sfxVolume: 0.7, controlScheme: 0, lowPower: false };
 
-type View = 'menu' | 'select' | 'room' | 'game' | 'shop';
+/** Everything before the reef is one of the shared menu stages; see `stage` in App. */
+type View = 'shell' | 'game';
+
+/** GameSettings.controlScheme, by name. Seat N at one keyboard steers with the (N + scheme)th. */
+const KEY_LAYOUTS = ['WASD', 'Arrows', 'IJKL'];
 
 export default function App() {
   const [handoff] = useState(readHandoff);
   const online = Boolean(handoff.room);
 
-  const [view, setView] = useState<View>(online ? 'room' : 'menu');
+  const [view, setView] = useState<View>('shell');
   useAutoFullscreen(online || view === 'game');
+  /** The stage for a flow this device runs alone. Online, the lobby's `menuStage` is the one that counts. */
+  const [localStage, setLocalStage] = useState<MenuStage>('menu');
   const [showSettings, setShowSettings] = useState(false);
+  const [showShop, setShowShop] = useState(false);
   const [uid, setUid] = useState<string | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
-  const [lobby, setLobby] = useState<{ hostId: string; players: Record<string, LobbyPerson & { isReady?: boolean }>; friendlyFish?: boolean; matchStarted?: boolean } | null>(null);
+  const [lobby, setLobby] = useState<{ hostId: string; players: Record<string, LobbyPerson & { isReady?: boolean }>; friendlyFish?: boolean; matchStarted?: boolean; menuStage?: string } | null>(null);
   const [lobbyError, setLobbyError] = useState<string | null>(null);
 
   const [seatCount, setSeatCount] = useState(1);
@@ -82,6 +80,8 @@ export default function App() {
    * engine a single online seat, so players two and three drove nothing.
    */
   const [offlineMatch, setOfflineMatch] = useState(false);
+  /** Friendly Fish for a run at one keyboard. Online, the lobby's `friendlyFish` is the one that counts. */
+  const [localFriendly, setLocalFriendly] = useState(false);
 
   /**
    * The purse belongs to the account, not to this browser.
@@ -164,7 +164,7 @@ export default function App() {
             setLobbyError('That lobby is gone.');
             return;
           }
-          const data = snap.data() as { hostId: string; players: Record<string, LobbyPerson>; friendlyFish?: boolean; matchStarted?: boolean };
+          const data = snap.data() as { hostId: string; players: Record<string, LobbyPerson>; friendlyFish?: boolean; matchStarted?: boolean; menuStage?: string };
           if (!data.players?.[uid]) {
             setLobbyError("You're not in this lobby.");
             return;
@@ -200,7 +200,7 @@ export default function App() {
     // a shared-keyboard run straight back to the room.
     if (!online || offlineMatch) return;
     if (lobby?.matchStarted && myFish !== undefined && myFish !== null) setView('game');
-    else if (view === 'game') setView('room');
+    else if (view === 'game') setView('shell');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lobby?.matchStarted, myFish, online, offlineMatch]);
 
@@ -226,15 +226,21 @@ export default function App() {
 
   const startMatch = useCallback(async () => {
     if (!isHost) return;
+    // Already flying: a host who inherited the room mid-match (the old host
+    // left) just swims back in. true -> true would not reach the effect above.
+    if (lobby?.matchStarted) {
+      setView('game');
+      return;
+    }
     try {
       const { db, doc, updateDoc } = await import('./firebase');
       await updateDoc(doc(db, 'lobbies', handoff.room), { matchStarted: true });
     } catch (e) {
       console.error('Could not start the match', e);
     }
-  }, [isHost, handoff.room]);
+  }, [isHost, lobby?.matchStarted, handoff.room]);
 
-  const buy = (index: number) => {
+  const buy =(index: number) => {
     const price = FISH_ASSETS[index].price;
     if (unlocked.includes(index) || coins < price) return;
     setCoins((c) => c - price);
@@ -246,8 +252,8 @@ export default function App() {
   }, []);
 
   /**
-   * Leaving the water, online: back to the room, and , for the host , the
-   * go-signal comes down with it.
+   * Leaving the water: back to the match page (Stage 3), and online , for the
+   * host , the go-signal comes down with it.
    *
    * `matchStarted` was never reset anywhere after being set, so a "Back to
    * lobby" round-trip was broken: the room screen's transition to 'game' is
@@ -263,13 +269,69 @@ export default function App() {
    * quit alike , actually passes through.
    */
   const leaveWater = useCallback(() => {
-    setOfflineMatch(false);
-    setView(online ? 'room' : 'menu');
+    // Back to the match page either way, ready for another go. Offline that
+    // is this device's own stage; online the room is still on it.
+    setView('shell');
+    if (offlineMatch) {
+      setLocalStage('modes');
+      return;
+    }
     if (!online || !isHost) return;
     void import('./firebase')
       .then(({ db, doc, updateDoc }) => updateDoc(doc(db, 'lobbies', handoff.room), { matchStarted: false }))
       .catch((e) => console.error('Could not reset the match flag', e));
-  }, [online, isHost, handoff.room]);
+  }, [online, isHost, offlineMatch, handoff.room]);
+
+  /** Host only: a room-wide change, from moving everyone to the next stage to the Friendly Fish rule. */
+  const writeLobby = useCallback(
+    async (fields: Record<string, string | number | boolean>) => {
+      if (!online || !isHost) return;
+      try {
+        const { db, doc, updateDoc } = await import('./firebase');
+        await updateDoc(doc(db, 'lobbies', handoff.room), fields);
+      } catch (e) {
+        console.error('Could not update the room', e);
+      }
+    },
+    [online, isHost, handoff.room],
+  );
+
+  // ── the pre-match flow ───────────────────────────────────────────────────
+  //
+  // Title screen, fish, match rules. Online the host writes the stage into the
+  // lobby (`menuStage`) and every client renders whatever it says; solo, at one
+  // keyboard, or opened on its own, the stage lives on this device alone.
+  const local = !online || offlineMatch;
+  const remoteStage = parseStage(lobby?.menuStage);
+  const iAmReady = myFish !== undefined && myFish !== null;
+  /**
+   * Nobody sits on the match page without a fish. A guest who has none , they
+   * arrived late, or were still choosing when the host moved on , keeps the
+   * picker until they do, and if a match is already running, picking one is
+   * what takes them into it (the `matchStarted` effect above).
+   */
+  const lateJoin = !local && remoteStage === 'modes' && !isHost && !iAmReady;
+  const stage: MenuStage = local ? localStage : lateJoin ? 'customize' : remoteStage;
+  const goStage = (next: MenuStage) => {
+    if (local) setLocalStage(next);
+    else void writeLobby({ [MENU_STAGE_FIELD]: next });
+  };
+
+  // The shop is a detour off the title screen. When the room moves on, a
+  // guest still browsing it moves on with everyone else.
+  useEffect(() => setShowShop(false), [stage]);
+
+  const openOffline = (players: number) => {
+    setOfflineMatch(true);
+    setSeatCount(players);
+    setSeatFish({});
+    setLocalStage('customize');
+  };
+
+  const closeOffline = () => {
+    setOfflineMatch(false);
+    setLocalStage('menu');
+  };
 
   // ── in the water ─────────────────────────────────────────────────────────
   if (view === 'game') {
@@ -290,7 +352,7 @@ export default function App() {
           localIds={localIds}
           localFish={localFish}
           localNames={localNames}
-          friendlyFish={Boolean(netPlay) && lobby?.friendlyFish === true}
+          friendlyFish={netPlay ? lobby?.friendlyFish === true : seatCount > 1 && localFriendly}
           settings={settings}
           onOpenSettings={() => setShowSettings(true)}
           onExit={leaveWater}
@@ -304,143 +366,225 @@ export default function App() {
     );
   }
 
-  // ── shells ───────────────────────────────────────────────────────────────
+  // ── the menu stages ──────────────────────────────────────────────────────
   //
   // A fixed height with the scrolling done *inside* each screen. The root used
   // to be `min-h-[100dvh] overflow-y-auto`, which grows with its content rather
   // than scrolling it , and since index.css sets `body { overflow: hidden }`,
   // anything past the fold was simply unreachable. That is why the start button
   // could not be tapped on a phone.
-  return (
-    <div className="relative h-[100dvh] w-full overflow-hidden text-slate-900">
-      {view === 'shop' && (
-        <Shell title="Fish Shop" coins={coins} onBack={() => setView(online ? 'room' : 'menu')}>
-          <FishGrid
-            unlocked={unlocked}
-            coins={coins}
-            onPick={buy}
-            selected={null}
-            pickedBy={{}}
-            mode="shop"
-          />
-        </Shell>
-      )}
+  const hostName = lobby ? lobby.players?.[lobby.hostId]?.displayName : undefined;
+  const fullscreen = () => toggleFullscreen(document.documentElement, !isNativeFullscreen());
+  const coinChip = (
+    <div className="glass-dark flex items-center gap-1.5 rounded-2xl px-3 py-2.5 font-bold text-amber-600 short:py-2">
+      <Coins className="h-4 w-4" /> {coins}
+    </div>
+  );
+  const toolButton = (label: string, icon: React.ReactNode, onClick: () => void) => (
+    <button onClick={onClick} aria-label={label} title={label} className="glass-dark rounded-2xl p-2.5 short:p-2">
+      {icon}
+    </button>
+  );
+  /** Stages 2 and 3. The balance matters while picking (a locked fish is bought on tap), less once picked. */
+  const stageToolbar = (coinsOnPhone: boolean) => (
+    <>
+      <div className={coinsOnPhone ? '' : 'hidden sm:block'}>{coinChip}</div>
+      {toolButton('Full screen', <Maximize2 className="h-5 w-5" />, fullscreen)}
+      {toolButton('Settings', <SettingsIcon className="h-5 w-5" />, () => setShowSettings(true))}
+      {!local && isHost && toolButton('End the match for everyone', <LogOut className="h-5 w-5" />, askHostToEndGame)}
+    </>
+  );
 
-      {view === 'menu' && (
-        <div className="flex h-full flex-col gap-4 overflow-y-auto p-6">
-          {/* A real row, not an overlay -- so a long title on a short screen
-              pushes the content down instead of running under these buttons. */}
-          <div className="flex shrink-0 items-center justify-end gap-2">
-            <div className="glass-dark flex items-center gap-2 rounded-2xl px-3 py-2.5 font-bold text-amber-600">
-              <Coins className="h-4 w-4" /> {coins}
-            </div>
-            <button onClick={() => setView('shop')} className="glass-dark rounded-2xl px-3 py-2.5 font-bold">
+  let screen: React.ReactNode;
+  if (showShop) {
+    screen = (
+      <Shell title="Fish Shop" coins={coins} onBack={() => setShowShop(false)}>
+        <FishGrid unlocked={unlocked} coins={coins} onPick={buy} selected={null} pickedBy={{}} mode="shop" />
+      </Shell>
+    );
+  } else if (!local && lobbyError) {
+    screen = (
+      <div className="flex h-full flex-col items-center justify-center gap-3 overflow-y-auto p-6 text-center">
+        <h2 className="text-2xl font-black">{lobbyError}</h2>
+        <p className="text-sm text-slate-600">Head back to the PlayBuddies lobby and try again.</p>
+      </div>
+    );
+  } else if (!local && (!authChecked || !uid || !lobby)) {
+    screen = (
+      <div className="flex h-full flex-col items-center justify-center gap-3">
+        <Loader2 className="h-10 w-10 animate-spin text-emerald-600" />
+        <p className="font-bold text-slate-700">Joining the reef…</p>
+      </div>
+    );
+  } else if (stage === 'menu') {
+    screen = (
+      <MainMenu
+        theme={THEME}
+        online={online}
+        isHost={isHost}
+        hostName={hostName}
+        onSingle={() => openOffline(1)}
+        onMulti={online && !handoff.solo ? () => goStage('customize') : undefined}
+        onSettings={() => setShowSettings(true)}
+        singleHint="Just you and the reef"
+        multiHint={`Everyone in this room · ${people.length} ${people.length === 1 ? 'player' : 'players'}`}
+        toolbar={
+          <>
+            {coinChip}
+            <button onClick={() => setShowShop(true)} className="glass-dark rounded-2xl px-3 py-2.5 font-bold short:py-2">
               Shop
             </button>
-            <button
-              onClick={() => toggleFullscreen(document.documentElement, !isNativeFullscreen())}
-              aria-label="Full screen"
-              className="glass-dark rounded-2xl p-2.5"
-            >
-              <Maximize2 className="h-5 w-5" />
-            </button>
-            <button onClick={() => setShowSettings(true)} aria-label="Settings" className="glass-dark rounded-2xl p-2.5">
-              <SettingsIcon className="h-5 w-5" />
-            </button>
-            <button onClick={askToLeaveLobby} aria-label="Leave" className="glass-dark rounded-2xl p-2.5">
-              <LogOut className="h-5 w-5" />
-            </button>
-          </div>
-
-          <div className="flex flex-1 flex-col items-center justify-center gap-8">
-          <div className="text-center">
-            <div className="mb-4 inline-block rounded-3xl bg-emerald-500/15 p-4">
-              <FishIcon className="h-14 w-14 text-emerald-600" />
+            {toolButton('Full screen', <Maximize2 className="h-5 w-5" />, fullscreen)}
+            {toolButton('Leave', <LogOut className="h-5 w-5" />, askToLeaveLobby)}
+          </>
+        }
+        title={
+          <>
+            <div className="mb-3 flex items-end justify-center gap-4 short:hidden" aria-hidden>
+              {[10, 21, 29].map((index, i) => (
+                <img
+                  key={index}
+                  src={fishSrc(index)}
+                  alt=""
+                  className="animate-float h-12 w-auto drop-shadow-lg sm:h-16"
+                  style={{ animationDelay: `${i * -2}s` }}
+                />
+              ))}
             </div>
-            <h1 className="text-4xl font-black leading-none tracking-tighter sm:text-6xl">
+            <h1 className="text-4xl font-black leading-none tracking-tighter sm:text-6xl short:text-3xl">
               GO EAT <span className="text-emerald-500">FISH</span>
             </h1>
-            <p className="mt-2 text-xs font-bold uppercase tracking-[0.3em] text-slate-600">
-              Grow or get eaten
-            </p>
-          </div>
-
-          <div className="glass-dark w-full max-w-md space-y-5 rounded-[2rem] p-8 text-center">
-            <h2 className="text-2xl font-bold">Solo Hunt</h2>
-            <p className="text-sm text-slate-600">
-              Play alone, or share one keyboard with up to two friends.
-            </p>
-            <div className="flex justify-center gap-3">
-              {[1, 2, 3].map((n) => (
+            <p className="mt-2 text-xs font-bold uppercase tracking-[0.3em] text-slate-600">Grow or get eaten</p>
+          </>
+        }
+        secondary={
+          <div className="rounded-2xl border border-black/10 bg-white/40 p-2.5 short:p-1.5">
+            <p className="text-center text-[11px] font-black text-slate-600">Share one keyboard</p>
+            <div className="mt-1.5 grid grid-cols-2 gap-2">
+              {[2, 3].map((n) => (
                 <button
                   key={n}
-                  onClick={() => {
-                    setOfflineMatch(true);
-                    setSeatCount(n);
-                    setSeatFish({});
-                    setView('select');
-                  }}
-                  className="rounded-xl border border-emerald-500/30 bg-emerald-600/15 px-6 py-3 font-bold text-emerald-700 transition-colors hover:bg-emerald-500 hover:text-white"
+                  onClick={() => openOffline(n)}
+                  disabled={online && !isHost}
+                  className="rounded-xl border border-emerald-500/30 bg-emerald-600/15 py-2 text-sm font-black text-emerald-700 transition-colors enabled:hover:bg-emerald-500 enabled:hover:text-white disabled:cursor-not-allowed disabled:opacity-40 short:py-1.5"
                 >
-                  {n}P
+                  {n} players
                 </button>
               ))}
             </div>
-            <p className="text-xs text-slate-500">
-              Playing online? Start a lobby on PlayBuddies and pick this game.
-            </p>
-            {online && (
-              <button
-                onClick={() => setView('room')}
-                className="w-full rounded-xl border border-black/10 bg-white/50 py-2.5 text-sm font-bold text-slate-600 transition-colors hover:bg-white"
-              >
-                Back to the lobby
-              </button>
-            )}
           </div>
-          </div>
-        </div>
-      )}
+        }
+        footer={
+          <p className="max-w-md text-center text-[11px] leading-relaxed text-slate-600 short:hidden">
+            Steer with {KEY_LAYOUTS[settings.controlScheme] ?? KEY_LAYOUTS[0]} (Game Settings changes it), or drag
+            anywhere on a touchscreen.
+            {!online && ' Playing online? Start a lobby on PlayBuddies and pick this game.'}
+          </p>
+        }
+      />
+    );
+  } else if (stage === 'customize') {
+    const slots: FishSlot[] = local
+      ? Array.from({ length: seatCount }, (_, i) => ({
+          key: `seat-${i}`,
+          label: seatCount > 1 ? `Player ${i + 1}` : 'You',
+          fish: seatFish[`seat-${i}`],
+          editable: true,
+        }))
+      : people.map((p) => ({
+          key: p.uid,
+          label: p.displayName,
+          fish: p.fishIndex,
+          editable: p.uid === uid,
+          isHost: p.uid === lobby?.hostId,
+        }));
+    screen = (
+      <CustomizeScreen
+        key={local ? `seats-${seatCount}` : 'room'}
+        slots={slots}
+        role={local ? 'local' : isHost ? 'host' : 'guest'}
+        unlocked={unlocked}
+        coins={coins}
+        toolbar={stageToolbar(true)}
+        hostName={hostName}
+        lateJoin={lateJoin ? (lobby?.matchStarted ? 'underway' : 'setup') : undefined}
+        onPick={(key, index) => {
+          if (!local) return void pickFishOnline(index);
+          if (!unlocked.includes(index)) {
+            if (coins < FISH_ASSETS[index].price) return;
+            buy(index);
+          }
+          setSeatFish((s) => ({ ...s, [key]: index }));
+        }}
+        onBack={local ? closeOffline : isHost ? () => goStage('menu') : undefined}
+        onNext={() => goStage('modes')}
+      />
+    );
+  } else {
+    const kind: 'room' | 'solo' | 'couch' = !local ? 'room' : seatCount > 1 ? 'couch' : 'solo';
+    const members: ReefMember[] = local
+      ? Array.from({ length: seatCount }, (_, i) => ({
+          key: `seat-${i}`,
+          name: seatCount > 1 ? `Player ${i + 1}` : 'You',
+          fish: seatFish[`seat-${i}`],
+          keys: seatCount > 1 ? KEY_LAYOUTS[(i + settings.controlScheme) % KEY_LAYOUTS.length] : undefined,
+        }))
+      : people.map((p) => ({
+          key: p.uid,
+          name: p.displayName,
+          fish: p.fishIndex,
+          you: p.uid === uid,
+          host: p.uid === lobby?.hostId,
+        }));
+    const waiting = members.filter((m) => m.fish === undefined || m.fish === null).length;
+    const underway = !local && lobby?.matchStarted === true;
+    let action: { label: string; onClick: () => void; disabled?: boolean } | undefined;
+    let note: string;
+    if (local) {
+      action = { label: 'Dive in', onClick: () => setView('game') };
+      note =
+        kind === 'couch'
+          ? 'Everyone steers with the keys by their name. Dragging on a touchscreen steers Player 1.'
+          : 'Every fish starts the same size. Grow by eating.';
+    } else if (isHost) {
+      action = { label: underway ? 'Dive back in' : 'Dive in', onClick: () => void startMatch(), disabled: !iAmReady };
+      note = !iAmReady
+        ? 'Pick your fish first: go back a step.'
+        : waiting > 0
+          ? `${waiting} still choosing. They can dive in once they pick.`
+          : 'Everyone is ready!';
+    } else if (underway && iAmReady) {
+      // A guest who left a match still running: the reef has no finish line, so they can go straight back.
+      action = { label: 'Dive back in', onClick: () => setView('game') };
+      note = 'A match is underway in this room.';
+    } else {
+      note = `${hostName || 'The host'} starts the match when everyone is ready.`;
+    }
+    screen = (
+      <ModesScreen
+        kind={kind}
+        locked={!local && !isHost}
+        hostName={hostName}
+        underway={underway}
+        toolbar={stageToolbar(false)}
+        members={members}
+        friendlyFish={local ? localFriendly : lobby?.friendlyFish === true}
+        onFriendlyFish={(value) => {
+          if (local) return setLocalFriendly(value);
+          // The lobby field is the rule itself: every guest's locked copy of this page reads it back live.
+          if (!isHost || lobby?.matchStarted) return;
+          void writeLobby({ friendlyFish: value });
+        }}
+        onBack={local || isHost ? () => goStage('customize') : undefined}
+        action={action}
+        note={note}
+      />
+    );
+  }
 
-      {view === 'select' && (
-        <SoloSelect
-          seatCount={seatCount}
-          unlocked={unlocked}
-          coins={coins}
-          onBack={() => setView('menu')}
-          onDone={(picks) => {
-            setSeatFish(picks);
-            setView('game');
-          }}
-          onBuy={buy}
-        />
-      )}
-
-      {view === 'room' && (
-        <RoomScreen
-          ready={authChecked}
-          error={lobbyError}
-          uid={uid}
-          people={people}
-          hostId={lobby?.hostId ?? null}
-          myFish={myFish}
-          unlocked={unlocked}
-          coins={coins}
-          isHost={isHost}
-          onPick={pickFishOnline}
-          friendlyFish={lobby?.friendlyFish === true}
-          onFriendlyFish={async (value) => {
-            if (!isHost || lobby?.matchStarted) return;
-            const { db, doc, updateDoc } = await import('./firebase');
-            await updateDoc(doc(db, 'lobbies', handoff.room), { friendlyFish: value });
-          }}
-          onStart={startMatch}
-          onShop={() => setView('shop')}
-          onSettings={() => setShowSettings(true)}
-          onFullscreen={() => toggleFullscreen(document.documentElement, !isNativeFullscreen())}
-          onPlayOffline={() => setView('menu')}
-        />
-      )}
+  return (
+    <div className="relative h-[100dvh] w-full overflow-hidden text-slate-900">
+      {screen}
 
       {showSettings && (
         <SettingsPanel settings={settings} onChange={setSettings} onClose={() => setShowSettings(false)} />
@@ -475,330 +619,6 @@ function Shell({
       </div>
       <div className="glass-dark min-h-0 flex-1 overflow-y-auto overscroll-contain rounded-[2rem] p-3 sm:p-6">
         {children}
-      </div>
-    </div>
-  );
-}
-
-function FishGrid({
-  unlocked,
-  coins,
-  onPick,
-  selected,
-  pickedBy,
-  mode,
-}: {
-  unlocked: number[];
-  coins: number;
-  onPick: (index: number) => void;
-  selected: number | null;
-  /**
-   * Everyone else who has also picked this fish. Purely informational , size
-   * is what tells fish apart in the water, so nothing stops two players
-   * choosing the same one.
-   */
-  pickedBy: Record<number, string[]>;
-  mode: 'shop' | 'pick';
-}) {
-  return (
-    <div className="space-y-5">
-      {FISH_CATEGORIES.map((category) => {
-        const entries = FISH_ASSETS.map((fish, index) => ({ fish, index })).filter(
-          (e) => e.fish.category === category,
-        );
-        if (!entries.length) return null;
-
-        return (
-          <section key={category} className="space-y-2">
-            <h3 className="border-b border-black/10 pb-1.5 text-[10px] sm:text-[11px] font-black uppercase tracking-[0.2em] text-emerald-700/80">
-              {category} class
-            </h3>
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2 sm:gap-3">
-              {entries.map(({ fish, index }) => {
-                const isUnlocked = unlocked.includes(index);
-                const others = pickedBy[index] ?? [];
-                const isSelected = selected === index;
-                const affordable = coins >= fish.price;
-
-                return (
-                  <button
-                    key={index}
-                    onClick={() => onPick(index)}
-                    disabled={mode === 'shop' && (isUnlocked || !affordable)}
-                    className={`relative flex flex-col items-center gap-1 overflow-hidden rounded-xl sm:rounded-2xl border p-1.5 sm:p-2 transition-all ${
-                      isSelected
-                        ? 'border-emerald-500 bg-emerald-500/20 shadow-[0_0_0_3px_rgba(16,185,129,0.2)] scale-[1.02]'
-                        : isUnlocked
-                          ? 'border-black/10 bg-white/40 hover:bg-white/70 active:scale-95'
-                          : 'border-amber-400/40 bg-amber-400/10'
-                    }`}
-                  >
-                    {!isUnlocked && (
-                      <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-black/55 backdrop-blur-[1px]">
-                        <Lock className="mb-0.5 h-3.5 w-3.5 text-amber-300" />
-                        <span className="text-[9px] font-black text-amber-300">{fish.price}</span>
-                      </div>
-                    )}
-                    <div className="flex h-11 sm:h-14 items-center justify-center">
-                      <img
-                        src={fishSrc(index)}
-                        alt={fish.name}
-                        loading="lazy"
-                        className="max-h-full max-w-full object-contain"
-                      />
-                    </div>
-                    <span className="w-full truncate text-center text-[9px] sm:text-[10px] font-bold uppercase tracking-wide">
-                      {fish.name}
-                    </span>
-                    {others.length > 0 && (
-                      <span className="w-full truncate text-[8px] sm:text-[9px] font-bold uppercase text-slate-400">
-                        Also played by {others.join(', ')}
-                      </span>
-                    )}
-                    {mode === 'shop' && isUnlocked && (
-                      <span className="flex items-center gap-1 text-[9px] sm:text-[10px] font-bold text-emerald-600">
-                        <Check className="h-3 w-3" /> owned
-                      </span>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          </section>
-        );
-      })}
-    </div>
-  );
-}
-
-function SoloSelect({
-  seatCount,
-  unlocked,
-  coins,
-  onBack,
-  onDone,
-  onBuy,
-}: {
-  seatCount: number;
-  unlocked: number[];
-  coins: number;
-  onBack: () => void;
-  onDone: (picks: Record<string, number>) => void;
-  onBuy: (index: number) => void;
-}) {
-  const [picks, setPicks] = useState<Record<string, number>>({});
-  const seat = Object.keys(picks).length;
-
-  const pickedBy = useMemo(() => {
-    const map: Record<number, string[]> = {};
-    Object.entries(picks).forEach(([id, index], i) => {
-      const label = `Player ${Number(id.split('-')[1]) + 1 || i + 1}`;
-      (map[index] ??= []).push(label);
-    });
-    return map;
-  }, [picks]);
-
-  const pick = (index: number) => {
-    if (!unlocked.includes(index)) {
-      onBuy(index);
-      return;
-    }
-    const next = { ...picks, [`seat-${seat}`]: index };
-    setPicks(next);
-    if (Object.keys(next).length >= seatCount) onDone(next);
-  };
-
-  return (
-    <Shell title={`Player ${seat + 1}: pick a fish`} coins={coins} onBack={onBack}>
-      <FishGrid unlocked={unlocked} coins={coins} onPick={pick} selected={null} pickedBy={pickedBy} mode="pick" />
-    </Shell>
-  );
-}
-
-function RoomScreen({
-  ready,
-  error,
-  uid,
-  people,
-  hostId,
-  myFish,
-  unlocked,
-  coins,
-  isHost,
-  onPick,
-  onStart,
-  friendlyFish,
-  onFriendlyFish,
-  onShop,
-  onSettings,
-  onFullscreen,
-  onPlayOffline,
-}: {
-  ready: boolean;
-  error: string | null;
-  uid: string | null;
-  people: LobbyPerson[];
-  hostId: string | null;
-  myFish: number | undefined;
-  unlocked: number[];
-  coins: number;
-  isHost: boolean;
-  onPick: (index: number) => void;
-  onStart: () => void;
-  friendlyFish: boolean;
-  onFriendlyFish: (value: boolean) => Promise<void>;
-  onShop: () => void;
-  onSettings: () => void;
-  onFullscreen: () => void;
-  onPlayOffline: () => void;
-}) {
-  const pickedBy = useMemo(() => {
-    const map: Record<number, string[]> = {};
-    for (const p of people) {
-      if (p.uid !== uid && p.fishIndex !== undefined && p.fishIndex !== null) {
-        (map[p.fishIndex] ??= []).push(p.displayName);
-      }
-    }
-    return map;
-  }, [people, uid]);
-
-  if (error) {
-    return (
-      <div className="flex h-full flex-col items-center justify-center gap-3 overflow-y-auto p-6 text-center">
-        <h2 className="text-2xl font-black">{error}</h2>
-        <p className="text-sm text-slate-600">Head back to the PlayBuddies lobby and try again.</p>
-      </div>
-    );
-  }
-
-  if (!ready || !uid) {
-    return (
-      <div className="flex h-full flex-col items-center justify-center gap-3">
-        <Loader2 className="h-10 w-10 animate-spin text-emerald-600" />
-        <p className="font-bold text-slate-700">Joining the reef…</p>
-      </div>
-    );
-  }
-
-  const everyonePicked = people.every((p) => p.fishIndex !== undefined && p.fishIndex !== null);
-  const iAmReady = myFish !== undefined && myFish !== null;
-
-  return (
-    <div className="mx-auto flex h-full w-full max-w-6xl flex-col overflow-y-auto overscroll-contain gap-2 p-2 sm:gap-4 sm:p-5">
-      {/* Header */}
-      <div className="flex shrink-0 items-center justify-between gap-2 px-1">
-        <div className="flex items-center gap-2 min-w-0">
-          <h2 className="min-w-0 truncate text-base font-black tracking-tight sm:text-2xl">Pick your fish</h2>
-          {myFish !== undefined && myFish !== null && (
-            <span className="hidden sm:inline-flex items-center gap-1 rounded-full bg-emerald-500/20 px-2.5 py-0.5 text-xs font-bold text-emerald-800">
-              <Check className="h-3 w-3" /> Ready
-            </span>
-          )}
-        </div>
-        <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
-          <button onClick={onShop} className="glass-dark flex items-center gap-1.5 rounded-xl px-2.5 py-1.5 text-xs sm:text-sm font-bold text-amber-600">
-            <Coins className="h-4 w-4" /> {coins}
-          </button>
-          <button onClick={onFullscreen} className="glass-dark rounded-xl p-2" title="Full screen">
-            <Maximize2 className="h-4 w-4 sm:h-5 sm:w-5" />
-          </button>
-          <button onClick={onSettings} className="glass-dark rounded-xl p-2">
-            <SettingsIcon className="h-4 w-4 sm:h-5 sm:w-5" />
-          </button>
-          {isHost && (
-            <button onClick={askHostToEndGame} className="glass-dark rounded-xl p-2" title="End the match for everyone">
-              <LogOut className="h-4 w-4 sm:h-5 sm:w-5" />
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Main Grid: Responsive for Portrait and Landscape */}
-      <div className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-3 landscape:grid-cols-3 gap-2 sm:gap-4">
-        {/* Fish Picker */}
-        <div className="glass-dark min-h-0 flex-1 overflow-y-auto overscroll-contain rounded-2xl md:rounded-[2rem] landscape:rounded-[2rem] p-2.5 sm:p-5 md:col-span-2 landscape:col-span-2">
-          <FishGrid
-            unlocked={unlocked}
-            coins={coins}
-            onPick={onPick}
-            selected={myFish ?? null}
-            pickedBy={pickedBy}
-            mode="pick"
-          />
-        </div>
-
-        {/* Players & Action Column */}
-        <div className="flex min-h-0 flex-col gap-2 sm:gap-3 md:col-span-1 landscape:col-span-1">
-          {/* Players List */}
-          <div className="glass-dark flex min-h-0 flex-1 flex-col rounded-2xl md:rounded-[2rem] landscape:rounded-[2rem] p-3 sm:p-4">
-            <h3 className="mb-2 flex shrink-0 items-center gap-1.5 text-[10px] sm:text-[11px] font-black uppercase tracking-[0.2em] text-slate-500">
-              <Users className="h-3.5 w-3.5" /> In the water ({people.length})
-            </h3>
-            <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto overscroll-contain pr-0.5">
-              {people.map((p) => (
-                <div key={p.uid} className="flex items-center gap-2.5 rounded-xl border border-black/5 bg-white/40 p-2 sm:p-2.5">
-                  <div className="flex h-8 w-8 sm:h-10 sm:w-10 shrink-0 items-center justify-center rounded-lg border border-black/10 bg-white/60 p-1">
-                    {p.fishIndex !== undefined && p.fishIndex !== null ? (
-                      <img src={fishSrc(p.fishIndex)} alt="" className="max-h-full max-w-full object-contain" />
-                    ) : (
-                      <FishIcon className="h-4 w-4 text-slate-400" />
-                    )}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="flex items-center gap-1 truncate text-xs sm:text-sm font-bold">
-                      {p.displayName}
-                      {p.uid === hostId && <Crown className="h-3 w-3 shrink-0 text-amber-500" />}
-                    </p>
-                    <p className="text-[9px] sm:text-[10px] font-bold uppercase tracking-widest text-slate-500">
-                      {p.uid === uid ? 'You' : p.fishIndex !== undefined && p.fishIndex !== null ? 'Ready' : 'Choosing…'}
-                    </p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Action Button */}
-          <div className="glass-dark shrink-0 rounded-2xl md:rounded-[2rem] landscape:rounded-[2rem] p-2.5 sm:p-4">
-            <label className="mb-3 flex items-center gap-2 text-sm text-white">
-              <input type="checkbox" checked={friendlyFish} disabled={!isHost}
-                onChange={(e) => { void onFriendlyFish(e.target.checked).catch(console.error); }} />
-              <span>Friendly Fish <small className="block opacity-70">{friendlyFish ? 'Players cannot eat each other' : 'Players can eat smaller players'}</small></span>
-            </label>
-            {isHost ? (
-              <>
-                <button
-                  onClick={onStart}
-                  disabled={!iAmReady}
-                  className="flex w-full items-center justify-center gap-2 rounded-xl sm:rounded-2xl bg-emerald-600 py-2.5 sm:py-3.5 text-sm sm:text-base font-black text-white shadow-lg transition-transform active:scale-95 disabled:opacity-40"
-                >
-                  <Play className="h-4 w-4 sm:h-5 sm:w-5 fill-current" /> DIVE IN
-                </button>
-                <p className="mt-1.5 text-center text-[10px] text-slate-500">
-                  {!iAmReady
-                    ? 'Pick your fish first.'
-                    : everyonePicked
-                      ? 'Everyone is ready!'
-                      : 'You can dive in now or wait for others.'}
-                </p>
-              </>
-            ) : (
-              <div className="text-center py-1">
-                <p className="text-xs sm:text-sm font-bold text-slate-600">
-                  {!iAmReady ? '👉 Pick a fish above' : '⏳ Waiting for host to start…'}
-                </p>
-              </div>
-            )}
-            {/* Sharing one keyboard is a legitimate way to play this while
-                sitting in a lobby, and until now the lobby was a dead end. */}
-            <button
-              onClick={onPlayOffline}
-              className="mt-2 w-full rounded-xl border border-black/10 bg-white/40 py-2 text-[11px] sm:text-xs font-bold text-slate-600 transition-colors hover:bg-white"
-            >
-              Play offline / one keyboard
-            </button>
-          </div>
-        </div>
       </div>
     </div>
   );
@@ -861,7 +681,7 @@ function SettingsPanel({
         <div className="space-y-2">
           <span className="text-sm font-bold">Keyboard layout</span>
           <div className="flex gap-1 rounded-xl bg-black/5 p-1">
-            {['WASD', 'Arrows', 'IJKL'].map((label, i) => (
+            {KEY_LAYOUTS.map((label, i) => (
               <button
                 key={label}
                 onClick={() => onChange({ ...settings, controlScheme: i })}

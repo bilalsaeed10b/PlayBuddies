@@ -15,6 +15,12 @@ import {
   Users,
 } from 'lucide-react';
 import { askHostToEndGame, askToLeaveLobby, isNativeFullscreen, toggleFullscreen, useAutoFullscreen } from './fullscreen';
+import { MainMenu } from '@shared/menu/MainMenu';
+import { ActionBar, HostBadge, StageFrame } from '@shared/menu/StageFrame';
+import { OptionGroup, RuleSection, ToggleOption } from '@shared/menu/MatchControls';
+import { MENU_STAGE_FIELD, parseStage } from '@shared/menu/stage';
+import type { MenuStage } from '@shared/menu/stage';
+import type { MenuTheme } from '@shared/menu/theme';
 import { FREE_OUTLAWS, OUTLAWS } from './game/outlaws';
 import useShortScreen from '@shared/ui/useShortScreen';
 import OutlawToken from './components/OutlawToken';
@@ -58,7 +64,15 @@ function readHandoff(): Handoff {
 
 const DEFAULT_SETTINGS: GameSettings = { sfxVolume: 0.7, hints: true };
 
-type View = 'menu' | 'pick' | 'room' | 'game' | 'offline_menu';
+/** Everything before the game is one of the shared menu stages; see `stage` in App. */
+type View = 'shell' | 'game';
+
+const THEME: MenuTheme = {
+  tone: 'light',
+  primary: 'bg-rose-800 text-amber-50',
+  selected: 'border-rose-700 bg-rose-100',
+  accent: 'text-rose-800',
+};
 
 interface LobbyPerson {
   uid: string;
@@ -72,10 +86,10 @@ const randomSeed = () => (Math.random() * 0x7fffffff) | 0;
 /**
  * The bot rank used for any seat this device fills in an online room.
  *
- * The tier picker in the menu is only ever reached offline, so it really means
- * "how hard should the practice bot be". Letting that leak into online rooms
- * is how a player who once tried Marshal ends up playing friends alongside
- * merciless fill-in bots.
+ * The tier picker on the match page is only ever reached offline, so it really
+ * means "how hard should the practice bot be". Letting that leak into online
+ * rooms is how a player who once tried Marshal ends up playing friends
+ * alongside merciless fill-in bots.
  */
 const ONLINE_AI_LEVEL = 1;
 
@@ -83,10 +97,12 @@ export default function App() {
   const [handoff] = useState(readHandoff);
   const online = Boolean(handoff.room);
 
-  const [view, setView] = useState<View>(online ? 'room' : 'menu');
+  const [view, setView] = useState<View>('shell');
+  /** The stage for a flow this device runs alone. Online, the lobby's `menuStage` is the one that counts. */
+  const [localStage, setLocalStage] = useState<MenuStage>('menu');
   useAutoFullscreen(online || view === 'game');
   const [showSettings, setShowSettings] = useState(false);
-  const [showRules, setShowRules] = useState(false);
+  const [showGuide, setShowGuide] = useState(false);
   const [uid, setUid] = useState<string | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
   const [lobby, setLobby] = useState<{
@@ -95,6 +111,7 @@ export default function App() {
     matchStarted?: boolean;
     matchRules?: number;
     matchSeed?: number;
+    menuStage?: string;
   } | null>(null);
   const [lobbyError, setLobbyError] = useState<string | null>(null);
 
@@ -178,6 +195,7 @@ export default function App() {
             matchStarted?: boolean;
             matchRules?: number;
             matchSeed?: number;
+            menuStage?: string;
           };
           if (!data.players?.[uid]) {
             setLobbyError('You are not in this lobby.');
@@ -232,6 +250,33 @@ export default function App() {
   const stampedRules = typeof lobby?.matchRules === 'number' ? unpackRules(lobby.matchRules) : null;
   const activeRules = lobby?.matchStarted && stampedRules ? stampedRules : rules;
 
+  /** Host only: any room-wide change, from moving the flow on to publishing the rules. */
+  const writeLobby = useCallback(
+    async (fields: Record<string, string | number | boolean>) => {
+      if (!online || !isHost) return;
+      try {
+        const { db, doc, updateDoc } = await import('./firebase');
+        await updateDoc(doc(db, 'lobbies', handoff.room), fields);
+      } catch (e) {
+        console.error('Could not update the room', e);
+      }
+    },
+    [online, isHost, handoff.room],
+  );
+
+  const remoteStage = parseStage(lobby?.menuStage);
+
+  /**
+   * The rules go to the room the moment the host changes them on the match
+   * page, not only with the start signal, so every guest's locked copy of that
+   * page shows what the host is actually choosing while they choose it.
+   */
+  useEffect(() => {
+    if (!online || offlineMatch || !isHost || remoteStage !== 'modes' || !lobby) return;
+    const packed = packRules(rules);
+    if (lobby.matchRules !== packed) void writeLobby({ matchRules: packed });
+  }, [online, offlineMatch, isHost, remoteStage, lobby, rules, writeLobby]);
+
   /**
    * The host's chosen player count follows the room, not the other way round.
    *
@@ -240,16 +285,16 @@ export default function App() {
    * connected crew with bots from an old setting.
    */
   useEffect(() => {
-    if (!online || !isHost || !lobby) return;
+    if (!online || offlineMatch || !isHost || !lobby) return;
     const roomSize = Object.keys(lobby.players ?? {}).length;
     const fits = PLAYER_CODES.find((n) => n >= roomSize) ?? PLAYER_CODES[PLAYER_CODES.length - 1];
     if (fits !== rules.players) setRules((r) => ({ ...r, players: fits }));
-  }, [online, isHost, lobby, rules.players]);
+  }, [online, offlineMatch, isHost, lobby, rules.players]);
 
   useEffect(() => {
     if (!online || offlineMatch) return;
     if (lobby?.matchStarted && mySkin !== undefined && mySkin !== null) setView('game');
-    else if (view === 'game') setView('room');
+    else if (view === 'game') setView('shell');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lobby?.matchStarted, mySkin, online, offlineMatch]);
 
@@ -308,15 +353,20 @@ export default function App() {
     reportResult(won);
   }, []);
 
+  /**
+   * Leaving the game: back to the match page for another round, and, online,
+   * the host's go-signal comes down with it.
+   */
   const leaveMatch = useCallback(() => {
-    setOfflineMatch(false);
-    setView(online ? 'room' : 'menu');
+    setView('shell');
     rollSession();
+    if (offlineMatch) {
+      setLocalStage('modes');
+      return;
+    }
     if (!online || !isHost) return;
-    void import('./firebase')
-      .then(({ db, doc, updateDoc }) => updateDoc(doc(db, 'lobbies', handoff.room), { matchStarted: false }))
-      .catch((e) => console.error('Could not reset the match flag', e));
-  }, [online, isHost, handoff.room, rollSession]);
+    void writeLobby({ matchStarted: false });
+  }, [online, isHost, offlineMatch, rollSession, writeLobby]);
 
   const rosterKey = people.map((person) => `${person.uid}:${person.skin ?? ''}`).join('|');
   // While waiting, every roster update rebuilds the preview config. Once the
@@ -449,78 +499,237 @@ export default function App() {
     setSeatCount(players);
     setSeatSkin({});
     // A couch game needs at least a seat each; a solo game keeps whatever the
-    // rules panel is set to.
+    // match page is set to.
     if (players > rules.players) setRules((r) => ({ ...r, players: players as PlayerCount }));
-    setView('pick');
+    setLocalStage('customize');
   };
+
+  const closeOffline = () => {
+    setOfflineMatch(false);
+    setLocalStage('menu');
+  };
+
+  // -- the shell --------------------------------------------------------------
+
+  /** Solo, couch, or a game opened on its own: the flow lives on this device alone. */
+  const local = !online || offlineMatch;
+  const stage: MenuStage = local ? localStage : remoteStage;
+  const goStage = (next: MenuStage) => {
+    if (local) setLocalStage(next);
+    else void writeLobby({ [MENU_STAGE_FIELD]: next });
+  };
+  const hostName = lobby ? lobby.players?.[lobby.hostId]?.displayName : undefined;
+  const fullscreen = () => toggleFullscreen(document.documentElement, !isNativeFullscreen());
+
+  const coinChip = (
+    <div className="panel flex items-center gap-1.5 rounded-2xl px-3 py-2.5 font-bold text-amber-800 short:py-2">
+      <Coins className="h-4 w-4" /> {coins}
+    </div>
+  );
+  const toolButton = (label: string, icon: React.ReactNode, onClick: () => void) => (
+    <button onClick={onClick} aria-label={label} title={label} className="panel rounded-2xl p-2.5 short:p-2">
+      {icon}
+    </button>
+  );
+  const stageToolbar = (
+    <>
+      <span className="hidden sm:block">{coinChip}</span>
+      {toolButton('The rules', <ScrollText className="h-5 w-5 text-rose-800" />, () => setShowGuide(true))}
+      {toolButton('Full screen', <Maximize2 className="h-5 w-5" />, fullscreen)}
+      {toolButton('Settings', <SettingsIcon className="h-5 w-5" />, () => setShowSettings(true))}
+      {!local && isHost && toolButton('End the game for everyone', <LogOut className="h-5 w-5" />, askHostToEndGame)}
+    </>
+  );
+
+  let screen: React.ReactNode;
+  if (!local && lobbyError) {
+    screen = (
+      <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center">
+        <h2 className="text-2xl font-black text-amber-950">{lobbyError}</h2>
+        <p className="text-sm text-amber-900/60">Head back to the PlayBuddies lobby and try again.</p>
+      </div>
+    );
+  } else if (!local && (!authChecked || !uid || !lobby)) {
+    screen = (
+      <div className="flex h-full flex-col items-center justify-center gap-3">
+        <Loader2 className="h-10 w-10 animate-spin text-rose-800" />
+        <p className="font-bold text-amber-900/70">Riding into town…</p>
+      </div>
+    );
+  } else if (stage === 'menu') {
+    screen = (
+      <MainMenu
+        theme={THEME}
+        online={online}
+        isHost={isHost}
+        hostName={hostName}
+        onSingle={() => openOffline(1)}
+        onMulti={online && !handoff.solo ? () => goStage('customize') : undefined}
+        onSettings={() => setShowSettings(true)}
+        singleHint="You against the bots"
+        multiHint={`Everyone in this room · ${people.length} in town`}
+        toolbar={
+          <>
+            {coinChip}
+            {toolButton('Full screen', <Maximize2 className="h-5 w-5" />, fullscreen)}
+            {toolButton('Leave', <LogOut className="h-5 w-5" />, askToLeaveLobby)}
+          </>
+        }
+        title={
+          <>
+            <p className="text-[10px] font-black uppercase tracking-[0.4em] text-amber-900/50 short:hidden">
+              Reward offered for
+            </p>
+            <h1 className="text-5xl font-black leading-none tracking-tighter text-amber-950 sm:text-7xl short:text-3xl">
+              WANTED
+            </h1>
+            <p className="mt-1 text-xs font-black uppercase tracking-[0.3em] text-rose-800">Dead or in debt</p>
+          </>
+        }
+        secondary={
+          <>
+            <button
+              onClick={() => openOffline(2)}
+              disabled={online && !isHost}
+              className="w-full rounded-2xl border border-black/10 bg-white/60 py-2.5 text-sm font-black text-amber-950 transition-colors hover:bg-white disabled:opacity-40 short:py-1.5"
+            >
+              Two on one device
+              <span className="block text-[10px] font-bold text-amber-900/50 short:hidden">
+                You pass the phone. Nobody peeks.
+              </span>
+            </button>
+            {/* Loud on purpose , cards are picked in secret and money is on the
+                line, and a small "Rules" button is easy to never notice at all. */}
+            <button
+              onClick={() => setShowGuide(true)}
+              className="relative flex w-full items-center gap-3 overflow-hidden rounded-2xl border-2 border-rose-700 bg-rose-100 px-4 py-3 text-left shadow-[0_4px_16px_rgba(190,18,60,0.18)] transition-transform active:scale-[0.99] short:py-1.5"
+            >
+              <span className="absolute -right-6 -top-6 h-16 w-16 animate-pulse rounded-full bg-rose-700/20" aria-hidden />
+              <ScrollText className="h-6 w-6 shrink-0 text-rose-800 short:h-5 short:w-5" />
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-black uppercase tracking-wide text-rose-900">New in town? Read the rules</p>
+                <p className="text-[11px] font-bold text-rose-800/70 short:hidden">If you want to win, it's worth a minute.</p>
+              </div>
+            </button>
+          </>
+        }
+        footer={
+          <p className="max-w-md text-center text-[11px] leading-relaxed text-amber-900/50 short:hidden">
+            Everybody picks a card in secret and they all flip at once. Your bounty climbs while you run, but it is
+            only yours once you have banked it.
+          </p>
+        }
+      />
+    );
+  } else if (stage === 'customize') {
+    const slots: OutlawSlot[] = local
+      ? Array.from({ length: seatCount }, (_, i) => ({
+          key: String(i),
+          label: seatCount > 1 ? `Player ${i + 1}` : 'You',
+          skin: seatSkin[i],
+          editable: true,
+        }))
+      : people.map((p) => ({
+          key: p.uid,
+          label: p.displayName,
+          skin: p.skin,
+          editable: p.uid === uid,
+          isHost: p.uid === lobby?.hostId,
+        }));
+    screen = (
+      <CustomizeScreen
+        slots={slots}
+        owned={owned}
+        coins={coins}
+        toolbar={stageToolbar}
+        leads={local || isHost}
+        hostName={hostName}
+        onPick={(key, index) => {
+          if (!local) return void pickOnline(index);
+          if (!owned.includes(index) && !buy(index)) return;
+          setSeatSkin((s) => ({ ...s, [Number(key)]: index }));
+        }}
+        onBack={local ? closeOffline : isHost ? () => goStage('menu') : undefined}
+        onNext={() => goStage('modes')}
+      />
+    );
+  } else {
+    const humans = local ? seatCount : people.length;
+    const bots = Math.max(0, rules.players - humans);
+    const roster: TownMember[] = local
+      ? Array.from({ length: rules.players }, (_, i) => ({
+          key: `seat-${i}`,
+          name: i < seatCount ? (seatCount > 1 ? `Player ${i + 1}` : 'You') : `${TIERS[aiLevel].label} ${i + 1}`,
+          skin: i < seatCount ? seatSkin[i] : undefined,
+          bot: i >= seatCount,
+          you: i === 0,
+        }))
+      : [
+          ...people.map((p) => ({
+            key: p.uid,
+            name: p.displayName,
+            skin: p.skin,
+            you: p.uid === uid,
+            host: p.uid === lobby?.hostId,
+          })),
+          ...Array.from({ length: bots }, (_, i) => ({
+            key: `bot-${i}`,
+            name: `${TIERS[ONLINE_AI_LEVEL].label} ${people.length + i + 1}`,
+            bot: true,
+          })),
+        ];
+    const everyonePicked = people.every((p) => p.skin !== undefined && p.skin !== null);
+    const iAmReady = mySkin !== undefined && mySkin !== null;
+    const waitingFor = people.filter((p) => p.skin === undefined || p.skin === null).length;
+    screen = (
+      <ModesScreen
+        rules={rules}
+        locked={!local && !isHost}
+        local={local}
+        hostName={hostName}
+        toolbar={stageToolbar}
+        roster={roster}
+        seatCount={seatCount}
+        bots={bots}
+        onRules={setRules}
+        aiLevel={aiLevel}
+        onAiLevel={local && bots > 0 ? setAiLevel : undefined}
+        onGuide={() => setShowGuide(true)}
+        onBack={local || isHost ? () => goStage('customize') : undefined}
+        onStart={
+          local
+            ? () => {
+                audioService.unlock();
+                setView('game');
+              }
+            : isHost
+              ? startMatch
+              : undefined
+        }
+        startDisabled={!local && !everyonePicked}
+        startNote={
+          !local && !isHost
+            ? !iAmReady
+              ? 'Pick a face to be ready.'
+              : `${hostName || 'The host'} rides out when the town is set.`
+            : !local && !everyonePicked
+              ? `Waiting on ${waitingFor} more to pick a face.`
+              : bots > 0
+                ? `Bots ride ${bots} of the ${rules.players} horses. Everyone picks a card in secret.`
+                : 'Everyone picks a card in secret, and they all flip at once.'
+        }
+      />
+    );
+  }
 
   return (
     <div className="game-surface relative h-[100dvh] w-full overflow-hidden">
-      {(view === 'menu' || view === 'offline_menu') && (
-        <Menu
-          coins={coins}
-          aiLevel={aiLevel}
-          onAiLevel={setAiLevel}
-          onSolo={() => openOffline(1)}
-          onCouch={() => openOffline(2)}
-          onSettings={() => setShowSettings(true)}
-          onRules={() => setShowRules(true)}
-          onFullscreen={() => toggleFullscreen(document.documentElement, !isNativeFullscreen())}
-          onExit={askToLeaveLobby}
-          rules={rules}
-          onBack={view === 'offline_menu' ? () => setView('room') : undefined}
-        />
-      )}
-
-      {view === 'pick' && (
-        <OutlawPick
-          seatCount={seatCount}
-          owned={owned}
-          coins={coins}
-          onBack={() => setView(online ? 'offline_menu' : 'menu')}
-          onBuy={buy}
-          onDone={(picks) => {
-            setSeatSkin(picks);
-            setView('game');
-          }}
-        />
-      )}
-
-      {view === 'room' && (
-        <RoomScreen
-          ready={authChecked}
-          error={lobbyError}
-          uid={uid}
-          people={people}
-          hostId={lobby?.hostId ?? null}
-          mine={mySkin}
-          owned={owned}
-          coins={coins}
-          isHost={isHost}
-          rules={rules}
-          onPick={pickOnline}
-          onStart={startMatch}
-          onSettings={() => setShowSettings(true)}
-          onRules={() => setShowRules(true)}
-          onFullscreen={() => toggleFullscreen(document.documentElement, !isNativeFullscreen())}
-          onPlayOffline={() => {
-            audioService.unlock();
-            setView('offline_menu');
-          }}
-        />
-      )}
+      {screen}
 
       {showSettings && (
         <SettingsPanel settings={settings} onChange={setSettings} onClose={() => setShowSettings(false)} />
       )}
-      {showRules && (
-        <RulesPanel
-          rules={rules}
-          editable={!online || isHost}
-          onChange={setRules}
-          onClose={() => setShowRules(false)}
-        />
-      )}
+      {showGuide && <GuidePanel onClose={() => setShowGuide(false)} />}
     </div>
   );
 }
@@ -539,121 +748,144 @@ function rulesSummary(rules: MatchRules): string {
   ].join(' · ');
 }
 
-// -- pieces -------------------------------------------------------------------
+// -- stage 2 ------------------------------------------------------------------
 
-function Menu({
+/** One person choosing a face: an online player, or a seat at this device. */
+interface OutlawSlot {
+  key: string;
+  label: string;
+  skin: number | null | undefined;
+  /** Whether this device picks for this slot. */
+  editable: boolean;
+  isHost?: boolean;
+}
+
+/**
+ * Stage 2: who you are in town.
+ *
+ * The same screen online and offline. Online, each player edits only their own
+ * slot and watches everyone else's appear in the roster strip; on a couch,
+ * every seat is this device's to edit, one at a time.
+ */
+function CustomizeScreen({
+  slots,
+  owned,
   coins,
-  aiLevel,
-  onAiLevel,
-  onSolo,
-  onCouch,
-  onSettings,
-  onRules,
-  onFullscreen,
-  onExit,
-  rules,
+  toolbar,
+  leads,
+  hostName,
+  onPick,
   onBack,
+  onNext,
 }: {
+  slots: OutlawSlot[];
+  owned: number[];
   coins: number;
-  aiLevel: number;
-  onAiLevel: (n: number) => void;
-  onSolo: () => void;
-  onCouch: () => void;
-  onSettings: () => void;
-  onRules: () => void;
-  onFullscreen: () => void;
-  onExit: () => void;
-  rules: MatchRules;
+  toolbar: React.ReactNode;
+  /** This device moves the flow on: offline, or the host. */
+  leads: boolean;
+  hostName?: string;
+  onPick: (key: string, index: number) => void;
   onBack?: () => void;
+  onNext: () => void;
 }) {
+  const mine = slots.filter((s) => s.editable);
+  const [activeKey, setActiveKey] = useState(() => mine[0]?.key ?? '');
+  const active = mine.find((s) => s.key === activeKey) ?? mine[0];
+
+  const others = slots.filter((s) => s !== active);
+  const pickedBy = useMemo(() => {
+    const map: Record<number, string[]> = {};
+    for (const s of others) if (s.skin !== undefined && s.skin !== null) (map[s.skin] ??= []).push(s.label);
+    return map;
+  }, [others]);
+
+  const picked = (s: OutlawSlot) => s.skin !== undefined && s.skin !== null;
+  const waiting = slots.filter((s) => !picked(s)).length;
+  const iAmReady = mine.every(picked);
+
   return (
-    <div className="flex h-full flex-col gap-3 overflow-y-auto overscroll-contain p-5">
-      {/* A real row, not an overlay -- so a long title on a short screen pushes
-          the content down instead of running under these buttons. */}
-      <div className="flex shrink-0 items-start justify-between gap-2">
-        <div>
-          {onBack && (
-            <button onClick={onBack} aria-label="Back" className="panel rounded-2xl p-3">
-              <ArrowLeft className="h-5 w-5" />
-            </button>
-          )}
-        </div>
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          <div className="panel flex items-center gap-2 rounded-2xl px-3 py-2 font-bold text-amber-800">
-            <Coins className="h-4 w-4" /> {coins}
-          </div>
-          <button onClick={onRules} className="panel flex items-center gap-2 rounded-2xl px-3 py-2 font-bold text-amber-900/70">
-            <ScrollText className="h-4 w-4" /> Rules
-          </button>
-          <button onClick={onFullscreen} aria-label="Full screen" className="panel rounded-2xl p-2.5">
-            <Maximize2 className="h-5 w-5" />
-          </button>
-          <button onClick={onSettings} aria-label="Settings" className="panel rounded-2xl p-2.5">
-            <SettingsIcon className="h-5 w-5" />
-          </button>
-          <button onClick={onExit} aria-label="Leave" className="panel rounded-2xl p-2.5">
-            <LogOut className="h-5 w-5" />
-          </button>
-        </div>
-      </div>
-
-      <div className="flex flex-1 flex-col items-center justify-center gap-5">
-      <div className="text-center">
-        <p className="text-[10px] font-black uppercase tracking-[0.4em] text-amber-900/50">Reward offered for</p>
-        <h1 className="text-5xl font-black leading-none tracking-tighter text-amber-950 sm:text-7xl">
-          WANTED
-        </h1>
-        <p className="mt-1 text-xs font-black uppercase tracking-[0.3em] text-rose-800">Dead or in debt</p>
-      </div>
-
-      <div className="panel w-full max-w-md space-y-4 rounded-[2rem] p-5">
-        <button
-          onClick={onSolo}
-          className="flex w-full items-center justify-center gap-2 rounded-2xl bg-rose-800 py-4 text-lg font-black uppercase tracking-wider text-amber-50 transition-transform active:scale-95"
-        >
-          <Play className="h-5 w-5 fill-current" /> Ride alone
-        </button>
-
-        <div className="space-y-1.5">
-          <p className="text-[10px] font-black uppercase tracking-[0.2em] text-amber-900/50">Bot rank</p>
-          <div className="flex gap-1 rounded-xl bg-amber-900/10 p-1">
-            {TIERS.map((tier, i) => (
+    <StageFrame
+      theme={THEME}
+      step={2}
+      title="Pick your face"
+      subtitle={`${slots.length} ${slots.length === 1 ? 'outlaw' : 'outlaws'} on the board`}
+      onBack={onBack}
+      toolbar={toolbar}
+      status={
+        !leads ? <HostBadge theme={THEME}>{hostName || 'The host'} moves on when everyone is set</HostBadge> : undefined
+      }
+      footer={
+        <ActionBar
+          theme={THEME}
+          label="Next: The game"
+          onAction={leads ? onNext : undefined}
+          disabled={waiting > 0}
+          note={
+            leads
+              ? waiting > 0
+                ? `Waiting on ${waiting} more to pick a face.`
+                : 'Everyone is set. Next, how the game runs.'
+              : iAmReady
+                ? `Ready. Waiting for ${hostName || 'the host'} to set the game up...`
+                : 'Pick a face to be ready.'
+          }
+        />
+      }
+    >
+      <div className="flex h-full flex-col gap-3 short:gap-2">
+        <div className="flex shrink-0 gap-2 overflow-x-auto overscroll-contain pb-1">
+          {slots.map((s, i) => {
+            const selectable = s.editable && mine.length > 1;
+            const color = SEAT_COLORS[i % SEAT_COLORS.length].main;
+            return (
               <button
-                key={tier.label}
-                onClick={() => onAiLevel(i)}
-                className={`flex-1 rounded-lg py-2 text-[11px] font-black uppercase tracking-wide transition-colors ${
-                  aiLevel === i ? 'bg-amber-950 text-amber-50' : 'text-amber-900/60'
+                key={s.key}
+                type="button"
+                disabled={!selectable}
+                onClick={() => setActiveKey(s.key)}
+                className={`flex shrink-0 items-center gap-2 rounded-2xl border-2 px-2 py-1.5 text-left disabled:cursor-default ${
+                  s === active && mine.length > 1 ? THEME.selected : 'border-amber-900/15 bg-[#f7ecd6]'
                 }`}
               >
-                {tier.label}
+                <span className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-xl bg-amber-900/10">
+                  {picked(s) ? <OutlawToken skin={s.skin as number} size={34} ring={color} /> : null}
+                </span>
+                <span className="min-w-0">
+                  <span className="flex max-w-[120px] items-center gap-1 truncate text-xs font-black text-amber-950">
+                    {s.label}
+                    {s.isHost && <Crown className="h-3 w-3 shrink-0 text-amber-600" />}
+                  </span>
+                  <span
+                    className={`block text-[9px] font-black uppercase tracking-wider ${
+                      picked(s) ? 'text-rose-800' : 'text-amber-900/40'
+                    }`}
+                  >
+                    {picked(s) ? 'Ready' : 'Choosing...'}
+                  </span>
+                </span>
               </button>
-            ))}
+            );
+          })}
+        </div>
+
+        {active ? (
+          <div className="min-h-0 flex-1">
+            <OutlawGrid
+              owned={owned}
+              coins={coins}
+              selected={active.skin ?? null}
+              pickedBy={pickedBy}
+              onPick={(index) => onPick(active.key, index)}
+            />
           </div>
-        </div>
-
-        <button
-          onClick={onCouch}
-          className="w-full rounded-2xl border-2 border-amber-900/25 bg-[#f7ecd6] py-3 font-black uppercase tracking-wide text-amber-950"
-        >
-          Two on one device
-          <span className="mt-0.5 block text-[10px] font-bold normal-case tracking-normal text-amber-900/50">
-            You pass the phone. Nobody peeks.
-          </span>
-        </button>
-
-        <div className="rounded-2xl bg-amber-900/5 p-3 text-center text-[11px] leading-relaxed text-amber-900/70">
-          <p className="mb-1 font-black uppercase tracking-[0.15em] text-amber-900/50">How it works</p>
-          <p>Everybody picks a card in secret. All of them flip at once.</p>
-          <p className="mt-1">
-            Your bounty climbs while you run , but it is only yours once you have banked it, and the Bank is the
-            one place everyone knows you have to visit.
+        ) : (
+          <p className="py-10 text-center text-sm font-bold text-amber-900/60">
+            The board is full for this one. You can watch it play out.
           </p>
-        </div>
+        )}
       </div>
-
-      <p className="text-center text-[10px] font-bold text-amber-900/40">{rulesSummary(rules)}</p>
-      </div>
-    </div>
+    </StageFrame>
   );
 }
 
@@ -721,247 +953,186 @@ function OutlawGrid({
   );
 }
 
-function OutlawPick({
-  seatCount,
-  owned,
-  coins,
-  onBack,
-  onBuy,
-  onDone,
-}: {
-  seatCount: number;
-  owned: number[];
-  coins: number;
-  onBack: () => void;
-  onBuy: (index: number) => boolean;
-  onDone: (picks: Record<number, number>) => void;
-}) {
-  const [picks, setPicks] = useState<Record<number, number>>({});
-  const seat = Object.keys(picks).length;
+// -- stage 3 ------------------------------------------------------------------
 
-  const pickedBy = useMemo(() => {
-    const map: Record<number, string[]> = {};
-    Object.entries(picks).forEach(([id, index]) => {
-      (map[index] ??= []).push(`P${Number(id) + 1}`);
-    });
-    return map;
-  }, [picks]);
-
-  const pick = (index: number) => {
-    if (!owned.includes(index) && !onBuy(index)) return;
-    const next = { ...picks, [seat]: index };
-    setPicks(next);
-    if (Object.keys(next).length >= seatCount) onDone(next);
-  };
-
-  return (
-    <div className="mx-auto flex h-full w-full max-w-5xl flex-col overflow-y-auto overscroll-contain gap-2 p-2.5 sm:gap-4 sm:p-5">
-      <div className="flex shrink-0 items-center justify-between gap-2">
-        <button onClick={onBack} aria-label="Back" className="panel shrink-0 rounded-2xl p-3">
-          <ArrowLeft className="h-5 w-5" />
-        </button>
-        <h2 className="min-w-0 truncate text-center text-base font-black uppercase tracking-wide text-amber-950 sm:text-2xl">
-          {seatCount > 1 ? `Player ${seat + 1} , pick your face` : 'Pick your face'}
-        </h2>
-        <div className="panel flex shrink-0 items-center gap-2 rounded-2xl px-3 py-2 font-bold text-amber-800">
-          <Coins className="h-4 w-4" /> {coins}
-        </div>
-      </div>
-      <div className="panel min-h-0 flex-1 overflow-y-auto overscroll-contain rounded-[2rem] p-3 sm:p-5">
-        <OutlawGrid owned={owned} coins={coins} selected={null} pickedBy={pickedBy} onPick={pick} />
-      </div>
-    </div>
-  );
+interface TownMember {
+  key: string;
+  name: string;
+  skin?: number | null;
+  bot?: boolean;
+  you?: boolean;
+  host?: boolean;
 }
 
-function RoomScreen({
-  ready,
-  error,
-  uid,
-  people,
-  hostId,
-  mine,
-  owned,
-  coins,
-  isHost,
+/**
+ * Stage 3: the whole game on one page.
+ *
+ * The host's copy is the controls; a guest's copy is the same page locked,
+ * kept current from the lobby as the host clicks. See MatchControls.
+ */
+function ModesScreen({
   rules,
-  onPick,
-  onStart,
-  onSettings,
+  locked,
+  local,
+  hostName,
+  toolbar,
+  roster,
+  seatCount,
+  bots,
   onRules,
-  onFullscreen,
-  onPlayOffline,
+  aiLevel,
+  onAiLevel,
+  onGuide,
+  onBack,
+  onStart,
+  startDisabled,
+  startNote,
 }: {
-  ready: boolean;
-  error: string | null;
-  uid: string | null;
-  people: { uid: string; displayName: string; skin?: number | null }[];
-  hostId: string | null;
-  mine: number | null | undefined;
-  owned: number[];
-  coins: number;
-  isHost: boolean;
   rules: MatchRules;
-  onPick: (index: number) => void;
-  onStart: () => void;
-  onSettings: () => void;
-  onRules: () => void;
-  onFullscreen: () => void;
-  onPlayOffline: () => void;
+  locked: boolean;
+  /** Solo or couch: no room, so the table size is this device's to choose. */
+  local: boolean;
+  hostName?: string;
+  toolbar: React.ReactNode;
+  roster: TownMember[];
+  seatCount: number;
+  bots: number;
+  onRules: (rules: MatchRules) => void;
+  aiLevel: number;
+  /** Omitted when no bot is riding, or for a guest: online bots always ride at one fixed rank. */
+  onAiLevel?: (level: number) => void;
+  onGuide: () => void;
+  onBack?: () => void;
+  onStart?: () => void;
+  startDisabled?: boolean;
+  startNote: string;
 }) {
-  const pickedBy = useMemo(() => {
-    const map: Record<number, string[]> = {};
-    for (const p of people) {
-      if (p.uid !== uid && p.skin !== undefined && p.skin !== null) (map[p.skin] ??= []).push(p.displayName);
-    }
-    return map;
-  }, [people, uid]);
-
-  if (error) {
-    return (
-      <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center">
-        <h2 className="text-2xl font-black text-amber-950">{error}</h2>
-        <p className="text-sm text-amber-900/60">Head back to the PlayBuddies lobby and try again.</p>
-      </div>
-    );
-  }
-
-  if (!ready || !uid) {
-    return (
-      <div className="flex h-full flex-col items-center justify-center gap-3">
-        <Loader2 className="h-10 w-10 animate-spin text-rose-800" />
-        <p className="font-bold text-amber-900/70">Riding into town…</p>
-      </div>
-    );
-  }
-
-  const iAmReady = mine !== undefined && mine !== null;
-  const everyonePicked = people.every((p) => p.skin !== undefined && p.skin !== null);
-  const canStart = iAmReady && everyonePicked;
-  const emptySeats = Math.max(0, rules.players - people.length);
+  const set = (patch: Partial<MatchRules>) => onRules({ ...rules, ...patch });
 
   return (
-    <div className="mx-auto flex h-full w-full max-w-6xl flex-col overflow-y-auto overscroll-contain gap-2 p-2.5 sm:gap-4 sm:p-5">
-      <div className="flex shrink-0 items-center justify-between gap-2">
-        <div className="min-w-0">
-          <h2 className="truncate text-lg font-black uppercase tracking-wide text-amber-950 sm:text-2xl">
-            Pick your face
-          </h2>
-          <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-rose-800/80">
-            {rules.players} outlaws{emptySeats > 0 && ` · ${emptySeats} to bots`}
-          </p>
-        </div>
-        <div className="flex shrink-0 items-center gap-2">
-          <div className="panel flex items-center gap-2 rounded-2xl px-3 py-2 font-bold text-amber-800">
-            <Coins className="h-4 w-4" /> {coins}
-          </div>
-          <button onClick={onFullscreen} className="panel rounded-2xl p-2.5" title="Full screen">
-            <Maximize2 className="h-5 w-5" />
-          </button>
-          <button onClick={onSettings} aria-label="Settings" className="panel rounded-2xl p-2.5">
-            <SettingsIcon className="h-5 w-5" />
-          </button>
-          {isHost && (
-            <button onClick={askHostToEndGame} aria-label="End game" className="panel rounded-2xl p-2.5">
-              <LogOut className="h-5 w-5" />
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Loud on purpose , this is the one moment before cards are hidden and
-          money is on the line, and the small "Rules" button lower down is easy
-          to never notice at all. */}
-      <button
-        onClick={onRules}
-        className="relative flex shrink-0 items-center gap-3 overflow-hidden rounded-2xl border-2 border-rose-700 bg-rose-100 px-4 py-3 text-left shadow-[0_4px_16px_rgba(190,18,60,0.18)] transition-transform active:scale-[0.99]"
-      >
-        <span className="absolute -right-6 -top-6 h-16 w-16 animate-pulse rounded-full bg-rose-700/20" aria-hidden />
-        <ScrollText className="h-6 w-6 shrink-0 text-rose-800" />
-        <div className="min-w-0 flex-1">
-          <p className="text-sm font-black uppercase tracking-wide text-rose-900">New in town? Read the rules</p>
-          <p className="text-[11px] font-bold text-rose-800/70">If you want to win, it's worth a minute.</p>
-        </div>
-        <span className="shrink-0 rounded-xl bg-rose-800 px-3 py-1.5 text-[11px] font-black uppercase tracking-wide text-amber-50">
-          Guide
-        </span>
-      </button>
-
-      <div className="panel shrink-0 rounded-2xl p-2.5">
-        {isHost ? (
-          <button
-            onClick={onStart}
-            disabled={!canStart}
-            className="flex w-full items-center justify-center gap-2 rounded-xl bg-rose-800 py-2.5 text-sm font-black uppercase tracking-[0.18em] text-amber-50 disabled:opacity-40"
-          >
-            <Play className="h-4 w-4 fill-current" /> Ride out
-          </button>
-        ) : (
-          <p className="py-1 text-center text-xs font-bold text-amber-900/60">
-            {!iAmReady ? 'Pick a face to be ready.' : !everyonePicked ? 'Waiting for everyone…' : 'Waiting for the host…'}
-          </p>
-        )}
-        <div className="mt-2 grid grid-cols-2 gap-2">
-          <button
-            onClick={onRules}
-            className="flex items-center justify-center gap-1.5 rounded-lg border-2 border-amber-900/20 bg-[#f7ecd6] py-2 text-xs font-black uppercase text-amber-900/70"
-          >
-            <ScrollText className="h-3.5 w-3.5" /> Rules
-          </button>
-          <button
-            onClick={onPlayOffline}
-            className="rounded-lg border-2 border-amber-900/20 bg-[#f7ecd6] py-2 text-xs font-black uppercase text-amber-900/70"
-          >
-            Play offline
-          </button>
-        </div>
-        <p className="mt-1.5 text-center text-[10px] font-bold text-amber-900/40">{rulesSummary(rules)}</p>
-      </div>
-
-      <div className="panel shrink-0 rounded-2xl p-2">
-        <h3 className="mb-1 flex items-center gap-1.5 text-[9px] font-black uppercase tracking-[0.2em] text-amber-900/50">
-          <Users className="h-3 w-3" /> In town ({people.length})
-        </h3>
-        <div className="flex gap-2 overflow-x-auto pb-0.5">
-          {people.map((p, i) => (
-            <div
-              key={p.uid}
-              className="flex shrink-0 items-center gap-1.5 rounded-lg border-2 px-2 py-1"
-              style={{
-                borderColor: `${SEAT_COLORS[i % SEAT_COLORS.length].main}55`,
-                background: `${SEAT_COLORS[i % SEAT_COLORS.length].main}14`,
-              }}
+    <StageFrame
+      theme={THEME}
+      step={3}
+      title="The game"
+      subtitle={rulesSummary(rules)}
+      onBack={onBack}
+      toolbar={toolbar}
+      status={locked ? <HostBadge theme={THEME}>{hostName || 'The host'} is setting the game up...</HostBadge> : undefined}
+      footer={
+        <ActionBar
+          theme={THEME}
+          label="Ride out"
+          icon={<Play className="h-4 w-4 fill-current" />}
+          onAction={onStart}
+          disabled={startDisabled}
+          note={startNote}
+        />
+      }
+    >
+      <div className="grid gap-5 lg:grid-cols-3 short:gap-3">
+        <div className="space-y-5 lg:col-span-2 short:space-y-3">
+          {local ? (
+            <RuleSection
+              theme={THEME}
+              title="Outlaws at the table"
+              hint="Seats past whoever is on the couch are filled with bots."
             >
-              {p.skin !== undefined && p.skin !== null ? (
-                <OutlawToken skin={p.skin} size={28} ring={SEAT_COLORS[i % SEAT_COLORS.length].main} />
-              ) : (
-                <div className="h-7 w-7 rounded-full bg-amber-900/15" />
-              )}
-              <div className="min-w-0 max-w-[80px]">
-                <p className="flex items-center gap-1 truncate text-[10px] font-black text-amber-950">
-                  {p.displayName}
-                  {p.uid === hostId && <Crown className="h-2.5 w-2.5 shrink-0 text-amber-600" />}
-                </p>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
+              <OptionGroup
+                theme={THEME}
+                columns={5}
+                value={rules.players}
+                onChange={(n) => set({ players: Math.max(seatCount, n) as PlayerCount })}
+                options={PLAYER_CODES.map((n) => ({ value: n, label: String(n) }))}
+              />
+            </RuleSection>
+          ) : (
+            <RuleSection theme={THEME} title="Outlaws at the table" locked={locked}>
+              <p className="rounded-xl bg-black/5 px-3 py-2 text-[11px] font-bold leading-relaxed text-slate-600">
+                Whoever is in the room rides , {rules.players} at this table
+                {bots > 0 && `, ${bots} of them bots`}. Invite one more and the table grows with you.
+              </p>
+            </RuleSection>
+          )}
 
-      {/* Not `flex-1 min-h-0 overflow-y-auto` any more. That squeezed this
-          panel into whatever the four rows above it (header, rules banner,
-          ready panel, roster) left over -- sometimes a sliver just tall
-          enough to slice a locked card's price badge in half, with nothing
-          visible to say the panel itself still scrolled. Sized to its own
-          content instead, so the whole page (already `overflow-y-auto`
-          above) is the one thing that scrolls -- the ordinary swipe a phone
-          always tries first, not a small nested scrollport easy to miss. */}
-      <div className="panel rounded-[2rem] p-3 sm:p-5">
-        <OutlawGrid owned={owned} coins={coins} selected={mine ?? null} pickedBy={pickedBy} onPick={onPick} />
+          <RuleSection
+            theme={THEME}
+            title="Banked to win"
+            hint={`Only money in the Bank is safe. Or the richest after ${BALANCE.ROUNDS} rounds takes it.`}
+            locked={locked}
+          >
+            <OptionGroup
+              theme={THEME}
+              locked={locked}
+              value={rules.target}
+              onChange={(target) => set({ target })}
+              options={TARGET_CHOICES.map((amount, i) => ({ value: i, label: `$${amount}` }))}
+            />
+          </RuleSection>
+
+          <RuleSection theme={THEME} title="Modifiers" locked={locked}>
+            <ToggleOption
+              theme={THEME}
+              label={`Round clock · ${BALANCE.ROUND_SECONDS}s`}
+              hint="After the clock runs out, anyone still deciding lays low. Off lets a round take as long as it takes."
+              value={rules.roundTimer}
+              locked={locked}
+              onChange={(roundTimer) => set({ roundTimer })}
+            />
+          </RuleSection>
+
+          {onAiLevel && (
+            <RuleSection theme={THEME} title="Bot rank" hint="How well the bots in empty saddles read the table.">
+              <OptionGroup
+                theme={THEME}
+                value={aiLevel}
+                onChange={onAiLevel}
+                options={TIERS.map((tier, i) => ({ value: i, label: tier.label }))}
+              />
+            </RuleSection>
+          )}
+
+          <button
+            onClick={onGuide}
+            className="flex w-full items-center gap-2 rounded-xl border-2 border-rose-700/40 bg-rose-100/70 px-3 py-2 text-left text-[11px] font-bold leading-relaxed text-rose-900 short:hidden"
+          >
+            <ScrollText className="h-4 w-4 shrink-0 text-rose-800" />
+            Four spokes run straight to the Bank , fast, and everyone can see you take one. Read what every card does.
+          </button>
+        </div>
+
+        <RuleSection theme={THEME} title={`In town · ${roster.length}`} locked={locked}>
+          <div className="space-y-1.5">
+            {roster.map((m, i) => {
+              const color = SEAT_COLORS[i % SEAT_COLORS.length].main;
+              return (
+                <div
+                  key={m.key}
+                  className="flex items-center gap-2 rounded-xl border-2 p-1.5"
+                  style={{ borderColor: `${color}55`, background: `${color}14` }}
+                >
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-amber-900/10">
+                    {m.skin !== undefined && m.skin !== null ? (
+                      <OutlawToken skin={m.skin} size={30} ring={color} />
+                    ) : (
+                      <Users className="h-4 w-4 text-amber-900/30" />
+                    )}
+                  </span>
+                  <span className={`min-w-0 flex-1 truncate text-xs font-bold ${m.bot ? 'text-amber-900/50' : 'text-amber-950'}`}>
+                    {m.name}
+                    {m.you && <span className="text-amber-900/50"> · you</span>}
+                  </span>
+                  {m.host && <Crown className="h-3.5 w-3.5 shrink-0 text-amber-600" />}
+                </div>
+              );
+            })}
+          </div>
+        </RuleSection>
       </div>
-    </div>
+    </StageFrame>
   );
 }
+
+// -- modals -------------------------------------------------------------------
 
 function SettingsPanel({
   settings,
@@ -1091,25 +1262,14 @@ function MapDiagram() {
 }
 
 /**
- * The rules of the night, set by the host and obeyed by everyone.
+ * How the game works, for anyone who has never played this one.
  *
- * Separate from Settings on purpose: these change what the game *is*, so both
- * sides have to be playing the same one. They travel to a guest over the wire
- * (see `packRules`), and a guest can read this panel but not touch it ,
- * letting them change a copy that the host's next write overwrites would be a
- * lie about who is in charge.
+ * Only the explanation now: the table size, what it takes to win and the
+ * round clock are all decisions the match page makes, where the town they
+ * apply to is already on screen. A modal was the wrong place to keep them
+ * , it hid the one page that says what you are about to play.
  */
-function RulesPanel({
-  rules,
-  editable,
-  onChange,
-  onClose,
-}: {
-  rules: MatchRules;
-  editable: boolean;
-  onChange: (r: MatchRules) => void;
-  onClose: () => void;
-}) {
+function GuidePanel({ onClose }: { onClose: () => void }) {
   // Escape closes it too. See @shared/ui/dismiss.
   useEscape(true, onClose);
   return (
@@ -1118,9 +1278,7 @@ function RulesPanel({
         <div className="flex items-start justify-between">
           <div>
             <h3 className="text-xl font-black uppercase tracking-wide text-amber-950">The rules</h3>
-            <p className="text-[11px] font-semibold text-amber-900/50">
-              {editable ? 'Applies to everyone. Takes effect next game.' : 'Set by the host.'}
-            </p>
+            <p className="text-[11px] font-semibold text-amber-900/50">Everything but the numbers, which the host sets.</p>
           </div>
           <button onClick={onClose} aria-label="Close" className="rounded-xl p-2 hover:bg-amber-900/10">
             <ArrowLeft className="h-5 w-5" />
@@ -1129,67 +1287,6 @@ function RulesPanel({
 
         <HowItWorks />
         <MapDiagram />
-
-        <div className="space-y-1.5">
-          <p className="text-sm font-bold text-amber-950">Outlaws</p>
-          <div className="grid grid-cols-5 gap-1.5">
-            {PLAYER_CODES.map((n) => (
-              <button
-                key={n}
-                disabled={!editable}
-                onClick={() => onChange({ ...rules, players: n })}
-                className={`rounded-xl border-2 py-2.5 text-xs font-black disabled:opacity-50 ${
-                  rules.players === n
-                    ? 'border-rose-700 bg-rose-100 text-rose-900'
-                    : 'border-amber-900/20 bg-[#f7ecd6] text-amber-900/60'
-                }`}
-              >
-                {n}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="space-y-1.5">
-          <p className="text-sm font-bold text-amber-950">
-            Banked to win
-            <span className="block text-[11px] font-normal text-amber-900/50">
-              Or the richest after {BALANCE.ROUNDS} rounds takes it.
-            </span>
-          </p>
-          <div className="grid grid-cols-3 gap-2">
-            {TARGET_CHOICES.map((amount, i) => (
-              <button
-                key={amount}
-                disabled={!editable}
-                onClick={() => onChange({ ...rules, target: i })}
-                className={`rounded-xl border-2 py-2.5 text-xs font-black disabled:opacity-50 ${
-                  rules.target === i
-                    ? 'border-rose-700 bg-rose-100 text-rose-900'
-                    : 'border-amber-900/20 bg-[#f7ecd6] text-amber-900/60'
-                }`}
-              >
-                ${amount}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <label className="flex items-center justify-between gap-3">
-          <span className="text-sm font-bold text-amber-950">
-            Round clock
-            <span className="block text-[11px] font-normal text-amber-900/50">
-              After {BALANCE.ROUND_SECONDS} seconds, anyone still deciding lays low.
-            </span>
-          </span>
-          <input
-            type="checkbox"
-            disabled={!editable}
-            checked={rules.roundTimer}
-            onChange={(e) => onChange({ ...rules, roundTimer: e.target.checked })}
-            className="h-6 w-6 shrink-0 accent-rose-800 disabled:opacity-50"
-          />
-        </label>
 
         <div className="space-y-2.5 border-t border-amber-900/15 pt-4">
           <p className="text-sm font-black uppercase tracking-wide text-amber-950">The cards</p>
@@ -1210,6 +1307,10 @@ function RulesPanel({
             </div>
           ))}
         </div>
+
+        <p className="text-center text-[10px] font-bold text-amber-900/40">
+          Table size, the target and the round clock are set on the game page, right before you ride out.
+        </p>
       </div>
     </div>
   );
