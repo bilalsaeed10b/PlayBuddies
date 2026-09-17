@@ -81,8 +81,8 @@ export const FREE_CHARACTERS = CHARACTERS.map((c, i) => (c.price === 0 ? i : -1)
 /**
  * Draws a character at world scale.
  *
- * Everything is relative to `r`, so the Giant power-up works by changing one
- * number rather than by swapping to a bigger sprite.
+ * Everything is relative to `r`, so a character is drawn at whatever size the
+ * engine says its body is rather than at a size baked into the sprite.
  */
 export function drawCharacter(
   ctx: CanvasRenderingContext2D,

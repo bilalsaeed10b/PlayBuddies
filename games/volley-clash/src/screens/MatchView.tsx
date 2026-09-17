@@ -15,7 +15,7 @@ import { ChatLayer } from '@shared/chat/ChatLayer';
 import { useBubbleFeed } from '@shared/chat/useBubbleFeed';
 import { SpeechBubble } from '@shared/ui/SpeechBubble';
 import { CHARACTERS } from '../game/characters';
-import { BALANCE, POWER_META, TEAM_COLORS, arenaFor } from '../game/rules';
+import { BALANCE, TEAM_COLORS, arenaFor } from '../game/rules';
 import { MatchEngine, Seat } from '../engine/MatchEngine';
 import { QualityGovernor } from '../game/quality';
 // Type-only: the runtime value comes from the dynamic import below, keeping the
@@ -121,10 +121,9 @@ export default function MatchView({
    * The match's own rules, the same on every machine playing it.
    *
    * Separate from `settings` on purpose. These used to be fields of it, which
-   * meant each device brought its own: the host scored to its target while a
-   * guest that took a stalled match over finished to a different one, and a
-   * guest with power-ups switched off drew none of the ones the host was
-   * dropping on the court. They come from the lobby now.
+   * meant each device brought its own , the host scored to its target while a
+   * guest that took a stalled match over finished to a different one. They
+   * come from the lobby now.
    */
   rules: MatchRules;
   onOpenSettings: () => void;
@@ -139,7 +138,6 @@ export default function MatchView({
   const { bubbles, show: showBubble } = useBubbleFeed();
 
   const [score, setScore] = useState<[number, number]>([0, 0]);
-  const [powers, setPowers] = useState<{ kind: string; team: Team; left: number }[]>([]);
   const [over, setOver] = useState<{ winner: Team } | null>(null);
   const [wire, setWire] = useState<{
     peers: number;
@@ -233,13 +231,6 @@ export default function MatchView({
   const rulesRef = useRef(rules);
   rulesRef.current = rules;
 
-  // Power-up frequency is the one match rule that can be retuned mid-game: the
-  // rest (target score, win-by-two) would change what the players are already
-  // playing for, so those are read once when the engine is built.
-  useEffect(() => {
-    engineRef.current?.setPowerRate(rules.powerRate);
-  }, [rules.powerRate]);
-
   // ── keyboard ─────────────────────────────────────────────────────────────
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
@@ -271,7 +262,6 @@ export default function MatchView({
     return () => window.removeEventListener('resize', probe);
   }, []);
 
-  const powersRef = useRef(0);
   const scoreRef = useRef<[number, number]>([0, 0]);
 
   const readInput = useCallback((seatIndex: number, isOnlySeat: boolean): Input => {
@@ -328,8 +318,6 @@ export default function MatchView({
       seats,
       targetPoints: rulesRef.current.targetPoints,
       winByTwo: rulesRef.current.winByTwo,
-      powerUps: rulesRef.current.powerUps,
-      powerRate: rulesRef.current.powerRate,
       isHost,
       onPoint: (_team, sc) => setScore(sc),
       onOver: (winner) => {
@@ -499,10 +487,6 @@ export default function MatchView({
 
       // The HUD only needs to know about things that changed, and only at a
       // rate a human can read.
-      if (engine.powers.length !== powersRef.current) {
-        powersRef.current = engine.powers.length;
-        setPowers(engine.powers.map((p) => ({ kind: p.kind, team: p.team, left: p.left })));
-      }
       if (engine.score[0] !== scoreRef.current[0] || engine.score[1] !== scoreRef.current[1]) {
         scoreRef.current = [...engine.score] as [number, number];
         setScore(scoreRef.current);
@@ -779,25 +763,6 @@ export default function MatchView({
           </div>
         ))}
       </div>
-
-      {/* ── power-ups ── */}
-      {powers.length > 0 && (
-        <div className="pointer-events-none absolute left-1/2 top-24 z-20 flex -translate-x-1/2 gap-2">
-          {powers.map((p) => (
-            <div
-              key={p.kind}
-              className="flex items-center gap-1.5 rounded-full border border-white/25 bg-black/55 px-3 py-1 text-xs font-bold text-white backdrop-blur-md"
-            >
-              <span>{POWER_META[p.kind].glyph}</span>
-              <span>{POWER_META[p.kind].label}</span>
-              <span className="opacity-60">
-                {p.team === myTeam ? 'us' : 'them'}
-                {Number.isFinite(p.left) ? ` · ${Math.ceil(p.left)}s` : ''}
-              </span>
-            </div>
-          ))}
-        </div>
-      )}
 
       {/* ── top-right controls ── */}
       <div className="absolute right-3 top-3 z-20 flex flex-col items-end gap-2">

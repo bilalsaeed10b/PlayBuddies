@@ -27,14 +27,9 @@ import { CHARACTERS, Character, FREE_CHARACTERS, drawCharacter } from './game/ch
 import { TEAM_COLORS } from './game/rules';
 import {
   DEFAULT_RULES,
-  POWER_RATE_MAX,
-  POWER_RATE_MIN,
-  POWER_RATE_STEP,
   TARGET_POINTS,
   cleanRules,
   packRules,
-  powerGapLabel,
-  powerRateLabel,
   rulesSummary,
   unpackRules,
 } from './game/matchRules';
@@ -1263,38 +1258,6 @@ function ModesScreen({
             />
           </RuleSection>
 
-          <RuleSection theme={THEME} title="Power-ups" locked={locked}>
-            <ToggleOption
-              theme={THEME}
-              label="Drops during rallies"
-              hint="Rocket, Feather, Giant and Freeze fall onto the court. Whoever touched the ball last owns the one they hit."
-              value={rules.powerUps}
-              locked={locked}
-              onChange={(powerUps) => set({ powerUps })}
-            />
-            {/* Only meaningful while power-ups are on, so it hides with them. */}
-            {rules.powerUps && (
-              <div className="space-y-1 rounded-2xl border border-white/15 bg-white/5 px-3 py-2.5">
-                <div className="flex justify-between text-xs font-black">
-                  <span>How often</span>
-                  <span className={THEME.accent}>{powerRateLabel(rules.powerRate)}</span>
-                </div>
-                <input
-                  type="range"
-                  min={POWER_RATE_MIN}
-                  max={POWER_RATE_MAX}
-                  step={POWER_RATE_STEP}
-                  value={rules.powerRate}
-                  disabled={locked}
-                  aria-label="Power-up frequency"
-                  onChange={(e) => set({ powerRate: parseFloat(e.target.value) })}
-                  className="w-full accent-amber-400 disabled:opacity-60"
-                />
-                <p className="text-[11px] text-white/50">About one drop every {powerGapLabel(rules.powerRate)}.</p>
-              </div>
-            )}
-          </RuleSection>
-
           {bots > 0 && (
             <RuleSection
               theme={THEME}
@@ -1381,7 +1344,7 @@ function SettingsPanel({
   /**
    * This device only.
    *
-   * The target score, win-by-two and the power-ups used to live here and no
+   * The target score and win-by-two used to live here and no
    * longer do. They decide what the match *is*, so everybody in it has to agree
    * on them , and while they sat beside the volume sliders every machine kept
    * its own copy, which online was quietly wrong in both directions. They are

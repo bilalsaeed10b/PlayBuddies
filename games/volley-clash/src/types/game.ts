@@ -8,8 +8,6 @@ export type Team = 0 | 1;
 
 export type Phase = 'serve' | 'rally' | 'point' | 'over';
 
-export type PowerKind = 'rocket' | 'feather' | 'giant' | 'freeze';
-
 /**
  * Who is driving a character.
  *
@@ -67,7 +65,7 @@ export interface Player {
   y: number;
   vx: number;
   vy: number;
-  /** Body radius. Grows while the Giant power-up is up, so it is not a constant. */
+  /** Body radius. One number for every character; see game/characters.ts. */
   r: number;
   facing: 1 | -1;
 
@@ -103,26 +101,10 @@ export interface Ball {
   vy: number;
   /** Positive spins the flight one way, negative the other. Decays over time. */
   spin: number;
-  /** Team of whoever touched it last, or null off a serve. Decides power-up ownership. */
+  /** Team of whoever touched it last, or null off a serve. Decides who a floor touch scores against. */
   lastTeam: Team | null;
   /** Player id of the last toucher, for the "ACE" call. */
   lastHitter: string | null;
-}
-
-export interface ActivePower {
-  kind: PowerKind;
-  /** Whose ball it was when it was collected. */
-  team: Team;
-  /** Seconds left. Rocket sits at Infinity until it is spent. */
-  left: number;
-}
-
-export interface FloatingPower {
-  kind: PowerKind;
-  x: number;
-  y: number;
-  vy: number;
-  spin: number;
 }
 
 /**
@@ -149,7 +131,7 @@ export interface GameSettings {
 }
 
 /**
- * What the match is: how long, how many, and what falls out of the sky.
+ * What the match is: how long, and how many a side.
  *
  * One copy per *match*, not per device. Online the host owns it and publishes
  * it to the lobby; see game/matchRules.ts for the packing and App.tsx for the
@@ -166,12 +148,6 @@ export interface MatchRules {
    * rule, kept as an option for anyone who wants it.
    */
   winByTwo: boolean;
-  powerUps: boolean;
-  /**
-   * How often power-ups drop, as a multiplier on the base interval. 1 is the
-   * stock pace; 2 is twice as often; 0.5 is half.
-   */
-  powerRate: number;
   /** Rank of every bot that fills an empty spot. Index into engine/ai TIERS. */
   aiLevel: number;
   /**
@@ -220,10 +196,6 @@ export const F_GROUND = 1;
 export const F_FACING = 2;
 export const F_DASH = 4;
 
-export type PowerPacket = [kind: PowerKind, team: Team, left: number];
-
-export type FloatPacket = [kind: PowerKind, x: number, y: number];
-
 /** Host → everyone, SNAPSHOT_HZ times a second. */
 export interface Snapshot {
   t: 's';
@@ -245,8 +217,6 @@ export interface Snapshot {
   ph: Phase;
   /** Seconds left on the current phase, for the serve countdown. */
   tm: number;
-  pw: PowerPacket[];
-  fl: FloatPacket[];
   /** Serving team, so a late joiner draws the ball on the right side. */
   sv: Team;
 }

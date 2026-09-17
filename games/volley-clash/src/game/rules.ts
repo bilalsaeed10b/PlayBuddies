@@ -201,18 +201,6 @@ export const BALANCE = {
   WIN_BY: 2,
   HARD_CAP: 11,
 
-  // ── power-ups ───────────────────────────────────────────────────────────
-  POWER_EVERY_MIN: 12,
-  POWER_EVERY_MAX: 20,
-  POWER_R: 26,
-  POWER_FALL: 95,
-  POWER_FEATHER_GRAVITY: 0.5,
-  /** Rocket multiplies the next hit. It replaced the charge meter's role. */
-  POWER_ROCKET_HIT: 1.85,
-  POWER_GIANT_SCALE: 1.4,
-  POWER_FREEZE_SLOW: 0.5,
-  DURATION: { rocket: Infinity, feather: 8, giant: 7, freeze: 4 } as const,
-
   // ── net ─────────────────────────────────────────────────────────────────
   //
   // The rule this whole section is built around: *nobody ever waits for the
@@ -306,7 +294,7 @@ export const BALANCE = {
   /**
    * Seconds without a snapshot before a guest runs the rules itself.
    *
-   * A guest cannot score, serve or spawn power-ups, so a host that vanishes
+   * A guest cannot score or serve, so a host that vanishes
    * used to leave everyone else staring at a frozen court until they gave up
    * and quit. Taking over is not always *right* , two guests could take over at
    * once and drift apart , but a game that keeps playing beats a game that has
@@ -329,16 +317,6 @@ export const TEAM_COLORS = [
   { main: '#f97316', dark: '#c2410c', light: '#fdba74', name: 'Blaze' },
   { main: '#0ea5e9', dark: '#0369a1', light: '#7dd3fc', name: 'Tide' },
 ] as const;
-
-export const POWER_META: Record<
-  string,
-  { label: string; blurb: string; color: string; glyph: string }
-> = {
-  rocket: { label: 'Rocket', blurb: 'Next hit is a max-power spike', color: '#ef4444', glyph: '🚀' },
-  feather: { label: 'Feather', blurb: 'The ball floats', color: '#a78bfa', glyph: '🪶' },
-  giant: { label: 'Giant', blurb: 'Your team grows', color: '#22c55e', glyph: '💪' },
-  freeze: { label: 'Freeze', blurb: 'They slow down', color: '#38bdf8', glyph: '❄️' },
-};
 
 export function clamp(v: number, lo: number, hi: number) {
   return v < lo ? lo : v > hi ? hi : v;

@@ -1,5 +1,5 @@
 /**
- * The whole match: physics, rules, power-ups and rendering.
+ * The whole match: physics, rules and rendering.
  *
  * Two things shape this file more than anything else.
  *
@@ -12,11 +12,11 @@
  *    server, so one of the players is the server. The host runs every rule;
  *    everyone else runs the same physics purely so the picture is smooth, and
  *    is continuously corrected toward the host's snapshots. Rules , points,
- *    phase changes, power-up spawns , are host-only, and guarded as such.
+ *    phase changes, point awards , are host-only, and guarded as such.
  */
 import { bakeCourt, drawFallbackCourt } from '../game/court';
 import { CHARACTERS, drawCharacter } from '../game/characters';
-import { Arena, BALANCE, POWER_META, TEAM_COLORS, clamp } from '../game/rules';
+import { Arena, BALANCE, TEAM_COLORS, clamp } from '../game/rules';
 import { newBrain, thinkFor } from './ai';
 // The engine's own timebase, shared with the wire so a packet's stamp and the
 // clock it is dated against are the same kind of number. Pure arithmetic ,
@@ -24,19 +24,16 @@ import { newBrain, thinkFor } from './ai';
 import { localNow } from '../net/clock';
 import type { Quality } from '../game/quality';
 import {
-  ActivePower,
   Ball,
   BodyPacket,
   Control,
   F_DASH,
   F_FACING,
   F_GROUND,
-  FloatingPower,
   Input,
   NO_INPUT,
   Phase,
   Player,
-  PowerKind,
   Snapshot,
   Team,
   packInput,
@@ -57,9 +54,6 @@ export interface EngineConfig {
   seats: Seat[];
   targetPoints: number;
   winByTwo: boolean;
-  powerUps: boolean;
-  /** Multiplier on how often power-ups drop. 1 is the stock pace. */
-  powerRate: number;
   isHost: boolean;
   onPoint?: (team: Team, score: [number, number], call: string) => void;
   onOver?: (team: Team) => void;
@@ -94,8 +88,6 @@ interface Particle {
   size: number;
   color: string;
 }
-
-const POWER_KINDS: PowerKind[] = ['rocket', 'feather', 'giant', 'freeze'];
 
 /** What the ball ran into during one step. The caller decides what it means. */
 interface BallEvents {
@@ -238,16 +230,12 @@ export class MatchEngine {
   call = '';
   callLeft = 0;
 
-  powers: ActivePower[] = [];
-  floating: FloatingPower[] = [];
-
   private cfg: EngineConfig;
   private backdrop: HTMLCanvasElement | null = null;
   private acc = 0;
   private shake = 0;
   private particles: Particle[] = [];
   private trail: { x: number; y: number }[] = [];
-  private powerTimer = 0;
   /** Multiplier on every particle burst, set once a frame from the governor. */
   private budget = 1;
   /** Touches in the current rally, for the ACE call. */
@@ -359,7 +347,6 @@ export class MatchEngine {
     this.backdrop = bakeCourt(this.arena);
     this.resetPositions();
     this.serveBall();
-    this.armPowerTimer();
   }
 
   // ── setup ─────────────────────────────────────────────────────────────────
@@ -461,24 +448,6 @@ export class MatchEngine {
     this.serveShot = true;
   }
 
-  private armPowerTimer() {
-    const gap =
-      BALANCE.POWER_EVERY_MIN + Math.random() * (BALANCE.POWER_EVERY_MAX - BALANCE.POWER_EVERY_MIN);
-    // The setting is a *frequency* multiplier, so it divides the wait: 2 means
-    // twice as often, which is half the gap. Guarded against zero so a slider
-    // dragged to the bottom cannot produce an infinite timer.
-    this.powerTimer = gap / Math.max(0.05, this.cfg.powerRate);
-  }
-
-  /** Lets the settings panel retune a match already in progress. */
-  setPowerRate(rate: number) {
-    const previous = this.cfg.powerRate;
-    this.cfg.powerRate = rate;
-    // Rescale whatever is left to run, so dragging the slider takes effect on
-    // the pending drop instead of only on the one after it.
-    if (previous > 0 && rate > 0) this.powerTimer *= previous / rate;
-  }
-
   // ── the loop ──────────────────────────────────────────────────────────────
 
   /**
@@ -542,13 +511,11 @@ export class MatchEngine {
     // on screen; `contact` is rally-only, so nobody can touch it once the point
     // has been awarded.
     if (this.phase === 'rally' || this.phase === 'point') this.moveBall(dt);
-    if (this.phase === 'rally') this.movePowerUps(dt);
     // Recorded before contact, so a rewind looks up the ball as it was
     // travelling, never one already redirected by a hit this same step.
     if (this.host) this.recordBall();
     for (const p of this.players) this.contact(p);
 
-    this.expirePowers(dt);
     this.stepParticles(dt);
   }
 
@@ -562,10 +529,8 @@ export class MatchEngine {
   // ── players ───────────────────────────────────────────────────────────────
 
   private movePlayer(p: Player, input: Input, dt: number) {
-    // Characters are skins. Freeze is the only thing that changes how a body
-    // moves, and it applies to a whole team at once.
-    const mobility = this.hasPower('freeze', p.team === 0 ? 1 : 0) ? BALANCE.POWER_FREEZE_SLOW : 1;
-
+    // Characters are skins: every body on the court moves by exactly the same
+    // numbers, and the only difference between two players is the player.
     const dir = (input.right ? 1 : 0) - (input.left ? 1 : 0);
     if (dir !== 0) p.facing = dir > 0 ? 1 : -1;
 
@@ -573,8 +538,8 @@ export class MatchEngine {
       p.dashLeft -= dt;
       p.vx = p.facing * BALANCE.DASH_SPEED;
     } else {
-      const accel = (p.onGround ? BALANCE.RUN_ACCEL : BALANCE.AIR_ACCEL) * mobility;
-      const cap = BALANCE.MAX_RUN * mobility;
+      const accel = p.onGround ? BALANCE.RUN_ACCEL : BALANCE.AIR_ACCEL;
+      const cap = BALANCE.MAX_RUN;
       if (dir !== 0) {
         p.vx += dir * accel * dt;
         p.vx = clamp(p.vx, -cap, cap);
@@ -623,8 +588,6 @@ export class MatchEngine {
       p.jumpHeld = -1;
     }
 
-    p.r = BALANCE.PLAYER_R * (this.hasPower('giant', p.team) ? BALANCE.POWER_GIANT_SCALE : 1);
-
     // Nobody crosses the net. Clamping is enough , a player pressing into it
     // simply stops, which is the behaviour every volleyball game has.
     const { netX, netW, w } = this.arena;
@@ -663,7 +626,7 @@ export class MatchEngine {
   // ── ball ──────────────────────────────────────────────────────────────────
 
   private ballGravity() {
-    return BALANCE.GRAVITY * (this.hasPower('feather') ? BALANCE.POWER_FEATHER_GRAVITY : 1);
+    return BALANCE.GRAVITY;
   }
 
   private moveBall(dt: number) {
@@ -743,11 +706,8 @@ export class MatchEngine {
   private beginServe() {
     this.phase = 'serve';
     this.phaseTimer = BALANCE.SERVE_DELAY;
-    this.powers.length = 0;
-    this.floating.length = 0;
     this.resetPositions();
     this.serveBall();
-    this.armPowerTimer();
     if (this.isMatchPoint()) this.say('MATCH POINT');
   }
 
@@ -859,11 +819,10 @@ export class MatchEngine {
     }
 
     const incoming = Math.hypot(b.vx, b.vy);
-    // Rocket is the only thing that changes hit power now that the charge meter
-    // is gone, and it multiplies the shot directly instead of faking a full
-    // wind-up.
-    const rocket = this.hasPower('rocket', p.team);
-    const power = (rocket ? BALANCE.POWER_ROCKET_HIT : 1) * (this.serveShot ? BALANCE.SERVE_BONUS : 1);
+    // The serve is the one shot with a bonus on it. Nothing else multiplies a
+    // hit now , what the ball does is decided by where it was met and how fast
+    // it was already going, which is the whole game.
+    const power = this.serveShot ? BALANCE.SERVE_BONUS : 1;
     this.serveShot = false;
     const speed = Math.min(
       BALANCE.BALL_MAX_SPEED,
@@ -920,8 +879,6 @@ export class MatchEngine {
     const heat = clamp(outgoing / BALANCE.BALL_MAX_SPEED, 0, 1);
     this.lastPower = heat;
 
-    if (rocket) this.dropPower('rocket');
-
     this.shake = Math.max(this.shake, heat * 9);
     this.puff(b.x, b.y, TEAM_COLORS[p.team].light, 6 + Math.round(heat * 14), 120 + heat * 260);
     this.cfg.onHit?.(heat);
@@ -929,74 +886,6 @@ export class MatchEngine {
     // and heading down into the other half.
     if (heat > 0.7 && b.vy > 120) this.say('SPIKE!');
     else if (this.touches === 6) this.say('RALLY x6');
-  }
-
-  // ── power-ups ─────────────────────────────────────────────────────────────
-
-  private movePowerUps(dt: number) {
-    if (!this.cfg.powerUps) return;
-
-    // Host only: two machines rolling their own spawns would place them in
-    // different halves and hand the match to whoever's screen you watched.
-    // Never in the opening rally: the first point of a match should be a clean
-    // test of who can actually play, with nothing falling out of the sky.
-    const opening = this.score[0] + this.score[1] === 0;
-    if (this.host && this.touches > 0 && !opening) {
-      this.powerTimer -= dt;
-      if (this.powerTimer <= 0) {
-        this.armPowerTimer();
-        this.floating.push({
-          kind: POWER_KINDS[Math.floor(Math.random() * POWER_KINDS.length)],
-          x: this.arena.w * (0.16 + Math.random() * 0.68),
-          y: 70,
-          vy: BALANCE.POWER_FALL,
-          spin: Math.random() * Math.PI * 2,
-        });
-      }
-    }
-
-    for (let i = this.floating.length - 1; i >= 0; i--) {
-      const f = this.floating[i];
-      f.y += f.vy * dt;
-      f.spin += dt * 2;
-      if (f.y > this.arena.floor - BALANCE.POWER_R) {
-        this.floating.splice(i, 1);
-        continue;
-      }
-      // The *ball* collects it, so the reward goes to whoever kept the rally
-      // alive rather than to whoever happened to be standing underneath.
-      const d = Math.hypot(this.ball.x - f.x, this.ball.y - f.y);
-      if (d < BALANCE.POWER_R + BALANCE.BALL_R && this.ball.lastTeam !== null) {
-        this.grantPower(f.kind, this.ball.lastTeam);
-        this.puff(f.x, f.y, POWER_META[f.kind].color, 20, 240);
-        this.floating.splice(i, 1);
-      }
-    }
-  }
-
-  private grantPower(kind: PowerKind, team: Team) {
-    this.dropPower(kind);
-    this.powers.push({ kind, team, left: BALANCE.DURATION[kind] });
-    this.say(POWER_META[kind].label.toUpperCase() + '!');
-  }
-
-  private dropPower(kind: PowerKind) {
-    const i = this.powers.findIndex((p) => p.kind === kind);
-    if (i >= 0) this.powers.splice(i, 1);
-  }
-
-  private expirePowers(dt: number) {
-    for (let i = this.powers.length - 1; i >= 0; i--) {
-      const p = this.powers[i];
-      if (p.left === Infinity) continue;
-      p.left -= dt;
-      if (p.left <= 0) this.powers.splice(i, 1);
-    }
-  }
-
-  /** `team` omitted means "is this power up at all, for anyone". */
-  hasPower(kind: PowerKind, team?: Team) {
-    return this.powers.some((p) => p.kind === kind && (team === undefined || p.team === team));
   }
 
   /** Would this score take the match for `team`? */
@@ -1105,8 +994,6 @@ export class MatchEngine {
       sc: [...this.score] as [number, number],
       ph: this.phase,
       tm: Math.round(this.phaseTimer * 100) / 100,
-      pw: this.powers.map((x) => [x.kind, x.team, x.left === Infinity ? -1 : x.left] as [PowerKind, Team, number]),
-      fl: this.floating.map((f) => [f.kind, Math.round(f.x), Math.round(f.y)] as [PowerKind, number, number]),
       sv: this.serving,
     };
   }
@@ -1154,9 +1041,6 @@ export class MatchEngine {
       this.winner = this.score[0] > this.score[1] ? 0 : 1;
       this.cfg.onOver?.(this.winner);
     }
-
-    this.powers = s.pw.map(([kind, team, left]) => ({ kind, team, left: left < 0 ? Infinity : left }));
-    this.floating = s.fl.map(([kind, x, y]) => ({ kind, x, y, vy: BALANCE.POWER_FALL, spin: 0 }));
 
     // The host rebuilds the court between points , everyone back to their
     // starting spot, ball back in the server's hands. There is nothing to ease
@@ -1267,7 +1151,7 @@ export class MatchEngine {
    * The host consumes it for authoritative collision checks. Other guests use
    * the same one-hop packet to draw that player without waiting for a relayed
    * host snapshot; this is the same ownership model that keeps Fish Eat Fish
-   * smooth. Ball, score, phase and power-ups remain host-authoritative.
+   * smooth. Ball, score and phase remain host-authoritative.
    *
    * `tick` is the last snapshot that guest had applied when it spoke. A claim
    * made before the court was reset predates the reset and is discarded, or
@@ -1416,7 +1300,7 @@ export class MatchEngine {
   }
 
   private puff(x: number, y: number, color: string, count: number, spread: number) {
-    // Hard cap: a long rally with power-ups can otherwise queue thousands and
+    // Hard cap: a long rally can otherwise queue thousands and
     // the frame cost lands exactly when the action is busiest.
     if (this.particles.length > 320) return;
     // Rounded up, so a burst that was asked for never vanishes entirely , a
@@ -1500,7 +1384,6 @@ export class MatchEngine {
     // Shadows sell the height of a jump, so they are worth keeping until the
     // cheapest tier: they are decoration that still carries information.
     if (q.fancy) this.drawShadows(ctx);
-    this.drawFloating(ctx);
     for (const p of this.players) this.drawPlayer(ctx, p);
     this.drawBall(ctx, q);
     this.drawParticles(ctx);
@@ -1611,39 +1494,6 @@ export class MatchEngine {
       ctx.stroke();
     }
     ctx.restore();
-
-    if (this.hasPower('rocket')) {
-      ctx.beginPath();
-      ctx.arc(b.x, b.y, R * 1.45, 0, Math.PI * 2);
-      ctx.strokeStyle = 'rgba(239, 68, 68, 0.75)';
-      ctx.lineWidth = 4;
-      ctx.stroke();
-    }
-  }
-
-  private drawFloating(ctx: CanvasRenderingContext2D) {
-    for (const f of this.floating) {
-      const meta = POWER_META[f.kind];
-      ctx.save();
-      ctx.translate(f.x, f.y);
-      ctx.rotate(Math.sin(f.spin) * 0.25);
-      ctx.beginPath();
-      ctx.arc(0, 0, BALANCE.POWER_R * 1.35, 0, Math.PI * 2);
-      ctx.fillStyle = `${meta.color}33`;
-      ctx.fill();
-      ctx.beginPath();
-      ctx.arc(0, 0, BALANCE.POWER_R, 0, Math.PI * 2);
-      ctx.fillStyle = meta.color;
-      ctx.fill();
-      ctx.strokeStyle = 'rgba(255,255,255,0.9)';
-      ctx.lineWidth = 3;
-      ctx.stroke();
-      ctx.font = '22px system-ui, sans-serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(meta.glyph, 0, 1);
-      ctx.restore();
-    }
   }
 
   private drawParticles(ctx: CanvasRenderingContext2D) {
