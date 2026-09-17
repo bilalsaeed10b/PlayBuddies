@@ -16,9 +16,14 @@ import {
   Settings as SettingsIcon,
   Target,
   Trophy,
-  Users,
 } from 'lucide-react';
 import { askHostToEndGame, askToLeaveLobby, isNativeFullscreen, toggleFullscreen, useAutoFullscreen } from './fullscreen';
+import { MainMenu } from '@shared/menu/MainMenu';
+import { ActionBar, HostBadge, StageFrame } from '@shared/menu/StageFrame';
+import { ModeCard, OptionGroup, RuleSection, ToggleOption } from '@shared/menu/MatchControls';
+import { MENU_STAGE_FIELD, parseStage } from '@shared/menu/stage';
+import type { MenuStage } from '@shared/menu/stage';
+import type { MenuTheme } from '@shared/menu/theme';
 import { FREE_SHIPS, SHIPS, drawShip } from './game/ships';
 import { WEATHER_CHOICES, weatherFor, wetWeather } from './game/weather';
 import { DEFAULT_HULL_INDEX, HULLS, getHullStatDots } from './game/hulls';
@@ -68,7 +73,15 @@ const DEFAULT_SETTINGS: GameSettings = {
   lowPower: false,
 };
 
-type View = 'menu' | 'pick' | 'room' | 'game' | 'offline_menu';
+/** Everything before the battle is one of the shared menu stages; see `stage` in App. */
+type View = 'shell' | 'game';
+
+const THEME: MenuTheme = {
+  tone: 'dark',
+  primary: 'bg-amber-400 text-slate-900',
+  selected: 'border-amber-400 bg-amber-400/15',
+  accent: 'text-amber-300',
+};
 
 interface LobbyPerson {
   uid: string;
@@ -119,9 +132,12 @@ export default function App() {
   const [handoff] = useState(readHandoff);
   const online = Boolean(handoff.room);
 
-  const [view, setView] = useState<View>(online ? 'room' : 'menu');
+  const [view, setView] = useState<View>('shell');
   useAutoFullscreen(online || view === 'game');
+  /** The stage for a flow this device runs alone. Online, the lobby's `menuStage` is the one that counts. */
+  const [localStage, setLocalStage] = useState<MenuStage>('menu');
   const [showSettings, setShowSettings] = useState(false);
+  const [showLeaderboard, setShowLeaderboard] = useState(false);
   const [uid, setUid] = useState<string | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
   const [lobby, setLobby] = useState<{
@@ -133,6 +149,7 @@ export default function App() {
     battleFirst?: Team;
     matchStarted?: boolean;
     matchRules?: number;
+    menuStage?: string;
   } | null>(null);
   const [lobbyError, setLobbyError] = useState<string | null>(null);
 
@@ -203,7 +220,6 @@ export default function App() {
     const saved = localStorage.getItem('pirates_rules_v2');
     return saved ? { ...DEFAULT_RULES, ...JSON.parse(saved) } : DEFAULT_RULES;
   });
-  const [showRules, setShowRules] = useState(false);
   /** The captain's log. Read once on boot, replaced after every battle. */
   const [stats, setStats] = useState<Stats>(readStats);
   const [showStats, setShowStats] = useState(false);
@@ -287,6 +303,7 @@ export default function App() {
             battleFirst?: Team;
             matchStarted?: boolean;
             matchRules?: number;
+            menuStage?: string;
           };
           if (!data.players?.[uid]) {
             setLobbyError("You are not in this lobby.");
@@ -363,9 +380,6 @@ export default function App() {
       }));
   }, [lobby, rules.players]);
 
-  const mySkin = uid ? lobby?.players?.[uid]?.fishIndex : undefined;
-  const myHullRaw = uid ? lobby?.players?.[uid]?.role : undefined;
-  const myHull = typeof myHullRaw === 'number' ? myHullRaw : DEFAULT_HULL_INDEX;
   const isHost = Boolean(uid && lobby && lobby.hostId === uid);
 
   /**
@@ -405,7 +419,7 @@ export default function App() {
       setSession({ seed: lobby.battleSeed, first: lobby.battleFirst });
       setView('game');
     }
-    else if (view === 'game') setView('room');
+    else if (view === 'game') setView('shell');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lobby?.matchStarted, lobby?.battleRoster, lobby?.battleSeed, lobby?.battleFirst, uid, online, offlineMatch]);
 
@@ -545,9 +559,36 @@ export default function App() {
     setStats(recordBattle(won, record));
   }, []);
 
+  /** Host only: any room-wide change, from moving the flow on to publishing the rules. */
+  const writeLobby = useCallback(
+    async (fields: Record<string, string | number | boolean>) => {
+      if (!online || !isHost) return;
+      try {
+        const { db, doc, updateDoc } = await import('./firebase');
+        await updateDoc(doc(db, 'lobbies', handoff.room), fields);
+      } catch (e) {
+        console.error('Could not update the room', e);
+      }
+    },
+    [online, isHost, handoff.room],
+  );
+
+  const remoteStage = parseStage(lobby?.menuStage);
+
   /**
-   * Leaving the battle, online: back to the room, and, for the host, the
-   * go-signal comes down with it.
+   * The rules go to the room the moment the host changes them on the match
+   * page, not only with the start signal, so every guest's locked copy of that
+   * page shows what the host is actually choosing while they choose it.
+   */
+  useEffect(() => {
+    if (!online || offlineMatch || !isHost || remoteStage !== 'modes' || !lobby) return;
+    const packed = packRules(rules);
+    if (lobby.matchRules !== packed) void writeLobby({ matchRules: packed });
+  }, [online, offlineMatch, isHost, remoteStage, lobby, rules, writeLobby]);
+
+  /**
+   * Leaving the battle: back to the match page for a rematch, and, online, the
+   * host's go-signal comes down with it.
    *
    * `matchStarted` was never reset anywhere in the two games before this one,
    * and it broke a rematch two different ways: pressing Start again did
@@ -557,14 +598,15 @@ export default function App() {
    * host quitting mid-match, which is what the platform's own End Game does.
    */
   const leaveBattle = useCallback(() => {
-    setOfflineMatch(false);
-    setView(online ? 'room' : 'menu');
+    setView('shell');
     rollSession();
+    if (offlineMatch) {
+      setLocalStage('modes');
+      return;
+    }
     if (!online || !isHost) return;
-    void import('./firebase')
-      .then(({ db, doc, updateDoc }) => updateDoc(doc(db, 'lobbies', handoff.room), { matchStarted: false }))
-      .catch((e) => console.error('Could not reset the match flag', e));
-  }, [online, isHost, handoff.room, rollSession]);
+    void writeLobby({ matchStarted: false });
+  }, [online, isHost, offlineMatch, rollSession, writeLobby]);
 
   // -- into the battle --------------------------------------------------------
 
@@ -782,7 +824,7 @@ export default function App() {
     };
   }
 
-  // -- shells -----------------------------------------------------------------
+  // -- the pre-match flow -----------------------------------------------------
 
   const openOffline = (players: number) => {
     audioService.unlock();
@@ -790,83 +832,223 @@ export default function App() {
     setOfflineMatch(true);
     setSeatCount(players);
     setSeatSkin({});
-    setView('pick');
+    setSeatHull({});
+    setLocalStage('customize');
   };
+
+  const closeOffline = () => {
+    setOfflineMatch(false);
+    setLocalStage('menu');
+  };
+
+  /** Solo, couch, or a game opened on its own: the flow lives on this device alone. */
+  const local = !online || offlineMatch;
+  const stage: MenuStage = local ? localStage : remoteStage;
+  const goStage = (next: MenuStage) => {
+    if (local) setLocalStage(next);
+    else void writeLobby({ [MENU_STAGE_FIELD]: next });
+  };
+  const hostName = lobby ? lobby.players?.[lobby.hostId]?.displayName : undefined;
+  const fullscreen = () => toggleFullscreen(document.documentElement, !isNativeFullscreen());
+
+  const coinChip = (
+    <div className="panel flex items-center gap-1.5 rounded-2xl px-3 py-2.5 font-bold text-amber-300 short:py-2">
+      <Coins className="h-4 w-4" /> {coins}
+    </div>
+  );
+  const toolButton = (label: string, icon: React.ReactNode, onClick: () => void, extra = '') => (
+    <button onClick={onClick} aria-label={label} title={label} className={`panel rounded-2xl p-2.5 short:p-2 ${extra}`}>
+      {icon}
+    </button>
+  );
+  const stageToolbar = (
+    <>
+      <span className="hidden sm:block">{coinChip}</span>
+      {!local &&
+        toolButton('Friends leaderboard', <Trophy className="h-5 w-5 text-amber-300" />, () => setShowLeaderboard(true), 'hidden sm:block')}
+      {toolButton('Full screen', <Maximize2 className="h-5 w-5" />, fullscreen)}
+      {toolButton('Settings', <SettingsIcon className="h-5 w-5" />, () => setShowSettings(true))}
+      {!local && isHost && toolButton('End the match for everyone', <LogOut className="h-5 w-5" />, askHostToEndGame)}
+    </>
+  );
+
+  let screen: React.ReactNode;
+  if (!local && lobbyError) {
+    screen = (
+      <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center">
+        <h2 className="text-2xl font-black">{lobbyError}</h2>
+        <p className="text-sm text-white/60">Head back to the PlayBuddies lobby and try again.</p>
+      </div>
+    );
+  } else if (!local && (!authChecked || !uid || !lobby)) {
+    screen = (
+      <div className="flex h-full flex-col items-center justify-center gap-3">
+        <Loader2 className="h-10 w-10 animate-spin text-amber-300" />
+        <p className="font-bold text-white/80">Coming alongside...</p>
+      </div>
+    );
+  } else if (stage === 'menu') {
+    screen = (
+      <MainMenu
+        theme={THEME}
+        online={online}
+        isHost={isHost}
+        hostName={hostName}
+        onSingle={() => openOffline(1)}
+        onMulti={online && !handoff.solo ? () => goStage('customize') : undefined}
+        onSettings={() => setShowSettings(true)}
+        multiHint={`Everyone in this room · ${people.length} aboard`}
+        toolbar={
+          <>
+            {coinChip}
+            {toolButton("Captain's log", <Target className="h-5 w-5 text-sky-300" />, () => setShowStats(true))}
+            {toolButton('Full screen', <Maximize2 className="h-5 w-5" />, fullscreen)}
+            {toolButton('Leave', <LogOut className="h-5 w-5" />, askToLeaveLobby)}
+          </>
+        }
+        title={
+          <>
+            <div className="mb-3 inline-block rounded-3xl bg-amber-400/20 p-4 short:hidden">
+              <Anchor className="h-12 w-12 text-amber-300" />
+            </div>
+            <h1 className="text-4xl font-black leading-none tracking-tighter drop-shadow-lg sm:text-6xl short:text-3xl">
+              BATTLE OF <span className="text-amber-300">PIRATES</span>
+            </h1>
+            <p className="mt-2 text-[11px] font-bold uppercase tracking-[0.3em] text-white/70">Aim, swipe, sink</p>
+          </>
+        }
+        secondary={
+          <button
+            onClick={() => openOffline(2)}
+            disabled={online && !isHost}
+            className="w-full rounded-2xl border border-white/15 bg-white/5 py-2.5 text-sm font-black text-white/80 transition-colors hover:bg-white/10 disabled:opacity-40 short:py-1.5"
+          >
+            Two captains, one device
+            <span className="block text-[10px] font-bold text-white/45">Turns alternate on this screen</span>
+          </button>
+        }
+        footer={
+          <p className="max-w-md text-center text-[11px] leading-relaxed text-white/45 short:hidden">
+            Drag back from anywhere and let go. Further back is more powder; the angle is the angle.
+          </p>
+        }
+      />
+    );
+  } else if (stage === 'customize') {
+    const slots: LoadoutSlot[] = local
+      ? Array.from({ length: seatCount }, (_, i) => ({
+          key: String(i),
+          label: seatCount > 1 ? `Player ${i + 1}` : 'You',
+          skin: seatSkin[i],
+          hull: seatHull[i] ?? DEFAULT_HULL_INDEX,
+          editable: true,
+        }))
+      : people.map((p) => ({
+          key: p.uid,
+          label: p.displayName,
+          skin: p.skin,
+          hull: p.hull,
+          photoURL: p.photoURL,
+          editable: p.uid === uid,
+          isHost: p.uid === lobby?.hostId,
+        }));
+    screen = (
+      <CustomizeScreen
+        slots={slots}
+        owned={owned}
+        coins={coins}
+        toolbar={stageToolbar}
+        leads={local || isHost}
+        hostName={hostName}
+        onPickSkin={(key, index) => {
+          if (!local) return void pickOnline(index);
+          if (!owned.includes(index) && !buy(index)) return;
+          setSeatSkin((s) => ({ ...s, [Number(key)]: index }));
+        }}
+        onPickHull={(key, index) => {
+          if (!local) return void pickHullOnline(index);
+          setSeatHull((h) => ({ ...h, [Number(key)]: index }));
+        }}
+        onBack={local ? closeOffline : isHost ? () => goStage('menu') : undefined}
+        onNext={() => goStage('modes')}
+      />
+    );
+  } else {
+    const capacity = rules.players / 2;
+    const roster: FleetMember[] = [];
+    if (local) {
+      for (let i = 0; i < rules.players; i++) {
+        roster.push({
+          key: `seat-${i}`,
+          name: i < seatCount ? (seatCount > 1 ? `Player ${i + 1}` : 'You') : `${TIERS[aiLevel].label} Bot`,
+          team: (i % 2) as Team,
+          skin: i < seatCount ? seatSkin[i] : undefined,
+          bot: i >= seatCount,
+        });
+      }
+    } else {
+      for (const p of people) {
+        roster.push({ key: p.uid, name: p.displayName, team: p.team, skin: p.skin, you: p.uid === uid, host: p.uid === lobby?.hostId });
+      }
+      for (const team of [0, 1] as const) {
+        const empty = capacity - people.filter((p) => p.team === team).length;
+        for (let i = 0; i < empty; i++) {
+          roster.push({ key: `bot-${team}-${i}`, name: `${TIERS[aiLevel].label} Bot`, team, bot: true });
+        }
+      }
+    }
+    const everyonePicked = people.every((p) => p.skin !== undefined && p.skin !== null);
+    const teamsOverfull = ([0, 1] as const).some((team) => people.filter((p) => p.team === team).length > capacity);
+    const waitingFor = people.filter((p) => p.skin === undefined || p.skin === null).length;
+    const bots = roster.filter((m) => m.bot).length;
+    screen = (
+      <ModesScreen
+        rules={rules}
+        locked={!local && !isHost}
+        hostName={hostName}
+        toolbar={stageToolbar}
+        roster={roster}
+        onRules={setRules}
+        onAssignTeam={!local && isHost && rules.players > 2 ? assignTeam : undefined}
+        aiLevel={aiLevel}
+        onAiLevel={(local || isHost) && bots > 0 ? setAiLevel : undefined}
+        onBack={local || isHost ? () => goStage('customize') : undefined}
+        onStart={
+          local
+            ? () => {
+                audioService.unlock();
+                setView('game');
+              }
+            : isHost
+              ? startMatch
+              : undefined
+        }
+        startDisabled={!local && (!everyonePicked || teamsOverfull)}
+        startNote={
+          !local && !isHost
+            ? `${hostName || 'The host'} weighs anchor when the fleet is set.`
+            : !local && !everyonePicked
+              ? `Waiting on ${waitingFor} more to pick a ship.`
+              : teamsOverfull
+                ? `Move a captain: each fleet holds ${capacity}.`
+                : bots > 0
+                  ? `Bots sail ${bots} of the ${rules.players} hulls. Who fires first is drawn at the start.`
+                  : 'Who fires first is drawn at the start.'
+        }
+      />
+    );
+  }
 
   return (
     <div className="relative h-[100dvh] w-full overflow-hidden text-white">
-      {(view === 'menu' || view === 'offline_menu') && (
-        <Menu
-          coins={coins}
-          aiLevel={aiLevel}
-          onAiLevel={setAiLevel}
-          onSolo={() => openOffline(1)}
-          onCouch={() => openOffline(2)}
-          onSettings={() => setShowSettings(true)}
-          onRules={() => setShowRules(true)}
-          onStats={() => setShowStats(true)}
-          onFullscreen={() => toggleFullscreen(document.documentElement, !isNativeFullscreen())}
-          onExit={askToLeaveLobby}
-          rules={rules}
-          onBack={view === 'offline_menu' ? () => setView('room') : undefined}
-        />
-      )}
-
-      {view === 'pick' && (
-        <OfflinePick
-          seatCount={seatCount}
-          owned={owned}
-          coins={coins}
-          onBack={() => setView(online ? 'offline_menu' : 'menu')}
-          onBuy={buy}
-          onDone={(picks, hulls) => {
-            setSeatSkin(picks);
-            setSeatHull(hulls);
-            setView('game');
-          }}
-        />
-      )}
-
-      {view === 'room' && (
-        <RoomScreen
-          ready={authChecked}
-          error={lobbyError}
-          uid={uid}
-          people={people}
-          hostId={lobby?.hostId ?? null}
-          mine={mySkin}
-          owned={owned}
-          coins={coins}
-          isHost={isHost}
-          onPick={pickOnline}
-          onPickHull={pickHullOnline}
-          onAssignTeam={assignTeam}
-          myHull={myHull}
-          onStart={startMatch}
-          onSettings={() => setShowSettings(true)}
-          onRules={() => setShowRules(true)}
-          onStats={() => setShowStats(true)}
-          stats={stats}
-          rules={rules}
-          onFullscreen={() => toggleFullscreen(document.documentElement, !isNativeFullscreen())}
-          onPlayOffline={() => {
-            audioService.unlock();
-            setView('offline_menu');
-          }}
-        />
-      )}
+      {screen}
 
       {showSettings && (
         <SettingsPanel settings={settings} onChange={setSettings} onClose={() => setShowSettings(false)} />
       )}
 
-      {showRules && (
-        <RulesPanel
-          rules={rules}
-          editable={!online || isHost}
-          onChange={setRules}
-          onClose={() => setShowRules(false)}
-        />
+      {showLeaderboard && (
+        <LeaderboardModal people={people} uid={uid} stats={stats} onClose={() => setShowLeaderboard(false)} />
       )}
 
       {showStats && (
@@ -887,6 +1069,12 @@ const MOUNTAIN_LABEL: Record<MountainRule, string> = {
   off: 'No mountain',
   breakable: 'Breakable mountain',
   solid: 'Solid mountain',
+};
+
+const MOUNTAIN_HINT: Record<MountainRule, string> = {
+  off: 'Open water. Every shot is a flat duel.',
+  breakable: 'Stone amidships that crumbles after ten hits, so the lane opens up late in a long battle.',
+  solid: 'Never crumbles. The lane over the top is the only lane there is, or a bore shot through it.',
 };
 
 /** How a player count reads as a fight. */
@@ -914,130 +1102,395 @@ function pickOtherShip(playerChoice: number) {
   return options[Math.floor(Math.random() * options.length)] ?? 0;
 }
 
-// -- pieces -------------------------------------------------------------------
 
-function Menu({
+/** One person choosing a loadout: an online player, or a seat at this device. */
+interface LoadoutSlot {
+  key: string;
+  label: string;
+  skin: number | null | undefined;
+  hull: number;
+  photoURL?: string;
+  /** Whether this device picks for this slot. */
+  editable: boolean;
+  isHost?: boolean;
+}
+
+/**
+ * Stage 2: paint and hull.
+ *
+ * The same screen online and offline. Online, each player edits only their own
+ * slot and watches everyone else's appear in the roster strip; on a couch,
+ * every seat is this device's to edit, one at a time.
+ */
+function CustomizeScreen({
+  slots,
+  owned,
   coins,
-  aiLevel,
-  onAiLevel,
-  onSolo,
-  onCouch,
-  onSettings,
-  onRules,
-  onStats,
-  onFullscreen,
-  onExit,
-  rules,
+  toolbar,
+  leads,
+  hostName,
+  onPickSkin,
+  onPickHull,
   onBack,
+  onNext,
 }: {
+  slots: LoadoutSlot[];
+  owned: number[];
   coins: number;
-  aiLevel: number;
-  onAiLevel: (n: number) => void;
-  onSolo: () => void;
-  onCouch: () => void;
-  onSettings: () => void;
-  onRules: () => void;
-  onStats: () => void;
-  onFullscreen: () => void;
-  onExit: () => void;
-  rules: MatchRules;
+  toolbar: React.ReactNode;
+  /** This device moves the flow on: offline, or the host. */
+  leads: boolean;
+  hostName?: string;
+  onPickSkin: (key: string, index: number) => void;
+  onPickHull: (key: string, index: number) => void;
   onBack?: () => void;
+  onNext: () => void;
 }) {
+  const mine = slots.filter((s) => s.editable);
+  const [activeKey, setActiveKey] = useState(() => mine[0]?.key ?? '');
+  const active = mine.find((s) => s.key === activeKey) ?? mine[0];
+  /** Paint first, because it is the one with a price on it. */
+  const [tab, setTab] = useState<'ship' | 'hull'>('ship');
+
+  const others = slots.filter((s) => s !== active);
+  const pickedBy = useMemo(() => {
+    const map: Record<number, string[]> = {};
+    for (const s of others) if (s.skin !== undefined && s.skin !== null) (map[s.skin] ??= []).push(s.label);
+    return map;
+  }, [others]);
+  const hullPickedBy = useMemo(() => {
+    const map: Record<number, string[]> = {};
+    for (const s of others) (map[s.hull] ??= []).push(s.label);
+    return map;
+  }, [others]);
+
+  const picked = (s: LoadoutSlot) => s.skin !== undefined && s.skin !== null;
+  const waiting = slots.filter((s) => !picked(s)).length;
+  const iAmReady = mine.every(picked);
+
   return (
-    <div className="flex h-full flex-col gap-4 overflow-y-auto overscroll-contain p-6">
-      {/* A real row, not an overlay -- so a long title on a short screen pushes
-          the content down instead of running under these buttons. */}
-      <div className="flex shrink-0 items-start justify-between gap-2">
-        <div>
-          {onBack && (
-            <button onClick={onBack} aria-label="Back" className="panel rounded-2xl p-3">
-              <ArrowLeft className="h-5 w-5" />
-            </button>
-          )}
-        </div>
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          <div className="panel flex items-center gap-2 rounded-2xl px-3 py-2.5 font-bold text-amber-300">
-            <Coins className="h-4 w-4" /> {coins}
-          </div>
-          <button onClick={onRules} className="panel flex items-center gap-2 rounded-2xl px-3 py-2.5 font-bold text-white/70">
-            <ScrollText className="h-4 w-4" /> Rules
-          </button>
-          <button onClick={onStats} aria-label="Captain's log" className="panel rounded-2xl p-2.5 text-white/70">
-            <Trophy className="h-5 w-5" />
-          </button>
-          <button onClick={onFullscreen} aria-label="Full screen" className="panel rounded-2xl p-2.5">
-            <Maximize2 className="h-5 w-5" />
-          </button>
-          <button onClick={onSettings} aria-label="Settings" className="panel rounded-2xl p-2.5">
-            <SettingsIcon className="h-5 w-5" />
-          </button>
-          <button onClick={onExit} aria-label="Leave" className="panel rounded-2xl p-2.5">
-            <LogOut className="h-5 w-5" />
-          </button>
-        </div>
-      </div>
-
-      <div className="flex flex-1 flex-col items-center justify-center gap-6">
-      <div className="text-center">
-        <div className="mb-4 inline-block rounded-3xl bg-amber-400/20 p-4">
-          <Anchor className="h-12 w-12 text-amber-300" />
-        </div>
-        <h1 className="text-4xl font-black leading-none tracking-tighter drop-shadow-lg sm:text-6xl">
-          BATTLE OF <span className="text-amber-300">PIRATES</span>
-        </h1>
-        <p className="mt-2 text-[11px] font-bold uppercase tracking-[0.3em] text-white/70">Aim, swipe, sink</p>
-      </div>
-
-      <div className="panel w-full max-w-md space-y-5 rounded-[2rem] p-6">
-        <button
-          onClick={onSolo}
-          className="flex w-full items-center justify-center gap-2 rounded-2xl bg-amber-400 py-4 text-lg font-black text-slate-900 transition-transform active:scale-95"
-        >
-          <Play className="h-5 w-5 fill-current" /> Solo - you against the bot
-        </button>
-
-        <div className="space-y-2">
-          <p className="text-[11px] font-black uppercase tracking-[0.2em] text-white/50">Bot rank</p>
-          <div className="flex gap-1 rounded-xl bg-black/30 p-1">
-            {TIERS.map((tier, i) => (
+    <StageFrame
+      theme={THEME}
+      step={2}
+      title="Pick your ship"
+      subtitle={`${slots.length} ${slots.length === 1 ? 'captain' : 'captains'} · paint and hull`}
+      onBack={onBack}
+      toolbar={toolbar}
+      status={!leads ? <HostBadge theme={THEME}>{hostName || 'The host'} moves the fleet on when everyone is set</HostBadge> : undefined}
+      footer={
+        <ActionBar
+          theme={THEME}
+          label="Next: Match rules"
+          onAction={leads ? onNext : undefined}
+          disabled={waiting > 0}
+          note={
+            leads
+              ? waiting > 0
+                ? `Waiting on ${waiting} more to pick a ship.`
+                : 'Everyone is set. Next, the rules of the battle.'
+              : iAmReady
+                ? `Ready. Waiting for ${hostName || 'the host'} to set up the match...`
+                : 'Pick a ship to be ready.'
+          }
+        />
+      }
+    >
+      <div className="flex h-full flex-col gap-3 short:gap-2">
+        <div className="flex shrink-0 gap-2 overflow-x-auto overscroll-contain pb-1">
+          {slots.map((s) => {
+            const selectable = s.editable && mine.length > 1;
+            return (
               <button
-                key={tier.label}
-                onClick={() => onAiLevel(i)}
-                className={`flex-1 rounded-lg py-2 text-xs font-black uppercase tracking-wider transition-colors ${
-                  aiLevel === i ? 'bg-amber-400 text-slate-900' : 'text-white/60'
+                key={s.key}
+                type="button"
+                disabled={!selectable}
+                onClick={() => setActiveKey(s.key)}
+                className={`flex shrink-0 items-center gap-2 rounded-2xl border px-2 py-1.5 text-left disabled:cursor-default ${
+                  s === active && mine.length > 1 ? THEME.selected : 'border-white/10 bg-black/20'
                 }`}
               >
-                {tier.label}
+                <span className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-xl bg-black/25">
+                  {picked(s) ? <Portrait index={s.skin as number} size={36} /> : <Anchor className="h-4 w-4 text-white/35" />}
+                </span>
+                <span className="min-w-0">
+                  <span className="flex max-w-[120px] items-center gap-1 truncate text-xs font-black">
+                    {s.label}
+                    {s.isHost && <Crown className="h-3 w-3 shrink-0 text-amber-300" />}
+                  </span>
+                  <span className={`block text-[9px] font-black uppercase tracking-wider ${picked(s) ? 'text-emerald-300' : 'text-white/40'}`}>
+                    {picked(s) ? `Ready · ${HULLS[s.hull]?.name ?? 'Balanced'}` : 'Choosing...'}
+                  </span>
+                </span>
               </button>
-            ))}
-          </div>
+            );
+          })}
         </div>
 
-        <button
-          onClick={onCouch}
-          className="w-full rounded-2xl border border-white/25 bg-white/10 py-4 font-black transition-colors hover:bg-white/20"
-        >
-          Two captains, one device
-          <span className="mt-1 block text-[11px] font-bold normal-case tracking-normal text-white/50">
-            Turns alternate. Whoever is up drags and lets go.
-          </span>
-        </button>
-
-        <div className="rounded-2xl bg-black/25 p-3 text-center text-xs leading-relaxed text-white/50">
-          <p className="mb-1 font-black uppercase tracking-[0.15em] text-white/40">How it works</p>
-          <p>Drag back from anywhere and let go. Further back is more powder; the angle is the angle.</p>
-          <p className="mt-1">Read the range, pick a card, and put a hole in the other hull first.</p>
-          <p className="mt-2 text-white/40">
-            Playing online? Start a lobby on PlayBuddies and pick this game. Two ships, one stretch of water.
+        {active ? (
+          <>
+            <div className="flex shrink-0 gap-1 rounded-xl bg-black/30 p-1">
+              {(['ship', 'hull'] as const).map((t) => (
+                <button
+                  key={t}
+                  onClick={() => setTab(t)}
+                  className={`flex-1 rounded-lg py-1.5 text-[11px] font-black uppercase tracking-wider transition-colors ${
+                    tab === t ? 'bg-amber-400 text-slate-900' : 'text-white/55'
+                  }`}
+                >
+                  {t === 'ship' ? 'Ship paint' : `Hull class · ${HULLS[active.hull]?.name ?? 'Balanced'}`}
+                </button>
+              ))}
+            </div>
+            <div className="min-h-0 flex-1">
+              {tab === 'ship' ? (
+                <ShipGrid
+                  owned={owned}
+                  coins={coins}
+                  selected={active.skin ?? null}
+                  pickedBy={pickedBy}
+                  onPick={(index) => onPickSkin(active.key, index)}
+                />
+              ) : (
+                <div className="space-y-3 pb-1">
+                  <p className="text-center text-[11px] font-semibold text-white/45">
+                    All {HULLS.length} are free. The paint is what you bought; this is how you fight.
+                  </p>
+                  <HullGrid selected={active.hull} onPick={(index) => onPickHull(active.key, index)} pickedBy={hullPickedBy} />
+                </div>
+              )}
+            </div>
+          </>
+        ) : (
+          <p className="py-10 text-center text-sm font-bold text-white/55">
+            The berths are full for this battle. You can watch from the shore.
           </p>
-        </div>
+        )}
       </div>
-
-      <p className="text-center text-[11px] font-semibold text-white/35">{rulesSummary(rules)}</p>
-      </div>
-    </div>
+    </StageFrame>
   );
 }
+
+interface FleetMember {
+  key: string;
+  name: string;
+  team: Team;
+  skin?: number | null;
+  bot?: boolean;
+  you?: boolean;
+  host?: boolean;
+}
+
+const FLEET_MODES: { players: PlayerCount; title: string; description: string }[] = [
+  { players: 2, title: 'Duel', description: 'One hull each, the whole sea between you.' },
+  { players: 4, title: 'Fleet Skirmish', description: 'Two to a side. The water widens and the helm alternates sides.' },
+  { players: 6, title: 'Armada', description: 'Full fleets of three. Every living captain takes a turn in order.' },
+];
+
+/**
+ * Stage 3: the whole match on one page.
+ *
+ * The host's copy is the controls; a guest's copy is the same page locked,
+ * kept current from the lobby as the host clicks. See MatchControls.
+ */
+function ModesScreen({
+  rules,
+  locked,
+  hostName,
+  toolbar,
+  roster,
+  onRules,
+  onAssignTeam,
+  aiLevel,
+  onAiLevel,
+  onBack,
+  onStart,
+  startDisabled,
+  startNote,
+}: {
+  rules: MatchRules;
+  locked: boolean;
+  hostName?: string;
+  toolbar: React.ReactNode;
+  roster: FleetMember[];
+  onRules: (rules: MatchRules) => void;
+  /** Host only, and only when there is more than one ship to a side. */
+  onAssignTeam?: (uid: string, team: Team) => void;
+  aiLevel: number;
+  /** Omitted when no bot is sailing, or for a guest: bots are driven by the host. */
+  onAiLevel?: (level: number) => void;
+  onBack?: () => void;
+  onStart?: () => void;
+  startDisabled?: boolean;
+  startNote: string;
+}) {
+  const set = (patch: Partial<MatchRules>) => onRules({ ...rules, ...patch });
+  const weather = rules.weather ?? weatherFor(rules);
+
+  return (
+    <StageFrame
+      theme={THEME}
+      step={3}
+      title="Match rules"
+      subtitle={rulesSummary(rules)}
+      onBack={onBack}
+      toolbar={toolbar}
+      status={locked ? <HostBadge theme={THEME}>{hostName || 'The host'} is configuring the match...</HostBadge> : undefined}
+      footer={
+        <ActionBar
+          theme={THEME}
+          label="Weigh anchor"
+          icon={<Play className="h-4 w-4 fill-current" />}
+          onAction={onStart}
+          disabled={startDisabled}
+          note={startNote}
+        />
+      }
+    >
+      <div className="grid gap-5 lg:grid-cols-3 short:gap-3">
+        <div className="space-y-5 lg:col-span-2 short:space-y-3">
+          <RuleSection theme={THEME} title="Game mode" locked={locked}>
+            <div className="grid gap-2 sm:grid-cols-3">
+              {FLEET_MODES.map((mode) => (
+                <ModeCard
+                  key={mode.players}
+                  theme={THEME}
+                  title={mode.title}
+                  badge={`${formatSides(mode.players)} · ${mode.players} ships`}
+                  description={mode.description}
+                  icon={<Anchor className="h-4 w-4" />}
+                  selected={rules.players === mode.players}
+                  locked={locked}
+                  onSelect={() => set({ players: mode.players })}
+                />
+              ))}
+            </div>
+            <p className="rounded-xl border border-amber-300/20 bg-amber-300/10 px-3 py-2 text-[11px] leading-relaxed text-amber-100 short:hidden">
+              Land 3 damaging cannon attacks to charge a special: Torpedo deals 25 to one enemy, Acid Rain deals 10 to
+              every enemy, Heal restores up to 25 HP. Each special uses your turn.
+            </p>
+          </RuleSection>
+
+          <RuleSection
+            theme={THEME}
+            title="Weather"
+            hint="Random picks one sky at the start and keeps it. Weather never changes your aim."
+            locked={locked}
+          >
+            <OptionGroup
+              theme={THEME}
+              columns={3}
+              locked={locked}
+              value={weather}
+              onChange={(id) => set({ weather: id, storm: id === 'random' ? false : wetWeather(id) })}
+              options={WEATHER_CHOICES.map((w) => ({ value: w.id, label: w.name }))}
+            />
+          </RuleSection>
+
+          <RuleSection theme={THEME} title="The mountain" hint={MOUNTAIN_HINT[rules.mountain]} locked={locked}>
+            <OptionGroup
+              theme={THEME}
+              locked={locked}
+              value={rules.mountain}
+              onChange={(mountain) => set({ mountain })}
+              options={(['off', 'breakable', 'solid'] as MountainRule[]).map((m) => ({ value: m, label: MOUNTAIN_LABEL[m] }))}
+            />
+          </RuleSection>
+
+          <RuleSection theme={THEME} title="Modifiers" locked={locked}>
+            <div className="grid gap-2 sm:grid-cols-3">
+              <ToggleOption
+                theme={THEME}
+                label="Cards"
+                hint="Three special shots dealt each turn. Off is round shot every time."
+                value={rules.cards}
+                locked={locked}
+                onChange={(cards) => set({ cards })}
+              />
+              <ToggleOption
+                theme={THEME}
+                label={`Turn clock · ${BALANCE.TURN_TIME}s`}
+                hint="Aim in time or the turn passes. Off lets a turn take as long as it takes."
+                value={rules.turnTimer}
+                locked={locked}
+                onChange={(turnTimer) => set({ turnTimer })}
+              />
+              <ToggleOption
+                theme={THEME}
+                label="Aim arc"
+                hint="Draws the start of the shot while aiming. Much easier."
+                value={rules.aimArc}
+                locked={locked}
+                onChange={(aimArc) => set({ aimArc })}
+              />
+            </div>
+          </RuleSection>
+
+          {onAiLevel && (
+            <RuleSection theme={THEME} title="Bot rank" hint="How well the bots in empty berths shoot.">
+              <OptionGroup
+                theme={THEME}
+                value={aiLevel}
+                onChange={onAiLevel}
+                options={TIERS.map((tier, i) => ({ value: i, label: tier.label }))}
+              />
+            </RuleSection>
+          )}
+        </div>
+
+        <RuleSection
+          theme={THEME}
+          title={`Fleets · ${formatSides(rules.players)}`}
+          hint={onAssignTeam ? 'Tap a side to move a captain.' : undefined}
+          locked={locked}
+        >
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
+            {([0, 1] as const).map((team) => (
+              <div
+                key={team}
+                className="space-y-1.5 rounded-2xl border p-2"
+                style={{ borderColor: `${TEAM_COLORS[team].main}55`, background: `${TEAM_COLORS[team].main}14` }}
+              >
+                <p className="px-1 text-[10px] font-black uppercase tracking-widest" style={{ color: TEAM_COLORS[team].light }}>
+                  {TEAM_COLORS[team].name}
+                </p>
+                {roster
+                  .filter((m) => m.team === team)
+                  .map((m) => (
+                    <div key={m.key} className="flex items-center gap-2 rounded-xl bg-black/20 p-1.5">
+                      <span className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-black/25">
+                        {m.skin !== undefined && m.skin !== null ? (
+                          <Portrait index={m.skin} size={32} />
+                        ) : (
+                          <Anchor className="h-4 w-4 text-white/35" />
+                        )}
+                      </span>
+                      <span className={`min-w-0 flex-1 truncate text-xs font-bold ${m.bot ? 'text-white/45' : ''}`}>
+                        {m.name}
+                        {m.you && <span className="text-white/45"> · you</span>}
+                      </span>
+                      {m.host && <Crown className="h-3.5 w-3.5 shrink-0 text-amber-300" />}
+                      {onAssignTeam && !m.bot && (
+                        <button
+                          type="button"
+                          onClick={() => onAssignTeam(m.key, team === 0 ? 1 : 0)}
+                          className="shrink-0 rounded-lg border border-white/15 bg-white/5 px-2 py-1 text-[9px] font-black uppercase tracking-wide text-white/65 hover:bg-white/10"
+                          title={`Move to ${TEAM_COLORS[team === 0 ? 1 : 0].name}`}
+                        >
+                          Swap
+                        </button>
+                      )}
+                    </div>
+                  ))}
+              </div>
+            ))}
+          </div>
+        </RuleSection>
+      </div>
+    </StageFrame>
+  );
+}
+
+// -- pieces -------------------------------------------------------------------
 
 /** A ship card, drawn with the same code the battle uses. */
 function Portrait({ index, size = 92 }: { index: number; size?: number }) {
@@ -1218,651 +1671,6 @@ function HullGrid({
   );
 }
 
-function Shell({
-  title,
-  coins,
-  onBack,
-  children,
-}: {
-  title: string;
-  coins: number;
-  onBack: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="mx-auto flex h-full w-full max-w-6xl flex-col overflow-hidden gap-3 p-3 sm:gap-4 sm:p-6">
-      <div className="flex shrink-0 items-center justify-between gap-2">
-        <button onClick={onBack} aria-label="Back" className="panel shrink-0 rounded-2xl p-3">
-          <ArrowLeft className="h-5 w-5" />
-        </button>
-        <h2 className="min-w-0 truncate text-center text-base font-black tracking-tight sm:text-2xl">{title}</h2>
-        <div className="panel flex shrink-0 items-center gap-2 rounded-2xl px-3 py-2 font-bold text-amber-300">
-          <Coins className="h-4 w-4" /> {coins}
-        </div>
-      </div>
-      {/* Explicit min-h-0 is what lets the child actually scroll instead of
-          growing the flex column past the viewport. Only this panel scrolls --
-          the outer shell staying `overflow-hidden` is what stops that scroll
-          from also showing up as a second, outer scrollbar. */}
-      <div className="panel min-h-0 flex-1 overflow-y-auto overscroll-contain rounded-[2rem] p-3 sm:p-6">
-        {children}
-      </div>
-    </div>
-  );
-}
-
-function OfflinePick({
-  seatCount,
-  owned,
-  coins,
-  onBack,
-  onBuy,
-  onDone,
-}: {
-  seatCount: number;
-  owned: number[];
-  coins: number;
-  onBack: () => void;
-  onBuy: (index: number) => boolean;
-  onDone: (picks: Record<number, number>, hulls: Record<number, number>) => void;
-}) {
-  const [picks, setPicks] = useState<Record<number, number>>({});
-  const [hulls, setHulls] = useState<Record<number, number>>({});
-  /**
-   * Each seat picks a paint job and then a class, in that order.
-   *
-   * Two steps rather than one grid of thirty-two combinations: the two
-   * choices are genuinely unrelated -- one is what you look like and one is
-   * how you fight -- and pairing them would imply a link the game
-   * deliberately does not have. See the note at the top of hulls.ts.
-   *
-   * An explicit cursor rather than one derived from how many picks have been
-   * made: with two steps per seat, a size is no longer a position.
-   */
-  const [seat, setSeat] = useState(0);
-  const choosingHull = picks[seat] !== undefined;
-
-  const pickedBy = useMemo(() => {
-    const map: Record<number, string[]> = {};
-    Object.entries(picks).forEach(([id, index]) => {
-      (map[index] ??= []).push(`P${Number(id) + 1}`);
-    });
-    return map;
-  }, [picks]);
-
-  const hullPickedBy = useMemo(() => {
-    const map: Record<number, string[]> = {};
-    Object.entries(hulls).forEach(([id, index]) => {
-      (map[index] ??= []).push(`P${Number(id) + 1}`);
-    });
-    return map;
-  }, [hulls]);
-
-  const pickShip = (index: number) => {
-    if (!owned.includes(index) && !onBuy(index)) return;
-    setPicks({ ...picks, [seat]: index });
-  };
-
-  const pickHull = (index: number) => {
-    const nextHulls = { ...hulls, [seat]: index };
-    setHulls(nextHulls);
-    if (seat + 1 >= seatCount) onDone(picks, nextHulls);
-    else setSeat(seat + 1);
-  };
-
-  const who = seatCount > 1 ? `Player ${seat + 1} - ` : '';
-  const title = choosingHull ? `${who}pick a hull` : `${who}pick a ship`;
-  return (
-    <Shell
-      title={title}
-      coins={coins}
-      onBack={() => {
-        // Back out of the hull step to the ship step rather than all the way
-        // out of the picker, which is what a half-made choice deserves.
-        if (choosingHull) {
-          const next = { ...picks };
-          delete next[seat];
-          setPicks(next);
-        } else if (seat > 0) {
-          // Back through the previous captain's hull choice, not out of the
-          // picker entirely -- the seat before this one is fully made up.
-          setSeat(seat - 1);
-        } else onBack();
-      }}
-    >
-      {choosingHull ? (
-        <div className="space-y-3">
-          <p className="text-center text-[11px] font-semibold text-white/45">
-            All {HULLS.length} are free and always have been. Pick how you want to fight, not what you paid for.
-          </p>
-          <HullGrid selected={hulls[seat] ?? DEFAULT_HULL_INDEX} onPick={pickHull} pickedBy={hullPickedBy} />
-        </div>
-      ) : (
-        <ShipGrid owned={owned} coins={coins} selected={null} pickedBy={pickedBy} onPick={pickShip} />
-      )}
-    </Shell>
-  );
-}
-
-function RoomScreen({
-  ready,
-  error,
-  uid,
-  people,
-  hostId,
-  mine,
-  myHull,
-  owned,
-  coins,
-  isHost,
-  onPick,
-  onPickHull,
-  onAssignTeam,
-  onStart,
-  onSettings,
-  onRules,
-  onStats,
-  stats,
-  rules,
-  onFullscreen,
-  onPlayOffline,
-}: {
-  ready: boolean;
-  error: string | null;
-  uid: string | null;
-  people: {
-    uid: string;
-    displayName: string;
-    skin?: number | null;
-    hull: number;
-    team: Team;
-    photoURL?: string;
-    isReady: boolean;
-  }[];
-  hostId: string | null;
-  mine: number | null | undefined;
-  myHull: number;
-  owned: number[];
-  coins: number;
-  isHost: boolean;
-  onPick: (index: number) => void;
-  onPickHull: (index: number) => void;
-  onAssignTeam: (uid: string, team: Team) => void;
-  onStart: () => void;
-  onSettings: () => void;
-  onRules: () => void;
-  onStats: () => void;
-  stats: Stats;
-  rules: MatchRules;
-  onFullscreen: () => void;
-  onPlayOffline: () => void;
-}) {
-  /**
-   * Whether the roster gets the compact chip strip or the roomy card list.
-   *
-   * A Tailwind width breakpoint got this wrong: a phone turned sideways is
-   * wide enough to cross `sm:` and pick up the roomy layout, but it is
-   * *short* on height, not width, which is the dimension actually being
-   * fought over here. The roomy roster plus the mobile start/rules block
-   * above it left as little as 49px for the ship grid on a landscape phone --
-   * worse than doing nothing at all. Read like `compact`/`portrait` in
-   * BattleView: real height, not a width proxy for it. Left off past desktop
-   * width, where the roomy layout's own column is doing the flexing (see
-   * `lg:max-h-none lg:flex-1` below) rather than fighting anything above it.
-   */
-  const [compactRoster, setCompactRoster] = useState(
-    () => typeof window !== 'undefined' && window.innerHeight < 620 && window.innerWidth < 1024,
-  );
-  /**
-   * A landscape phone: short *and* wider than it is tall. Short enough that
-   * the roster and the CTA block stacked on top of each other, even both
-   * compacted, still left the ship grid a sliver -- 129px in testing at
-   * 812x375, less than one card's own height. Wide enough, though, that they
-   * fit fine side by side in a single row instead of stacked in two. See the
-   * `sideBySide` branch below.
-   */
-  const [sideBySide, setSideBySide] = useState(
-    () => typeof window !== 'undefined' && window.innerHeight < 480 && window.innerWidth > window.innerHeight,
-  );
-  useEffect(() => {
-    const probe = () => {
-      setCompactRoster(window.innerHeight < 620 && window.innerWidth < 1024);
-      setSideBySide(window.innerHeight < 480 && window.innerWidth > window.innerHeight);
-    };
-    probe();
-    window.addEventListener('resize', probe);
-    window.addEventListener('orientationchange', probe);
-    return () => {
-      window.removeEventListener('resize', probe);
-      window.removeEventListener('orientationchange', probe);
-    };
-  }, []);
-
-  const pickedBy = useMemo(() => {
-    const map: Record<number, string[]> = {};
-    for (const p of people) {
-      if (p.uid !== uid && p.skin !== undefined && p.skin !== null) (map[p.skin] ??= []).push(p.displayName);
-    }
-    return map;
-  }, [people, uid]);
-
-  const hullPickedBy = useMemo(() => {
-    const map: Record<number, string[]> = {};
-    // Unlike the paint, everyone has a hull from the moment they walk in --
-    // a player who has not touched this is on a Frigate, and knowing that
-    // about the ship across the water is worth as much as knowing they chose.
-    for (const p of people) if (p.uid !== uid) (map[p.hull] ??= []).push(p.displayName);
-    return map;
-  }, [people, uid]);
-
-  /** Paint or class. Paint first, because it is the one with a price on it. */
-  const [tab, setTab] = useState<'ship' | 'hull'>('ship');
-  const [showTeams, setShowTeams] = useState(false);
-  const [showLeaderboard, setShowLeaderboard] = useState(false);
-
-  if (error) {
-    return (
-      <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center">
-        <h2 className="text-2xl font-black">{error}</h2>
-        <p className="text-sm text-white/60">Head back to the PlayBuddies lobby and try again.</p>
-      </div>
-    );
-  }
-
-  if (!ready || !uid) {
-    return (
-      <div className="flex h-full flex-col items-center justify-center gap-3">
-        <Loader2 className="h-10 w-10 animate-spin text-amber-300" />
-        <p className="font-bold text-white/80">Coming alongside...</p>
-      </div>
-    );
-  }
-
-  const iAmReady = mine !== undefined && mine !== null;
-  /** Berths the rules call for that nobody has walked into; bots take these. */
-  const emptyBerths = Math.max(0, rules.players - people.length);
-  /**
-   * Nobody sails until everybody has chosen.
-   *
-   * The host used to be able to weigh anchor the moment its *own* ship was
-   * picked, which left anyone still choosing to be dropped into a battle
-   * sailing a hull the lobby had never recorded , their opponent saw a ship
-   * they had not chosen, and the shop screen was still open over the top of it.
-   */
-  const everyonePicked = people.every((p) => p.skin !== undefined && p.skin !== null);
-  const fleetCapacity = rules.players / 2;
-  const teamCounts: Record<Team, number> = {
-    0: people.filter((p) => p.team === 0).length,
-    1: people.filter((p) => p.team === 1).length,
-  };
-  const teamsOverfull = teamCounts[0] > fleetCapacity || teamCounts[1] > fleetCapacity;
-  const canStart = iAmReady && everyonePicked && !teamsOverfull;
-  const waitingFor = people.filter((p) => p.skin === undefined || p.skin === null).length;
-
-  const header = (
-    <div className="flex shrink-0 flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-      <div className="w-full min-w-0 sm:w-auto">
-        <h2 className="truncate text-lg font-black tracking-tight sm:text-2xl">Pick your ship</h2>
-        <p className="text-[10px] font-bold uppercase leading-snug tracking-[0.14em] text-amber-300/80 sm:text-[11px] sm:tracking-[0.18em]">
-          {formatSides(rules.players)} across open water
-          {emptyBerths > 0 && ` · ${emptyBerths} ${emptyBerths === 1 ? 'helm' : 'helms'} to bots`}
-        </p>
-      </div>
-      <div className="flex w-full shrink-0 items-center justify-end gap-1.5 sm:w-auto sm:gap-2">
-        <button
-          onClick={() => setShowLeaderboard(true)}
-          className="panel flex items-center gap-2 rounded-2xl p-2.5 text-xs font-black text-amber-200 sm:px-3 sm:py-2"
-          title="Friends leaderboard"
-          aria-label="Friends leaderboard"
-        >
-          <Trophy className="h-4 w-4 text-amber-300" /> <span className="hidden sm:inline">Leaderboard</span>
-        </button>
-        <button onClick={onStats} className="panel flex items-center gap-2 rounded-2xl p-2.5 text-xs font-black text-sky-200 sm:px-3 sm:py-2" title="Captain statistics" aria-label="Captain statistics">
-          <Target className="h-4 w-4 text-sky-300" /> <span className="hidden sm:inline">Stats</span>
-        </button>
-        <div className="panel flex items-center gap-1.5 rounded-2xl px-2.5 py-2 font-bold text-amber-300 sm:gap-2 sm:px-3">
-          <Coins className="h-4 w-4" /> {coins}
-        </div>
-        <button onClick={onFullscreen} className="panel rounded-2xl p-2.5" title="Full screen">
-          <Maximize2 className="h-5 w-5" />
-        </button>
-        <button onClick={onSettings} aria-label="Settings" className="panel rounded-2xl p-2.5">
-          <SettingsIcon className="h-5 w-5" />
-        </button>
-        {isHost && (
-          <button onClick={askHostToEndGame} aria-label="End game" className="panel rounded-2xl p-2.5" title="End the match for everyone">
-            <LogOut className="h-5 w-5" />
-          </button>
-        )}
-      </div>
-    </div>
-  );
-
-  /**
-   * WEIGH ANCHOR plus Rules/Offline, without its own wrapper -- the caller
-   * decides whether that goes in its own full-width panel or shares a row
-   * with the roster, so this is written once for both.
-   */
-  const ctaButtons = (
-    <>
-      {isHost ? (
-        <button
-          onClick={onStart}
-          disabled={!canStart}
-          className="flex w-full items-center justify-center gap-2 rounded-xl bg-amber-400 py-2.5 text-sm font-black text-slate-900 disabled:opacity-40"
-        >
-          <Play className="h-4 w-4 fill-current" /> WEIGH ANCHOR
-        </button>
-      ) : (
-        <p className="py-1 text-center text-xs font-bold text-white/60">
-          {!iAmReady
-            ? 'Pick a ship to be ready.'
-            : !everyonePicked
-              ? 'Waiting for everyone to pick...'
-              : 'Waiting for the host...'}
-        </p>
-      )}
-      <div className={`mt-2 grid gap-2 ${isHost ? 'grid-cols-3' : 'grid-cols-2'}`}>
-        <button
-          onClick={onRules}
-          className="flex items-center justify-center gap-1.5 rounded-lg border border-white/20 bg-white/5 py-2 text-xs font-black text-white/70 transition-colors active:bg-white/15"
-        >
-          <ScrollText className="h-3.5 w-3.5" /> Rules
-        </button>
-        {isHost && (
-          <button
-            onClick={() => setShowTeams(true)}
-            className="flex items-center justify-center gap-1.5 rounded-lg border border-white/20 bg-white/5 py-2 text-xs font-black text-white/70 transition-colors active:bg-white/15"
-          >
-            <Users className="h-3.5 w-3.5" /> Teams
-          </button>
-        )}
-        <button
-          onClick={onPlayOffline}
-          className="rounded-lg border border-white/20 bg-white/5 py-2 text-xs font-black text-white/70 transition-colors active:bg-white/15"
-        >
-          Play offline
-        </button>
-      </div>
-    </>
-  );
-
-  /**
-   * Who's ready to sail, at a glance -- just the faces. A ship and a name are
-   * what the full roster below is for; this strip exists to answer one
-   * question fast (is everyone set?), so it only shows people who actually
-   * are: ready, and past the picker.
-   */
-  const rosterChips = (
-    <div className="flex min-h-0 flex-1 gap-2 overflow-x-auto overscroll-contain">
-      {people
-        .filter((p) => p.isReady && p.skin !== undefined && p.skin !== null)
-        .map((p) => (
-          <div
-            key={p.uid}
-            className="relative h-9 w-9 shrink-0 overflow-hidden rounded-full border-2"
-            style={{ borderColor: TEAM_COLORS[p.team].main }}
-            title={p.displayName}
-          >
-            <img
-              src={p.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${p.uid}`}
-              alt={p.displayName}
-              onError={(e) => {
-                e.currentTarget.onerror = null;
-                e.currentTarget.src = `https://api.dicebear.com/7.x/avataaars/svg?seed=${p.uid}`;
-              }}
-              className="h-full w-full object-cover"
-            />
-            {p.uid === hostId && (
-              <Crown className="absolute -right-0.5 -top-0.5 h-3 w-3 rounded-full bg-slate-950/70 p-0.5 text-amber-300" />
-            )}
-          </div>
-        ))}
-    </div>
-  );
-
-  /**
-   * Two tabs over one panel, rather than two panels stacked.
-   *
-   * The room is already the tightest screen in the game -- see `compactRoster`
-   * and `sideBySide` above, both of which exist because a landscape phone had
-   * 129px left for the ship grid. A second grid below it would have had
-   * neither of them readable; a tab costs one row.
-   */
-  const shipGridPanel = (extra: string) => (
-    <div className={`panel flex min-h-0 flex-col rounded-[2rem] p-3 sm:p-5 lg:p-5 xl:p-6 min-h-[520px] lg:min-h-[600px] xl:min-h-[660px] ${extra}`}>
-      <div className="mb-3 flex shrink-0 gap-1 rounded-xl bg-black/30 p-1">
-        {(['ship', 'hull'] as const).map((t) => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            className={`flex-1 rounded-lg py-1.5 text-[11px] font-black uppercase tracking-wider transition-colors ${
-              tab === t ? 'bg-amber-400 text-slate-900' : 'text-white/55'
-            }`}
-          >
-            {t === 'ship' ? 'Paint' : `Hull · ${HULLS[myHull]?.name ?? 'Balanced'}`}
-          </button>
-        ))}
-      </div>
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1.5 scrollbar-thin">
-        {tab === 'ship' ? (
-          <ShipGrid owned={owned} coins={coins} selected={mine ?? null} pickedBy={pickedBy} onPick={onPick} />
-        ) : (
-          <div className="space-y-3 pb-3">
-            <p className="text-center text-[11px] font-semibold text-white/45">
-              All {HULLS.length} are free. The paint is what you bought; this is how you fight.
-            </p>
-            <HullGrid selected={myHull} onPick={onPickHull} pickedBy={hullPickedBy} />
-          </div>
-        )}
-      </div>
-    </div>
-  );
-
-  const desktopCta = (
-    <div className="panel hidden shrink-0 rounded-[2rem] p-5 lg:block">
-      {isHost ? (
-        <>
-          <button
-            onClick={onStart}
-            disabled={!canStart}
-            className="flex w-full items-center justify-center gap-2 rounded-2xl bg-amber-400 py-4 text-lg font-black text-slate-900 disabled:opacity-40"
-          >
-            <Play className="h-5 w-5 fill-current" /> WEIGH ANCHOR
-          </button>
-          <p className="mt-2 text-center text-[11px] text-white/50">
-            {!iAmReady
-              ? 'Pick your own ship first.'
-              : !everyonePicked
-                ? `Waiting on ${waitingFor} more to pick a ship.`
-                : teamsOverfull
-                  ? 'Move a captain: each fleet has room for only two.'
-                : emptyBerths > 0
-                  ? `Bots will sail ${emptyBerths} of the ${rules.players} hulls.`
-                  : 'Which side fires first is drawn at the start.'}
-          </p>
-        </>
-      ) : (
-        <p className="text-center text-sm font-bold text-white/60">
-          {!iAmReady
-            ? 'Pick a ship to be ready.'
-            : !everyonePicked
-              ? 'Waiting for everyone to pick...'
-              : 'Waiting for the host...'}
-        </p>
-      )}
-      <button
-        onClick={onRules}
-        className="mt-3 flex w-full flex-col items-center gap-1 rounded-2xl border border-white/20 bg-white/5 py-3 font-black text-white/60 transition-colors hover:bg-white/15"
-      >
-        <span className="flex items-center gap-2">
-          <ScrollText className="h-4 w-4" /> {isHost ? 'Battle rules' : 'Battle rules (host sets these)'}
-        </span>
-        <span className="px-3 text-[10px] font-semibold leading-tight text-white/45">{rulesSummary(rules)}</span>
-      </button>
-      {isHost && (
-        <button
-          onClick={() => setShowTeams(true)}
-          className="mt-3 flex w-full items-center justify-center gap-2 rounded-2xl border border-sky-300/35 bg-sky-400/10 py-3 font-black text-sky-100 transition-colors hover:bg-sky-400/20"
-        >
-          <Users className="h-4 w-4" /> Manage teams · {teamCounts[0]} Crimson / {teamCounts[1]} Cobalt
-        </button>
-      )}
-      <button
-        onClick={onPlayOffline}
-        className="mt-3 w-full rounded-2xl border border-white/20 bg-white/5 py-3 font-black text-white/60 transition-colors hover:bg-white/15"
-      >
-        Play offline
-      </button>
-    </div>
-  );
-
-  const teamManager = showTeams && (
-    <TeamManager
-      people={people}
-      capacity={fleetCapacity}
-      onAssign={onAssignTeam}
-      onClose={() => setShowTeams(false)}
-    />
-  );
-
-  // A landscape phone is wide enough to build a row but short on the one
-  // thing that matters here -- see `sideBySide` above. CTA and roster share
-  // a single slim row instead of stacking, and the ship grid gets everything
-  // below it rather than splitting a second row with the roster again.
-  if (sideBySide) {
-    return (
-      <>
-        <div className="mx-auto flex h-full w-full max-w-6xl flex-col overflow-y-auto overscroll-contain gap-2 p-2.5">
-          {header}
-          <div className="flex shrink-0 gap-2">
-            <div className="panel min-w-0 flex-1 rounded-2xl p-2">{ctaButtons}</div>
-            <div className="panel flex w-32 shrink-0 flex-col rounded-2xl p-1.5">
-              <h3 className="mb-1 flex shrink-0 items-center gap-1 text-[8px] font-black uppercase tracking-wide text-white/50">
-                <Users className="h-2.5 w-2.5" /> {people.length} up
-              </h3>
-              {rosterChips}
-            </div>
-          </div>
-          {shipGridPanel('flex-1')}
-        </div>
-        {teamManager}
-        {showLeaderboard && (
-          <LeaderboardModal people={people} uid={uid} stats={stats} onClose={() => setShowLeaderboard(false)} />
-        )}
-      </>
-    );
-  }
-
-  return (
-    <>
-      <div className="mx-auto flex h-full w-full max-w-6xl flex-col overflow-y-auto overscroll-contain gap-2 p-2.5 sm:gap-4 sm:p-6">
-        {header}
-
-      {/* Loud on purpose, and the one thing this whole screen fights for
-          height on that skips `short:` -- see `sideBySide` above for what
-          happens instead when there truly is none to spare. "Rules" further
-          down among the CTA buttons read as maintenance, not as the wind and
-          the mountain and the reload that decide most battles. */}
-      <button
-        onClick={onRules}
-        className="relative flex shrink-0 items-center gap-3 overflow-hidden rounded-2xl border-2 border-amber-400/60 bg-amber-400/10 px-3.5 py-2 sm:px-4 sm:py-2.5 text-left transition-transform active:scale-[0.99] short:hidden"
-      >
-        <span className="absolute -right-6 -top-6 h-14 w-14 animate-pulse rounded-full bg-amber-400/20" aria-hidden />
-        <ScrollText className="h-5 w-5 shrink-0 text-amber-300" />
-        <div className="min-w-0 flex-1">
-          <p className="text-xs sm:text-sm font-black uppercase tracking-wide text-amber-200">
-            {isHost ? 'New here? Read the rules' : 'How weather and cards work'}
-          </p>
-          <p className="text-[10px] sm:text-[11px] font-bold text-amber-300/70">Worth 30 seconds before the first shot.</p>
-        </div>
-        <span className="shrink-0 rounded-xl bg-amber-400 px-2.5 py-1 sm:px-3 sm:py-1.5 text-[10px] sm:text-[11px] font-black uppercase tracking-wide text-slate-900">
-          Guide
-        </span>
-      </button>
-
-      {/* On a phone the start button would otherwise sit below the fold, which
-          is exactly what made it unreachable in the other games. Kept to two
-          short rows now rather than three stacked full-height buttons: that
-          block plus the roster below it used to eat most of a phone's height
-          before the ship grid -- the one thing this whole screen is for --
-          ever got a pixel, leaving it a sliver you had to scroll through
-          three cards at a time. */}
-      <div className="panel shrink-0 rounded-2xl p-2.5 lg:hidden">{ctaButtons}</div>
-
-        <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[auto_minmax(0,1fr)] gap-2 sm:gap-4 lg:grid-cols-3 lg:grid-rows-[minmax(0,1fr)]">
-          {shipGridPanel('order-2 lg:order-1 lg:col-span-2')}
-
-          <div className="order-1 flex min-h-0 flex-col gap-3 sm:gap-4 lg:order-2">
-          {/* A horizontal strip of avatar chips when height is tight, the
-              roomy vertical card list when it isn't. The roster only needs to
-              say who's on the water and what side -- it does not need a
-              quarter of a short screen to say it. See `compactRoster` above
-              for why this branches on measured height rather than a width
-              breakpoint. */}
-          <div
-            className={`panel flex min-h-0 shrink-0 flex-col lg:max-h-none lg:flex-1 lg:rounded-[2rem] lg:p-5 ${
-              compactRoster ? 'max-h-[72px] rounded-2xl p-2' : 'max-h-44 rounded-[2rem] p-4 sm:p-5'
-            }`}
-          >
-            <h3
-              className={`mb-1 flex shrink-0 items-center gap-1.5 text-[9px] font-black uppercase tracking-[0.18em] text-white/50 lg:mb-3 lg:gap-2 lg:text-[11px] lg:tracking-[0.2em] ${
-                compactRoster ? '' : 'mb-3 gap-2 text-[11px] tracking-[0.2em]'
-              }`}
-            >
-              <Users className={compactRoster ? 'h-3 w-3' : 'h-4 w-4'} /> On the water ({people.length})
-            </h3>
-            {compactRoster ? (
-              rosterChips
-            ) : (
-              <div className="flex min-h-0 flex-1 flex-col gap-0 space-y-2 overflow-x-hidden overflow-y-auto pr-1 lg:overflow-x-hidden lg:overflow-y-auto">
-                {people.map((p) => (
-                  <div
-                    key={p.uid}
-                    className="flex w-auto shrink-0 flex-row items-center gap-3 rounded-2xl border p-2.5"
-                    style={{
-                      borderColor: `${TEAM_COLORS[p.team].main}55`,
-                      background: `${TEAM_COLORS[p.team].main}18`,
-                    }}
-                  >
-                    <div className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-black/25">
-                      {p.skin !== undefined && p.skin !== null ? (
-                        <Portrait index={p.skin} size={42} />
-                      ) : (
-                        <Anchor className="h-5 w-5 text-white/40" />
-                      )}
-                    </div>
-                    <div className="min-w-0">
-                      <p className="flex items-center justify-start gap-1 truncate text-sm font-bold">
-                        {p.displayName}
-                        {p.uid === hostId && <Crown className="h-3.5 w-3.5 shrink-0 text-amber-300" />}
-                      </p>
-                      <p
-                        className="text-[10px] font-black uppercase tracking-widest"
-                        style={{ color: TEAM_COLORS[p.team].light }}
-                      >
-                        {TEAM_COLORS[p.team].name}
-                        {p.uid === uid ? ' - you' : ''}
-                      </p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-            {desktopCta}
-          </div>
-        </div>
-      </div>
-      {teamManager}
-      {showLeaderboard && (
-        <LeaderboardModal people={people} uid={uid} stats={stats} onClose={() => setShowLeaderboard(false)} />
-      )}
-    </>
-  );
-}
-
 type PublicAimTotals = {
   allTime: { shots: number; hits: number };
   week: { id: string; shots: number; hits: number };
@@ -2005,77 +1813,6 @@ function HullMeters({ hull }: { hull: typeof HULLS[number] }) {
   );
 }
 
-/** Host-only pre-match crew board. Teams are locked into the engine at launch. */
-function TeamManager({
-  people,
-  capacity,
-  onAssign,
-  onClose,
-}: {
-  people: { uid: string; displayName: string; team: Team; photoURL?: string }[];
-  capacity: number;
-  onAssign: (uid: string, team: Team) => void;
-  onClose: () => void;
-}) {
-  useEscape(true, onClose);
-  const counts: Record<Team, number> = {
-    0: people.filter((p) => p.team === 0).length,
-    1: people.filter((p) => p.team === 1).length,
-  };
-
-  return (
-    <div {...scrimProps(onClose)} className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/75 p-3 backdrop-blur-sm">
-      <div className="panel w-full max-w-lg rounded-[2rem] p-4 sm:p-6" onClick={(event) => event.stopPropagation()}>
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <h3 className="text-lg font-black">Manage teams</h3>
-            <p className="mt-1 text-xs font-semibold text-white/55">Place each captain before weighing anchor. Each fleet holds {capacity}.</p>
-          </div>
-          <button onClick={onClose} aria-label="Close team manager" className="rounded-xl p-2 text-white/65 hover:bg-white/10">
-            <ArrowLeft className="h-5 w-5" />
-          </button>
-        </div>
-
-        <div className="mt-4 space-y-2">
-          {people.map((person) => (
-            <div key={person.uid} className="flex items-center gap-2 rounded-2xl border border-white/10 bg-black/20 p-2">
-              <img
-                src={person.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${person.uid}`}
-                alt=""
-                className="h-9 w-9 shrink-0 rounded-xl object-cover"
-              />
-              <p className="min-w-0 flex-1 truncate text-sm font-bold">{person.displayName}</p>
-              {([0, 1] as const).map((team) => {
-                const selected = person.team === team;
-                const full = counts[team] >= capacity && !selected;
-                return (
-                  <button
-                    key={team}
-                    type="button"
-                    onClick={() => onAssign(person.uid, team)}
-                    title={full ? `Swap into ${TEAM_COLORS[team].name}` : TEAM_COLORS[team].name}
-                    className={`rounded-xl border px-2.5 py-2 text-[10px] font-black uppercase tracking-wide transition-colors ${
-                      selected ? 'text-slate-950' : 'border-white/15 bg-white/5 text-white/60 hover:bg-white/10'
-                    }`}
-                    style={selected ? { borderColor: TEAM_COLORS[team].main, background: TEAM_COLORS[team].light } : undefined}
-                  >
-                    {TEAM_COLORS[team].name}
-                  </button>
-                );
-              })}
-            </div>
-          ))}
-        </div>
-
-        <div className="mt-4 flex items-center justify-between rounded-xl bg-white/5 px-3 py-2 text-[11px] font-bold text-white/60">
-          <span style={{ color: TEAM_COLORS[0].light }}>Crimson {counts[0]}/{capacity}</span>
-          <span style={{ color: TEAM_COLORS[1].light }}>Cobalt {counts[1]}/{capacity}</span>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function SettingsPanel({
   settings,
   onChange,
@@ -2151,19 +1888,6 @@ function SettingsPanel({
   );
 }
 
-/**
- * The rules of the battle, set once by the host and obeyed by everyone.
- *
- * Separate from Settings on purpose. Settings are this device's business ,
- * volume, render cost , and nobody else is affected by them. These change what
- * the battle *is*, so both fleets have to be playing the same one: they travel
- * to the guest over the wire (see `packRules`) and its engine is built from
- * whatever arrives, not from anything stored locally.
- *
- * A guest can open this panel and read it, but every control is dead. Letting
- * them change a copy that gets overwritten the moment the host presses start
- * would be a lie about who is in charge.
- */
 /**
  * The captain's log.
  *
@@ -2358,156 +2082,6 @@ function Figure({
       </p>
       <p className="mt-1 truncate text-xl font-black text-white">{value}</p>
       {sub && <p className="text-[10px] font-bold opacity-70">{sub}</p>}
-    </div>
-  );
-}
-
-function RulesPanel({
-  rules,
-  editable,
-  onChange,
-  onClose,
-}: {
-  rules: MatchRules;
-  editable: boolean;
-  onChange: (r: MatchRules) => void;
-  onClose: () => void;
-}) {
-  const toggles: { key: 'cards' | 'turnTimer' | 'aimArc'; label: string; hint: string }[] = [
-    {
-      key: 'cards',
-      label: 'Cards',
-      hint: 'Three dealt a turn from round, chain, grape, mortar, firebomb, bore, repair, twin, triple-shot, and powder-keg attacks. Off means round shot every time.',
-    },
-    {
-      key: 'turnTimer',
-      label: 'Turn clock',
-      hint: `${BALANCE.TURN_TIME} seconds to aim, then the turn passes you by -- no shot, no second chance. Off lets a turn take as long as it takes.`,
-    },
-    {
-      key: 'aimArc',
-      label: 'Aim arc',
-      hint: 'Draws the opening stretch of the shot while aiming. It makes the game a great deal easier , line the dots up and let go. The aim arrow on the pad stays either way.',
-    },
-  ];
-
-  // Escape closes it too. See @shared/ui/dismiss.
-  useEscape(true, onClose);
-  return (
-    <div {...scrimProps(onClose)} className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm">
-      <div className="panel max-h-[88dvh] w-full max-w-md space-y-6 overflow-y-auto overscroll-contain rounded-[2rem] p-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h3 className="text-xl font-black">Battle rules</h3>
-            <p className="text-[11px] font-semibold text-white/45">
-              {editable ? 'Applies to both fleets. Takes effect next battle.' : 'Set by the host.'}
-            </p>
-          </div>
-          <button onClick={onClose} aria-label="Close" className="rounded-xl p-2 hover:bg-white/10">
-            <ArrowLeft className="h-5 w-5" />
-          </button>
-        </div>
-
-        <div className="space-y-2">
-          <p className="text-sm font-bold">
-            Ships on the water
-            <span className="block text-[11px] font-normal text-white/50">
-              Split evenly into two fleets. Anyone in the room beyond this watches , the two sides have to
-              match. Empty berths are sailed by bots.
-            </span>
-          </p>
-          <p className="rounded-xl border border-amber-300/20 bg-amber-300/10 px-3 py-2 text-xs leading-relaxed text-amber-100">
-            Every living captain takes one turn in order. Land 3 damaging cannon attacks to charge a special:
-            Torpedo deals 25 to one enemy, Acid Rain deals 10 to every enemy, or Heal restores up to 25 HP.
-            Each special spends the meter and uses your turn.
-          </p>
-          <div className="grid grid-cols-3 gap-2">
-            {PLAYER_CODES.map((option) => (
-              <button
-                key={option}
-                disabled={!editable}
-                onClick={() => onChange({ ...rules, players: option })}
-                className={`rounded-xl border px-2 py-2.5 text-xs font-black transition-colors disabled:opacity-50 ${
-                  rules.players === option
-                    ? 'border-amber-400 bg-amber-400/20 text-amber-200'
-                    : 'border-white/15 bg-white/5 text-white/60 hover:bg-white/10'
-                }`}
-              >
-                {formatSides(option)}
-                <span className="block text-[10px] font-bold text-white/40">{option} ships</span>
-              </button>
-            ))}
-          </div>
-          <p className="text-[11px] text-white/40">
-            {rules.players === 2
-              ? 'The duel. One hull each, the whole sea between you.'
-              : `The water widens to fit ${rules.players} hulls, and the guns reach further for it. The helm alternates sides every turn.`}
-          </p>
-        </div>
-
-        <div className="space-y-2">
-          <p className="text-sm font-bold">
-            The mountain
-            <span className="block text-[11px] font-normal text-white/50">
-              Stone amidships, tall enough that no working elevation skims it. Going over it costs real powder;
-              the only way through is a bore shot.
-            </span>
-          </p>
-          <div className="grid grid-cols-3 gap-2">
-            {(['off', 'breakable', 'solid'] as MountainRule[]).map((option) => (
-              <button
-                key={option}
-                disabled={!editable}
-                onClick={() => onChange({ ...rules, mountain: option })}
-                className={`rounded-xl border px-2 py-2.5 text-xs font-black capitalize transition-colors disabled:opacity-50 ${
-                  rules.mountain === option
-                    ? 'border-amber-400 bg-amber-400/20 text-amber-200'
-                    : 'border-white/15 bg-white/5 text-white/60 hover:bg-white/10'
-                }`}
-              >
-                {option}
-              </button>
-            ))}
-          </div>
-          <p className="text-[11px] text-white/40">
-            {rules.mountain === 'off'
-              ? 'Open water. Every shot is a flat duel.'
-              : rules.mountain === 'breakable'
-                ? 'Crumbles after ten hits, so the lane opens up late in a long battle.'
-                : 'Never crumbles. The lane over the top is the only lane there is.'}
-          </p>
-        </div>
-
-        <div className="space-y-2">
-          <p className="text-sm font-bold">Weather</p>
-          <p className="text-[11px] text-white/50">Random is the default: one sky is chosen when the match starts and stays until it ends. Rain falls straight down; weather does not change your aim.</p>
-          <div className="grid grid-cols-2 gap-2">
-            {WEATHER_CHOICES.map(option => (
-              <button key={option.id} disabled={!editable} aria-pressed={rules.weather === option.id || (!rules.weather && weatherFor(rules) === option.id)}
-                onClick={() => onChange({ ...rules, weather: option.id, storm: option.id === 'random' ? false : wetWeather(option.id) })}
-                className={`rounded-xl border px-3 py-2 text-left text-xs font-bold disabled:opacity-50 ${rules.weather === option.id || (!rules.weather && weatherFor(rules) === option.id) ? 'border-sky-300 bg-sky-300/15 text-sky-100' : 'border-white/15 bg-white/5 text-white/65'}`}>
-                {option.name}<span className="mt-1 block text-[10px] font-normal opacity-70">{option.hint}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {toggles.map(({ key, label, hint }) => (
-          <label key={key} className="flex items-center justify-between gap-3">
-            <span className="text-sm font-bold">
-              {label}
-              <span className="block text-[11px] font-normal text-white/50">{hint}</span>
-            </span>
-            <input
-              type="checkbox"
-              disabled={!editable}
-              checked={rules[key]}
-              onChange={(e) => onChange({ ...rules, [key]: e.target.checked })}
-              className="h-6 w-6 shrink-0 accent-amber-400 disabled:opacity-50"
-            />
-          </label>
-        ))}
-      </div>
     </div>
   );
 }

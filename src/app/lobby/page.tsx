@@ -670,6 +670,9 @@ function LobbyContent() {
       await updateDoc(doc(db, "lobbies", roomId), {
         status: "playing",
         matchStarted: false,
+        // Every game opens on its own title screen; a stage left behind by the
+        // last game in this room would drop everyone halfway into the next.
+        menuStage: "menu",
         matchSeed: deleteField(),
         collectedGems: {},
         ...roster,
@@ -688,6 +691,7 @@ function LobbyContent() {
       await updateDoc(doc(db, "lobbies", roomId), {
         status: "waiting",
         matchStarted: false,
+        menuStage: "menu",
       });
     } catch (e) {
       console.error("Error ending game:", e);
