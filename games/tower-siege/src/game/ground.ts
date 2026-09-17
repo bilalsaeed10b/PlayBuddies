@@ -5,14 +5,14 @@
  * all of this is painted exactly once into an offscreen bitmap and blitted
  * from then on, where the towers and enemies in art.ts are drawn every frame.
  *
- * The first pass at this was the worst-looking thing in the game and it is
- * worth saying why, because both faults were the same mistake. The turf was
- * one flat green: real ground varies at a scale you notice from across the
- * board, not at the scale of a blade of grass. And a faint rounded square was
- * baked onto every one of the hundred-odd buildable tiles, which turned a
- * field into a spreadsheet , that grid is information a player wants while
- * they are deciding where a tower goes and at no other time, so it now lives
- * in `drawPlots` and appears only then.
+ * The look is deliberately cartoon, and every rule below follows from that.
+ * Flat saturated colour rather than gradients; big shapes rather than fine
+ * texture; and a thick dark outline around anything that is meant to read as
+ * an object. The pass before this one chased realism , grass blades, cobble
+ * noise, a heavy vignette , and the result was muddy at the size it is
+ * actually played at. Detail you cannot see from across the board is not
+ * detail, it is dirt on the lens, and the vignette was literally dimming the
+ * corners of a game whose whole appeal is that it is bright.
  */
 import {
   COLS,
@@ -30,6 +30,32 @@ import { TILE, mulberry32 } from './rules';
 
 const GROUND_SEED = 0x9e3779b1;
 const ROAD_W = TILE * 0.78;
+
+/**
+ * The palette, in one place.
+ *
+ * Named rather than inlined because the whole point of a cartoon board is that
+ * a handful of colours repeat everywhere , the same green in the turf and the
+ * tree, the same brown in the road and the trunk. Scattering hex codes through
+ * the paint code is how that quietly stops being true.
+ */
+export const PALETTE = {
+  grass: '#7ed957',
+  grassLight: '#a6ee6b',
+  grassDark: '#57bf50',
+  grassDeep: '#3fa04a',
+  dirt: '#f2c876',
+  dirtMid: '#dda551',
+  dirtDark: '#b3752f',
+  ink: '#2f4a2c',
+  stone: '#cbd5e4',
+  stoneMid: '#9aa8bf',
+  stoneDark: '#4f5c74',
+  wood: '#a9703c',
+  woodDark: '#6b4423',
+  water: '#4ecdf0',
+  waterDark: '#1f9fce',
+} as const;
 
 export function rounded(
   ctx: CanvasRenderingContext2D,
@@ -49,19 +75,77 @@ export function rounded(
   ctx.closePath();
 }
 
-/** Distance from a point to the nearest point on the road, in world units. */
-function distToRoad(x: number, y: number): number {
-  let best = Infinity;
-  for (let i = 1; i < PATH.length; i++) {
-    const a = PATH[i - 1];
-    const b = PATH[i];
-    const dx = b.x - a.x;
-    const dy = b.y - a.y;
-    const len = dx * dx + dy * dy;
-    const t = len === 0 ? 0 : Math.max(0, Math.min(1, ((x - a.x) * dx + (y - a.y) * dy) / len));
-    best = Math.min(best, Math.hypot(x - (a.x + dx * t), y - (a.y + dy * t)));
+/** Darken a hex colour toward black by `k`. The outline of anything is its own colour, darkened. */
+export function shade(hex: string, k: number): string {
+  const n = parseInt(hex.slice(1), 16);
+  return `rgb(${Math.round(((n >> 16) & 255) * k)}, ${Math.round(((n >> 8) & 255) * k)}, ${Math.round((n & 255) * k)})`;
+}
+
+/** Lighten a hex colour toward white by `k` (0 = unchanged, 1 = white). The lit face of anything. */
+export function tint(hex: string, k: number): string {
+  const n = parseInt(hex.slice(1), 16);
+  const mix = (c: number) => Math.round(c + (255 - c) * k);
+  return `rgb(${mix((n >> 16) & 255)}, ${mix((n >> 8) & 255)}, ${mix(n & 255)})`;
+}
+
+/**
+ * Fill then outline, which is the one move the whole style is built on.
+ *
+ * A cartoon object is a flat colour with a dark line around it. Doing that by
+ * hand is four statements every time and it is the thing most likely to get
+ * skipped on the twentieth shape, which is exactly when the board starts
+ * looking inconsistent.
+ */
+export function inked(ctx: CanvasRenderingContext2D, fill: string, line: string, width = 3) {
+  ctx.fillStyle = fill;
+  ctx.fill();
+  ctx.strokeStyle = line;
+  ctx.lineWidth = width;
+  ctx.lineJoin = 'round';
+  ctx.stroke();
+}
+
+/**
+ * A closed wobbly blob: a circle with its radius nudged per vertex.
+ *
+ * Every organic shape on the board is one of these , canopies, rocks, grass
+ * patches. A true circle reads as a token and a bezier cloud is more control
+ * points than any of this is worth.
+ */
+export function blob(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  r: number,
+  squash: number,
+  wobble: number,
+  rnd: () => number,
+  points = 9,
+) {
+  // Curved through the midpoints rather than joined corner to corner. Straight
+  // segments between jittered vertices give a faceted low-poly edge, which is a
+  // different look entirely and not the one this board is going for , at the
+  // size a grass patch is actually drawn, every one of those facets is visible.
+  const pts: [number, number][] = [];
+  for (let i = 0; i < points; i++) {
+    const a = (i / points) * Math.PI * 2;
+    const rr = r * (1 - wobble / 2 + rnd() * wobble);
+    pts.push([x + Math.cos(a) * rr, y + Math.sin(a) * rr * squash]);
   }
-  return best;
+  const mid = (i: number): [number, number] => {
+    const a = pts[i % points];
+    const b = pts[(i + 1) % points];
+    return [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+  };
+  ctx.beginPath();
+  const start = mid(points - 1);
+  ctx.moveTo(start[0], start[1]);
+  for (let i = 0; i < points; i++) {
+    const c = pts[i];
+    const end = mid(i);
+    ctx.quadraticCurveTo(c[0], c[1], end[0], end[1]);
+  }
+  ctx.closePath();
 }
 
 // ── the bake ───────────────────────────────────────────────────────────────
@@ -92,87 +176,37 @@ export function bakeGround(): HTMLCanvasElement | null {
 function paintGround(ctx: CanvasRenderingContext2D) {
   const rnd = mulberry32(GROUND_SEED);
 
-  // Turf.
-  //
-  // Painted as a base wash plus soft-edged blobs, and emphatically *not* as a
-  // grid of noise-sampled cells, which is what it was first. A cell grid
-  // quantises: each block is one flat colour, and with a noise lattice only a
-  // couple of cells wide the steps between them line up into vertical banding
-  // you cannot unsee once you have noticed it. A radial gradient has no edge
-  // to band along.
-  const base = ctx.createLinearGradient(0, 0, WORLD_W * 0.25, WORLD_H);
-  base.addColorStop(0, '#83d85c');
-  base.addColorStop(0.5, '#55b951');
-  base.addColorStop(1, '#2f9b55');
-  ctx.fillStyle = base;
+  // Turf: one flat green, then big flat patches of two others. Flat on
+  // purpose. A gradient wash makes one corner of the field darker than the
+  // other, which at this scale does not read as light , it reads as a stain.
+  ctx.fillStyle = PALETTE.grass;
   ctx.fillRect(0, 0, WORLD_W, WORLD_H);
 
-  // Patches: lighter meadow, darker shade, and dry yellowed ground. Sized in
-  // multiples of a tile so they read at the scale the board is looked at.
-  const patches: [string, number, number][] = [
-    ['rgba(190, 244, 102, 0.5)', 30, 150],
-    ['rgba(25, 132, 73, 0.38)', 26, 170],
-    ['rgba(255, 221, 91, 0.25)', 16, 120],
+  const patches: [string, number, number, number][] = [
+    [PALETTE.grassLight, 14, 130, 0.35],
+    [PALETTE.grassDark, 12, 150, 0.3],
+    [PALETTE.grassLight, 18, 70, 0.3],
   ];
-  for (const [colour, count, size] of patches) {
+  for (const [colour, count, size, alpha] of patches) {
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = colour;
     for (let i = 0; i < count; i++) {
-      const x = rnd() * WORLD_W;
-      const y = rnd() * WORLD_H;
-      const r = size * (0.5 + rnd() * 0.9);
-      const g = ctx.createRadialGradient(x, y, 0, x, y, r);
-      g.addColorStop(0, colour);
-      g.addColorStop(1, colour.replace(/[\d.]+\)$/, '0)'));
-      ctx.fillStyle = g;
-      ctx.beginPath();
-      ctx.ellipse(x, y, r, r * (0.6 + rnd() * 0.5), rnd() * Math.PI, 0, Math.PI * 2);
+      blob(ctx, rnd() * WORLD_W, rnd() * WORLD_H, size * (0.55 + rnd() * 0.8), 0.6 + rnd() * 0.35, 0.5, rnd, 11);
       ctx.fill();
     }
   }
+  ctx.globalAlpha = 1;
 
-  // Trodden earth spreading out from the road, so the road belongs to the
-  // ground rather than being a ribbon laid across it. Stroked in widening
-  // passes rather than sampled per cell, for the same reason as above.
-  ctx.lineCap = 'round';
-  ctx.lineJoin = 'round';
-  for (let i = 6; i >= 1; i--) {
-    ctx.strokeStyle = `rgba(126, 106, 72, ${0.06 + (6 - i) * 0.015})`;
-    ctx.lineWidth = ROAD_W + i * 26;
-    strokeRoute(ctx);
-  }
-  // And a few dry scuffs off the shoulder, so the wear is not a perfect band.
-  for (let i = 0; i < 40; i++) {
-    const d = rnd() * PATH_LENGTH;
-    const p = pointAt(d);
-    const r = 22 + rnd() * 40;
-    const x = p.x + (rnd() - 0.5) * 120;
-    const y = p.y + (rnd() - 0.5) * 120;
-    const g = ctx.createRadialGradient(x, y, 0, x, y, r);
-    g.addColorStop(0, 'rgba(134, 114, 78, 0.35)');
-    g.addColorStop(1, 'rgba(134, 114, 78, 0)');
-    ctx.fillStyle = g;
-    ctx.beginPath();
-    ctx.arc(x, y, r, 0, Math.PI * 2);
-    ctx.fill();
-  }
-
-  // Blades, and only where the turf is actually turf.
-  ctx.lineCap = 'round';
-  for (let i = 0; i < 1500; i++) {
-    const x = rnd() * WORLD_W;
-    const y = rnd() * WORLD_H;
-    if (distToRoad(x, y) < 32) continue;
-    const len = 3 + rnd() * 6;
-    ctx.strokeStyle = `rgba(${(148 + rnd() * 62) | 0}, ${(194 + rnd() * 52) | 0}, ${(118 + rnd() * 52) | 0}, ${0.07 + rnd() * 0.13})`;
-    ctx.lineWidth = 1.3;
-    ctx.beginPath();
-    ctx.moveTo(x, y);
-    ctx.lineTo(x + (rnd() - 0.5) * 3.5, y - len);
-    ctx.stroke();
-  }
+  // Mown stripes, very faint. Free, and it is what says "a field somebody
+  // looks after" rather than "a green rectangle".
+  ctx.globalAlpha = 0.035;
+  ctx.fillStyle = '#ffffff';
+  for (let x = 0; x < WORLD_W; x += TILE * 2) ctx.fillRect(x, 0, TILE, WORLD_H);
+  ctx.globalAlpha = 1;
 
   paintRoad(ctx, rnd);
+  paintMeadow(ctx, rnd);
   paintScenery(ctx);
-  paintVignette(ctx);
   paintBreach(ctx);
 }
 
@@ -182,62 +216,105 @@ function routePath(ctx: CanvasRenderingContext2D) {
   for (let i = 1; i < PATH.length; i++) ctx.lineTo(PATH[i].x, PATH[i].y);
 }
 
-function strokeRoute(ctx: CanvasRenderingContext2D) {
+function strokeRoute(ctx: CanvasRenderingContext2D, colour: string, width: number) {
+  ctx.strokeStyle = colour;
+  ctx.lineWidth = width;
   routePath(ctx);
   ctx.stroke();
 }
 
+/**
+ * The road, as four strokes of the same line.
+ *
+ * Outline, shadow lip, body, lit inlay , in that order and each narrower than
+ * the last, so one polyline becomes a raised path with a dark edge all the way
+ * round it. The dark edge is doing most of the work: it is what separates the
+ * road from the grass at a glance, and it is the single change that makes the
+ * board read as drawn rather than rendered.
+ */
 function paintRoad(ctx: CanvasRenderingContext2D, rnd: () => number) {
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
 
-  // A soft shadow under the whole road, so it sits *in* the ground.
-  ctx.strokeStyle = 'rgba(12, 22, 16, 0.5)';
-  ctx.lineWidth = ROAD_W + 16;
-  strokeRoute(ctx);
+  strokeRoute(ctx, PALETTE.ink, ROAD_W + 16);
+  strokeRoute(ctx, PALETTE.dirtDark, ROAD_W + 9);
+  strokeRoute(ctx, PALETTE.dirt, ROAD_W);
+  ctx.globalAlpha = 0.5;
+  strokeRoute(ctx, tint(PALETTE.dirt, 0.45), ROAD_W - 22);
+  ctx.globalAlpha = 1;
 
-  ctx.strokeStyle = '#84542f';
-  ctx.lineWidth = ROAD_W + 4;
-  strokeRoute(ctx);
-  ctx.strokeStyle = '#c88a47';
-  ctx.lineWidth = ROAD_W;
-  strokeRoute(ctx);
-  ctx.strokeStyle = '#e4b86b';
-  ctx.lineWidth = ROAD_W - 16;
-  strokeRoute(ctx);
-
-  // Cobbles, laid by walking the route so every one is genuinely on the road
-  // however it bends. Scattering them over the map and rejecting the misses
-  // would be slower and would never quite fill the corners.
-  for (let d = 0; d < PATH_LENGTH; d += 11) {
+  // A handful of flat stones set into the road. Chunky and sparse: the pass
+  // before this laid five per eleven units and the result was gravel, which at
+  // arm's length is just noise the eye has to wade through.
+  for (let d = 12; d < PATH_LENGTH; d += 46) {
     const p = pointAt(d);
     const ahead = pointAt(Math.min(PATH_LENGTH, d + 6));
     const ang = Math.atan2(ahead.y - p.y, ahead.x - p.x);
     const nx = -Math.sin(ang);
     const ny = Math.cos(ang);
-    for (let k = -2; k <= 2; k++) {
-      if (rnd() < 0.35) continue;
-      const off = k * (ROAD_W / 5.4) + (rnd() - 0.5) * 5;
-      const shade = 118 + rnd() * 46;
+    const n = 1 + Math.floor(rnd() * 2);
+    for (let k = 0; k < n; k++) {
+      const off = (rnd() - 0.5) * ROAD_W * 0.66;
       ctx.save();
-      ctx.translate(p.x + nx * off + (rnd() - 0.5) * 4, p.y + ny * off + (rnd() - 0.5) * 4);
-      ctx.rotate(ang + (rnd() - 0.5) * 0.5);
-      ctx.fillStyle = `rgba(${shade | 0}, ${(shade * 0.88) | 0}, ${(shade * 0.66) | 0}, 0.5)`;
-      rounded(ctx, -5, -3.4, 10, 6.8, 3);
-      ctx.fill();
-      ctx.strokeStyle = 'rgba(60, 48, 32, 0.28)';
-      ctx.lineWidth = 1;
-      ctx.stroke();
+      ctx.translate(p.x + nx * off + (rnd() - 0.5) * 14, p.y + ny * off + (rnd() - 0.5) * 14);
+      ctx.rotate(rnd() * Math.PI);
+      rounded(ctx, -7, -5, 14, 10, 5);
+      inked(ctx, PALETTE.dirtMid, PALETTE.dirtDark, 2);
       ctx.restore();
     }
   }
+}
 
-  // Wheel ruts worn down the middle.
-  ctx.strokeStyle = 'rgba(74, 60, 40, 0.28)';
-  ctx.lineWidth = 4;
-  ctx.setLineDash([22, 16]);
-  strokeRoute(ctx);
-  ctx.setLineDash([]);
+/** Flowers and grass tufts, well clear of the road. Pure colour, and cheap. */
+function paintMeadow(ctx: CanvasRenderingContext2D, rnd: () => number) {
+  const petals = ['#ffd93d', '#ff7eb6', '#ffffff', '#8be9ff'];
+  for (let i = 0; i < 150; i++) {
+    const x = rnd() * WORLD_W;
+    const y = rnd() * WORLD_H;
+    if (distToRoad(x, y) < 44) continue;
+
+    if (rnd() < 0.45) {
+      // A tuft: three blades, thick and rounded, in the dark green.
+      ctx.strokeStyle = PALETTE.grassDeep;
+      ctx.lineWidth = 2.6;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      for (let k = -1; k <= 1; k++) {
+        ctx.moveTo(x + k * 3.5, y);
+        ctx.lineTo(x + k * 6, y - 7 - rnd() * 4);
+      }
+      ctx.stroke();
+      continue;
+    }
+
+    const colour = petals[(rnd() * petals.length) | 0];
+    ctx.fillStyle = colour;
+    for (let k = 0; k < 5; k++) {
+      const a = (k / 5) * Math.PI * 2;
+      ctx.beginPath();
+      ctx.arc(x + Math.cos(a) * 3.2, y + Math.sin(a) * 3.2, 2.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.fillStyle = '#ffdf5e';
+    ctx.beginPath();
+    ctx.arc(x, y, 2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+/** Distance from a point to the nearest point on the road, in world units. */
+function distToRoad(x: number, y: number): number {
+  let best = Infinity;
+  for (let i = 1; i < PATH.length; i++) {
+    const a = PATH[i - 1];
+    const b = PATH[i];
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const len = dx * dx + dy * dy;
+    const t = len === 0 ? 0 : Math.max(0, Math.min(1, ((x - a.x) * dx + (y - a.y) * dy) / len));
+    best = Math.min(best, Math.hypot(x - (a.x + dx * t), y - (a.y + dy * t)));
+  }
+  return best;
 }
 
 // ── scenery ────────────────────────────────────────────────────────────────
@@ -266,46 +343,73 @@ function paintScenery(ctx: CanvasRenderingContext2D) {
     }
     const cx = (x0 + x1) / 2;
     const cy = (y0 + y1) / 2;
-    const rx = (x1 - x0) / 2 - 5;
-    const ry = (y1 - y0) / 2 - 5;
+    const rx = (x1 - x0) / 2 - 6;
+    const ry = (y1 - y0) / 2 - 6;
+    const rnd = mulberry32(0x9077d);
 
-    ctx.fillStyle = 'rgba(24, 44, 30, 0.8)';
-    ctx.beginPath();
-    ctx.ellipse(cx, cy + 4, rx + 8, ry + 8, 0, 0, Math.PI * 2);
+    // A grass lip a shade darker, so the water is set into the ground rather
+    // than painted on top of it.
+    blob(ctx, cx, cy + 3, rx + 9, ry / rx, 0.16, mulberry32(0x9077e), 13);
+    ctx.fillStyle = PALETTE.grassDeep;
     ctx.fill();
 
-    const water = ctx.createRadialGradient(cx - rx * 0.3, cy - ry * 0.35, 4, cx, cy, rx);
-    water.addColorStop(0, '#4aa3c4');
-    water.addColorStop(0.55, '#2b7495');
-    water.addColorStop(1, '#154868');
-    ctx.fillStyle = water;
-    ctx.beginPath();
-    ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
-    ctx.fill();
+    blob(ctx, cx, cy, rx, ry / rx, 0.16, mulberry32(0x9077d), 13);
+    inked(ctx, PALETTE.water, PALETTE.waterDark, 4);
 
-    // Two still highlights. Water with no light on it is a hole.
-    ctx.strokeStyle = 'rgba(210, 245, 255, 0.38)';
-    ctx.lineWidth = 2.5;
-    ctx.beginPath();
-    ctx.ellipse(cx - rx * 0.2, cy - ry * 0.32, rx * 0.42, ry * 0.16, -0.2, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.globalAlpha = 0.5;
-    ctx.beginPath();
-    ctx.ellipse(cx + rx * 0.26, cy + ry * 0.3, rx * 0.26, ry * 0.1, 0.15, 0, Math.PI * 2);
-    ctx.stroke();
+    // Flat darker water toward the far bank, then hard white sparkles. Two
+    // tones and a highlight is the whole of cartoon water; a radial gradient
+    // reads as a hole in the ground.
+    ctx.save();
+    ctx.clip();
+    ctx.fillStyle = PALETTE.waterDark;
+    ctx.globalAlpha = 0.45;
+    blob(ctx, cx + rx * 0.25, cy + ry * 0.45, rx * 0.85, 0.6, 0.3, rnd, 9);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.restore();
+
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineCap = 'round';
+    ctx.lineWidth = 4;
+    ctx.globalAlpha = 0.85;
+    for (const [ox, oy, w] of [
+      [-0.3, -0.35, 0.36],
+      [0.18, -0.12, 0.22],
+      [-0.05, 0.3, 0.16],
+    ] as [number, number, number][]) {
+      ctx.beginPath();
+      ctx.moveTo(cx + rx * ox - rx * w * 0.5, cy + ry * oy);
+      ctx.quadraticCurveTo(cx + rx * ox, cy + ry * oy - 4, cx + rx * ox + rx * w * 0.5, cy + ry * oy);
+      ctx.stroke();
+    }
     ctx.globalAlpha = 1;
 
+    // Lily pads: a green disc with a wedge cut out, which is the one shape
+    // everybody reads as a lily pad and nothing else.
+    for (const [ox, oy, r] of [
+      [-0.54, 0.5, 11],
+      [0.58, -0.46, 9],
+    ] as [number, number, number][]) {
+      const px = cx + rx * ox;
+      const py = cy + ry * oy;
+      ctx.beginPath();
+      ctx.arc(px, py, r, 0.5, Math.PI * 2 + 0.2);
+      ctx.lineTo(px, py);
+      ctx.closePath();
+      inked(ctx, '#5fc85a', '#2f7a3a', 2.5);
+    }
+
     // Reeds on the near bank, which is what stops it reading as a blue puddle.
-    const rnd = mulberry32(0x9077d);
-    for (let i = 0; i < 22; i++) {
+    for (let i = 0; i < 26; i++) {
       const a = rnd() * Math.PI * 2;
-      const px = cx + Math.cos(a) * rx * (0.94 + rnd() * 0.14);
-      const py = cy + Math.sin(a) * ry * (0.94 + rnd() * 0.14);
-      ctx.strokeStyle = `rgba(${(96 + rnd() * 50) | 0}, ${(140 + rnd() * 50) | 0}, ${(72 + rnd() * 40) | 0}, 0.75)`;
-      ctx.lineWidth = 1.7;
+      const px = cx + Math.cos(a) * rx * (0.96 + rnd() * 0.12);
+      const py = cy + Math.sin(a) * ry * (0.96 + rnd() * 0.12);
+      ctx.strokeStyle = rnd() < 0.5 ? PALETTE.grassDeep : '#4fa84c';
+      ctx.lineWidth = 3;
+      ctx.lineCap = 'round';
       ctx.beginPath();
       ctx.moveTo(px, py);
-      ctx.lineTo(px + (rnd() - 0.5) * 5, py - 8 - rnd() * 9);
+      ctx.lineTo(px + (rnd() - 0.5) * 7, py - 10 - rnd() * 10);
       ctx.stroke();
     }
   }
@@ -320,77 +424,74 @@ function paintScenery(ctx: CanvasRenderingContext2D) {
 }
 
 function paintTree(ctx: CanvasRenderingContext2D, x: number, y: number, rnd: () => number) {
-  const h = 30 + rnd() * 10;
+  const h = 34 + rnd() * 8;
 
-  // Thrown to one side, so every tree on the board agrees where the light is.
-  ctx.fillStyle = 'rgba(10, 20, 14, 0.42)';
+  // One soft shadow, thrown the same way as everything else on the board , a
+  // single agreed light source is most of what makes a flat top-down scene
+  // read as having depth at all.
+  ctx.fillStyle = 'rgba(40, 80, 40, 0.28)';
   ctx.beginPath();
-  ctx.ellipse(x + 8, y + 11, 20, 9, 0, 0, Math.PI * 2);
+  ctx.ellipse(x + 9, y + 12, 22, 9, 0, 0, Math.PI * 2);
   ctx.fill();
 
-  ctx.fillStyle = '#4a3524';
-  rounded(ctx, x - 4, y - 4, 8, 16, 3);
-  ctx.fill();
+  rounded(ctx, x - 5, y - 6, 10, 18, 4);
+  inked(ctx, PALETTE.wood, PALETTE.woodDark, 3);
 
-  // Three overlapping blobs rather than one circle: a circle reads as a bush.
-  for (const [dx, dy, r] of [[-9, -h * 0.55, 15], [9, -h * 0.5, 14], [0, -h * 0.85, 17]] as [number, number, number][]) {
-    const g = ctx.createRadialGradient(x + dx - r * 0.35, y + dy - r * 0.4, 2, x + dx, y + dy, r);
-    g.addColorStop(0, '#63a24d');
-    g.addColorStop(0.6, '#3d7135');
-    g.addColorStop(1, '#254a25');
-    ctx.fillStyle = g;
-    ctx.beginPath();
-    ctx.arc(x + dx, y + dy, r * (0.9 + rnd() * 0.2), 0, Math.PI * 2);
-    ctx.fill();
+  // One big canopy blob with two smaller ones tucked behind it, all outlined
+  // together , overlapping outlines inside a canopy would cut it into pieces.
+  const lobes: [number, number, number][] = [
+    [-11, -h * 0.52, 17],
+    [12, -h * 0.46, 16],
+    [0, -h * 0.88, 20],
+  ];
+  ctx.beginPath();
+  for (const [dx, dy, r] of lobes) {
+    ctx.moveTo(x + dx + r, y + dy);
+    ctx.arc(x + dx, y + dy, r * (0.92 + rnd() * 0.16), 0, Math.PI * 2);
   }
+  inked(ctx, '#4fbf5a', '#25632f', 3.5);
+
+  // The lit side, clipped to the canopy so it never spills onto the grass.
+  ctx.save();
+  ctx.clip();
+  ctx.fillStyle = '#7ada6a';
+  ctx.beginPath();
+  ctx.arc(x - 6, y - h * 0.82, 14, 0, Math.PI * 2);
+  ctx.arc(x - 13, y - h * 0.52, 10, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
 }
 
 function paintRock(ctx: CanvasRenderingContext2D, x: number, y: number, rnd: () => number) {
-  ctx.fillStyle = 'rgba(10, 20, 14, 0.4)';
+  ctx.fillStyle = 'rgba(40, 80, 40, 0.28)';
   ctx.beginPath();
-  ctx.ellipse(x + 6, y + 9, 19, 8, 0, 0, Math.PI * 2);
+  ctx.ellipse(x + 7, y + 10, 20, 8, 0, 0, Math.PI * 2);
   ctx.fill();
 
-  for (const [dx, dy, r] of [[-8, 2, 12], [7, 4, 10], [0, -6, 14]] as [number, number, number][]) {
-    const g = ctx.createLinearGradient(x + dx, y + dy - r, x + dx, y + dy + r);
-    g.addColorStop(0, '#9aa2ac');
-    g.addColorStop(0.55, '#6d757f');
-    g.addColorStop(1, '#434952');
-    ctx.fillStyle = g;
+  for (const [dx, dy, r] of [[-9, 3, 13], [8, 5, 11], [0, -6, 15]] as [number, number, number][]) {
     ctx.beginPath();
-    // Faceted rather than round, so it reads as stone and not as a boulder
-    // drawn with the same tool as the tree canopy.
     const sides = 6;
     for (let i = 0; i < sides; i++) {
       const a = (i / sides) * Math.PI * 2 + rnd() * 0.3;
-      const rr = r * (0.78 + rnd() * 0.32);
+      const rr = r * (0.8 + rnd() * 0.28);
       const px = x + dx + Math.cos(a) * rr;
-      const py = y + dy + Math.sin(a) * rr * 0.82;
+      const py = y + dy + Math.sin(a) * rr * 0.84;
       if (i === 0) ctx.moveTo(px, py);
       else ctx.lineTo(px, py);
     }
     ctx.closePath();
-    ctx.fill();
-    ctx.strokeStyle = 'rgba(30, 34, 40, 0.4)';
-    ctx.lineWidth = 1.4;
-    ctx.stroke();
-  }
-}
+    inked(ctx, PALETTE.stoneMid, PALETTE.stoneDark, 3);
 
-/** Darkens the rim, so the eye settles on the middle of the board. */
-function paintVignette(ctx: CanvasRenderingContext2D) {
-  const g = ctx.createRadialGradient(
-    WORLD_W * 0.45,
-    WORLD_H * 0.42,
-    WORLD_H * 0.25,
-    WORLD_W * 0.5,
-    WORLD_H * 0.5,
-    WORLD_W * 0.74,
-  );
-  g.addColorStop(0, 'rgba(0, 0, 0, 0)');
-  g.addColorStop(1, 'rgba(4, 10, 8, 0.5)');
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, WORLD_W, WORLD_H);
+    // One flat lit facet across the top. Flat, not a gradient: a boulder lit
+    // by a gradient looks like a ball bearing.
+    ctx.save();
+    ctx.clip();
+    ctx.fillStyle = PALETTE.stone;
+    ctx.beginPath();
+    ctx.ellipse(x + dx - r * 0.25, y + dy - r * 0.42, r * 0.66, r * 0.34, -0.3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
 }
 
 /** Where the enemies come in. A broken gatehouse, so it reads as a breach. */
@@ -398,21 +499,31 @@ function paintBreach(ctx: CanvasRenderingContext2D) {
   const y = PATH[0].y;
   ctx.save();
   for (const [ty, th] of [
-    [y - TILE * 1.6, TILE * 1.05],
-    [y + TILE * 0.55, TILE * 1.05],
+    [y - TILE * 1.7, TILE * 1.15],
+    [y + TILE * 0.55, TILE * 1.15],
   ] as [number, number][]) {
-    const g = ctx.createLinearGradient(0, ty, 28, ty);
-    g.addColorStop(0, '#3d3d48');
-    g.addColorStop(1, '#23232c');
-    ctx.fillStyle = g;
-    rounded(ctx, -8, ty, 28, th, 4);
-    ctx.fill();
-    // Rubble at the broken end, which is what says breach rather than gate.
-    ctx.fillStyle = '#4a4a56';
-    ctx.beginPath();
-    ctx.arc(17, ty + th - 6, 6, 0, Math.PI * 2);
-    ctx.arc(22, ty + 9, 4.5, 0, Math.PI * 2);
-    ctx.fill();
+    rounded(ctx, -10, ty, 32, th, 6);
+    inked(ctx, PALETTE.stoneMid, PALETTE.stoneDark, 4);
+
+    // Courses of stone, and rubble at the broken end , which is what says
+    // breach rather than gate.
+    ctx.strokeStyle = PALETTE.stoneDark;
+    ctx.lineWidth = 2;
+    for (let i = 1; i < 4; i++) {
+      ctx.beginPath();
+      ctx.moveTo(-8, ty + (th / 4) * i);
+      ctx.lineTo(20, ty + (th / 4) * i);
+      ctx.stroke();
+    }
+    for (const [rx, ry, rr] of [
+      [20, ty + th - 8, 8],
+      [27, ty + 12, 6],
+      [24, ty + th * 0.55, 5],
+    ] as [number, number, number][]) {
+      ctx.beginPath();
+      ctx.arc(rx, ry, rr, 0, Math.PI * 2);
+      inked(ctx, PALETTE.stone, PALETTE.stoneDark, 2.5);
+    }
   }
   ctx.restore();
 }
@@ -436,14 +547,15 @@ export function drawPlots(ctx: CanvasRenderingContext2D, taken: Set<number>) {
       if (taken.has(r * COLS + c)) continue;
       const x = c * TILE;
       const y = r * TILE;
-      ctx.fillStyle = 'rgba(190, 255, 210, 0.06)';
-      rounded(ctx, x + 7, y + 7, TILE - 14, TILE - 14, 7);
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.14)';
+      rounded(ctx, x + 7, y + 7, TILE - 14, TILE - 14, 9);
       ctx.fill();
       // Corner ticks rather than a full border: it marks the plot without
       // drawing a cage around every square inch of the map.
-      ctx.strokeStyle = 'rgba(190, 255, 210, 0.28)';
-      ctx.lineWidth = 2;
-      const k = 9;
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.55)';
+      ctx.lineWidth = 3;
+      ctx.lineCap = 'round';
+      const k = 10;
       ctx.beginPath();
       for (const [ox, oy, sx, sy] of [
         [7, 7, 1, 1],

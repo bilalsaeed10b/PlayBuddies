@@ -36,7 +36,7 @@ import {
 import type { MatchRules, TowerId } from '../game/rules';
 import { COLS, ROWS, WORLD_H, WORLD_W, isBuildable } from '../game/map';
 import { drawKeep, drawTowerHead, enemySprite, towerBase } from '../game/art';
-import { bakeGround, drawPlots } from '../game/ground';
+import { bakeGround, drawPlots, rounded, shade } from '../game/ground';
 import { audioService } from '../services/audio';
 import type { GameSettings, NetPacket } from '../types/game';
 // Type only: the runtime value arrives through the dynamic import below, which
@@ -646,13 +646,20 @@ export default function MatchView({
     const { scale, offX, offY } = viewRef.current;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     const surround = ctx.createLinearGradient(0, 0, 0, canvas.height);
-    surround.addColorStop(0, '#53c9f5');
-    surround.addColorStop(0.18, '#9be7ff');
-    surround.addColorStop(0.19, '#73c85b');
-    surround.addColorStop(1, '#2d8c49');
+    surround.addColorStop(0, '#5ec8ff');
+    surround.addColorStop(0.17, '#b6ecff');
+    surround.addColorStop(0.175, '#8ce46a');
+    surround.addColorStop(1, '#4eb95a');
     ctx.fillStyle = surround;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     ctx.setTransform(scale, 0, 0, scale, offX, offY);
+
+    // A drawn edge around the board, the same dark green everything else on it
+    // is outlined in. Without it the map dissolves into the surround at exactly
+    // the point a player is trying to judge whether a plot is on the map.
+    ctx.strokeStyle = 'rgba(37, 74, 44, 0.55)';
+    ctx.lineWidth = 6;
+    ctx.strokeRect(-3, -3, WORLD_W + 6, WORLD_H + 6);
 
     const ground = bakeGround();
     if (ground) ctx.drawImage(ground, 0, 0);
@@ -670,13 +677,19 @@ export default function MatchView({
     for (const t of engine.towers) {
       if (!showAll && t.plot !== sel) continue;
       const lv = TOWERS[t.kind].levels[t.level];
-      ctx.fillStyle = `${TOWERS[t.kind].trim}14`;
-      ctx.strokeStyle = `${TOWERS[t.kind].trim}55`;
-      ctx.lineWidth = 2;
+      ctx.fillStyle = `${TOWERS[t.kind].trim}1a`;
       ctx.beginPath();
       ctx.arc(t.x, t.y, lv.range, 0, Math.PI * 2);
       ctx.fill();
+      // Dashed and slowly turning, so a reach ring never gets mistaken for
+      // something painted on the ground.
+      ctx.strokeStyle = `${TOWERS[t.kind].trim}aa`;
+      ctx.lineWidth = 3;
+      ctx.setLineDash([12, 9]);
+      ctx.lineDashOffset = -clock * 18;
       ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.lineDashOffset = 0;
     }
 
     // The plot under the thumb, while a tower is picked up.
@@ -685,19 +698,27 @@ export default function MatchView({
       const row = Math.floor(sel / COLS);
       const kind = selectedRef.current;
       const ok = engine.costOf(sel, kind) >= 0 && engine.golds[mine] >= engine.costOf(sel, kind);
-      ctx.fillStyle = ok ? 'rgba(120, 255, 170, 0.18)' : 'rgba(255, 90, 90, 0.2)';
-      ctx.fillRect(col * TILE + 4, row * TILE + 4, TILE - 8, TILE - 8);
-      ctx.strokeStyle = ok ? '#7dffaa' : '#ff6b6b';
-      ctx.lineWidth = 2.5;
-      ctx.strokeRect(col * TILE + 4, row * TILE + 4, TILE - 8, TILE - 8);
+      // Breathing, so the plot under the thumb is obviously the live one even
+      // on a board with a wave crossing it.
+      const pulse = 0.5 + Math.sin(clock * 5) * 0.5;
+      rounded(ctx, col * TILE + 5, row * TILE + 5, TILE - 10, TILE - 10, 10);
+      ctx.fillStyle = ok ? `rgba(126, 255, 170, ${0.16 + pulse * 0.14})` : 'rgba(255, 96, 96, 0.24)';
+      ctx.fill();
+      ctx.strokeStyle = ok ? '#6cf5a3' : '#ff6b6b';
+      ctx.lineWidth = 4;
+      ctx.stroke();
       const lv = TOWERS[kind].levels[0];
-      ctx.fillStyle = `${TOWERS[kind].trim}12`;
-      ctx.strokeStyle = `${TOWERS[kind].trim}55`;
-      ctx.lineWidth = 2;
+      ctx.fillStyle = `${TOWERS[kind].trim}18`;
       ctx.beginPath();
       ctx.arc(col * TILE + TILE / 2, row * TILE + TILE / 2, lv.range, 0, Math.PI * 2);
       ctx.fill();
+      ctx.strokeStyle = `${TOWERS[kind].trim}aa`;
+      ctx.lineWidth = 3;
+      ctx.setLineDash([12, 9]);
+      ctx.lineDashOffset = -clock * 18;
       ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.lineDashOffset = 0;
     }
 
     drawKeep(ctx, engine.lives, BALANCE.LIVES, clock);
@@ -705,11 +726,11 @@ export default function MatchView({
     // Towers: baked base, live head.
     for (const t of engine.towers) {
       const ownerColor = SEATS[t.owner % SEATS.length];
-      ctx.fillStyle = `${ownerColor.main}25`;
-      ctx.strokeStyle = `${ownerColor.light}cc`;
-      ctx.lineWidth = 3;
+      ctx.fillStyle = `${ownerColor.main}38`;
+      ctx.strokeStyle = ownerColor.light;
+      ctx.lineWidth = 4;
       ctx.beginPath();
-      ctx.ellipse(t.x, t.y + 18, 27, 10, 0, 0, Math.PI * 2);
+      ctx.ellipse(t.x, t.y + 19, 28, 11, 0, 0, Math.PI * 2);
       ctx.fill();
       ctx.stroke();
       const base = towerBase(t.kind, t.level);
@@ -721,15 +742,16 @@ export default function MatchView({
       ctx.restore();
       ctx.fillStyle = ownerColor.main;
       ctx.strokeStyle = '#ffffff';
-      ctx.lineWidth = 2;
+      ctx.lineWidth = 3;
       ctx.beginPath();
-      ctx.arc(t.x + 21, t.y - 21, 8, 0, Math.PI * 2);
+      ctx.arc(t.x + 21, t.y - 21, 8.5, 0, Math.PI * 2);
       ctx.fill();
       ctx.stroke();
       if (t.plot === sel) {
-        ctx.strokeStyle = '#ffe9a8';
-        ctx.lineWidth = 2.5;
-        ctx.strokeRect((t.plot % COLS) * TILE + 4, Math.floor(t.plot / COLS) * TILE + 4, TILE - 8, TILE - 8);
+        rounded(ctx, (t.plot % COLS) * TILE + 5, Math.floor(t.plot / COLS) * TILE + 5, TILE - 10, TILE - 10, 10);
+        ctx.strokeStyle = '#ffd93d';
+        ctx.lineWidth = 4;
+        ctx.stroke();
       }
     }
 
@@ -742,10 +764,25 @@ export default function MatchView({
       ctx.translate(e.x, e.y + bob);
 
       if (e.chill > 0) {
-        ctx.fillStyle = 'rgba(140, 220, 255, 0.3)';
+        // Frost reads as a rimed shell with spikes on it, not as a blue haze.
+        // The haze was invisible against a bright board.
         ctx.beginPath();
-        ctx.arc(0, 0, meta.size * 1.25, 0, Math.PI * 2);
+        ctx.arc(0, 0, meta.size * 1.3, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(160, 232, 255, 0.45)';
         ctx.fill();
+        ctx.strokeStyle = '#9fe8ff';
+        ctx.lineWidth = 3;
+        ctx.stroke();
+        ctx.strokeStyle = '#e8fbff';
+        ctx.lineWidth = 3;
+        ctx.lineCap = 'round';
+        for (let i = 0; i < 6; i++) {
+          const a = (i / 6) * Math.PI * 2 + clock * 0.6;
+          ctx.beginPath();
+          ctx.moveTo(Math.cos(a) * meta.size * 1.1, Math.sin(a) * meta.size * 1.1);
+          ctx.lineTo(Math.cos(a) * meta.size * 1.55, Math.sin(a) * meta.size * 1.55);
+          ctx.stroke();
+        }
       }
       if (sprite) {
         ctx.save();
@@ -765,12 +802,21 @@ export default function MatchView({
       // Health bar, only once it has actually been hurt , a full bar over
       // every walker turns the board into a bar chart.
       if (e.hp < e.maxHp) {
-        const w = meta.size * 2.1;
+        const w = meta.size * 2.2;
+        const h = 7;
+        const top = -meta.size - 13;
         const frac = clamp(e.hp / e.maxHp, 0, 1);
-        ctx.fillStyle = 'rgba(0,0,0,0.55)';
-        ctx.fillRect(-w / 2, -meta.size - 9, w, 5);
-        ctx.fillStyle = frac > 0.5 ? '#4ade80' : frac > 0.22 ? '#fbbf24' : '#f87171';
-        ctx.fillRect(-w / 2, -meta.size - 9, w * frac, 5);
+        rounded(ctx, -w / 2, top, w, h, h / 2);
+        ctx.fillStyle = 'rgba(24, 34, 28, 0.75)';
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(16, 24, 20, 0.9)';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        if (frac > 0.02) {
+          rounded(ctx, -w / 2 + 1.5, top + 1.5, (w - 3) * frac, h - 3, (h - 3) / 2);
+          ctx.fillStyle = frac > 0.5 ? '#5cf08a' : frac > 0.22 ? '#ffd93d' : '#ff6b6b';
+          ctx.fill();
+        }
       }
       ctx.restore();
     }
@@ -779,72 +825,121 @@ export default function MatchView({
     for (const s of engine.shots) {
       const meta = TOWERS[s.kind];
       if (s.arc) {
-        // The coil's chain, drawn as one jagged polyline with a glow under it.
-        ctx.strokeStyle = meta.trim;
-        ctx.lineWidth = 3.5;
+        // The coil's chain: the same jagged polyline stroked three times, wide
+        // and dark to narrow and white. A shadowBlur glow is expensive and on
+        // this board it just fogged the bolt; three strokes is a drawn bolt.
         ctx.globalAlpha = clamp(1 - s.age / 0.12, 0, 1);
-        ctx.shadowColor = meta.trim;
-        ctx.shadowBlur = 12;
-        ctx.beginPath();
-        for (let i = 0; i < s.arc.length; i++) {
-          const p = s.arc[i];
-          if (i === 0) ctx.moveTo(p.x, p.y);
-          else {
-            // A midpoint kicked off the straight line, so a bolt looks like a
-            // bolt rather than a ruler.
-            const q = s.arc[i - 1];
-            const mx = (p.x + q.x) / 2 + Math.sin(clock * 40 + i) * 9;
-            const my = (p.y + q.y) / 2 + Math.cos(clock * 37 + i) * 9;
-            ctx.quadraticCurveTo(mx, my, p.x, p.y);
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        const bolt = () => {
+          ctx.beginPath();
+          for (let i = 0; i < s.arc!.length; i++) {
+            const p = s.arc![i];
+            if (i === 0) ctx.moveTo(p.x, p.y);
+            else {
+              // A midpoint kicked off the straight line, so a bolt looks like a
+              // bolt rather than a ruler.
+              const q = s.arc![i - 1];
+              const mx = (p.x + q.x) / 2 + Math.sin(clock * 40 + i) * 9;
+              const my = (p.y + q.y) / 2 + Math.cos(clock * 37 + i) * 9;
+              ctx.quadraticCurveTo(mx, my, p.x, p.y);
+            }
           }
+          ctx.stroke();
+        };
+        for (const [colour, width] of [
+          [shade(meta.hue, 0.5), 10],
+          [meta.trim, 6],
+          ['#ffffff', 2.5],
+        ] as [string, number][]) {
+          ctx.strokeStyle = colour;
+          ctx.lineWidth = width;
+          bolt();
         }
-        ctx.stroke();
-        ctx.shadowBlur = 0;
+        // A spark where the bolt lands on each target.
+        ctx.fillStyle = '#ffffff';
+        for (const p of s.arc) {
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, 4, 0, Math.PI * 2);
+          ctx.fill();
+        }
         ctx.globalAlpha = 1;
         continue;
       }
-      ctx.fillStyle = meta.trim;
-      ctx.beginPath();
-      const r = s.kind === 'cannon' ? 5.5 : s.kind === 'ballista' ? 4 : 3.2;
-      ctx.arc(s.x, s.y, r, 0, Math.PI * 2);
-      ctx.fill();
+      const r = s.kind === 'cannon' ? 7 : s.kind === 'ballista' ? 5 : 4.2;
       // A short tail in the direction of travel reads as speed and costs one
       // line, where a real particle trail would cost hundreds of objects.
+      // Drawn under the pellet so the pellet keeps its own clean outline.
       const dx = s.tx - s.x;
       const dy = s.ty - s.y;
       const d = Math.hypot(dx, dy) || 1;
-      ctx.strokeStyle = `${meta.trim}88`;
-      ctx.lineWidth = r * 1.1;
+      ctx.strokeStyle = `${meta.trim}77`;
+      ctx.lineWidth = r * 1.5;
       ctx.lineCap = 'round';
       ctx.beginPath();
       ctx.moveTo(s.x, s.y);
-      ctx.lineTo(s.x - (dx / d) * 13, s.y - (dy / d) * 13);
+      ctx.lineTo(s.x - (dx / d) * 16, s.y - (dy / d) * 16);
       ctx.stroke();
+
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, r, 0, Math.PI * 2);
+      ctx.fillStyle = meta.trim;
+      ctx.fill();
+      ctx.strokeStyle = shade(meta.hue, 0.45);
+      ctx.lineWidth = 2.5;
+      ctx.stroke();
+      // A hard white catchlight: the same trick the enemies' eyes use, and it
+      // is what keeps a pellet visible over a bright road.
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+      ctx.beginPath();
+      ctx.arc(s.x - r * 0.3, s.y - r * 0.3, r * 0.3, 0, Math.PI * 2);
+      ctx.fill();
     }
 
     // Bursts.
+    // Bursts. Every one is a hard-edged shape that grows and fades, not a
+    // soft glow: a radial gradient on a flat bright board reads as a smudge,
+    // and the frost ring in particular was all but invisible over the road.
     for (const b of engine.bursts) {
       const a = clamp(b.life, 0, 1);
       if (b.kind === 'frost') {
-        ctx.strokeStyle = `rgba(165, 232, 255, ${a * 0.8})`;
-        ctx.lineWidth = 3;
+        ctx.strokeStyle = `rgba(200, 244, 255, ${a})`;
+        ctx.lineWidth = 6 * a + 1;
         ctx.beginPath();
         ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.strokeStyle = `rgba(79, 195, 247, ${a * 0.9})`;
+        ctx.lineWidth = 2.5;
         ctx.stroke();
       } else if (b.kind === 'leak') {
-        ctx.strokeStyle = `rgba(244, 63, 94, ${a})`;
-        ctx.lineWidth = 4;
+        // Two rings chasing each other outward, in the one colour on the board
+        // that means "that got through".
+        for (const k of [1, 0.72]) {
+          ctx.strokeStyle = `rgba(255, 90, 110, ${a * k})`;
+          ctx.lineWidth = 6 * k;
+          ctx.beginPath();
+          ctx.arc(b.x, b.y, b.r * k, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+      } else {
+        // A splash: a filled puff with a ring around it, so a shell landing
+        // has an edge you can actually see it expand past.
+        ctx.globalAlpha = a * 0.85;
+        ctx.fillStyle = b.color;
+        ctx.beginPath();
+        ctx.arc(b.x, b.y, b.r * 0.78, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = a;
+        ctx.fillStyle = '#fff3c4';
+        ctx.beginPath();
+        ctx.arc(b.x, b.y, b.r * 0.4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = b.color;
+        ctx.lineWidth = 4 * a + 1;
         ctx.beginPath();
         ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
         ctx.stroke();
-      } else {
-        const g = ctx.createRadialGradient(b.x, b.y, 0, b.x, b.y, Math.max(1, b.r));
-        g.addColorStop(0, `${b.color}${Math.round(a * 200).toString(16).padStart(2, '0')}`);
-        g.addColorStop(1, `${b.color}00`);
-        ctx.fillStyle = g;
-        ctx.beginPath();
-        ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
-        ctx.fill();
+        ctx.globalAlpha = 1;
       }
     }
 
@@ -1015,7 +1110,10 @@ export default function MatchView({
         return <SpeechBubble key={seatKey} text={text} style={{ left: p.x, top: p.y }} />;
       })}
 
-      {!over && <ChatLayer onSend={sendChat} />}
+      {/* Below the top bar, not in the default top-left corner: this game puts
+          lives and gold there, and the chat button was sitting squarely on top
+          of the lives counter , the one number a player checks most. */}
+      {!over && <ChatLayer onSend={sendChat} buttonClassName="absolute left-2 top-16 z-30 short:top-12" />}
 
       {/* ── the board ── */}
       <div ref={boardRef} className="relative min-h-0 flex-1">
