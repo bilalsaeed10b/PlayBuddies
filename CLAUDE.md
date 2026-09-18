@@ -1,1 +1,2 @@
-use graphify.skill and caveman.skill
+Answer every prompt using caveman.skill
+
