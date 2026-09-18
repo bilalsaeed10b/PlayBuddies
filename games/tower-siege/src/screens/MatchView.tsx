@@ -632,7 +632,7 @@ export default function MatchView({
     (seat: number): { x: number; y: number } => {
       const towers = enginesRef.current[0]?.towers ?? [];
       for (let i = towers.length - 1; i >= 0; i--) {
-        if (towers[i].owner === seat) return { x: towers[i].x, y: towers[i].y - 46 };
+        if (towers[i].owner === seat) return { x: towers[i].x, y: towers[i].y - 66 };
       }
       return { x: ((seat + 1) / (config.seats.length + 1)) * WORLD_W, y: 34 };
     },

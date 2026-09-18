@@ -591,9 +591,19 @@ export function legalWalls(pos: Position, seat: number, layout: Layout): number[
 export const STEP_CODES = MAX_CELLS;
 export const MOVE_CODES = STEP_CODES + 2 * WALL_SLOTS;
 
+/**
+ * A turn skipped because its clock ran out.
+ *
+ * It is a move like any other, one past the last wall code, rather than a
+ * side message saying "seat 2 timed out". The history is the game (see
+ * MovePacket), and a skip that lived anywhere but the history would be a turn
+ * that one device counted and another did not.
+ */
+export const PASS_MOVE = MOVE_CODES;
+
 export const encodeStep = (target: number) => target;
 export const encodeWall = (o: Orientation, r: number, c: number) => STEP_CODES + wallCode(o, r, c);
-export const isWallMove = (move: number) => move >= STEP_CODES;
+export const isWallMove = (move: number) => move >= STEP_CODES && move < MOVE_CODES;
 
 export function decodeWall(move: number): { o: Orientation; r: number; c: number } {
   const code = move - STEP_CODES;
@@ -607,6 +617,7 @@ export function decodeWall(move: number): { o: Orientation; r: number; c: number
 
 /** Rejects anything that is not a legal move for this seat in this position. */
 export function moveLegal(pos: Position, seat: number, move: number, layout: Layout): boolean {
+  if (move === PASS_MOVE) return true;
   if (!Number.isInteger(move) || move < 0 || move >= MOVE_CODES) return false;
   if (!isWallMove(move)) return pawnMoves(pos, seat, layout).includes(move);
   const { o, r, c } = decodeWall(move);
@@ -615,6 +626,7 @@ export function moveLegal(pos: Position, seat: number, move: number, layout: Lay
 
 /** Applies a move that has already been checked. Mutates. */
 export function applyMove(pos: Position, seat: number, move: number) {
+  if (move === PASS_MOVE) return;
   if (!isWallMove(move)) {
     pos.pawns[seat] = move;
     return;

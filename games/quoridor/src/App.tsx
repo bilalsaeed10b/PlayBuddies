@@ -45,6 +45,16 @@ import type { GameSettings, MatchRules, PlayerCount } from './types/game';
 const log = createLogger('quoridor');
 
 /**
+ * Where this device keeps the rules it last played with.
+ *
+ * Versioned because the turn clock became on by default: under the old key
+ * nearly everyone had `turnTimer: false` saved, not because they chose it but
+ * because it was the default when they first opened the game, and the new
+ * default would never have reached them.
+ */
+const RULES_KEY = 'quoridor_rules_v2';
+
+/**
  * The platform owns the lobby.
  *
  * This game never shows a login screen and never asks for a room code. It
@@ -221,11 +231,11 @@ export default function App() {
    * being set rather than find out what they are playing at the first move.
    */
   const [rules, setRules] = useState<MatchRules>(() => {
-    const saved = localStorage.getItem('quoridor_rules');
+    const saved = localStorage.getItem(RULES_KEY);
     return saved ? { ...DEFAULT_RULES, ...JSON.parse(saved) } : DEFAULT_RULES;
   });
   useEffect(() => {
-    localStorage.setItem('quoridor_rules', JSON.stringify(rules));
+    localStorage.setItem(RULES_KEY, JSON.stringify(rules));
   }, [rules]);
 
   // The coin balance is shared with the rest of PlayBuddies on purpose. Coins
@@ -1338,7 +1348,7 @@ function ModesScreen({
             <ToggleOption
               theme={THEME}
               label={`Turn clock · ${TURN_SECONDS}s`}
-              hint="A move goes in on its own when the clock runs out: a step along that pawn's own shortest route, never a wall. Off lets a turn take as long as it takes."
+              hint="Run the clock out and the turn is skipped: no step, no wall, the next player is up. Off lets a turn take as long as it takes."
               value={rules.turnTimer}
               locked={locked}
               onChange={(turnTimer) => set({ turnTimer })}

@@ -2581,6 +2581,17 @@ export class BattleEngine {
     return { x: (px - this.offX) / this.scale, y: (py - this.offY) / this.scale };
   }
 
+  /**
+   * Where a ship's chat bubble points: just above the name over its health
+   * bar, which is the top of everything drawn for that hull.
+   *
+   * It used to point 130 units up a mast that stands 242, so a line of chat
+   * sat on the sails of the ship it was meant to be coming from.
+   */
+  bubbleY(i: number): number {
+    return this.shipY(i) - 338;
+  }
+
   /** World point to a CSS-pixel screen point inside the displayed canvas. */
   toClient(x: number, y: number, rect: DOMRect): { x: number; y: number } {
     return {

@@ -16,12 +16,12 @@ import { SpeechBubble } from '@shared/ui/SpeechBubble';
 import BoardPad from '../components/BoardPad';
 import { QuoridorEngine } from '../engine/QuoridorEngine';
 import type { Seat } from '../engine/QuoridorEngine';
-import { TIERS, chooseMove, fallbackMove, newBrain } from '../engine/ai';
+import { TIERS, chooseMove, newBrain } from '../engine/ai';
 import type { Brain } from '../engine/ai';
 import { HORIZONTAL, TEAMS, VERTICAL, layoutFor, teamOf } from '../game/rules';
 import type { Orientation, PlayerCount, SideMeta } from '../game/rules';
 import { audioService } from '../services/audio';
-import { TURN_SECONDS, packRules, unpackRules } from '../types/game';
+import { BOT_OPENING_HOLD_MS, REMOTE_GRACE_SECONDS, TURN_SECONDS, packRules, unpackRules } from '../types/game';
 import type { GameSettings, MatchRules, NetPacket } from '../types/game';
 // Type only: the runtime value arrives through the dynamic import below, which
 // is what keeps the Firebase SDK out of an offline player's bundle.
@@ -152,6 +152,15 @@ export default function MatchView({
   const [mode, setMode] = useState<'move' | 'wall'>('move');
   const [forced, setForced] = useState<Orientation | undefined>(undefined);
   const [notice, setNotice] = useState<string | null>(null);
+  /** The last turn lost to the clock, shown under the turn banner for a moment. */
+  const [skipped, setSkipped] = useState<string | null>(null);
+  /** The opening hold before a bot may move online (see BOT_OPENING_HOLD_MS). */
+  const [holding, setHolding] = useState(false);
+  useEffect(() => {
+    if (!skipped) return;
+    const t = window.setTimeout(() => setSkipped(null), 2800);
+    return () => window.clearTimeout(t);
+  }, [skipped]);
   const [rematch, setRematch] = useState(0);
 
   /**
@@ -458,6 +467,13 @@ export default function MatchView({
         onResult(won, engine.history.length);
         audioService.playEnd(won);
       },
+      onSkip: (seat) => {
+        const who = roster.localSeats.includes(seat) && roster.localSeats.length === 1
+          ? 'You'
+          : engine.seats[seat]?.name ?? 'Someone';
+        setSkipped(`${who} ran out of time · turn skipped`);
+        audioService.playDeny();
+      },
     });
     engineRef.current = engine;
     brains.current = engine.seats.map(() => newBrain());
@@ -498,6 +514,8 @@ export default function MatchView({
     let lastMoves = -1;
     let lastStock = '';
     let lastClock = -1;
+    let lastHolding = false;
+    const builtAt = performance.now();
     let last = performance.now();
     let raf = 0;
 
@@ -509,8 +527,18 @@ export default function MatchView({
       engine.showHints = settingsRef.current.hints;
       engine.draw(dt);
 
+      // Online, nothing moves on its own until the other players have had a
+      // moment to load in: a bot that opened on the spot played before half
+      // the table had a board to watch it on. People can still move , the
+      // hold is on the bot and the clock, not on anybody's hands.
+      const holding = online && engine.history.length === 0 && now - builtAt < BOT_OPENING_HOLD_MS;
+      if (holding !== lastHolding) {
+        lastHolding = holding;
+        setHolding(holding);
+      }
+
       // The bot thinks for a beat before moving. Instant moves read as a bug.
-      if (engine.awaitingAI(aiDriverRef.current) && aiTimer.current === null) {
+      if (!holding && engine.awaitingAI(aiDriverRef.current) && aiTimer.current === null) {
         const seat = engine.turn;
         aiTimer.current = window.setTimeout(
           () => {
@@ -525,21 +553,26 @@ export default function MatchView({
         );
       }
 
-      // The clock only ever runs against somebody sitting at this device , a
-      // remote player's clock is their own device's business, and running a
-      // second copy of it here would move their pawn for them.
-      if (session.rules.turnTimer && engine.awaitingLocal) {
-        clockRef.current = Math.max(0, clockRef.current - dt / 1000);
-        if (clockRef.current === 0) {
-          // A step along their own shortest route, never a wall: a clock
-          // should not spend somebody's walls for them.
-          engine.play(fallbackMove(engine.pos, engine.turn, engine.layout));
+      // The clock runs for whoever is to move, on every device, so everyone
+      // sees the same countdown. Only two devices ever act on it: the one the
+      // seat is played from, on the dot, and the one driving the bots, a few
+      // seconds later, for a player whose device stopped running its own (see
+      // REMOTE_GRACE_SECONDS). Bots are never timed , they move in a second.
+      if (session.rules.turnTimer && !holding && engine.winner < 0) {
+        clockRef.current = Math.max(-REMOTE_GRACE_SECONDS, clockRef.current - dt / 1000);
+        const control = engine.seats[engine.turn]?.control;
+        if (control === 'local' && clockRef.current <= 0) {
+          engine.skipTurn();
+        } else if (control === 'remote' && aiDriverRef.current && clockRef.current <= -REMOTE_GRACE_SECONDS) {
+          engine.skipTurn();
         }
       }
 
+      if (engine.turn !== lastTurn || engine.history.length !== lastMoves) {
+        clockRef.current = TURN_SECONDS;
+      }
       if (engine.turn !== lastTurn) {
         lastTurn = engine.turn;
-        clockRef.current = TURN_SECONDS;
         setTurn(engine.turn);
       }
       if (engine.history.length !== lastMoves) {
@@ -552,7 +585,7 @@ export default function MatchView({
         lastStock = stockKey;
         setStock(engine.pos.stock.slice());
       }
-      const shown = Math.ceil(clockRef.current);
+      const shown = Math.max(0, Math.ceil(clockRef.current));
       if (shown !== lastClock) {
         lastClock = shown;
         setClock(shown);
@@ -696,6 +729,8 @@ export default function MatchView({
   const myTurn = localSeats.has(turn) && !over;
   const wallsLeft = stock[turn] ?? 0;
   const mover = seats[turn]?.name ?? 'Someone';
+  /** The board's own idea of who holds the turn, which knows about seats handed to a bot mid-game. */
+  const seatControl = engine?.seats[turn]?.control ?? seats[turn]?.control;
   const mySeat = roster.localSeats[0] ?? 0;
   /** Pairs, at four players, when the host asked for them. */
   const teams = layout.teams;
@@ -706,7 +741,9 @@ export default function MatchView({
       ? roster.localSeats.length > 1
         ? `${mover} to move`
         : 'Your move'
-      : `${mover} is thinking`;
+      : holding && seatControl === 'ai'
+        ? 'Waiting for everyone to connect'
+        : `${mover} is thinking`;
 
   if (!session) {
     return (
@@ -815,8 +852,8 @@ export default function MatchView({
         const engine = engineRef.current;
         const canvas = canvasRef.current;
         if (!engine || !canvas) return null;
-        const at = engine.pawnCenter(i);
-        const p = engine.toClient(at.x, at.y - 46, canvas.getBoundingClientRect());
+        const at = engine.bubbleAnchor(i);
+        const p = engine.toClient(at.x, at.y, canvas.getBoundingClientRect());
         return <SpeechBubble key={seatKey} text={text} style={{ left: p.x, top: p.y }} />;
       })}
 
@@ -841,15 +878,29 @@ export default function MatchView({
             >
               {turnLabel}
             </div>
-            {session.rules.turnTimer && myTurn && (
-              <div className="h-1.5 w-40 overflow-hidden rounded-full bg-black/10">
-                <div
-                  className="h-full rounded-full transition-[width] duration-200"
-                  style={{
-                    width: `${Math.max(0, Math.min(100, (clock / TURN_SECONDS) * 100))}%`,
-                    background: clock <= 5 ? '#e11d48' : layout.sides[turn]?.main,
-                  }}
-                />
+            {/* Everyone's clock, not just yours: a table can see who is taking
+                their time. Nobody is timed while the opening hold is on. */}
+            {session.rules.turnTimer && !holding && seatControl !== 'ai' && (
+              <div className="flex items-center gap-1.5">
+                <div className="h-1.5 w-36 overflow-hidden rounded-full bg-black/10">
+                  <div
+                    className="h-full rounded-full transition-[width] duration-200"
+                    style={{
+                      width: `${Math.max(0, Math.min(100, (clock / TURN_SECONDS) * 100))}%`,
+                      background: clock <= 5 ? '#e11d48' : layout.sides[turn]?.main,
+                    }}
+                  />
+                </div>
+                <span
+                  className={`w-6 text-[11px] font-black tabular-nums ${clock <= 5 ? 'text-rose-600' : 'text-slate-600'}`}
+                >
+                  {clock}s
+                </span>
+              </div>
+            )}
+            {skipped && (
+              <div className="rounded-full bg-rose-600 px-3 py-1 text-[11px] font-black text-white shadow-sm">
+                {skipped}
               </div>
             )}
           </div>

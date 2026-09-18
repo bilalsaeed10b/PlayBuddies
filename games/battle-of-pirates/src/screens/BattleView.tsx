@@ -995,8 +995,10 @@ export default function BattleView({
         const engine = engineRef.current;
         const canvas = canvasRef.current;
         if (!engine || !canvas || !engine.ships[i]) return null;
-        const p = engine.toClient(engine.ships[i].x, engine.shipY(i) - 130, canvas.getBoundingClientRect());
-        return <SpeechBubble key={shipKey} text={text} style={{ left: p.x, top: p.y }} />;
+        const p = engine.toClient(engine.ships[i].x, engine.bubbleY(i), canvas.getBoundingClientRect());
+        // Floored so a camera framed tight on the masts cannot push the
+        // bubble off the top of the screen.
+        return <SpeechBubble key={shipKey} text={text} style={{ left: p.x, top: Math.max(p.y, 48) }} />;
       })}
 
       {!over && <ChatLayer onSend={sendChat} />}

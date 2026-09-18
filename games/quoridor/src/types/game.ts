@@ -39,10 +39,13 @@ export interface GameSettings {
 export interface MatchRules {
   players: PlayerCount;
   /**
-   * Fire a move off on its own after thirty seconds.
+   * Thirty seconds a turn. Run it out and the turn is skipped: nothing moves,
+   * nothing is built, and the next seat is up.
    *
-   * The auto-move is a step along the pawn's own shortest route, never a wall:
-   * a clock should not spend somebody's walls for them.
+   * It used to play a step along the pawn's shortest route instead. A skip is
+   * the honest version of the same thing , a clock that moves your pawn for
+   * you is playing your game, and a player who walked off should lose tempo,
+   * not have it spent on their behalf.
    */
   turnTimer: boolean;
   /**
@@ -65,12 +68,34 @@ export interface MatchRules {
 
 export const DEFAULT_RULES: MatchRules = {
   players: 2,
-  turnTimer: false,
+  turnTimer: true,
   teams: false,
   aiLevel: 3,
 };
 
 export const TURN_SECONDS = 30;
+
+/**
+ * How long past a remote player's own clock the host waits before calling
+ * time on them.
+ *
+ * Each device runs the clock for its own seats and skips on the dot. The host
+ * runs a second copy for everyone else only as a backstop, for a phone that
+ * went to sleep mid-turn and will never run its own clock out. The margin is
+ * what keeps the two from racing: that player's device learned it was their
+ * turn a network hop after the host did, and a host that skipped first while
+ * their move was in flight would leave two different games in two documents.
+ */
+export const REMOTE_GRACE_SECONDS = 5;
+
+/**
+ * How long the host holds a bot's opening move online.
+ *
+ * The board is built the moment the match starts, but the other players'
+ * frames are still loading and their links still opening. A bot that moved
+ * first on the spot played before half the table had a board to watch it on.
+ */
+export const BOT_OPENING_HOLD_MS = 5000;
 
 /**
  * The counts this game actually seats, low to high.

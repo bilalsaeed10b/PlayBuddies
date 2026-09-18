@@ -21,6 +21,7 @@ import {
   encodeWall,
   isWallMove,
   moveLegal,
+  PASS_MOVE,
   pawnMoves,
   rowOf,
   TEAMS,
@@ -136,6 +137,8 @@ export class QuoridorEngine {
       /** Fired for a move made on this device, so the caller can put it on the wire. */
       onLocalMove?: (history: number[]) => void;
       onOver?: (winner: number) => void;
+      /** A seat's turn was skipped on the clock, here or on somebody else's device. */
+      onSkip?: (seat: number) => void;
     },
   ) {
     this.seats = opts.seats;
@@ -190,6 +193,22 @@ export class QuoridorEngine {
       this.opts.onSfx?.('deny');
       return false;
     }
+    this.opts.onLocalMove?.(this.history.slice());
+    return true;
+  }
+
+  /**
+   * The clock ran out: whoever is to move loses the turn.
+   *
+   * Unlike `play` this goes through for a remote seat too. Nobody may move
+   * another player's pawn, but a player whose phone went to sleep mid-turn
+   * never runs their own clock out, and the host calling time on them is the
+   * only thing that keeps the table moving. It goes on the wire like any move
+   * made here.
+   */
+  skipTurn(): boolean {
+    if (this.winner >= 0 || this.slide) return false;
+    if (!this.commit(PASS_MOVE, false)) return false;
     this.opts.onLocalMove?.(this.history.slice());
     return true;
   }
@@ -266,7 +285,9 @@ export class QuoridorEngine {
     const seat = this.turn;
     if (!moveLegal(this.pos, seat, move, this.layout)) return false;
 
-    if (isWallMove(move)) {
+    if (move === PASS_MOVE) {
+      if (!silent) this.opts.onSkip?.(seat);
+    } else if (isWallMove(move)) {
       applyMove(this.pos, seat, move);
       if (animate) this.wallPop = { code: move, t: 0 };
       if (!silent) this.opts.onSfx?.('wall');
@@ -384,6 +405,18 @@ export class QuoridorEngine {
   pawnCenter(seat: number): { x: number; y: number } {
     const at = this.pos.pawns[seat] ?? 0;
     return { x: this.centreX(colOf(at)), y: this.centreY(rowOf(at)) };
+  }
+
+  /**
+   * Just above the top of a pawn, where its chat bubble's tail should point.
+   *
+   * Scaled by the square rather than a fixed lift: a pawn on a desktop board
+   * is twice the height of one on a phone, and a fixed 46px that cleared the
+   * small one sat the bubble on the big one's head.
+   */
+  bubbleAnchor(seat: number): { x: number; y: number } {
+    const at = this.pawnCenter(seat);
+    return { x: at.x, y: at.y - this.view.cell * 0.68 - 8 };
   }
 
   /** A CSS-pixel point inside the canvas's own box, converted to the page's viewport. */
