@@ -52,3 +52,7 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Firebase emulator logs (npm run test:rules)
+firestore-debug.log
+firebase-debug.log

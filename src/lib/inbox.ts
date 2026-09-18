@@ -28,7 +28,7 @@ import { db } from "@/lib/firebase";
  * their own messages and nobody else's, with no query-shape rule to get wrong.
  */
 
-export const INBOX_KINDS = ["coins", "badge", "bug", "note"] as const;
+export const INBOX_KINDS = ["coins", "gems", "badge", "bug", "note"] as const;
 export type InboxKind = (typeof INBOX_KINDS)[number];
 
 export interface InboxMessage {
@@ -36,7 +36,7 @@ export interface InboxMessage {
   kind: InboxKind;
   title: string;
   body: string;
-  /** Set for `coins`: how many, and in which game's purse. */
+  /** Set for `coins` and `gems`: how many, and for coins, in which game's purse. */
   amount: number | null;
   gameId: string;
   /** Set for `badge`: which one, so the UI can draw the real chip. */

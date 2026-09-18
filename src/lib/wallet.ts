@@ -25,6 +25,11 @@ export interface Wallet {
   coins: Record<string, number>;
   /** Cosmetic items bought per game, e.g. { "battle-of-pirates": [0, 3] }. */
   unlocks: Record<string, number[]>;
+  /**
+   * Badge grants, read-only on this path. Handed to a game so it can unlock a
+   * badge-only item; a game never writes them back (see writeWallet).
+   */
+  grants?: Record<string, boolean>;
 }
 
 export const EMPTY_WALLET: Wallet = { coins: {}, unlocks: {} };
@@ -72,7 +77,18 @@ export function cleanWallet(raw: { coins?: unknown; unlocks?: unknown }): Wallet
 export async function readWallet(uid: string): Promise<Wallet> {
   const snap = await getDoc(doc(db, "users", uid));
   if (!snap.exists()) throw new Error("Account is still being initialized; retry wallet loading.");
-  return cleanWallet(snap.data() as { coins?: unknown; unlocks?: unknown });
+  const data = snap.data() as { coins?: unknown; unlocks?: unknown; grants?: unknown };
+  return { ...cleanWallet(data), grants: cleanGrants(data.grants) };
+}
+
+/** Only true/false grants, under the handful of keys an admin can set. */
+function cleanGrants(raw: unknown): Record<string, boolean> {
+  if (!raw || typeof raw !== "object") return {};
+  const out: Record<string, boolean> = {};
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>).slice(0, 8)) {
+    if (typeof v === "boolean") out[k.slice(0, 24)] = v;
+  }
+  return out;
 }
 
 export async function writeWallet(uid: string, gameId: string, wallet: Wallet): Promise<void> {

@@ -15,7 +15,7 @@ import type { ReefMember } from './screens/ModesScreen';
 import FishGrid from './components/FishGrid';
 import { THEME } from './screens/menuTheme';
 import { audioService } from './services/audio';
-import { GameWallet, reportResult } from './platform/wallet';
+import { GameWallet, reportResult, reportRun } from './platform/wallet';
 
 /**
  * The platform owns the lobby.
@@ -249,6 +249,8 @@ export default function App() {
 
   const awardCoins = useCallback((score: number) => {
     setCoins((c) => c + Math.floor(score / 8));
+    // A life ending is a run for the daily challenge, not a match on the record.
+    reportRun({ score });
   }, []);
 
   /**

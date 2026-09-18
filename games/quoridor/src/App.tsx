@@ -506,7 +506,7 @@ export default function App() {
     // Something for turning up, more for crossing first, and a bonus for doing
     // it briskly , a ninety-move win is a grind, a thirty-move win is a plan.
     setCoins((c) => c + (won ? 95 : 30) + (won ? Math.max(0, 60 - movesTaken) : 0));
-    reportResult(won);
+    reportResult(won, { moves: movesTaken });
   }, []);
 
   /** Host only: any room-wide change, from moving the flow on to publishing the rules. */

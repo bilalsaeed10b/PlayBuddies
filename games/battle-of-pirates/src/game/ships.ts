@@ -50,7 +50,7 @@ export interface ShipSkin {
   sailShade: string;
   flag: string;
   /** Drawn on the sail. Kept to a handful of primitives so it bakes cheaply. */
-  emblem: 'skull' | 'cross' | 'moon' | 'star' | 'anchor' | 'none';
+  emblem: 'skull' | 'cross' | 'moon' | 'star' | 'anchor' | 'bug' | 'bolt' | 'none';
   /**
    * A halo baked in behind the whole ship.
    *
@@ -59,7 +59,44 @@ export interface ShipSkin {
    * light -- a glowing ship is hit exactly as easily as a plain one.
    */
   glow?: string;
-  ornament?: 'dragon' | 'coral' | 'forge' | 'seraph' | 'leviathan' | 'eclipse';
+  ornament?: 'dragon' | 'coral' | 'forge' | 'seraph' | 'leviathan' | 'eclipse' | 'firefly' | 'tempest';
+  /**
+   * Not for sale: flown only by a captain holding this PlayBuddies badge.
+   *
+   * The badge is the price. Both tester tiers are earned by getting bug
+   * reports approved, and an admin grants them (see src/lib/badges.ts), so
+   * these hulls are the one thing in the shop coins cannot reach. Still paint:
+   * the same hitbox, the same guns, the same everything that decides a fight.
+   */
+  badge?: ShipBadge;
+}
+
+/** The two tester tiers, by their grant key on the account. */
+export type ShipBadge = 'tester' | 'testerPlus';
+
+/** What the account holds, as the lobby page reports it. Absent means no. */
+export type ShipGrants = Partial<Record<ShipBadge, boolean>>;
+
+export const BADGE_LABEL: Record<ShipBadge, string> = { tester: 'Tester', testerPlus: 'Tester+' };
+
+/**
+ * Whether a captain may fly a badge hull.
+ *
+ * Tester+ covers Tester's ship as well. The badges are tiers of the same
+ * thing, and a captain who climbed to the higher one should not find the
+ * lower one's ship locked because an admin only ever flipped the top grant.
+ */
+export function badgeAllows(badge: ShipBadge, grants: ShipGrants): boolean {
+  if (badge === 'tester') return grants.tester === true || grants.testerPlus === true;
+  return grants.testerPlus === true;
+}
+
+/** Badge hulls this captain may fly, by index. */
+export function badgeShipsFor(grants: ShipGrants): number[] {
+  return SHIPS.reduce<number[]>((out, ship, i) => {
+    if (ship.badge && badgeAllows(ship.badge, grants)) out.push(i);
+    return out;
+  }, []);
 }
 
 export const SHIPS: ShipSkin[] = [
@@ -151,12 +188,30 @@ export const SHIPS: ShipSkin[] = [
     hull: '#30204d', hullDark: '#110c23', trim: '#ffda8b', deck: '#60416e',
     sail: '#5c398b', sailShade: '#24153f', flag: '#f0abfc', emblem: 'moon', glow: '#c084fc',
   },
+  // Badge hulls go last, so every index above keeps meaning the ship it
+  // always has in saved purses and lobby documents.
+  {
+    name: 'Firefly Warden', blurb: 'Tester only. Lanterns on the rail, a swarm of fireflies in the rigging and a spark that jumps mast to mast.', price: 0,
+    rig: 'clipper', shape: 'sharp', ornament: 'firefly', badge: 'tester',
+    hull: '#1d5a37', hullDark: '#0a2616', trim: '#bef264', deck: '#3d7a4d',
+    sail: '#effcd6', sailShade: '#a7d98a', flag: '#a3e635', emblem: 'bug', glow: '#84cc16',
+  },
+  {
+    name: 'Tempest Sovereign', blurb: 'Tester+ only. Sails under her own storm: lightning on call, a spinning energy crown and a shield that hums.', price: 0,
+    rig: 'galleon', shape: 'sharp', ornament: 'tempest', badge: 'testerPlus',
+    hull: '#0d3a4a', hullDark: '#04151d', trim: '#67e8f9', deck: '#1d5468',
+    sail: '#d5fbff', sailShade: '#63c6d6', flag: '#22d3ee', emblem: 'bolt', glow: '#22d3ee',
+  },
 ];
 
+/** Every captain's opening fleet. Badge hulls cost nothing but are not free. */
 export const FREE_SHIPS = SHIPS.reduce<number[]>((free, ship, i) => {
-  if (ship.price === 0) free.push(i);
+  if (ship.price === 0 && !ship.badge) free.push(i);
   return free;
 }, []);
+
+/** Ornaments that move, so a preview card knows to keep repainting itself. */
+export const ANIMATED_ORNAMENTS = ['seraph', 'leviathan', 'eclipse', 'firefly', 'tempest'];
 
 /**
  * The handful of numbers that differ per rig but belong to the hull under it.
@@ -526,6 +581,54 @@ function paintOrnament(ctx: CanvasRenderingContext2D, skin: ShipSkin, clock = 0)
       ctx.lineWidth = 3;
       for (let i = 0; i < 5; i++) { ctx.beginPath(); ctx.arc(side * (99 + i * 6), -10 - i * 9, 3, 0, Math.PI * 2); ctx.stroke(); }
     }
+  } else if (skin.ornament === 'firefly') {
+    // Circuit traces along the lower hull: a tester's ship is wired.
+    ctx.lineWidth = 2;
+    ctx.globalAlpha = 0.85;
+    ctx.beginPath();
+    ctx.moveTo(-84, 8); ctx.lineTo(-52, 8); ctx.lineTo(-44, 0); ctx.lineTo(-18, 0);
+    ctx.moveTo(-18, 12); ctx.lineTo(20, 12); ctx.lineTo(28, 4); ctx.lineTo(58, 4);
+    ctx.moveTo(58, 14); ctx.lineTo(80, 14);
+    ctx.stroke();
+    for (const [x, y] of [[-84, 8], [-18, 0], [-18, 12], [58, 4], [58, 14], [80, 14]]) {
+      ctx.beginPath(); ctx.arc(x, y, 3, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    // Rail lanterns: a dark cage round a lime core, on short posts.
+    for (const x of [-66, -4, 60]) {
+      spar(ctx, x, -52, x, -66, 3, '#2b3a22');
+      ctx.fillStyle = '#1b2a14';
+      ctx.fillRect(x - 6, -80, 12, 15);
+      ctx.fillStyle = '#d9f99d';
+      ctx.fillRect(x - 3.5, -77, 7, 9);
+      ctx.fillStyle = skin.trim;
+      ctx.fillRect(x - 7, -83, 14, 4);
+    }
+  } else if (skin.ornament === 'tempest') {
+    // Crystal spines along the rail, lit down one face.
+    for (let i = 0; i < 6; i++) {
+      const x = -74 + i * 30;
+      const h = 30 + (i % 2) * 14;
+      ctx.fillStyle = skin.trim;
+      ctx.beginPath(); ctx.moveTo(x - 8, -48); ctx.lineTo(x, -48 - h); ctx.lineTo(x + 8, -48); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#ecfeff';
+      ctx.globalAlpha = 0.7;
+      ctx.beginPath(); ctx.moveTo(x - 8, -48); ctx.lineTo(x, -48 - h); ctx.lineTo(x, -48); ctx.closePath(); ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+    // Rune chevrons along the lower hull.
+    ctx.lineWidth = 2.5;
+    ctx.globalAlpha = 0.9;
+    ctx.beginPath();
+    for (let x = -72; x <= 72; x += 18) {
+      ctx.moveTo(x - 4, 3); ctx.lineTo(x + 3, 9); ctx.lineTo(x - 4, 15);
+    }
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+    // Lightning rod on the main truck, which the storm above actually uses.
+    spar(ctx, -12, -242, -12, -262, 3, '#9adbe6');
+    ctx.fillStyle = '#ecfeff';
+    ctx.beginPath(); ctx.arc(-12, -264, 4, 0, Math.PI * 2); ctx.fill();
   } else {
     for (let i = 0; i < 7; i++) {
       const x = -65 + i * 21;
@@ -537,10 +640,18 @@ function paintOrnament(ctx: CanvasRenderingContext2D, skin: ShipSkin, clock = 0)
   ctx.restore();
 }
 
+const AURA: Record<string, string> = {
+  seraph: '#aacfff',
+  leviathan: '#45edac',
+  eclipse: '#bc7cff',
+  firefly: '#a3e635',
+  tempest: '#22d3ee',
+};
+
 const auraSprites = new Map<string, HTMLCanvasElement | null>();
 /** One 128px gradient per premium aura, reused at every scale and every frame. */
 function drawAura(ctx: CanvasRenderingContext2D, skin: ShipSkin, clock: number) {
-  const color = skin.ornament === 'seraph' ? '#aacfff' : skin.ornament === 'leviathan' ? '#45edac' : skin.ornament === 'eclipse' ? '#bc7cff' : null;
+  const color = AURA[skin.ornament ?? ''] ?? null;
   if (!color) return;
   if (!auraSprites.has(color)) {
     try {
@@ -566,6 +677,8 @@ function drawAura(ctx: CanvasRenderingContext2D, skin: ShipSkin, clock: number) 
 
 /** Clock-driven effects use fixed geometry, without growing particle pools. */
 function drawPremiumEffects(ctx: CanvasRenderingContext2D, skin: ShipSkin, clock: number) {
+  if (skin.ornament === 'firefly') return drawFirefly(ctx, clock);
+  if (skin.ornament === 'tempest') return drawTempest(ctx, clock);
   if (skin.ornament === 'eclipse') drawEclipse(ctx, clock);
   if (!['seraph', 'leviathan', 'eclipse'].includes(skin.ornament ?? '')) return;
   ctx.save();
@@ -617,6 +730,245 @@ function drawEclipse(ctx: CanvasRenderingContext2D, clock: number) {
     const x = Math.cos(a) * radius, y = Math.sin(a) * radius;
     ctx.fillStyle = i % 2 ? '#fde68a' : '#e9d5ff';
     ctx.fillRect(x - 1.5, y - 3, 3, 6); ctx.fillRect(x - 3, y - 1.5, 6, 3);
+  }
+  ctx.restore();
+}
+
+/** A stable 0-1 value for an integer, so a jagged bolt holds its shape for a frame or two. */
+function hash01(n: number): number {
+  const s = Math.sin(n * 127.1 + 311.7) * 43758.5453;
+  return s - Math.floor(s);
+}
+
+/** A jagged line between two points, two passes: a wide soft glow, then a hot core. */
+function bolt(
+  ctx: CanvasRenderingContext2D,
+  x0: number,
+  y0: number,
+  x1: number,
+  y1: number,
+  seed: number,
+  glow: string,
+  core: string,
+  width: number,
+) {
+  const steps = 9;
+  const dx = x1 - x0;
+  const dy = y1 - y0;
+  const len = Math.hypot(dx, dy) || 1;
+  // Kinks go sideways to the bolt's own direction, whichever way it runs.
+  const nx = -dy / len;
+  const ny = dx / len;
+  for (const [stroke, w] of [[glow, width * 3.2], [core, width]] as const) {
+    ctx.strokeStyle = stroke;
+    ctx.lineWidth = w;
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(x0, y0);
+    for (let i = 1; i < steps; i++) {
+      const t = i / steps;
+      const kink = (hash01(seed * 17 + i) - 0.5) * len * 0.16;
+      ctx.lineTo(x0 + dx * t + nx * kink, y0 + dy * t + ny * kink);
+    }
+    ctx.lineTo(x1, y1);
+    ctx.stroke();
+  }
+}
+
+/** A soft dot with a bright centre, the unit every glowing particle here is made of. */
+function glowDot(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, halo: string, core: string) {
+  ctx.fillStyle = halo;
+  ctx.beginPath(); ctx.arc(x, y, r * 2.6, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = core;
+  ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+}
+
+/**
+ * Firefly Warden, the Tester hull.
+ *
+ * A swarm drifting through the rigging, each one blinking on its own rhythm,
+ * lanterns breathing on the rail, and every couple of seconds a spark that
+ * jumps from one masthead to the other. Fixed counts and clock-driven paths,
+ * like every other effect in this file: no particle pool to grow or leak.
+ */
+function drawFirefly(ctx: CanvasRenderingContext2D, clock: number) {
+  const base = ctx.globalAlpha;
+  ctx.save();
+
+  // Lanterns breathing, over the baked cages.
+  const breathe = 0.55 + Math.sin(clock * 2.6) * 0.25;
+  ctx.globalAlpha = base * breathe;
+  for (const x of [-66, -4, 60]) glowDot(ctx, x, -72, 3, 'rgba(190,242,100,0.28)', '#f7fee7');
+  for (const [x, y] of [[-34, -242], [54, -208]]) glowDot(ctx, x, y, 3.5, 'rgba(190,242,100,0.3)', '#ecfccb');
+
+  // The spark: two thirds of a second in every two and a half.
+  const cycle = clock % 2.5;
+  if (cycle < 0.38) {
+    ctx.globalAlpha = base * (1 - cycle / 0.38);
+    bolt(ctx, -34, -240, 54, -206, Math.floor(clock * 22), 'rgba(190,242,100,0.35)', '#fbffe9', 2.2);
+    // And a little way down each mast, where it earths.
+    bolt(ctx, 54, -206, 58, -150, Math.floor(clock * 22) + 5, 'rgba(190,242,100,0.25)', '#ecfccb', 1.4);
+  }
+
+  // The swarm.
+  for (let i = 0; i < 18; i++) {
+    const speed = 0.32 + (i % 5) * 0.07;
+    const t = clock * speed + i * 1.7;
+    const x = 10 + Math.sin(t * 1.3 + i) * (62 + (i % 4) * 20);
+    const y = -142 + Math.sin(t * 0.85 + i * 2.1) * (84 + (i % 3) * 12);
+    const blink = Math.sin(clock * (2 + (i % 3) * 0.8) + i * 1.3);
+    if (blink <= 0.05) continue;
+    ctx.globalAlpha = base * blink;
+    glowDot(ctx, x, y, 1.8 + (i % 2) * 0.6, 'rgba(163,230,53,0.3)', i % 4 === 0 ? '#fef9c3' : '#ecfccb');
+  }
+
+  // Lime wake.
+  ctx.strokeStyle = '#bef264';
+  ctx.lineWidth = 1.5;
+  for (let i = 0; i < 3; i++) {
+    const phase = (clock * 0.4 + i / 3) % 1;
+    ctx.globalAlpha = base * (1 - phase) * 0.8;
+    ctx.beginPath();
+    ctx.ellipse(0, 20 + phase * 8, 80 + phase * 60, 6 + phase * 10, 0, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+/** The thundercloud, as puffs of [x, y, radius] around its own centre. */
+const CLOUD_PUFFS: readonly (readonly [number, number, number])[] = [
+  [-30, 4, 16], [-10, -6, 21], [14, -2, 19], [32, 6, 14], [4, 10, 17],
+];
+
+/**
+ * Tempest Sovereign, the Tester+ hull.
+ *
+ * Carries its own weather: a thundercloud over the stern that throws a bolt
+ * every couple of seconds, alternating between the lightning rod on the main
+ * truck and the sea off the bow, with the whole ship lit by the flash; a
+ * crown of two counter-rotating energy rings round the mast, an orb riding
+ * each; a shield dome whose hexes light up in a travelling wave; rain; and a
+ * charged wake throwing sparks. Still only light , the hitbox underneath is
+ * the same rectangle as a Salt Dog's.
+ */
+function drawTempest(ctx: CanvasRenderingContext2D, clock: number) {
+  const base = ctx.globalAlpha;
+  ctx.save();
+
+  const period = 2.1;
+  const strikeN = Math.floor(clock / period);
+  const since = clock - strikeN * period;
+  const striking = since < 0.3;
+  const flash = striking ? 1 - since / 0.3 : 0;
+
+  // The flash first, so everything after it reads as lit by it.
+  if (flash > 0) {
+    ctx.globalAlpha = base * flash * 0.22;
+    ctx.fillStyle = '#cffafe';
+    ctx.beginPath(); ctx.ellipse(-10, -120, 190, 190, 0, 0, Math.PI * 2); ctx.fill();
+  }
+
+  // Shield dome, humming, with a wave of hexes running over it.
+  const hum = 0.5 + Math.sin(clock * 3.2) * 0.5;
+  ctx.strokeStyle = '#67e8f9';
+  ctx.lineWidth = 1.6;
+  ctx.globalAlpha = base * (0.16 + hum * 0.12 + flash * 0.3);
+  ctx.beginPath(); ctx.ellipse(0, 6, 152, 262, 0, Math.PI, 0); ctx.stroke();
+  for (let i = 0; i < 11; i++) {
+    const a = Math.PI + ((i + 0.5) / 11) * Math.PI;
+    const hx = Math.cos(a) * 152;
+    const hy = 6 + Math.sin(a) * 262;
+    const lit = Math.sin(clock * 2.6 - i * 0.62);
+    if (lit < 0.15) continue;
+    ctx.globalAlpha = base * lit * 0.75;
+    ctx.beginPath();
+    for (let k = 0; k < 6; k++) {
+      const ang = (Math.PI / 3) * k + Math.PI / 6;
+      const px = hx + Math.cos(ang) * 8;
+      const py = hy + Math.sin(ang) * 8;
+      if (k === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+    ctx.stroke();
+  }
+
+  // The crown: two tilted rings round the mast, turning opposite ways.
+  for (const k of [0, 1]) {
+    const tilt = k ? 0.32 : -0.32;
+    const spin = clock * (k ? -1.1 : 1.4);
+    const rx = 74 - k * 12;
+    const ry = 15;
+    const cy = -150 - k * 44;
+    ctx.globalAlpha = base * (0.55 + flash * 0.4);
+    ctx.strokeStyle = k ? '#a5f3fc' : '#22d3ee';
+    ctx.lineWidth = 2.2;
+    ctx.beginPath(); ctx.ellipse(-12, cy, rx, ry, tilt, spin, spin + Math.PI * 1.35); ctx.stroke();
+    // The orb at the leading end of the arc.
+    const end = spin + Math.PI * 1.35;
+    const ex = Math.cos(end) * rx;
+    const ey = Math.sin(end) * ry;
+    const ox = -12 + ex * Math.cos(tilt) - ey * Math.sin(tilt);
+    const oy = cy + ex * Math.sin(tilt) + ey * Math.cos(tilt);
+    ctx.globalAlpha = base;
+    glowDot(ctx, ox, oy, 3.2, 'rgba(34,211,238,0.35)', '#f0fdff');
+  }
+
+  // Rain, slanting out of the cloud.
+  ctx.strokeStyle = '#a5f3fc';
+  ctx.lineWidth = 1.2;
+  for (let i = 0; i < 14; i++) {
+    const fall = (clock * 1.6 + i * 0.137) % 1;
+    const x = -150 + ((i * 37) % 130) - fall * 18;
+    const y = -250 + fall * 250;
+    ctx.globalAlpha = base * Math.sin(fall * Math.PI) * 0.45;
+    ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x - 4, y + 14); ctx.stroke();
+  }
+
+  // The cloud, over the stern, clear of the masthead and the health bar.
+  const drift = Math.sin(clock * 0.5) * 6;
+  const cx = -92 + drift;
+  const puffs = CLOUD_PUFFS;
+  ctx.globalAlpha = base * 0.92;
+  ctx.fillStyle = '#0c2430';
+  for (const [px, py, r] of puffs) { ctx.beginPath(); ctx.arc(cx + px, -258 + py, r, 0, Math.PI * 2); ctx.fill(); }
+  ctx.globalAlpha = base * (0.45 + flash * 0.55);
+  ctx.strokeStyle = '#67e8f9';
+  ctx.lineWidth = 2;
+  for (const [px, py, r] of puffs) { ctx.beginPath(); ctx.arc(cx + px, -258 + py, r, Math.PI * 1.05, Math.PI * 1.95); ctx.stroke(); }
+
+  // The strike itself, alternating targets.
+  if (striking) {
+    ctx.globalAlpha = base * flash;
+    if (strikeN % 2 === 0) {
+      bolt(ctx, cx + 4, -246, -12, -264, strikeN, 'rgba(103,232,249,0.45)', '#ffffff', 2.6);
+      glowDot(ctx, -12, -264, 6 * flash + 2, 'rgba(165,243,252,0.5)', '#ffffff');
+    } else {
+      bolt(ctx, cx + 10, -246, 150, 18, strikeN, 'rgba(103,232,249,0.4)', '#ffffff', 3);
+      ctx.strokeStyle = '#a5f3fc';
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.ellipse(150, 20, 26 * (1 - flash) + 8, 5, 0, 0, Math.PI * 2); ctx.stroke();
+    }
+  }
+
+  // A charged wake: rings, and sparks climbing out of it.
+  ctx.strokeStyle = '#67e8f9';
+  ctx.lineWidth = 1.6;
+  for (let i = 0; i < 3; i++) {
+    const phase = (clock * 0.45 + i / 3) % 1;
+    ctx.globalAlpha = base * (1 - phase) * 0.85;
+    ctx.beginPath(); ctx.ellipse(0, 20 + phase * 8, 84 + phase * 70, 6 + phase * 12, 0, 0, Math.PI * 2); ctx.stroke();
+  }
+  ctx.fillStyle = '#ecfeff';
+  for (let i = 0; i < 10; i++) {
+    const phase = (clock * 0.5 + i * 0.173) % 1;
+    const x = Math.sin(i * 5.3 + clock * 0.6) * 120;
+    const y = 14 - phase * 70;
+    ctx.globalAlpha = base * Math.sin(phase * Math.PI) * 0.85;
+    ctx.save(); ctx.translate(x, y); ctx.rotate(clock * 2 + i);
+    ctx.fillRect(-1, -5, 2, 10); ctx.fillRect(-5, -1, 10, 2);
+    ctx.restore();
   }
   ctx.restore();
 }
@@ -1104,6 +1456,41 @@ function drawEmblem(ctx: CanvasRenderingContext2D, skin: ShipSkin) {
       if (i === 0) ctx.moveTo(px, py);
       else ctx.lineTo(px, py);
     }
+    ctx.closePath();
+    ctx.fill();
+  } else if (skin.emblem === 'bug') {
+    // The Tester badge's own mark: a beetle, legs and all.
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.ellipse(0, 4, 13, 17, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(0, -16, 8, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    for (const side of [-1, 1]) {
+      for (const y of [-4, 5, 14]) {
+        ctx.moveTo(side * 11, y);
+        ctx.lineTo(side * 22, y - 5 + (y > 5 ? 8 : 0));
+      }
+      ctx.moveTo(side * 4, -22);
+      ctx.lineTo(side * 11, -31);
+    }
+    ctx.stroke();
+    ctx.strokeStyle = skin.sail;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(0, -10);
+    ctx.lineTo(0, 20);
+    ctx.stroke();
+  } else if (skin.emblem === 'bolt') {
+    ctx.beginPath();
+    ctx.moveTo(6, -26);
+    ctx.lineTo(-13, 3);
+    ctx.lineTo(-1, 3);
+    ctx.lineTo(-7, 26);
+    ctx.lineTo(14, -5);
+    ctx.lineTo(2, -5);
     ctx.closePath();
     ctx.fill();
   } else {

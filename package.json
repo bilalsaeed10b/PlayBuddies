@@ -13,7 +13,8 @@
     "serve": "node scripts/serve.mjs",
     "host": "npm run build && node scripts/serve.mjs",
     "logs": "node scripts/logs.mjs",
-    "diagnostics": "node scripts/diagnostics.mjs"
+    "diagnostics": "node scripts/diagnostics.mjs",
+    "test:rules": "firebase emulators:exec --only firestore --project demo-playbuddies \"node --test tests/rules/gems.test.mjs\""
   },
   "dependencies": {
     "firebase": "^12.11.0",

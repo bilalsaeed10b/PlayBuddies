@@ -16,6 +16,7 @@ import { normalizeRoomCode, isValidRoomCode, LOBBY_TTL_MS, inviteTimestamps } fr
 import { FRIEND_CODE_LENGTH, findByFriendCode, sendFriendRequest } from "@/lib/friends";
 import { rememberLobby, forgetLobby } from "@/lib/lastLobby";
 import { cleanWallet, readWallet, recordMatch, writeWallet } from "@/lib/wallet";
+import { GEMS_PER_CHALLENGE, cleanDetail, recordChallengeEvent, type ChallengeDef } from "@/lib/challenges";
 import { playPop } from "@/lib/sounds";
 import type { Lobby, LobbyMessage, LobbyPlayer } from "@/types/game";
 import {
@@ -47,6 +48,7 @@ import {
   UserPlus,
   UserX,
   Search,
+  Gem,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -91,6 +93,13 @@ function LobbyContent() {
   const [chatMessage, setChatMessage] = useState("");
   const [showSidebar, setShowSidebar] = useState(false);
   const [isPseudoFull, setIsPseudoFull] = useState(false);
+  /** A daily challenge this match just completed, shown over the game for a moment. */
+  const [challengeToast, setChallengeToast] = useState<ChallengeDef | null>(null);
+  useEffect(() => {
+    if (!challengeToast) return;
+    const t = setTimeout(() => setChallengeToast(null), 5000);
+    return () => clearTimeout(t);
+  }, [challengeToast]);
   const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
   const [inviteSent, setInviteSent] = useState<string | null>(null);
   const [inviteAllCooldown, setInviteAllCooldown] = useState(0);
@@ -522,6 +531,7 @@ function LobbyContent() {
         source: "playbuddies-host", type: "wallet", ...walletSession.current,
         coins: wallet.coins[request.gameId] ?? 0,
         unlocks: wallet.unlocks[request.gameId] ?? [],
+        grants: wallet.grants ?? {},
       }, window.location.origin);
     } catch (error) {
       // The game will retry. A failed read must never become an empty save.
@@ -557,7 +567,10 @@ function LobbyContent() {
    *                 sender's own device.
    *   wallet-request  I have booted, what does this player own?
    *   wallet-save   Their balance changed, please keep it.
-   *   result        A match finished, and whether this player won it.
+   *   result        A match finished, and whether this player won it, with a
+   *                 few numbers from it for the daily challenges.
+   *   run           A run ended in a game with no winner (a life in Players
+   *                 Eat Fish). Challenge progress only, never the record.
    *   diagnostics   A bounded batch from the shared game logger. The parent
    *                 sanitizes and buffers it before an authenticated write.
    */
@@ -612,6 +625,19 @@ function LobbyContent() {
         void recordMatch(user.uid, Boolean(data.won))
           .then(clearStats)
           .catch((err) => console.error("Could not record the match:", err));
+        if (lobby?.gameId) {
+          void recordChallengeEvent(user.uid, lobby.gameId, { won: Boolean(data.won), detail: cleanDetail(data.detail) })
+            .then((def) => def && setChallengeToast(def))
+            .catch((err) => console.error("Could not update the daily challenge:", err));
+        }
+        return;
+      }
+
+      if (data.type === "run") {
+        if (!user || !lobby?.gameId) return;
+        void recordChallengeEvent(user.uid, lobby.gameId, { won: false, detail: cleanDetail(data.detail) }, "run")
+          .then((def) => def && setChallengeToast(def))
+          .catch((err) => console.error("Could not update the daily challenge:", err));
       }
     };
     window.addEventListener("message", onMessage);
@@ -1367,6 +1393,27 @@ function LobbyContent() {
                 title={selectedGame?.name || "Game Window"}
                 allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
               />
+              {/* Inside the game shell so it shows in fullscreen too. */}
+              <AnimatePresence>
+                {challengeToast && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -16, scale: 0.95 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: -12 }}
+                    className="pointer-events-none absolute left-1/2 top-3 z-30 flex -translate-x-1/2 items-center gap-3 rounded-2xl border border-cyan-300/40 bg-slate-950/90 px-4 py-2.5 shadow-2xl backdrop-blur"
+                  >
+                    <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-cyan-400 to-violet-500">
+                      <Gem size={18} className="text-white" />
+                    </div>
+                    <div className="text-left">
+                      <p className="text-[10px] font-black uppercase tracking-[0.18em] text-cyan-300">Daily challenge complete</p>
+                      <p className="text-sm font-bold text-white">
+                        {challengeToast.title} · +{GEMS_PER_CHALLENGE} gems
+                      </p>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
           ) : (
             <div className="space-y-8 relative">

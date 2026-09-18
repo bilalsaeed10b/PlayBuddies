@@ -399,7 +399,7 @@ export default function App() {
     // Something for turning up, more for winning, and a bonus for a close one.
     const margin = Math.abs(score[0] - score[1]);
     setCoins((c) => c + (won ? 90 : 30) + (margin <= 2 ? 25 : 0));
-    reportResult(won);
+    reportResult(won, { margin });
   }, []);
 
   const remoteStage = parseStage(lobby?.menuStage);

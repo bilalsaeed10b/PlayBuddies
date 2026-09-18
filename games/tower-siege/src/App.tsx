@@ -426,7 +426,7 @@ export default function App() {
     // Something for turning up, more for surviving, and a slice per wave so a
     // long losing stand still pays better than a short one.
     setCoins((c) => c + (won ? 120 : 30) + wave * 6);
-    reportResult(won);
+    reportResult(won, { wave });
   }, []);
 
   // -- configs ----------------------------------------------------------------

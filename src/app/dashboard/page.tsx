@@ -34,6 +34,9 @@ import {
 } from "lucide-react";
 import { isAdminUser } from "@/lib/admin";
 import Inbox from "@/components/Inbox";
+import DailyChallenges from "@/components/DailyChallenges";
+import GemStore, { GemBalance } from "@/components/GemStore";
+import { useGemAccount } from "@/hooks/useGemAccount";
 
 const CREATE_LOBBY_TIMEOUT_MS = 12_000;
 
@@ -67,6 +70,8 @@ export default function DashboardPage() {
   const [userStats, setUserStats] = useState({ gamesPlayed: 0 });
   const [loadingStats, setLoadingStats] = useState(true);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [gemStoreOpen, setGemStoreOpen] = useState(false);
+  const gemAccount = useGemAccount();
   const profileRef = useRef<HTMLDivElement>(null);
   // Read once on mount: localStorage isn't available during the server render,
   // and reading it in the body would make the first paint mismatch.
@@ -233,6 +238,7 @@ export default function DashboardPage() {
           </div>
 
           <div className="flex items-center gap-3" ref={profileRef}>
+            <GemBalance gems={gemAccount.gems} onClick={() => setGemStoreOpen(true)} />
             <Inbox />
             {/* Profile pill */}
             <div className="relative">
@@ -468,6 +474,8 @@ export default function DashboardPage() {
             ))}
           </div>
 
+          <DailyChallenges state={gemAccount.challenges} onPlay={createLobby} />
+
           {/* Games Grid */}
           <div>
             <div className="flex items-center justify-between mb-8">
@@ -512,6 +520,7 @@ export default function DashboardPage() {
             </div>
           </div>
         </main>
+        <GemStore open={gemStoreOpen} gems={gemAccount.gems} onClose={() => setGemStoreOpen(false)} />
       </div>
     </AuthGuard>
   );

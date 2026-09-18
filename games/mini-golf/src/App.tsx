@@ -426,7 +426,7 @@ export default function App() {
       // tidy card , a round in level fours pays about double a scrappy one.
       const budget = rules.holes * 4;
       setCoins((c) => c + (won ? 95 : 30) + Math.max(0, budget - strokes) * 7);
-      reportResult(won);
+      reportResult(won, { overPar: strokes - budget });
     },
     [rules.holes],
   );

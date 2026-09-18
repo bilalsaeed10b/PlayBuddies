@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
-import { Bell, Bug, Check, Coins, Gift, Sparkles, X } from "lucide-react";
+import { Bell, Bug, Check, Coins, Gem, Gift, Sparkles, X } from "lucide-react";
 import { useAuthStore } from "@/store/useAuthStore";
 import { BADGES_BY_ID } from "@/lib/badges";
 import { markAllRead, markRead, watchInbox, type InboxMessage } from "@/lib/inbox";
@@ -300,6 +300,9 @@ function MessageIcon({ message }: { message: InboxMessage }) {
   }
   if (message.kind === "coins") {
     return <Icon tone="from-amber-400 to-orange-500" node={<Coins size={17} />} />;
+  }
+  if (message.kind === "gems") {
+    return <Icon tone="from-cyan-400 to-violet-500" node={<Gem size={17} />} />;
   }
   if (message.kind === "bug") {
     return <Icon tone="from-lime-400 to-emerald-500" node={<Bug size={17} />} />;

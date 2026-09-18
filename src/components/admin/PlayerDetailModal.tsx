@@ -1,9 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { Bug, Coins, Loader2, Sparkles, Trophy, X } from "lucide-react";
+import { Bug, Coins, Gem, Loader2, Sparkles, Trophy, X } from "lucide-react";
 import { PLAYABLE_GAMES, getGame } from "@/lib/games";
-import { adjustCoins, setGrant } from "@/lib/adminActions";
+import { adjustCoins, adjustGems, setGrant } from "@/lib/adminActions";
 import { topBadge } from "@/lib/badges";
 import type { BugReport } from "@/lib/bugs";
 import { timeAgo, type AdminUser } from "@/lib/adminMetrics";
@@ -41,6 +41,8 @@ export default function PlayerDetailModal({
   // Goes into the message the player actually reads. A reward that arrives
   // with no explanation is indistinguishable from a bug in the wallet.
   const [reason, setReason] = useState("");
+  const [gemAmount, setGemAmount] = useState(20);
+  const [gemReason, setGemReason] = useState("");
 
   const badge = topBadge({
     gamesPlayed: user.gamesPlayed,
@@ -75,6 +77,21 @@ export default function PlayerDetailModal({
       onChanged();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not change that balance.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const applyGems = async (sign: 1 | -1) => {
+    if (gemAmount === 0) return;
+    setBusy(true);
+    setError("");
+    try {
+      await adjustGems(user.uid, sign * Math.abs(gemAmount), gemReason);
+      setGemReason("");
+      onChanged();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not change the gem balance.");
     } finally {
       setBusy(false);
     }
@@ -220,6 +237,45 @@ export default function PlayerDetailModal({
             />
             <p className="mt-1 text-[10px] text-text-muted">
               This is the message that lands in their inbox. Left blank, they just see the amount.
+            </p>
+          </section>
+
+          <section>
+            <h3 className="text-[11px] font-bold uppercase tracking-wider text-text-muted mb-2 flex items-center gap-1.5">
+              Gems <span className="text-white tabular-nums">· {user.gems.toLocaleString()}</span>
+            </h3>
+            <div className="flex items-center gap-2">
+              <input
+                type="number"
+                min={1}
+                value={gemAmount}
+                onChange={(e) => setGemAmount(Math.max(1, Math.round(Number(e.target.value) || 0)))}
+                className="flex-1 min-w-0 bg-white/5 border border-white/10 rounded-xl px-2.5 py-2 text-xs text-white outline-none tabular-nums"
+              />
+              <button
+                disabled={busy}
+                onClick={() => applyGems(1)}
+                className="px-3 py-2 rounded-xl bg-cyan-500/20 text-cyan-300 text-xs font-bold hover:bg-cyan-500/30 disabled:opacity-40 transition-colors flex items-center gap-1"
+              >
+                {busy ? <Loader2 size={12} className="animate-spin" /> : <Gem size={12} />}
+                Add
+              </button>
+              <button
+                disabled={busy}
+                onClick={() => applyGems(-1)}
+                className="px-3 py-2 rounded-xl bg-red-500/15 text-red-300 text-xs font-bold hover:bg-red-500/25 disabled:opacity-40 transition-colors"
+              >
+                Take
+              </button>
+            </div>
+            <input
+              value={gemReason}
+              onChange={(e) => setGemReason(e.target.value.slice(0, 200))}
+              placeholder="Why? e.g. Chest pack, paid 18 Sep"
+              className="mt-2 w-full bg-white/5 border border-white/10 rounded-xl px-2.5 py-2 text-xs text-white outline-none placeholder:text-text-muted/60"
+            />
+            <p className="mt-1 text-[10px] text-text-muted">
+              Until card payments are live, this is how a purchase gets credited.
             </p>
           </section>
 

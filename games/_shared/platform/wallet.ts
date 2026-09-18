@@ -2,6 +2,25 @@
 export interface Purse {
   coins: number;
   unlocks: number[];
+  /**
+   * Badges an admin granted this account, read-only here.
+   *
+   * Handed down with the wallet so a game can unlock a badge-only item (the
+   * Tester ships in Battle of Pirates). Never sent back up: the lobby page
+   * only ever writes coins and unlocks from a save, and the grants on the
+   * account are writable by an admin alone.
+   */
+  grants?: Record<string, boolean>;
+}
+
+/** Only true/false entries under short keys survive the trip across the frame. */
+function cleanGrants(raw: unknown): Record<string, boolean> {
+  if (!raw || typeof raw !== 'object') return {};
+  const out: Record<string, boolean> = {};
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>).slice(0, 8)) {
+    if (typeof v === 'boolean') out[k.slice(0, 24)] = v;
+  }
+  return out;
 }
 
 const embedded = window.parent !== window;
@@ -50,7 +69,7 @@ export class GameWallet {
           typeof data.accountId !== 'string' || !data.accountId || this.ready) return;
       if (!Number.isFinite(data.coins) || !Array.isArray(data.unlocks)) return;
       this.accountId = data.accountId;
-      this.purse = { coins: data.coins, unlocks: data.unlocks };
+      this.purse = { coins: data.coins, unlocks: data.unlocks, grants: cleanGrants(data.grants) };
       this.ready = true;
       if (this.timer !== null) window.clearInterval(this.timer);
       this.timer = null;
@@ -68,11 +87,13 @@ export class GameWallet {
 
   save(purse: Purse) {
     if (!this.ready) return;
-    this.purse = purse;
+    // A save carries coins and unlocks; the grants were never the game's to set.
+    this.purse = { coins: purse.coins, unlocks: purse.unlocks, grants: this.purse.grants };
     if (embedded) {
       window.parent.postMessage({
         source: 'playbuddies-game', type: 'wallet-save', gameId: this.gameId,
-        requestId: this.requestId, accountId: this.accountId, ...purse,
+        requestId: this.requestId, accountId: this.accountId,
+        coins: purse.coins, unlocks: purse.unlocks,
       }, window.location.origin);
     } else {
       try {
@@ -91,6 +112,24 @@ export class GameWallet {
   }
 }
 
-export function reportResult(won: boolean) {
-  if (embedded) window.parent.postMessage({ source: 'playbuddies-game', type: 'result', won }, window.location.origin);
+/**
+ * A match finished. `detail` is a few numbers from it (ships sunk, moves, the
+ * wave reached) that the platform's daily challenges are judged on; see
+ * src/lib/challenges.ts for which game reports what.
+ */
+export function reportResult(won: boolean, detail: Record<string, number> = {}) {
+  if (embedded) {
+    window.parent.postMessage({ source: 'playbuddies-game', type: 'result', won, detail }, window.location.origin);
+  }
+}
+
+/**
+ * A run ended in a game with no winner to report, such as a life in Players
+ * Eat Fish. It counts toward that game's daily challenge but is not a match:
+ * it touches neither games played nor wins.
+ */
+export function reportRun(detail: Record<string, number> = {}) {
+  if (embedded) {
+    window.parent.postMessage({ source: 'playbuddies-game', type: 'run', detail }, window.location.origin);
+  }
 }

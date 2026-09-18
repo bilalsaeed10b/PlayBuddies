@@ -91,6 +91,34 @@ export async function adjustCoins(
 }
 
 /**
+ * Adjust a player's gem balance by a signed amount.
+ *
+ * This is the only way gems arrive other than a daily challenge, and it is
+ * deliberate that it is an admin's hand: until real payments run through a
+ * server that can confirm them, a purchase made some other way is credited
+ * here. The rules let a player's own client add gems two at a time against a
+ * completed challenge and nothing else.
+ */
+export async function adjustGems(uid: string, delta: number, reason = ""): Promise<void> {
+  if (!Number.isFinite(delta) || delta === 0) return;
+  const amount = Math.round(delta);
+  await setDoc(doc(db, "users", uid), { gems: increment(amount) }, { merge: true });
+
+  try {
+    await sendInboxMessage(uid, {
+      kind: "gems",
+      title: amount > 0 ? `+${amount} gems` : `${amount} gems`,
+      body:
+        reason.trim() ||
+        (amount > 0 ? `An admin added ${amount} gems to your account.` : `An admin adjusted your gems by ${amount}.`),
+      amount,
+    });
+  } catch (e) {
+    console.error("Gems landed but the inbox message did not", e);
+  }
+}
+
+/**
  * Close a room outright.
  *
  * Ordinary deletion is host-only, which is correct for a normal end-of-match

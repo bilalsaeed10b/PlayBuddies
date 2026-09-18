@@ -4,6 +4,7 @@ import useShortScreen from '@shared/ui/useShortScreen';
 import {
   Anchor,
   ArrowLeft,
+  Bug,
   Check,
   Coins,
   Crown,
@@ -24,7 +25,8 @@ import { ModeCard, OptionGroup, RuleSection, ToggleOption } from '@shared/menu/M
 import { MENU_STAGE_FIELD, parseStage } from '@shared/menu/stage';
 import type { MenuStage } from '@shared/menu/stage';
 import type { MenuTheme } from '@shared/menu/theme';
-import { FREE_SHIPS, SHIPS, drawShip } from './game/ships';
+import { ANIMATED_ORNAMENTS, BADGE_LABEL, FREE_SHIPS, SHIPS, badgeShipsFor, drawShip } from './game/ships';
+import type { ShipGrants } from './game/ships';
 import { WEATHER_CHOICES, weatherFor, wetWeather } from './game/weather';
 import { DEFAULT_HULL_INDEX, HULLS, getHullStatDots } from './game/hulls';
 import { BALANCE, CARDS, CARD_ORDER, TEAM_COLORS } from './game/rules';
@@ -182,15 +184,25 @@ export default function App() {
   const wallet = useMemo(() => new GameWallet('battle-of-pirates', 'pirates_owned'), []);
   const [coins, setCoins] = useState(() => wallet.current.coins);
   const [owned, setOwned] = useState<number[]>(() => [
-    ...new Set([...wallet.current.unlocks, ...FREE_SHIPS]),
+    ...new Set([...boughtOnly(wallet.current.unlocks), ...FREE_SHIPS]),
   ]);
+  /** Tester badges on the account, which unlock the two badge hulls. */
+  const [grants, setGrants] = useState<ShipGrants>({});
+  /**
+   * Everything this captain may fly: what they bought or started with, plus
+   * whatever their badges unlock. Kept apart from `owned` because `owned` is
+   * what gets saved, and a badge hull saved as a purchase would outlive the
+   * badge if an admin ever took it back.
+   */
+  const flyable = useMemo(() => [...new Set([...owned, ...badgeShipsFor(grants)])], [owned, grants]);
   /** Nothing is saved until the account has answered, or declined to. */
   const [walletReady, setWalletReady] = useState(false);
 
   useEffect(() => {
     wallet.open((purse) => {
       setCoins(purse.coins);
-      setOwned([...new Set([...purse.unlocks, ...FREE_SHIPS])]);
+      setOwned([...new Set([...boughtOnly(purse.unlocks), ...FREE_SHIPS])]);
+      setGrants(purse.grants ?? {});
       setWalletReady(true);
     });
     return () => wallet.close();
@@ -444,6 +456,8 @@ export default function App() {
 
   const buy = useCallback(
     (index: number) => {
+      // A badge hull is never for sale, whatever its price field says.
+      if (SHIPS[index]?.badge) return false;
       const price = SHIPS[index].price;
       if (owned.includes(index) || coins < price) return false;
       setCoins((c) => c - price);
@@ -457,7 +471,7 @@ export default function App() {
   const pickOnline = useCallback(
     async (index: number) => {
       if (!uid) return;
-      if (!owned.includes(index) && !buy(index)) return;
+      if (!flyable.includes(index) && !buy(index)) return;
       try {
         // Already loaded by the session effect on this path; the import cache
         // makes this a lookup rather than a second fetch.
@@ -467,7 +481,7 @@ export default function App() {
         console.error('Could not save your ship', e);
       }
     },
-    [uid, owned, buy, handoff.room],
+    [uid, flyable, buy, handoff.room],
   );
 
   /**
@@ -555,7 +569,7 @@ export default function App() {
     // Something for turning up, more for winning, and a bonus for coming
     // through it with your hull mostly intact.
     setCoins((c) => c + (won ? 95 : 30) + (won ? Math.round(hpLeft / 3) : 0));
-    reportResult(won);
+    reportResult(won, { sunk: record.sunk });
     setStats(recordBattle(won, record));
   }, []);
 
@@ -955,14 +969,14 @@ export default function App() {
     screen = (
       <CustomizeScreen
         slots={slots}
-        owned={owned}
+        owned={flyable}
         coins={coins}
         toolbar={stageToolbar}
         leads={local || isHost}
         hostName={hostName}
         onPickSkin={(key, index) => {
           if (!local) return void pickOnline(index);
-          if (!owned.includes(index) && !buy(index)) return;
+          if (!flyable.includes(index) && !buy(index)) return;
           setSeatSkin((s) => ({ ...s, [Number(key)]: index }));
         }}
         onPickHull={(key, index) => {
@@ -1094,6 +1108,17 @@ function rulesSummary(rules: MatchRules): string {
   ]
     .filter(Boolean)
     .join(' · ');
+}
+
+/**
+ * A saved purse with any badge hull taken out.
+ *
+ * Nothing this build writes puts one there, but a purse is whatever the
+ * account says it is, and a badge hull arriving as a "purchase" would stay
+ * unlocked after the badge was taken back.
+ */
+function boughtOnly(unlocks: number[]): number[] {
+  return unlocks.filter((i) => !SHIPS[i]?.badge);
 }
 
 /** The bot sails something other than what the player picked. */
@@ -1492,6 +1517,20 @@ function ModesScreen({
 
 // -- pieces -------------------------------------------------------------------
 
+/** Card colours for the two badge hulls, matching the badges they come from. */
+const BADGE_TONE = {
+  tester: {
+    card: 'border-lime-400/50 bg-lime-400/10 hover:bg-lime-400/15',
+    chip: 'bg-lime-400/20 text-lime-300',
+    text: 'text-lime-300',
+  },
+  testerPlus: {
+    card: 'border-cyan-300/60 bg-cyan-400/10 hover:bg-cyan-400/15 shadow-[0_0_18px_rgba(34,211,238,0.18)]',
+    chip: 'bg-cyan-400/20 text-cyan-200',
+    text: 'text-cyan-200',
+  },
+} as const;
+
 /** A ship card, drawn with the same code the battle uses. */
 function Portrait({ index, size = 92 }: { index: number; size?: number }) {
   const ref = useRef<HTMLCanvasElement>(null);
@@ -1504,7 +1543,7 @@ function Portrait({ index, size = 92 }: { index: number; size?: number }) {
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
       ctx.scale(dpr, dpr);
-      const animated = ['seraph', 'leviathan', 'eclipse'].includes(SHIPS[index]?.ornament ?? '');
+      const animated = ANIMATED_ORNAMENTS.includes(SHIPS[index]?.ornament ?? '');
       let frame = 0;
       let visible = false;
       let previous = -Infinity;
@@ -1567,7 +1606,9 @@ function ShipGrid({
         const isOwned = owned.includes(index);
         const others = pickedBy[index] ?? [];
         const isSelected = selected === index;
-        const affordable = coins >= ship.price;
+        // A badge hull is never bought: without the badge it is simply shut.
+        const affordable = !ship.badge && coins >= ship.price;
+        const badgeTone = ship.badge === 'testerPlus' ? BADGE_TONE.testerPlus : ship.badge ? BADGE_TONE.tester : null;
 
         return (
           <button
@@ -1579,12 +1620,21 @@ function ShipGrid({
             } ${
               isSelected
                 ? 'border-amber-400 bg-amber-400/20 shadow-[0_0_0_3px_rgba(251,191,36,0.25)]'
-                : isOwned
-                  ? 'border-white/15 bg-white/10 hover:bg-white/20'
-                  : 'border-amber-400/40 bg-amber-400/10'
+                : badgeTone
+                  ? badgeTone.card
+                  : isOwned
+                    ? 'border-white/15 bg-white/10 hover:bg-white/20'
+                    : 'border-amber-400/40 bg-amber-400/10'
             }`}
           >
-            {!isOwned && (
+            {!isOwned && ship.badge && badgeTone && (
+              <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-0.5 bg-black/65 px-2 backdrop-blur-[1px]">
+                <Bug className={`h-4 w-4 ${badgeTone.text}`} />
+                <span className={`text-[11px] font-black ${badgeTone.text}`}>{BADGE_LABEL[ship.badge]} only</span>
+                <span className="text-[9px] font-bold text-white/55 short:hidden">Earned by approved bug reports</span>
+              </div>
+            )}
+            {!isOwned && !ship.badge && (
               <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-black/60 backdrop-blur-[1px]">
                 <Lock className="mb-0.5 h-4 w-4 text-amber-300" />
                 <span className="text-[11px] font-black text-amber-300">{ship.price}</span>
@@ -1602,9 +1652,15 @@ function ShipGrid({
               bars on every card would imply a choice that does not exist, and
               hinting at one is worse than saying plainly that these are paint.
             */}
-            <span className="rounded-lg bg-black/25 px-2 py-0.5 text-[9px] font-black uppercase tracking-[0.15em] text-white/45 short:hidden">
-              Paint only
-            </span>
+            {badgeTone && ship.badge ? (
+              <span className={`rounded-lg px-2 py-0.5 text-[9px] font-black uppercase tracking-[0.15em] short:hidden ${badgeTone.chip}`}>
+                {BADGE_LABEL[ship.badge]} exclusive
+              </span>
+            ) : (
+              <span className="rounded-lg bg-black/25 px-2 py-0.5 text-[9px] font-black uppercase tracking-[0.15em] text-white/45 short:hidden">
+                Paint only
+              </span>
+            )}
             <span className="text-[10px] leading-tight text-white/50 short:hidden">{ship.blurb}</span>
             {others.length > 0 && (
               <span className="text-[9px] font-black uppercase text-white/40">Also flown by {others.join(', ')}</span>

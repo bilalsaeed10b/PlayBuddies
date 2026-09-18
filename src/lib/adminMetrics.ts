@@ -85,6 +85,8 @@ export interface AdminUser {
   coins: Record<string, number>;
   unlocks: Record<string, number[]>;
   grants: Record<string, boolean>;
+  /** The account-wide premium balance. */
+  gems: number;
   bugStats: { submitted: number; approved: number };
   createdAt: Timestamp | null;
 }
@@ -168,6 +170,7 @@ export function useAllUsers(enabled: boolean, refreshKey: number) {
               coins: (data.coins ?? {}) as Record<string, number>,
               unlocks: (data.unlocks ?? {}) as Record<string, number[]>,
               grants: (data.grants ?? {}) as Record<string, boolean>,
+              gems: Number.isFinite(Number(data.gems)) ? Math.max(0, Math.round(Number(data.gems))) : 0,
               bugStats: {
                 submitted: Number(bugStats.submitted ?? 0),
                 approved: Number(bugStats.approved ?? 0),

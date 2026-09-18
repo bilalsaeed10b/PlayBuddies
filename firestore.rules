@@ -156,6 +156,63 @@ service cloud.firestore {
                && after.get('approved', 0) == before.get('approved', 0);
       }
 
+      /** Today, UTC, as 20260918 , the same number src/lib/challenges.ts computes. */
+      function today() {
+        return request.time.year() * 10000 + request.time.month() * 100 + request.time.day();
+      }
+
+      /** What was completed today before this write. Yesterday's list counts for nothing. */
+      function doneBefore() {
+        let before = resource.data.get('challenges', { 'day': 0, 'done': [] });
+        return before.get('day', 0) == today() ? before.get('done', []) : [];
+      }
+
+      /**
+       * Today's daily-challenge record.
+       *
+       * Progress counters are the player's own business and are not checked
+       * beyond their shape , nothing is paid for them. What is pinned is the
+       * completed list: it is today's, it only ever grows, by at most one
+       * game per write, never names a game twice, and never holds more than
+       * three. That is the daily cap, and gemsStep() below pays against it.
+       */
+      function challengeStep() {
+        let c = incoming().challenges;
+        let prior = doneBefore();
+        return c is map
+               && c.keys().hasOnly(['day', 'progress', 'done'])
+               && c.day == today()
+               && c.progress is map
+               && c.progress.size() <= 12
+               && c.done is list
+               && c.done.size() <= 3
+               && c.done.toSet().size() == c.done.size()
+               && c.done.hasAll(prior)
+               && c.done.size() <= prior.size() + 1;
+      }
+
+      /** Did this write complete exactly one more of today's challenges? */
+      function completedOne() {
+        return touched().hasAny(['challenges'])
+               && incoming().challenges.done.size() == doneBefore().size() + 1;
+      }
+
+      /**
+       * Gems: the premium currency.
+       *
+       * A player may always spend them. The only way up from here is two at a
+       * time, in the same write as a completed challenge , so at most six a
+       * day, whatever a modified client claims. Anything more (a purchase, a
+       * correction) is an admin's write, below.
+       */
+      function gemsStep() {
+        let before = resource.data.get('gems', 0);
+        let after = incoming().get('gems', 0);
+        return after is int
+               && after >= 0
+               && (after <= before || (after == before + 2 && completedOne()));
+      }
+
       allow update: if isSelf(userId)
                     && !touched().hasAny(['uid', 'createdAt', 'friendCode'])
                     // Badges an admin hands out, and the count they are earned
@@ -163,7 +220,9 @@ service cloud.firestore {
                     && !touched().hasAny(['grants'])
                     && (!touched().hasAny(['stats']) || statsStep())
                     && (!touched().hasAny(['bugStats']) || bugStatsStep())
-                    && (!touched().hasAny(['coins', 'unlocks']) || walletStep());
+                    && (!touched().hasAny(['coins', 'unlocks']) || walletStep())
+                    && (!touched().hasAny(['challenges']) || challengeStep())
+                    && (!touched().hasAny(['gems']) || gemsStep());
 
       // Grants, bug counters, coin corrections: the panel's side of the same
       // document. Deliberately unconstrained in shape , an admin editing a
@@ -189,7 +248,7 @@ service cloud.firestore {
                         'kind', 'title', 'body', 'amount', 'gameId',
                         'badgeId', 'read', 'createdAt'
                       ])
-                      && incoming().kind in ['coins', 'badge', 'bug', 'note']
+                      && incoming().kind in ['coins', 'gems', 'badge', 'bug', 'note']
                       && incoming().title is string
                       && incoming().title.size() <= 80
                       && incoming().body is string
