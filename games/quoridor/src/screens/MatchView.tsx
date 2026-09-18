@@ -516,6 +516,8 @@ export default function MatchView({
     let lastClock = -1;
     let lastHolding = false;
     const builtAt = performance.now();
+    /** When the current turn began, for the turn clock. */
+    let turnStartedAt = builtAt;
     let last = performance.now();
     let raf = 0;
 
@@ -558,18 +560,25 @@ export default function MatchView({
       // seat is played from, on the dot, and the one driving the bots, a few
       // seconds later, for a player whose device stopped running its own (see
       // REMOTE_GRACE_SECONDS). Bots are never timed , they move in a second.
-      if (session.rules.turnTimer && !holding && engine.winner < 0) {
-        clockRef.current = Math.max(-REMOTE_GRACE_SECONDS, clockRef.current - dt / 1000);
-        const control = engine.seats[engine.turn]?.control;
-        if (control === 'local' && clockRef.current <= 0) {
-          engine.skipTurn();
-        } else if (control === 'remote' && aiDriverRef.current && clockRef.current <= -REMOTE_GRACE_SECONDS) {
-          engine.skipTurn();
-        }
+      //
+      // Wall time, not frame time. Frame deltas are clamped (so a stall does
+      // not teleport an animation), which made a phone drawing at 10fps count
+      // 64ms of clock per 100ms of turn, and a tab in the background , where
+      // frames stop altogether , never run out at all. Measured from when the
+      // turn began, a player who comes back to the tab finds the turn gone.
+      if (engine.turn !== lastTurn || engine.history.length !== lastMoves || holding) {
+        turnStartedAt = now;
       }
-
-      if (engine.turn !== lastTurn || engine.history.length !== lastMoves) {
-        clockRef.current = TURN_SECONDS;
+      clockRef.current = TURN_SECONDS - (now - turnStartedAt) / 1000;
+      if (session.rules.turnTimer && !holding && engine.winner < 0) {
+        const control = engine.seats[engine.turn]?.control;
+        const due =
+          (control === 'local' && clockRef.current <= 0) ||
+          (control === 'remote' && aiDriverRef.current && clockRef.current <= -REMOTE_GRACE_SECONDS);
+        // The next seat's clock starts now, not whenever the bookkeeping
+        // below notices the turn moved , by then it has already been recorded
+        // as seen, and on a couch the next player would be skipped on the spot.
+        if (due && engine.skipTurn()) turnStartedAt = now;
       }
       if (engine.turn !== lastTurn) {
         lastTurn = engine.turn;

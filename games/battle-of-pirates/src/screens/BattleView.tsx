@@ -996,9 +996,12 @@ export default function BattleView({
         const canvas = canvasRef.current;
         if (!engine || !canvas || !engine.ships[i]) return null;
         const p = engine.toClient(engine.ships[i].x, engine.bubbleY(i), canvas.getBoundingClientRect());
-        // Floored so a camera framed tight on the masts cannot push the
-        // bubble off the top of the screen.
-        return <SpeechBubble key={shipKey} text={text} style={{ left: p.x, top: Math.max(p.y, 48) }} />;
+        // Kept on screen: fleets sit right at the edges of the sea, and a
+        // bubble centred on a hull 40px from the side had half its words cut
+        // off. Floored for the same reason when the camera frames the masts.
+        const edge = Math.min(110, window.innerWidth / 4);
+        const left = Math.min(Math.max(p.x, edge), window.innerWidth - edge);
+        return <SpeechBubble key={shipKey} text={text} style={{ left, top: Math.max(p.y, 48) }} />;
       })}
 
       {!over && <ChatLayer onSend={sendChat} />}
