@@ -218,6 +218,8 @@ export default function MatchView({
    */
   const heardAt = useRef(new Map<string, number>());
   const heardSeq = useRef(new Map<string, number>());
+  /** Last snapshot tick taken from each host, so an older one is never applied over it. */
+  const heardSnap = useRef(new Map<string, number>());
   /** The roster as of this render, for the connection to read when it opens. */
   const peopleRef = useRef(config.people);
   peopleRef.current = config.people;
@@ -356,6 +358,7 @@ export default function MatchView({
     let sinceBody = 0;
     let seq = 0;
     let lastSent = -1;
+    let lastClaim = -1;
 
     const frame = (now: number) => {
       raf = requestAnimationFrame(frame);
@@ -430,9 +433,12 @@ export default function MatchView({
           // A fixed 30Hz send adds up to 33ms of pure waiting to every single
           // press, on top of the trip itself, and it is the kind of delay a
           // player feels without being able to name.
-          if (bits !== lastSent || sinceBody >= 1 / BALANCE.BODY_HZ) {
+          // A new touch goes out the frame it happens, like a key change.
+          const claim = engine.freshClaim();
+          if (bits !== lastSent || sinceBody >= 1 / BALANCE.BODY_HZ || (claim && claim.id !== lastClaim)) {
             sinceBody = 0;
             lastSent = bits;
+            if (claim) lastClaim = claim.id;
             const body = engine.bodyPacket(config.localIds[0]);
             if (body) {
               link.send(
@@ -443,6 +449,7 @@ export default function MatchView({
                   ts: link.stamp(),
                   n: ++seq,
                   k: engine.lastAppliedTick,
+                  ...(claim ? { h: claim } : {}),
                 } satisfies BodyMessage,
                 true,
               );
@@ -596,6 +603,16 @@ export default function MatchView({
                   engine.reclaim(from);
                 }
                 if (engine.isHost) break;
+                // The data channel is unordered, and the relay's heartbeat
+                // re-delivers a snapshot the direct channel already carried a
+                // newer one past. Applying it put the ball back where it was a
+                // moment ago , a jump backward roughly once a second.
+                {
+                  const last = heardSnap.current.get(from);
+                  const n = (msg as Snapshot).n;
+                  if (last !== undefined && n <= last && n > last - 1200) break;
+                  heardSnap.current.set(from, n);
+                }
                 lastSnapshotAt.current = performance.now();
                 heardHost.current = true;
                 if (stalledRef.current) {
@@ -616,6 +633,7 @@ export default function MatchView({
                 engine.reclaim(from);
                 remoteInputs.current.set(from, unpackInput(msg.i));
                 engine.applyBody(from, msg.d, msg.k, lagOf(msg));
+                if (msg.h && link) engine.applyClaim(from, msg.h, link.ageOf(from, msg.h.ts, BALANCE.MAX_EXTRAP));
                 break;
               case 'i':
                 heardAt.current.set(from, performance.now());

@@ -219,6 +219,24 @@ export interface Snapshot {
   tm: number;
   /** Serving team, so a late joiner draws the ball on the right side. */
   sv: Team;
+  /** Contacts the host has judged so far. Lets a guest tell a ball from before its own touch. */
+  hs?: number;
+}
+
+/**
+ * Guest → host: "I touched the ball, and this is where it went".
+ *
+ * `pre` is where the ball was on the guest's screen at the touch, which the
+ * host checks against its own record of that instant before believing `b`.
+ */
+export interface HitClaim {
+  /** Per-guest counter; the same claim rides in several packets. */
+  id: number;
+  /** Guest's `localNow()` at the touch. */
+  ts: number;
+  pre: [x: number, y: number];
+  /** The ball straight after the touch. */
+  b: BallPacket;
 }
 
 /**
@@ -245,6 +263,8 @@ export interface BodyMessage {
    * body described before the court was reset is describing the last rally.
    */
   k: number;
+  /** The guest's latest touch, repeated for BALANCE.CLAIM_REPEAT. */
+  h?: HitClaim;
 }
 
 export type NetMessage =

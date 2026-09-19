@@ -30,6 +30,7 @@ import {
   F_DASH,
   F_FACING,
   F_GROUND,
+  HitClaim,
   Input,
   NO_INPUT,
   Phase,
@@ -282,8 +283,38 @@ export class MatchEngine {
 
   /** Whether this machine is running the rules. Mutable: see promote(). */
   private host: boolean;
-  /** `performance.now()` of the last contact made by a body this machine owns. */
-  private lastOwnedHit = -Infinity;
+  /**
+   * Contacts the host has judged, counted. Rides in every snapshot as `hs`.
+   * On a guest this is the host's count as of the last snapshot taken.
+   */
+  private hitSeq = 0;
+  /**
+   * Contacts this guest has played ahead of the host, not yet confirmed.
+   *
+   * A guest plays every touch the instant its own simulation sees it , its own
+   * and the other side's , so for a moment afterwards the host is still
+   * describing a ball that has not been hit. Until a snapshot counts the touch
+   * (`hs` catches up), the ball in it is from before the hit and is ignored.
+   * `at` bounds the wait, for the touch the host judged a miss.
+   */
+  private predicted: { base: number; count: number; at: number } | null = null;
+  /** This guest's latest touch, repeated to the host until it has surely landed. */
+  private claim: HitClaim | null = null;
+  private claimSeq = 0;
+  /** Newest claim id taken from each guest, on the host. */
+  private claimSeen = new Map<string, number>();
+  /** How old each guest's packets are on arrival, in seconds. Sizes the landing hold. */
+  private peerLag = new Map<string, number>();
+  /**
+   * A landing the host is holding open, on the tick it happened.
+   *
+   * A guest's touch reaches the host one trip after it happened. A ball the
+   * guest dug off the sand has, on the host, already landed by then, and the
+   * point used to be scored before the claim could arrive. So the call waits
+   * that one trip: a claim from before the landing undoes it, and otherwise
+   * the point stands exactly as it would have.
+   */
+  private heldLand: { scorer: Team; tick: number; until: number } | null = null;
 
   /** The tick the ball was last touched on. A rewind may not reach back past it. */
   private lastContactTick = -Infinity;
@@ -296,13 +327,6 @@ export class MatchEngine {
   /** What the network last said each character is pressing. */
   private netInputs = new Map<string, Input>();
 
-  /**
-   * One-way delay to each peer, kept per peer rather than as one shared
-   * figure. In a 2v2 the four players are rarely on comparable paths, and a
-   * single `lastLag` , whichever packet happened to arrive most recently ,
-   * would rewind a 25ms peer by a relayed peer's 300ms.
-   */
-  private peerLag = new Map<string, number>();
 
   /**
    * Last time this guest heard a body directly from that body's owner.
@@ -446,6 +470,7 @@ export class MatchEngine {
     this.trail.length = 0;
     this.touches = 0;
     this.serveShot = true;
+    this.heldLand = null;
   }
 
   // ── the loop ──────────────────────────────────────────────────────────────
@@ -483,6 +508,12 @@ export class MatchEngine {
 
   private step(dt: number, inputs: Map<string, Input>) {
     this.tick++;
+
+    if (this.heldLand && this.tick >= this.heldLand.until) {
+      const { scorer } = this.heldLand;
+      this.heldLand = null;
+      if (this.phase === 'rally') this.awardPoint(scorer);
+    }
 
     if (this.phase === 'point' || this.phase === 'serve') {
       this.phaseTimer -= dt;
@@ -661,7 +692,7 @@ export class MatchEngine {
 
   /** Ball down. Only the host turns that into a point. */
   private land() {
-    if (this.phase !== 'rally') return;
+    if (this.phase !== 'rally' || this.heldLand) return;
     const scorer: Team = this.ball.x < this.arena.netX ? 1 : 0;
     this.puff(this.ball.x, this.arena.floor, '#e7c489', 22, 260);
     this.shake = Math.max(this.shake, 7);
@@ -671,7 +702,21 @@ export class MatchEngine {
       this.phase = 'point';
       return;
     }
+    const wait = this.claimWindow();
+    if (wait > 0) {
+      this.heldLand = { scorer, tick: this.tick, until: this.tick + Math.ceil(wait / BALANCE.FIXED_DT) };
+      return;
+    }
     this.awardPoint(scorer);
+  }
+
+  /** How long a touch from the slowest guest can take to arrive, in seconds. */
+  private claimWindow(): number {
+    let worst = 0;
+    for (const p of this.players) {
+      if (p.control === 'remote') worst = Math.max(worst, this.peerLag.get(p.id) ?? 0);
+    }
+    return worst > 0 ? Math.min(worst, BALANCE.MAX_EXTRAP) + 2 * BALANCE.FIXED_DT : 0;
   }
 
   private awardPoint(team: Team) {
@@ -726,31 +771,17 @@ export class MatchEngine {
   }
 
   /**
-   * The ball as a given peer saw it, or null if we should just use the present.
-   *
-   * Rewinding is deliberately bounded twice over. It never goes back further
-   * than MAX_EXTRAP , the same ceiling the guest's own extrapolation obeys, so
-   * the two agree about how far ahead of a packet it is reasonable to reason ,
-   * and it never goes back past the last contact anyone made. That second
-   * bound is the one that keeps this fair rather than merely generous: without
-   * it, a laggier player could reach into a moment that had already been
-   * decided and take a ball out of the hands of someone who legitimately got
-   * there first.
+   * The ball as the host had it at a given tick, or null if that is no longer
+   * on record. Never reaches past the last decided contact: ballPast is
+   * emptied at every touch, so a later claim cannot contest an earlier one.
    */
-  private ballAsSeenBy(id: string): (typeof this.ballPast)[number] | null {
-    const lag = this.peerLag.get(id);
-    if (!lag || lag <= 0) return null;
-    const back = Math.round(Math.min(lag, BALANCE.MAX_EXTRAP) / BALANCE.FIXED_DT);
-    if (back <= 0) return null;
-    // Never past a decided moment: the last contact is the boundary.
-    const floorTick = Math.max(this.tick - back, this.lastContactTick);
+  private ballAt(tick: number): (typeof this.ballPast)[number] | null {
     let best: (typeof this.ballPast)[number] | null = null;
     for (const shot of this.ballPast) {
-      if (shot.tick <= floorTick) best = shot;
+      if (shot.tick <= tick) best = shot;
       else break;
     }
-    // Already the present? Then there is nothing to compensate for.
-    return best && best.tick < this.tick ? best : null;
+    return best;
   }
 
   /**
@@ -762,40 +793,17 @@ export class MatchEngine {
    * have jumped above goes down (a spike). Nothing about that has to be taught.
    */
   private contact(p: Player) {
-    if (this.phase !== 'rally' || p.hitCd > 0) return;
+    if (this.phase !== 'rally' || this.heldLand || p.hitCd > 0) return;
+    // A guest's touches are theirs to call , see applyClaim. The host's copy of
+    // their body is dead-reckoned forward to the present while the ball they
+    // saw is in the past, so judging it here missed a real share of their hits
+    // (two in five at 40ms each way) and snapped the ball back out of their
+    // hands.
+    if (this.host && p.control === 'remote') return;
     const b = this.ball;
     const min = p.r + BALANCE.BALL_R;
-
-    /**
-     * Lag compensation, and the reason a guest's hits now land.
-     *
-     * The host used to judge a remote player's reach against the ball in
-     * front of *it*, which by then had travelled on for that player's entire
-     * round trip. The guest had already watched themselves make the contact ,
-     * they play their own hits immediately , so every marginal touch resolved
-     * as a miss here and then got yanked back out of their hands a moment
-     * later. That is the "I hit that and nothing happened" of this game, and
-     * no amount of smoothing downstream could fix it, because the two
-     * machines were not disagreeing about position: they were being asked
-     * different questions about different instants.
-     *
-     * Tested before anything is mutated, so a miss costs nothing.
-     */
-    const seen = this.host && p.control === 'remote' ? this.ballAsSeenBy(p.id) : null;
-    const at = seen ?? b;
-    if (Math.hypot(at.x - p.x, at.y - p.y) >= min) return;
-
-    // Committed to a hit. Rewind the ball to the instant being judged, let the
-    // ordinary contact code below play it out there, then run it forward again
-    // so everything after this still sees a ball in the present.
-    const catchUp = seen ? (this.tick - seen.tick) * BALANCE.FIXED_DT : 0;
-    if (seen) {
-      b.x = seen.x;
-      b.y = seen.y;
-      b.vx = seen.vx;
-      b.vy = seen.vy;
-      b.spin = seen.spin;
-    }
+    if (Math.hypot(b.x - p.x, b.y - p.y) >= min) return;
+    const pre: [number, number] = [b.x, b.y];
 
     let dx = b.x - p.x;
     let dy = b.y - p.y;
@@ -846,34 +854,40 @@ export class MatchEngine {
     }
 
     b.spin = clamp(p.vx * BALANCE.SPIN_FROM_HIT, -BALANCE.MAX_SPIN, BALANCE.MAX_SPIN);
+
+    if (this.host) {
+      this.hitSeq++;
+    } else {
+      // Played ahead of the host. The pre-hit target must stop steering the
+      // ball right now: correct() takes its velocity outright, so leaving it in
+      // place turned the ball straight back toward the player for a frame or
+      // two on every touch , the flicker a guest saw and the host never did.
+      this.predicted = this.predicted
+        ? { ...this.predicted, count: this.predicted.count + 1, at: localNow() }
+        : { base: this.hitSeq, count: 1, at: localNow() };
+      this.target.ball = null;
+      if (p.control === 'local') {
+        this.claim = {
+          id: ++this.claimSeq,
+          ts: localNow(),
+          pre: [Math.round(pre[0]), Math.round(pre[1])],
+          b: [Math.round(b.x), Math.round(b.y), Math.round(b.vx), Math.round(b.vy), Math.round(b.spin)],
+        };
+      }
+    }
+    this.touched(p);
+  }
+
+  /** Bookkeeping and fanfare common to every touch, judged here or claimed. */
+  private touched(p: Player) {
+    const b = this.ball;
     b.lastTeam = p.team;
     b.lastHitter = p.id;
-
     p.hitCd = BALANCE.HIT_COOLDOWN;
     this.touches++;
-    // This instant is now decided, and no later rewind may reach back past it
-    // to contest it. See ballAsSeenBy.
+    // This instant is now decided, and no later claim may reach back past it
+    // to contest it. See ballAt.
     this.lastContactTick = this.tick;
-    // Bring a rewound hit back to the present. The ball leaves the contact
-    // where the guest saw it and then flies the part of its path they have
-    // already lived through, so by the time anyone else looks it is where it
-    // would have been had the host judged the touch the instant it happened.
-    if (catchUp > 0) {
-      // Through moveBall, not integrateBall: the replayed stretch has to be
-      // able to end the rally. A rewound spike can easily reach the sand
-      // inside the window being replayed, and running it as bare integration
-      // would swallow the floor touch that scores the point.
-      let left = catchUp;
-      while (left > 0 && this.phase === 'rally') {
-        const slice = Math.min(left, BALANCE.FIXED_DT);
-        this.moveBall(slice);
-        left -= slice;
-      }
-      this.ballPast.length = 0;
-    }
-    // Noted so applySnapshot can tell a host that has not seen this hit yet
-    // from one that has. See the ball exception there.
-    if (p.control === 'local') this.lastOwnedHit = localNow();
 
     const outgoing = Math.hypot(b.vx, b.vy);
     const heat = clamp(outgoing / BALANCE.BALL_MAX_SPEED, 0, 1);
@@ -886,6 +900,70 @@ export class MatchEngine {
     // and heading down into the other half.
     if (heat > 0.7 && b.vy > 120) this.say('SPIKE!');
     else if (this.touches === 6) this.say('RALLY x6');
+  }
+
+  /** The newest touch this guest made, while it is still worth repeating. */
+  freshClaim(): HitClaim | null {
+    const c = this.claim;
+    return c && localNow() - c.ts < BALANCE.CLAIM_REPEAT * 1000 ? c : null;
+  }
+
+  /**
+   * A guest saying "I hit it, and this is where it went".
+   *
+   * The guest played the touch against the ball on its own screen, which is
+   * the ball the host had one trip ago. So the host looks up its own ball at
+   * that instant, and if the two agree , they differ only by network error ,
+   * takes the guest's result as the touch and replays the time since. Both
+   * machines then hold the same ball from the same starting point, so nothing
+   * needs correcting afterwards.
+   *
+   * Refused when the ball was somewhere else entirely, when the point has
+   * already been scored, or when a touch the host decided came in between.
+   * The guest then falls back to the host's ball once its wait runs out.
+   */
+  applyClaim(id: string, c: HitClaim, age: number) {
+    if (!this.host || this.phase !== 'rally') return;
+    const p = this.players.find((q) => q.id === id);
+    if (!p || p.control !== 'remote') return;
+    const last = this.claimSeen.get(id);
+    // Each claim rides in several packets; act on it once. A big jump back is
+    // a guest that reloaded and started counting again.
+    if (last !== undefined && c.id <= last && c.id > last - 1000) return;
+    this.claimSeen.set(id, c.id);
+
+    const back = Math.max(0, Math.round(Math.min(age, BALANCE.MAX_EXTRAP) / BALANCE.FIXED_DT));
+    const at = this.tick - back;
+    if (at <= this.lastContactTick) return;
+    if (this.heldLand) {
+      if (at >= this.heldLand.tick) return;
+      this.heldLand = null;
+    }
+    const then = back === 0 ? this.ball : this.ballAt(at);
+    if (!then || Math.hypot(then.x - c.pre[0], then.y - c.pre[1]) > BALANCE.CLAIM_TOLERANCE) return;
+
+    const b = this.ball;
+    const [x, y, vx, vy, spin] = c.b;
+    const speed = Math.hypot(vx, vy);
+    const k = speed > BALANCE.BALL_MAX_SPEED ? BALANCE.BALL_MAX_SPEED / speed : 1;
+    b.x = clamp(x, BALANCE.BALL_R, this.arena.w - BALANCE.BALL_R);
+    b.y = clamp(y, BALANCE.BALL_R, this.arena.floor - BALANCE.BALL_R);
+    b.vx = vx * k;
+    b.vy = vy * k;
+    b.spin = clamp(spin, -BALANCE.MAX_SPIN, BALANCE.MAX_SPIN);
+    this.serveShot = false;
+    this.hitSeq++;
+    this.touched(p);
+
+    // Fly the stretch the guest has already watched. Through moveBall, so a
+    // spike that reached the sand in that window still scores.
+    let left = back * BALANCE.FIXED_DT;
+    while (left > 0 && this.phase === 'rally') {
+      const slice = Math.min(left, BALANCE.FIXED_DT);
+      this.moveBall(slice);
+      left -= slice;
+    }
+    this.ballPast.length = 0;
   }
 
   /** Would this score take the match for `team`? */
@@ -946,6 +1024,8 @@ export class MatchEngine {
     if (this.host) return;
     this.host = true;
     this.target.ball = null;
+    this.predicted = null;
+    this.heldLand = null;
     this.target.fix.clear();
     this.ownerBodyAt.clear();
   }
@@ -962,6 +1042,8 @@ export class MatchEngine {
     if (!this.host) return;
     this.host = false;
     this.target.ball = null;
+    this.predicted = null;
+    this.heldLand = null;
     this.target.fix.clear();
     this.ownerBodyAt.clear();
   }
@@ -995,6 +1077,7 @@ export class MatchEngine {
       ph: this.phase,
       tm: Math.round(this.phaseTimer * 100) / 100,
       sv: this.serving,
+      hs: this.hitSeq,
     };
   }
 
@@ -1050,6 +1133,12 @@ export class MatchEngine {
     if (restart) {
       this.snapshotResetTick = s.n;
       this.ownerBodyAt.clear();
+      // The host armed its serve bonus in serveBall(); a guest never runs that,
+      // so without this every serve after the first was predicted weaker than
+      // the host played it, and corrected mid-flight.
+      this.serveShot = true;
+      this.touches = 0;
+      this.claim = null;
     }
     const drift = Math.min(lag, BALANCE.MAX_EXTRAP);
     const receivedAt = localNow();
@@ -1115,8 +1204,18 @@ export class MatchEngine {
      * ball only*. The score, the phase and everybody's body in the same packet
      * are still taken: none of them are in dispute.
      */
-    const hostSawOurHit = localNow() - lag * 1000 >= this.lastOwnedHit;
-    if (restart || hostSawOurHit) {
+    const hs = s.hs ?? 0;
+    const pending = this.predicted;
+    // Long enough for our body to reach the host, its next snapshot to leave,
+    // and that snapshot to come back , then the host has spoken.
+    const waitMs = Math.min(
+      600,
+      (2 * lag + 1 / BALANCE.SNAPSHOT_HZ + 1 / BALANCE.BODY_HZ) * 1000 + 60,
+    );
+    const hostCaughtUp = !pending || hs >= pending.base + pending.count || localNow() - pending.at > waitMs;
+    if (restart || hostCaughtUp) {
+      this.predicted = null;
+      this.hitSeq = hs;
       const ball: Ball & { age: number } = {
         x: s.b[0],
         y: s.b[1],

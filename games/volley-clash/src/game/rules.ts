@@ -231,6 +231,18 @@ export const BALANCE = {
    */
   OWNER_BODY_FRESH: 0.2,
   /**
+   * How long a guest keeps repeating its latest touch in body packets, in
+   * seconds. The data channel drops packets rather than resend them, and the
+   * relay only ever carries the newest one, so a touch said once can vanish.
+   */
+  CLAIM_REPEAT: 0.25,
+  /**
+   * How far the ball a guest says it hit may be from where the host had it at
+   * that moment, in px. Ordinary network error is well inside this; a claim
+   * past it is about a different ball.
+   */
+  CLAIM_TOLERANCE: 150,
+  /**
    * Floor on how often input is repeated when nothing is changing.
    *
    * Input is sent the instant a key changes state, so this is only a heartbeat
