@@ -73,6 +73,25 @@
         }
       }
     },
+    // Switches the admin panel flips for the whole platform: a banner,
+    // maintenance mode, games taken out of the catalog. Every signed-in page
+    // reads it; only the admin allowlist writes it.
+    "platform": {
+      "config": {
+        ".read": "auth != null",
+        ".write": "auth != null && auth.token.email_verified === true && (auth.token.email === 'bilalsaeed10b@gmail.com' || auth.token.email === 'bilalsaeed12b@gmail.com')"
+      },
+      // Suspended accounts. A player may read their own entry (that is how
+      // their page learns it) and nobody else's; only an admin writes or
+      // lists them.
+      "bans": {
+        ".read": "auth != null && auth.token.email_verified === true && (auth.token.email === 'bilalsaeed10b@gmail.com' || auth.token.email === 'bilalsaeed12b@gmail.com')",
+        ".write": "auth != null && auth.token.email_verified === true && (auth.token.email === 'bilalsaeed10b@gmail.com' || auth.token.email === 'bilalsaeed12b@gmail.com')",
+        "$uid": {
+          ".read": "auth != null && auth.uid === $uid"
+        }
+      }
+    },
     "$other": {
       ".read": false,
       ".write": false

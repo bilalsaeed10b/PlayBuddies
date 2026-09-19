@@ -1,7 +1,17 @@
-import { deleteDoc, doc, increment, setDoc, writeBatch } from "firebase/firestore";
+import {
+  collection,
+  deleteDoc,
+  deleteField,
+  doc,
+  increment,
+  serverTimestamp,
+  setDoc,
+  updateDoc,
+  writeBatch,
+} from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { BADGES_BY_ID, type GrantKey } from "@/lib/badges";
-import { sendInboxMessage } from "@/lib/inbox";
+import { INBOX_BODY_MAX, INBOX_TITLE_MAX, sendInboxMessage } from "@/lib/inbox";
 import { getGame } from "@/lib/games";
 
 /**
@@ -150,4 +160,115 @@ export async function purgeRooms(roomIds: string[]): Promise<number> {
     done += slice.length;
   }
   return done;
+}
+
+// -- whole-platform actions ----------------------------------------------------
+
+/** Firestore's batch limit is 500 writes; stay well inside it. */
+const BATCH = 400;
+
+/**
+ * One message into every listed player's inbox.
+ *
+ * A write per player, so the panel shows the count before it is sent; on the
+ * free plan a few thousand of these is a real share of the day's 20k writes.
+ */
+export async function broadcastInbox(
+  uids: string[],
+  message: { title: string; body: string },
+): Promise<number> {
+  let sent = 0;
+  for (let i = 0; i < uids.length; i += BATCH) {
+    const batch = writeBatch(db);
+    for (const uid of uids.slice(i, i + BATCH)) {
+      batch.set(doc(collection(db, "users", uid, "inbox")), {
+        kind: "note",
+        title: message.title.slice(0, INBOX_TITLE_MAX),
+        body: message.body.slice(0, INBOX_BODY_MAX),
+        amount: null,
+        gameId: "",
+        badgeId: "",
+        read: false,
+        createdAt: serverTimestamp(),
+      });
+    }
+    await batch.commit();
+    sent += Math.min(BATCH, uids.length - i);
+  }
+  return sent;
+}
+
+/**
+ * The same reward for everyone listed: gems, or coins in one game, plus the
+ * inbox note that says why. Two writes a player, batched.
+ */
+export async function rewardEveryone(
+  uids: string[],
+  reward: { kind: "gems" } | { kind: "coins"; gameId: string },
+  amount: number,
+  reason: string,
+): Promise<number> {
+  const n = Math.round(amount);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  const game = reward.kind === "coins" ? getGame(reward.gameId)?.name ?? reward.gameId : "";
+  const title = reward.kind === "gems" ? `+${n} gems` : `+${n} coins in ${game}`;
+  const body = reason.trim() || (reward.kind === "gems" ? `A gift of ${n} gems for everyone.` : `A gift of ${n} coins for everyone.`);
+  const per = 2;
+  const step = Math.floor(BATCH / per);
+  let done = 0;
+  for (let i = 0; i < uids.length; i += step) {
+    const batch = writeBatch(db);
+    for (const uid of uids.slice(i, i + step)) {
+      batch.set(
+        doc(db, "users", uid),
+        reward.kind === "gems" ? { gems: increment(n) } : { coins: { [reward.gameId]: increment(n) } },
+        { merge: true },
+      );
+      batch.set(doc(collection(db, "users", uid, "inbox")), {
+        kind: reward.kind,
+        title: title.slice(0, INBOX_TITLE_MAX),
+        body: body.slice(0, INBOX_BODY_MAX),
+        amount: n,
+        gameId: reward.kind === "coins" ? reward.gameId : "",
+        badgeId: "",
+        read: false,
+        createdAt: serverTimestamp(),
+      });
+    }
+    await batch.commit();
+    done += Math.min(step, uids.length - i);
+  }
+  return done;
+}
+
+/** Close every room at once, live or not. The emergency brake. */
+export async function closeAllRooms(roomIds: string[]): Promise<number> {
+  return purgeRooms(roomIds);
+}
+
+// -- one player ----------------------------------------------------------------
+
+/** A plain note from an admin, into one player's inbox. */
+export async function sendNote(uid: string, title: string, body: string): Promise<void> {
+  await sendInboxMessage(uid, { kind: "note", title: title.trim() || "A message from PlayBuddies", body: body.trim() });
+}
+
+/** Set the match counters outright , a correction, not an increment. */
+export async function setStats(uid: string, gamesPlayed: number, wins: number): Promise<void> {
+  const games = Math.max(0, Math.round(gamesPlayed));
+  const w = Math.max(0, Math.min(games, Math.round(wins)));
+  await setDoc(doc(db, "users", uid), { stats: { gamesPlayed: games, wins: w } }, { merge: true });
+}
+
+/** Wipe today's daily-challenge record, so the three completions are available again. */
+export async function resetChallenges(uid: string): Promise<void> {
+  await updateDoc(doc(db, "users", uid), { challenges: deleteField() });
+}
+
+/** Empty one game's purse and shop unlocks for a player. */
+export async function resetGameWallet(uid: string, gameId: string): Promise<void> {
+  await updateDoc(doc(db, "users", uid), {
+    [`coins.${gameId}`]: deleteField(),
+    [`unlocks.${gameId}`]: deleteField(),
+  });
 }

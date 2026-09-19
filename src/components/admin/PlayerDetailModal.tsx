@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Bug, Coins, Gem, Loader2, Sparkles, Trophy, X } from "lucide-react";
 import { PLAYABLE_GAMES, getGame } from "@/lib/games";
 import { adjustCoins, adjustGems, setGrant } from "@/lib/adminActions";
+import PlayerControls from "./PlayerControls";
 import { topBadge } from "@/lib/badges";
 import type { BugReport } from "@/lib/bugs";
 import { timeAgo, type AdminUser } from "@/lib/adminMetrics";
@@ -278,6 +279,8 @@ export default function PlayerDetailModal({
               Until card payments are live, this is how a purchase gets credited.
             </p>
           </section>
+
+          <PlayerControls user={user} onChanged={onChanged} />
 
           {theirReports.length > 0 && (
             <section>

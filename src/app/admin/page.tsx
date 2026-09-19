@@ -15,7 +15,9 @@ import {
   RefreshCw,
   ShieldAlert,
   Signal,
+  SlidersHorizontal,
   Sun,
+  TrendingUp,
   Users,
 } from "lucide-react";
 import { useAuthStore } from "@/store/useAuthStore";
@@ -28,11 +30,15 @@ import GamesPanel from "@/components/admin/GamesPanel";
 import LivePanel from "@/components/admin/LivePanel";
 import SystemPanel from "@/components/admin/SystemPanel";
 import OverviewPanel from "@/components/admin/OverviewPanel";
+import LimitsPanel from "@/components/admin/LimitsPanel";
+import ControlPanel from "@/components/admin/ControlPanel";
 import { useAllUsers, useLiveLobbies, useNetworkHealth, useOnlineUids } from "@/lib/adminMetrics";
 import { watchAllReports, type BugReport } from "@/lib/bugs";
 
 const TABS = [
   { id: "overview", label: "Overview", icon: Gauge },
+  { id: "limits", label: "Limits & load", icon: TrendingUp },
+  { id: "control", label: "Control", icon: SlidersHorizontal },
   { id: "bugs", label: "Bug queue", icon: Bug },
   { id: "live", label: "Live rooms", icon: Activity },
   { id: "players", label: "Players", icon: Users },
@@ -207,6 +213,12 @@ function AdminShell() {
                 health={health}
                 onJump={setTab}
               />
+            )}
+            {tab === "limits" && (
+              <LimitsPanel users={users} reports={reports} lobbies={lobbies} health={health} />
+            )}
+            {tab === "control" && (
+              <ControlPanel users={users} lobbies={lobbies} onChanged={() => setRefreshKey((k) => k + 1)} />
             )}
             {tab === "bugs" && (
               <BugQueuePanel

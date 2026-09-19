@@ -5,6 +5,7 @@ import FriendsSidebar from "@/components/FriendsSidebar";
 import InviteListener from "@/components/InviteListener";
 import FriendRequestListener from "@/components/FriendRequestListener";
 import BugReportButton from "@/components/BugReportButton";
+import PlatformNotices from "@/components/PlatformNotices";
 
 /**
  * Global overlays, mounted only where they make sense.
@@ -29,6 +30,7 @@ export default function AppChrome() {
       {!hideBugButton && <BugReportButton />}
       <FriendRequestListener />
       <InviteListener />
+      <PlatformNotices />
     </>
   );
 }

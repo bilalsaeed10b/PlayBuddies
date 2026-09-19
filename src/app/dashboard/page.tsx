@@ -37,6 +37,7 @@ import Inbox from "@/components/Inbox";
 import DailyChallenges from "@/components/DailyChallenges";
 import GemStore, { GemBalance } from "@/components/GemStore";
 import { useGemAccount } from "@/hooks/useGemAccount";
+import { usePlatformConfig } from "@/lib/platformConfig";
 
 const CREATE_LOBBY_TIMEOUT_MS = 12_000;
 
@@ -72,6 +73,14 @@ export default function DashboardPage() {
   const [profileOpen, setProfileOpen] = useState(false);
   const [gemStoreOpen, setGemStoreOpen] = useState(false);
   const gemAccount = useGemAccount();
+  // The admin panel's platform switches. Admins are never held back by them,
+  // so a maintenance switch flipped by mistake can still be flipped back.
+  const platform = usePlatformConfig(Boolean(user));
+  const holdDoors = platform.maintenance.on && !isAdminUser(user);
+  const openGames = useMemo(
+    () => PLAYABLE_GAMES.filter((g) => !platform.disabledGames[g.id] || isAdminUser(user)),
+    [platform.disabledGames, user],
+  );
   const profileRef = useRef<HTMLDivElement>(null);
   // Read once on mount: localStorage isn't available during the server render,
   // and reading it in the body would make the first paint mismatch.
@@ -147,6 +156,14 @@ export default function DashboardPage() {
 
   const createLobby = async (gameId: string | null = null) => {
     if (!user || isCreating) return;
+    if (holdDoors) {
+      setCreateError(platform.maintenance.message || "New games are paused for maintenance. Try again shortly.");
+      return;
+    }
+    if (typeof gameId === "string" && platform.disabledGames[gameId] && !isAdminUser(user)) {
+      setCreateError("That game is switched off for now.");
+      return;
+    }
     setIsCreating(true);
     setCreateError("");
 
@@ -204,6 +221,10 @@ export default function DashboardPage() {
     const code = normalizeRoomCode(joinCode);
     if (!isValidRoomCode(code)) {
       setJoinError("That code doesn't look right. It's 6 letters and numbers.");
+      return;
+    }
+    if (holdDoors) {
+      setJoinError(platform.maintenance.message || "Joining is paused for maintenance. Try again shortly.");
       return;
     }
     setJoinError("");
@@ -485,7 +506,7 @@ export default function DashboardPage() {
               </h2>
             </div>
             <div className="flex flex-wrap gap-6">
-              {PLAYABLE_GAMES.map((game, index) => (
+              {openGames.map((game, index) => (
                 <motion.div
                   key={game.id}
                   initial={{ opacity: 0, scale: 0.9 }}
