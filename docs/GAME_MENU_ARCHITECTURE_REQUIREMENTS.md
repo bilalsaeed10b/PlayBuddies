@@ -1,9 +1,9 @@
-# PlayBuddies — Universal Game Menu & Lobby Architecture Requirements
+# PlayWithBuddies — Universal Game Menu & Lobby Architecture Requirements
 
 ## 1. Executive Summary & Design Vision
 
 ### 1.1 The Core Problem
-Currently, game lobbies in PlayBuddies present an overwhelming "kitchen-sink" screen upon launch. Players are immediately confronted with:
+Currently, game lobbies in PlayWithBuddies present an overwhelming "kitchen-sink" screen upon launch. Players are immediately confronted with:
 - Simultaneous character selection, hull/skin picking, and inventory customization.
 - Cluttered sub-menus for game rules, timers, weather, AI bots, and team management.
 - Popups and modals competing for screen real estate (e.g., rules modals, weather selectors, settings dialogues).
@@ -11,7 +11,7 @@ Currently, game lobbies in PlayBuddies present an overwhelming "kitchen-sink" sc
 - Lack of clear visual hierarchy and pacing before entering a match.
 
 ### 1.2 The Design Vision: Progressive Stage-Based Flow
-To create a high-polish, arcade-grade user experience, all games across PlayBuddies will transition to a **4-Stage Progressive Menu Pipeline**:
+To create a high-polish, arcade-grade user experience, all games across PlayWithBuddies will transition to a **4-Stage Progressive Menu Pipeline**:
 
 ```mermaid
 graph LR
@@ -155,7 +155,7 @@ interface RoomLobbyDocument {
 
 ## 4. Game-by-Game Specific Requirements
 
-Below is the concrete blueprint for each of the 8 games across PlayBuddies.
+Below is the concrete blueprint for each of the 8 games across PlayWithBuddies.
 
 ---
 

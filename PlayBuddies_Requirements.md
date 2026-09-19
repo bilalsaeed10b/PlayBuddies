@@ -1,7 +1,7 @@
-﻿# PlayBuddies , Complete Product Requirements & Technical Architecture
+﻿# PlayWithBuddies , Complete Product Requirements & Technical Architecture
 
 **Author:** Bilal Saeed  
-**Project Name:** PlayBuddies  
+**Project Name:** PlayWithBuddies  
 **Type:** Real-time Web Multiplayer Gaming Platform  
 **Version:** 1.0  
 **Last Updated:** March 22, 2026  
@@ -10,7 +10,7 @@
 
 ## 1. Project Overview
 
-**PlayBuddies** is a premium web-based multiplayer gaming platform where users log in with their Google account, browse an arcade of 8–10 curated mini-games, invite friends via shareable room codes or links, and play together in real-time. The platform prioritizes low-latency gameplay, modular game architecture, and a stunning modern UI.
+**PlayWithBuddies** is a premium web-based multiplayer gaming platform where users log in with their Google account, browse an arcade of 8–10 curated mini-games, invite friends via shareable room codes or links, and play together in real-time. The platform prioritizes low-latency gameplay, modular game architecture, and a stunning modern UI.
 
 ### 1.1 Core Value Proposition
 - **Instant Play** , No downloads, no installs. Log in and play in seconds.
@@ -106,7 +106,7 @@
 ### 3.2 Directory Structure
 
 ```
-PlayBuddies/
+PlayWithBuddies/
 ├── apps/
 │   └── web/                        # Next.js frontend
 │       ├── app/
@@ -145,7 +145,7 @@ PlayBuddies/
 │       │   ├── lobbyStore.ts
 │       │   └── gameStore.ts
 │       ├── public/
-│       │   ├── logo.svg               # PlayBuddies logo
+│       │   ├── logo.svg               # PlayWithBuddies logo
 │       │   └── games/                 # Game thumbnails
 │       ├── tailwind.config.ts
 │       ├── next.config.ts
@@ -223,7 +223,7 @@ PlayBuddies/
 ### 4.1 Flow
 
 ```
-User opens PlayBuddies.com
+User opens PlayWithBuddies.com
         │
         ▼
   ┌──────────────┐         ┌──────────────┐
@@ -877,5 +877,5 @@ From analyzing the existing codebase in `games/fireboy-watergirl/`:
 
 ---
 
-*This document serves as the master blueprint for building PlayBuddies. Each section should be implemented incrementally, starting with auth → dashboard → lobby → game container → individual games.*
+*This document serves as the master blueprint for building PlayWithBuddies. Each section should be implemented incrementally, starting with auth → dashboard → lobby → game container → individual games.*
 

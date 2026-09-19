@@ -1,6 +1,6 @@
 # Quoridor
 
-A nine-by-nine race for PlayBuddies. Step one square a turn, or spend a wall
+A nine-by-nine race for PlayWithBuddies. Step one square a turn, or spend a wall
 and make somebody else's crossing longer. Two players with ten walls each, or
 four with five.
 
@@ -76,7 +76,7 @@ into two documents.
 
 ## Where the coins go
 
-The purse is the account's, not the browser's: the game asks the PlayBuddies
+The purse is the account's, not the browser's: the game asks the PlayWithBuddies
 page it is embedded in (`src/platform/wallet.ts`) and falls back to
 localStorage when opened on its own. Coins are shared across every game on the
 platform. Here they buy pawn shapes and nothing else , the seat colour is what

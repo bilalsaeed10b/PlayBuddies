@@ -44,7 +44,7 @@ const log = createLogger('mini-golf');
  *
  * This game never shows a login screen and never asks for a room code. It
  * reads the room it was handed in the query string, writes only its own slot
- * in it, and lets PlayBuddies decide who is in the round.
+ * in it, and lets PlayWithBuddies decide who is in the round.
  */
 interface Handoff {
   room: string;
@@ -149,7 +149,7 @@ export default function App() {
    * The purse belongs to the account, not to this browser.
    *
    * localStorage is still read first so the shop is never blank while the
-   * handshake with PlayBuddies is in flight, and it is still written on every
+   * handshake with PlayWithBuddies is in flight, and it is still written on every
    * change so the game works opened on its own. It is a cache now rather than
    * the record.
    */
@@ -189,7 +189,7 @@ export default function App() {
     return saved ? { ...DEFAULT_RULES, ...JSON.parse(saved) } : DEFAULT_RULES;
   });
 
-  // The coin balance is shared with the rest of PlayBuddies on purpose. Coins
+  // The coin balance is shared with the rest of PlayWithBuddies on purpose. Coins
   // earned in one game are worth something in the next, which is the only
   // thing that makes a single-player shop feel like part of a platform.
   //
@@ -673,7 +673,7 @@ export default function App() {
     screen = (
       <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center">
         <h2 className="text-2xl font-black">{lobbyError}</h2>
-        <p className="text-sm text-white/60">Head back to the PlayBuddies lobby and try again.</p>
+        <p className="text-sm text-white/60">Head back to the PlayWithBuddies lobby and try again.</p>
       </div>
     );
   } else if (!local && (!authChecked || !uid || !lobby)) {
@@ -739,7 +739,7 @@ export default function App() {
             stay out of the ponds, and get down in fewer than everybody else.
             {!online && (
               <span className="mt-1 block text-white/35">
-                Playing online? Start a lobby on PlayBuddies and pick this game.
+                Playing online? Start a lobby on PlayWithBuddies and pick this game.
               </span>
             )}
           </p>

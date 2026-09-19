@@ -1,6 +1,6 @@
 /**
  * The ships: fourteen hulls, three free, the rest bought with the coins the rest
- * of PlayBuddies pays out.
+ * of PlayWithBuddies pays out.
  *
  * They are skins and nothing else. Not one of them fires further, turns faster
  * or takes less damage, and none ever will: this is a game two people play
@@ -61,7 +61,7 @@ export interface ShipSkin {
   glow?: string;
   ornament?: 'dragon' | 'coral' | 'forge' | 'seraph' | 'leviathan' | 'eclipse' | 'firefly' | 'tempest';
   /**
-   * Not for sale: flown only by a captain holding this PlayBuddies badge.
+   * Not for sale: flown only by a captain holding this PlayWithBuddies badge.
    *
    * The badge is the price. Both tester tiers are earned by getting bug
    * reports approved, and an admin grants them (see src/lib/badges.ts), so

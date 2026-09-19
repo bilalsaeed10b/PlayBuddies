@@ -3,7 +3,7 @@
 An underwater arena for up to eight players. Start as a minnow, eat anything
 smaller, avoid anything bigger.
 
-This is a PlayBuddies game, not a standalone app. The platform launches it in an
+This is a PlayWithBuddies game, not a standalone app. The platform launches it in an
 iframe with the room in the query string:
 
 ```
@@ -15,7 +15,7 @@ on one keyboard) so you can develop it without a lobby.
 
 ## How the multiplayer works
 
-There is no game server , PlayBuddies is a static site. Instead:
+There is no game server , PlayWithBuddies is a static site. Instead:
 
 - **Firestore** holds the lobby (`lobbies/{room}`). This game only ever writes
   `players.{uid}.fishIndex`, plus `matchStarted` if it is the host.

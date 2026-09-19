@@ -34,7 +34,7 @@ export function MainMenu({
   title: ReactNode;
   /** Top-right buttons: coins, fullscreen, leave. */
   toolbar?: ReactNode;
-  /** Opened from a PlayBuddies room. */
+  /** Opened from a PlayWithBuddies room. */
   online: boolean;
   isHost: boolean;
   hostName?: string;

@@ -1,6 +1,6 @@
 ﻿# Battle of Pirates , Requirements
 
-A turn-based artillery duel for PlayBuddies. One or two players, against a bot,
+A turn-based artillery duel for PlayWithBuddies. One or two players, against a bot,
 across a room, or across the internet.
 
 This document is the contract the implementation is written against. Where a
@@ -31,7 +31,7 @@ netcode problem to solve**.
 |---|---|---|
 | **Solo** | 1 human vs 1 bot | Menu → Solo |
 | **Couch** | 2 humans, one device | Menu → Two captains, one device |
-| **Online 1v1** | 2 humans | PlayBuddies lobby, 2 players |
+| **Online 1v1** | 2 humans | PlayWithBuddies lobby, 2 players |
 
 - **R2.1** The mode is never chosen twice. Launched with a `room` query
   parameter it is online; without one the player picks Solo or Couch.
@@ -188,7 +188,7 @@ is the powder.
   it can be switched off entirely for the harder game.
 - **R7.7** The first touch of a battle requests fullscreen, because the
   Fullscreen API only grants a request that is handling a real user gesture.
-  Skipped while embedded: PlayBuddies drives fullscreen for the whole frame.
+  Skipped while embedded: PlayWithBuddies drives fullscreen for the whole frame.
 - **R7.8** A turn clock skips the turn after 12 seconds, so an
   online battle cannot be held hostage by someone who has walked away. It can
   be turned off.

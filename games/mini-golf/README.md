@@ -1,6 +1,6 @@
 # Mini Golf
 
-Top-down golf for PlayBuddies. A small green seen from directly above, a flag
+Top-down golf for PlayWithBuddies. A small green seen from directly above, a flag
 somewhere across it, one ball each. Drag back and let go.
 
 ## Running it
@@ -176,7 +176,7 @@ into two documents.
 
 ## Where the coins go
 
-The purse is the account's, not the browser's: the game asks the PlayBuddies
+The purse is the account's, not the browser's: the game asks the PlayWithBuddies
 page it is embedded in (`src/platform/wallet.ts`) and falls back to
 localStorage when opened on its own. Coins are per game, the same as the ball
 patterns they buy , what mini-golf pays out cannot be spent in Quoridor. Here

@@ -250,7 +250,7 @@ export async function closeAllRooms(roomIds: string[]): Promise<number> {
 
 /** A plain note from an admin, into one player's inbox. */
 export async function sendNote(uid: string, title: string, body: string): Promise<void> {
-  await sendInboxMessage(uid, { kind: "note", title: title.trim() || "A message from PlayBuddies", body: body.trim() });
+  await sendInboxMessage(uid, { kind: "note", title: title.trim() || "A message from PlayWithBuddies", body: body.trim() });
 }
 
 /** Set the match counters outright , a correction, not an increment. */

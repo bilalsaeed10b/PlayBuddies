@@ -52,7 +52,7 @@ const log = createLogger('last-gasp');
  *
  * This game never shows a login screen and never asks for a room code. It
  * reads the room it was handed in the query string, writes only its own slot
- * in it, and lets PlayBuddies decide who is in the game.
+ * in it, and lets PlayWithBuddies decide who is in the game.
  */
 interface Handoff {
   room: string;
@@ -579,7 +579,7 @@ export default function App() {
     screen = (
       <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center">
         <h2 className="text-2xl font-black text-slate-100">{lobbyError}</h2>
-        <p className="text-sm text-slate-400">Head back to the PlayBuddies lobby and try again.</p>
+        <p className="text-sm text-slate-400">Head back to the PlayWithBuddies lobby and try again.</p>
       </div>
     );
   } else if (!local && (!authChecked || !uid || !lobby)) {

@@ -10,7 +10,7 @@ import { steadyInterval } from '@shared/net/steadyTimer';
  * Database, with Realtime Database as the relay for any pair that cannot
  * connect directly.
  *
- * Why a mesh and not a server: PlayBuddies is a static site. There is no game
+ * Why a mesh and not a server: PlayWithBuddies is a static site. There is no game
  * server to run authority on, and routing 8 players' positions through
  * Firestore at even 10Hz is roughly 5,000 billed writes a minute *per room* ,
  * the single largest cost in the whole platform. Peer-to-peer traffic costs

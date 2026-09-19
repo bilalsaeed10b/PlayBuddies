@@ -45,7 +45,7 @@ const log = createLogger('tower-siege');
  *
  * This game never shows a login screen and never asks for a room code. It
  * reads the room it was handed in the query string, writes only its own slot
- * in it, and lets PlayBuddies decide who is in the match.
+ * in it, and lets PlayWithBuddies decide who is in the match.
  */
 interface Handoff {
   room: string;
@@ -140,7 +140,7 @@ const SOLO_RULES: MatchRules = { ...DEFAULT_RULES, mode: 'alliance', players: 1 
 interface LobbyPerson {
   uid: string;
   displayName: string;
-  /** Written by the PlayBuddies lobby, not by this game. */
+  /** Written by the PlayWithBuddies lobby, not by this game. */
   photoURL?: string;
   /** The platform's own ready flag: opt-out by default, and writable by its owner alone. */
   isReady?: boolean;
@@ -337,7 +337,7 @@ export default function App() {
       .map((p) => ({
         uid: p.uid,
         displayName: p.displayName || 'Player',
-        /** Everyone joins a PlayBuddies room ready, so only a deliberate un-ready reads as false. */
+        /** Everyone joins a PlayWithBuddies room ready, so only a deliberate un-ready reads as false. */
         ready: p.isReady !== false,
       }));
   }, [lobby, rules.players]);

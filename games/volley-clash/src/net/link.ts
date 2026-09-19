@@ -2,7 +2,7 @@
  * One wire, two ways to carry it.
  *
  * The mesh is the wire this game wants: peer-to-peer, sub-50ms, free. What it
- * is not is *reliable to establish*. PlayBuddies ships no TURN server, so two
+ * is not is *reliable to establish*. PlayWithBuddies ships no TURN server, so two
  * players behind unhelpful NATs , a phone on mobile data and a laptop on office
  * wifi is the usual pair , can hold a perfectly good signalling conversation
  * and still never open a data channel.

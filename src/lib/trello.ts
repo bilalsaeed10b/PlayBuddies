@@ -129,7 +129,7 @@ export function cardDescription(report: BugReport): string {
     "",
     "</details>",
     "",
-    `_Filed from the PlayBuddies admin panel · report ${report.id}_`,
+    `_Filed from the PlayWithBuddies admin panel · report ${report.id}_`,
   ];
   return lines.filter((l) => l !== "").join("\n");
 }

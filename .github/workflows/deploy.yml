@@ -1,4 +1,4 @@
-name: Deploy PlayBuddies to Pages
+name: Deploy PlayWithBuddies to Pages
 
 on:
   push:

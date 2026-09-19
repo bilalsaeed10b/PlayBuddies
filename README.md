@@ -1,4 +1,4 @@
-﻿# PlayBuddies
+﻿# PlayWithBuddies
 
 A web platform for playing browser games with friends. Google sign-in, shareable
 room codes, real-time lobbies.

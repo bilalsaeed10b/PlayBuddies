@@ -2,9 +2,9 @@ import type { Metadata } from "next";
 import LegalPage, { Points, Section } from "@/components/LegalPage";
 
 export const metadata: Metadata = {
-  title: "Terms | PlayBuddies",
+  title: "Terms | PlayWithBuddies",
   description:
-    "The terms for using PlayBuddies. A free browser gaming site with original games, no purchases and no adverts.",
+    "The terms for using PlayWithBuddies. A free browser gaming site with original games, no purchases and no adverts.",
 };
 
 export default function TermsPage() {
@@ -12,11 +12,11 @@ export default function TermsPage() {
     <LegalPage
       title="Terms"
       updated="21 August 2026"
-      intro="Plain terms for a free site. Using PlayBuddies means you are happy with what is written here."
+      intro="Plain terms for a free site. Using PlayWithBuddies means you are happy with what is written here."
     >
       <Section title="It is free, and it stays free">
         <p>
-          Every game on PlayBuddies is free to play in full. There is nothing to
+          Every game on PlayWithBuddies is free to play in full. There is nothing to
           buy, no subscription, no premium tier and no adverts. No part of the
           site is held back behind a payment, and you will never be asked for
           card details, because there is nothing here to charge you for.
@@ -42,7 +42,7 @@ export default function TermsPage() {
       </Section>
 
       <Section title="Playing fair">
-        <p>Keep it simple. While using PlayBuddies, do not:</p>
+        <p>Keep it simple. While using PlayWithBuddies, do not:</p>
         <Points
           items={[
             "Harass, threaten or abuse other players.",
@@ -59,7 +59,7 @@ export default function TermsPage() {
 
       <Section title="The games are original work">
         <p>
-          Every game here was written from scratch for PlayBuddies. The code, the
+          Every game here was written from scratch for PlayWithBuddies. The code, the
           artwork, the sounds, the level layouts and the physics are all original
           work. No assets, no source code, no characters, no music and no artwork
           have been taken from any other game, and nothing here is a reskin,
@@ -74,7 +74,7 @@ export default function TermsPage() {
           of these games what it is was built here.
         </p>
         <p>
-          PlayBuddies is not affiliated with, endorsed by, or connected to any
+          PlayWithBuddies is not affiliated with, endorsed by, or connected to any
           other game, studio or publisher, and does not claim to be. Any
           resemblance in a game name or theme is genre convention rather than a
           suggestion of any link.
@@ -88,7 +88,7 @@ export default function TermsPage() {
 
       <Section title="Availability">
         <p>
-          PlayBuddies is a hobby project. Games may be added, changed or removed,
+          PlayWithBuddies is a hobby project. Games may be added, changed or removed,
           the site may go down without warning, and there is no promise that it
           will be running tomorrow. Do not build anything you depend on around
           it.
@@ -99,7 +99,7 @@ export default function TermsPage() {
         <p>
           The site is offered as it is, with no guarantee that it will work, that
           it will be free of bugs, or that your progress will survive. To the
-          extent the law allows, PlayBuddies is not liable for anything that
+          extent the law allows, PlayWithBuddies is not liable for anything that
           follows from using it, including lost progress or lost coins. Since it
           costs you nothing, that is the fair trade.
         </p>

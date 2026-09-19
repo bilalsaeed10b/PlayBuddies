@@ -97,7 +97,7 @@ export default function PlatformNotices() {
         <div className="pointer-events-auto flex w-full max-w-xl items-center gap-2.5 rounded-2xl border border-amber-400/40 bg-amber-950/90 px-4 py-2.5 text-amber-50 shadow-2xl backdrop-blur">
           <Wrench size={16} className="shrink-0 text-amber-300" />
           <p className="text-xs font-bold leading-snug sm:text-sm">
-            {config.maintenance.message || "PlayBuddies is under maintenance. New games are paused for a moment."}
+            {config.maintenance.message || "PlayWithBuddies is under maintenance. New games are paused for a moment."}
             {admin && <span className="ml-1 font-normal text-amber-200/70">(admin: you can still play)</span>}
           </p>
         </div>

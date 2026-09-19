@@ -17,7 +17,7 @@ import { Avatar, Card, Empty, Pill, Stat } from "./ui";
 /**
  * Every room on the platform right now, and who is sitting in it.
  *
- * The hard part is the word "now". Nothing in PlayBuddies ever deletes a
+ * The hard part is the word "now". Nothing in PlayWithBuddies ever deletes a
  * lobby document, so `status: 'playing'` is not a fact about the present , it
  * is whatever the room was doing at the moment its last player closed the
  * tab, preserved for ever. Reading the collection raw showed 200 rooms and

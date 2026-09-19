@@ -1,6 +1,6 @@
 # Volley Clash
 
-Arcade beach volleyball for PlayBuddies. Solo against the bot, two on one
+Arcade beach volleyball for PlayWithBuddies. Solo against the bot, two on one
 keyboard, or online , 1v1, or 2v2 on a wider court.
 
 The full spec is in [REQUIREMENTS.md](./REQUIREMENTS.md); this is the map.
@@ -38,7 +38,7 @@ editing to add it.
 
 ## The two things worth knowing
 
-**The host owns the rules; you own your body.** PlayBuddies is a static site, so
+**The host owns the rules; you own your body.** PlayWithBuddies is a static site, so
 one player runs the score, the serve and the ball. But every machine simulates
 the entire match, and each player's own character is placed where *their* machine
 says it is , the packets carry the body and the input together. Nothing on your

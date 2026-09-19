@@ -659,7 +659,7 @@ export default function ProfilePage() {
                 <div>
                   <div className="flex items-center gap-2 mb-0.5">
                     <h3 className="text-lg font-black text-white">
-                      PlayBuddies
+                      PlayWithBuddies
                       <span className="text-amber-400">+</span>
                     </h3>
                     <span className="text-[10px] font-black bg-amber-500/20 text-amber-300 border border-amber-500/30 rounded-full px-2 py-0.5 uppercase tracking-widest">

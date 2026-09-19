@@ -2,9 +2,9 @@ import type { Metadata } from "next";
 import LegalPage, { Points, Section } from "@/components/LegalPage";
 
 export const metadata: Metadata = {
-  title: "Privacy | PlayBuddies",
+  title: "Privacy | PlayWithBuddies",
   description:
-    "What PlayBuddies stores, why it stores it, and everything it deliberately does not collect. No ads, no trackers, no analytics.",
+    "What PlayWithBuddies stores, why it stores it, and everything it deliberately does not collect. No ads, no trackers, no analytics.",
 };
 
 export default function PrivacyPage() {
@@ -12,7 +12,7 @@ export default function PrivacyPage() {
     <LegalPage
       title="Privacy"
       updated="11 September 2026"
-      intro="PlayBuddies is a free hobby project. It is not funded by advertising and it does not make money from anyone who visits, so there is no reason for it to gather anything about you beyond what it takes to sign you in and put you in a room with your friends."
+      intro="PlayWithBuddies is a free hobby project. It is not funded by advertising and it does not make money from anyone who visits, so there is no reason for it to gather anything about you beyond what it takes to sign you in and put you in a room with your friends."
     >
       <Section title="The short version">
         <p>
@@ -88,8 +88,8 @@ export default function PrivacyPage() {
             "Advertising identifiers, tracking cookies or fingerprinting of any kind.",
             "Analytics. No page view counts, no session recordings, no heatmaps, no visitor statistics.",
             "Your location, your contacts, your browsing history or anything else on your device.",
-            "Payment details. Nothing on PlayBuddies is for sale, so there is nothing to pay with.",
-            "A PlayBuddies account record for visitors who never sign in. Hosting providers may process ordinary request and connection logs.",
+            "Payment details. Nothing on PlayWithBuddies is for sale, so there is nothing to pay with.",
+            "A PlayWithBuddies account record for visitors who never sign in. Hosting providers may process ordinary request and connection logs.",
           ]}
         />
       </Section>
@@ -116,7 +116,7 @@ export default function PrivacyPage() {
 
       <Section title="Children">
         <p>
-          PlayBuddies is suitable for all ages and does not show adverts or ask
+          PlayWithBuddies is suitable for all ages and does not show adverts or ask
           for personal details beyond the Google sign-in. It is not aimed
           specifically at children and does not knowingly build profiles of
           anyone, of any age.

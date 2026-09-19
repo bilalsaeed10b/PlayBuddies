@@ -29,7 +29,7 @@ function subscribe(listener: () => void): () => void {
  * Light/dark for the admin panel only.
  *
  * This is deliberately not a site-wide theme system. Every other screen in
- * PlayBuddies is written with hardcoded dark colors, not theme tokens, so
+ * PlayWithBuddies is written with hardcoded dark colors, not theme tokens, so
  * "add light mode" for the whole app would mean re-touching every page. The
  * admin panel was built today on a small, contained set of components, which
  * is what makes scoping the toggle to just `/admin` cheap and safe rather

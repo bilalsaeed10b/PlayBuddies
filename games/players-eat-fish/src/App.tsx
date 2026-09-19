@@ -22,7 +22,7 @@ import { GameWallet, reportResult, reportRun } from './platform/wallet';
  *
  * This game used to ship its own Firebase project, its own Google sign-in, its
  * own room codes and its own waiting room , none of which knew anything about
- * the PlayBuddies lobby that launched it. Everything here now reads the room it
+ * the PlayWithBuddies lobby that launched it. Everything here now reads the room it
  * was handed in the query string and writes only its own slot in it.
  */
 interface Handoff {
@@ -87,7 +87,7 @@ export default function App() {
    * The purse belongs to the account, not to this browser.
    *
    * localStorage is read first so the shop is never blank while the handshake
-   * with PlayBuddies is in flight, and written on every change so the game
+   * with PlayWithBuddies is in flight, and written on every change so the game
    * still works opened on its own. It is a cache now rather than the record.
    */
   const wallet = useMemo(() => new GameWallet('players-eat-fish', 'fishy_unlocked'), []);
@@ -408,7 +408,7 @@ export default function App() {
     screen = (
       <div className="flex h-full flex-col items-center justify-center gap-3 overflow-y-auto p-6 text-center">
         <h2 className="text-2xl font-black">{lobbyError}</h2>
-        <p className="text-sm text-slate-600">Head back to the PlayBuddies lobby and try again.</p>
+        <p className="text-sm text-slate-600">Head back to the PlayWithBuddies lobby and try again.</p>
       </div>
     );
   } else if (!local && (!authChecked || !uid || !lobby)) {
@@ -480,7 +480,7 @@ export default function App() {
           <p className="max-w-md text-center text-[11px] leading-relaxed text-slate-600 short:hidden">
             Steer with WASD or the arrow keys, point with the mouse, or drag anywhere on a touchscreen. Sharing one
             keyboard? Game Settings picks who gets which keys.
-            {!online && ' Playing online? Start a lobby on PlayBuddies and pick this game.'}
+            {!online && ' Playing online? Start a lobby on PlayWithBuddies and pick this game.'}
           </p>
         }
       />

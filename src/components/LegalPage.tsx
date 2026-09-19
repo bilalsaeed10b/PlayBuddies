@@ -31,7 +31,7 @@ export default function LegalPage({
             className="inline-flex items-center gap-2 text-sm text-text-secondary transition-colors hover:text-white"
           >
             <ArrowLeft size={16} />
-            Back to PlayBuddies
+            Back to PlayWithBuddies
           </Link>
 
           <div className="mt-8 flex items-center gap-3">
@@ -64,7 +64,7 @@ export default function LegalPage({
               Terms
             </Link>
           </div>
-          <span>© 2026 PlayBuddies by Bilal Saeed</span>
+          <span>© 2026 PlayWithBuddies by Bilal Saeed</span>
         </footer>
       </div>
     </main>

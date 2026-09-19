@@ -1,6 +1,6 @@
 rules_version = '2';
 
-// PlayBuddies is a static site with no backend, so these rules are the ONLY
+// PlayWithBuddies is a static site with no backend, so these rules are the ONLY
 // thing standing between a browser and the database. Assume every client is
 // hostile: the Firebase config, the collection names and the document shapes
 // are all visible in the shipped bundle.
@@ -90,7 +90,7 @@ service cloud.firestore {
        * A match result: one game played, at most one win.
        *
        * This used to be refused outright, on the grounds that stats belong to
-       * trusted code. There is no trusted code: PlayBuddies is a static site
+       * trusted code. There is no trusted code: PlayWithBuddies is a static site
        * with no server and no Cloud Functions, so refusing the write did not
        * make the counters trustworthy, it only made them permanently zero.
        *

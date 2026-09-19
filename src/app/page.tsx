@@ -149,7 +149,7 @@ function handleLoginError(error: unknown) {
   const code = (error as { code?: string })?.code;
   if (code === "auth/popup-closed-by-user" || code === "auth/cancelled-popup-request") return;
   alert(code === "auth/unauthorized-domain"
-    ? "Sign-in is not available at this address yet. Please use the main PlayBuddies site."
+    ? "Sign-in is not available at this address yet. Please use the main PlayWithBuddies site."
     : "Could not sign in. Please try again.");
 }
 
@@ -819,7 +819,7 @@ function FeaturesSection() {
           <motion.div className="inline-flex items-center gap-2 px-4 py-2 rounded-full glass mb-6">
             <Sparkles size={14} className="text-accent" />
             <span className="text-xs font-semibold text-text-secondary tracking-wider uppercase">
-              Why PlayBuddies
+              Why PlayWithBuddies
             </span>
           </motion.div>
           <h2 className="text-4xl md:text-6xl font-black font-[family-name:var(--font-display)] tracking-tight mb-4">
@@ -1075,7 +1075,7 @@ function Footer() {
 
           {/* Copyright */}
           <div className="text-sm text-text-muted">
-            © 2026 PlayBuddies by Bilal Saeed
+            © 2026 PlayWithBuddies by Bilal Saeed
           </div>
         </div>
       </div>

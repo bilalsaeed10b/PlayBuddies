@@ -8,7 +8,7 @@
  *    the ball never moves further in one step than its own radius, which is
  *    what makes floor detection reliable at spike speed.
  *
- * 2. **The host is the authority.** PlayBuddies is a static site with no game
+ * 2. **The host is the authority.** PlayWithBuddies is a static site with no game
  *    server, so one of the players is the server. The host runs every rule;
  *    everyone else runs the same physics purely so the picture is smooth, and
  *    is continuously corrected toward the host's snapshots. Rules , points,

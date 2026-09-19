@@ -1,5 +1,5 @@
 /**
- * Extra ICE servers from PlayBuddies' own TURN relay, for the pairs STUN
+ * Extra ICE servers from PlayWithBuddies' own TURN relay, for the pairs STUN
  * alone cannot connect , two NATs that both block unsolicited inbound
  * traffic, which a mobile carrier or a locked-down office network does
  * often enough that "multiplayer doesn't work" used to be a normal

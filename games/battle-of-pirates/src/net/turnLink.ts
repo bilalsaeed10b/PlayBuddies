@@ -1,7 +1,7 @@
 /**
  * The wire, which is a single Firestore document each.
  *
- * The other PlayBuddies games open a WebRTC mesh, because a volleyball or a
+ * The other PlayWithBuddies games open a WebRTC mesh, because a volleyball or a
  * shoal of fish needs twenty position updates a second and routing those
  * through Firestore would be the largest bill on the platform. A turn-based
  * duel needs nothing of the sort: one shot is one write, and a whole match is

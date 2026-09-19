@@ -12,7 +12,7 @@ import { rtdb } from "@/lib/firebase";
  * per change, where a Firestore one bills a read per open tab every time the
  * admin touches a switch. See database.rules.json for who may read and write.
  *
- * These are *soft* controls. PlayBuddies has no server, so maintenance mode and
+ * These are *soft* controls. PlayWithBuddies has no server, so maintenance mode and
  * a disabled game are enforced by the pages that read them, not by the
  * database; a hand-edited client could ignore them. They are for steering an
  * honest crowd , closing the doors before a deploy, pulling a broken game

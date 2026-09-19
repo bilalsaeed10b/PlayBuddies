@@ -1,6 +1,6 @@
 ﻿# Battle of Pirates
 
-A turn-based artillery duel for PlayBuddies. Two ships, one stretch of open
+A turn-based artillery duel for PlayWithBuddies. Two ships, one stretch of open
 water, one cannon each. Drag back and let go.
 
 The full spec is in [REQUIREMENTS.md](./REQUIREMENTS.md); this is the map.

@@ -1,6 +1,6 @@
 # Volley Clash , Requirements
 
-A two-touch arcade volleyball game for PlayBuddies. One to four players, on a
+A two-touch arcade volleyball game for PlayWithBuddies. One to four players, on a
 keyboard, on a phone, or across the internet.
 
 This document is the contract the implementation is written against. Where a
@@ -19,7 +19,7 @@ ball, one rule ("don't let it land on your side"), and a skill ceiling that
 comes entirely from the physics rather than from content.
 
 It also has to survive the platform's hard constraint: **there is no game
-server.** PlayBuddies is a static site. Every design decision below that looks
+server.** PlayWithBuddies is a static site. Every design decision below that looks
 unusual is downstream of that.
 
 ---
@@ -30,8 +30,8 @@ unusual is downstream of that.
 |---|---|---|---|
 | **Solo** | 1 human vs 1 AI | Standard | Menu → Solo |
 | **Couch** | 2 humans, one keyboard | Standard | Menu → Couch |
-| **Online 1v1** | 2 humans | Standard | PlayBuddies lobby, 2 players |
-| **Online 2v2** | 4 humans, two teams | **Wide** | PlayBuddies lobby, 3–4 players |
+| **Online 1v1** | 2 humans | Standard | PlayWithBuddies lobby, 2 players |
+| **Online 2v2** | 4 humans, two teams | **Wide** | PlayWithBuddies lobby, 3–4 players |
 
 Rules that follow from the table:
 
@@ -216,7 +216,7 @@ worth playing.
 | Touch | Drag anywhere in the left half | Tap the right half | , | , |
 
 - **R8.1** On a touchscreen the whole screen is the controller, and it is the
-  **same scheme Neon Elements uses**, so one PlayBuddies game teaches you how to
+  **same scheme Neon Elements uses**, so one PlayWithBuddies game teaches you how to
   hold the next: the left half is a joystick that appears under your thumb and
   steers left/right only, the right half is jump. Both halves work at once. No
   floating buttons , a button beside the court is a target you have to find, and

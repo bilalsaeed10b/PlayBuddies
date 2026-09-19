@@ -1,4 +1,4 @@
-﻿# PlayBuddies , Business Model, Hosting Costs & Monetization Plan
+﻿# PlayWithBuddies , Business Model, Hosting Costs & Monetization Plan
 
 > **Goal:** Earn money through **ads only** (no game sales, no in-game purchases). Serve **up to 5,000 players** with **zero lag** in real-time multiplayer.
 
@@ -16,7 +16,7 @@
 | **Net Profit/Loss** | **$5–35** | **$100–300** | **$325–825** |
 
 > [!IMPORTANT]
-> PlayBuddies **can be profitable at just ~500 MAU** if you choose the cheapest hosting option and your traffic is from Tier-1 countries (US, UK, EU). The real question isn't "can I earn?" , it's "how fast can I grow to 3,000+ MAU?"
+> PlayWithBuddies **can be profitable at just ~500 MAU** if you choose the cheapest hosting option and your traffic is from Tier-1 countries (US, UK, EU). The real question isn't "can I earn?" , it's "how fast can I grow to 3,000+ MAU?"
 
 ---
 
@@ -112,7 +112,7 @@ Best for: **Production-ready, cost-effective at scale**
 
 Since you want to earn through **ads only** (no game sales, no in-app purchases), here's exactly how to implement it.
 
-### 2.1 Ad Formats for PlayBuddies
+### 2.1 Ad Formats for PlayWithBuddies
 
 | Ad Format | Where to Show | Expected eCPM (Tier-1) | Expected eCPM (Tier-3) | Player Impact |
 |-----------|---------------|----------------------|----------------------|---------------|
@@ -376,7 +376,7 @@ If you ever want to add revenue streams beyond ads, here are **player-friendly**
 
 2. **Are you open to eventually adding an optional "ad-free" subscription?** This doesn't involve selling games but gives players the *choice* to pay $2–3/month to remove ads. It's the most player-friendly upsell and can add 10–20% to your revenue.
 
-3. **Do you want to publish individual games on platforms like Poki/CrazyGames?** This gets you free traffic + ad revenue from their platform. The games would still live on PlayBuddies too , it's additive, not exclusive.
+3. **Do you want to publish individual games on platforms like Poki/CrazyGames?** This gets you free traffic + ad revenue from their platform. The games would still live on PlayWithBuddies too , it's additive, not exclusive.
 
 4. **What's your initial marketing plan?** The business model only works if you can get players. The invite-link system is great for viral growth, but you'll need a seed audience. Are you planning to promote on Reddit, Discord gaming servers, Twitter/X, TikTok, etc.?
 

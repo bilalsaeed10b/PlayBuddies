@@ -14,7 +14,7 @@ import { hasConnections } from "@/lib/presence";
 /**
  * What the admin panel can actually know, and what it only estimates.
  *
- * PlayBuddies has no server, so the panel is just another signed-in client
+ * PlayWithBuddies has no server, so the panel is just another signed-in client
  * with wider read rules. That is a real limit and it is surfaced rather than
  * papered over:
  *

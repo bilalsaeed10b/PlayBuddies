@@ -52,7 +52,7 @@ export interface LogEntry {
   data?: Record<string, unknown>;
 }
 
-/** Message understood by the PlayBuddies lobby shell around every game. */
+/** Message understood by the PlayWithBuddies lobby shell around every game. */
 const REMOTE_MESSAGE = 'diagnostics';
 
 /** How many entries to keep in memory for a manual dump when there is no collector. */
@@ -134,7 +134,7 @@ class Logger {
       this.inConsole = false;
     }
 
-    // A production game is framed by the authenticated PlayBuddies lobby.
+    // A production game is framed by the authenticated PlayWithBuddies lobby.
     // Even after the same-origin /__log endpoint proves absent on GitHub
     // Pages, that parent remains a working route to the remote collector.
     if (!this.shipping && !this.hasParentCollector()) return;

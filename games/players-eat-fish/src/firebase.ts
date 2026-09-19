@@ -13,7 +13,7 @@ import {
 
 // Same project as the platform, so the lobby this game is launched from is the
 // lobby it reads. It used to point at its own separate Firebase app, which is
-// why nothing about its multiplayer could ever line up with PlayBuddies.
+// why nothing about its multiplayer could ever line up with PlayWithBuddies.
 //
 // The web config is public by design: it identifies the project, it does not
 // authorise anything , security rules do that.
