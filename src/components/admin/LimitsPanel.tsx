@@ -43,6 +43,7 @@ import {
   estimateDocBytes,
   formatBytes,
   isRoomLive,
+  seatedCount,
   type AdminUser,
   type LiveLobby,
   type NetworkHealth,
@@ -65,10 +66,12 @@ export default function LimitsPanel({
   reports,
   lobbies,
   health,
+  onlineUids,
 }: {
   users: AdminUser[];
   reports: BugReport[];
   lobbies: LiveLobby[];
+  onlineUids: ReadonlySet<string>;
   health: NetworkHealth;
 }) {
   const { user } = useAuthStore();
@@ -128,9 +131,9 @@ export default function LimitsPanel({
   };
 
   // -- what this panel can measure without Monitoring ------------------------
-  const live = lobbies.filter((l) => isRoomLive(l, now));
+  const live = lobbies.filter((l) => isRoomLive(l, now, onlineUids));
   const playing = live.filter((l) => l.status === "playing");
-  const inMatch = playing.reduce((n, l) => n + l.playerCount, 0);
+  const inMatch = playing.reduce((n, l) => n + seatedCount(l, onlineUids), 0);
   const estimates = useMemo(() => {
     const fsBytes = [...users, ...reports, ...lobbies].reduce((n, d) => n + estimateDocBytes(d), 0);
     const shots = reports.filter((r) => r.screenshotURL).length * 250 * 1024;
@@ -142,11 +145,11 @@ export default function LimitsPanel({
     for (const l of playing) {
       const row = m.get(l.gameId) ?? { rooms: 0, players: 0 };
       row.rooms += 1;
-      row.players += l.playerCount;
+      row.players += seatedCount(l, onlineUids);
       m.set(l.gameId, row);
     }
     return [...m.entries()].sort((a, b) => b[1].players - a[1].players);
-  }, [playing]);
+  }, [playing, onlineUids]);
 
   /** The measured value for a limit, or an estimate marked as one, or nothing. */
   const reading = (l: ServiceLimit): { used: number | null; estimated: boolean } => {

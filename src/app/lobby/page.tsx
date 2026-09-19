@@ -10,6 +10,7 @@ import AuthGuard from "@/components/AuthGuard";
 import { gameSelectionUpdate } from "@/lib/lobbySettings";
 import { db } from "@/lib/firebase";
 import { useFriends } from "@/hooks/useFriends";
+import { steadyInterval } from "@/lib/steadyTimer";
 import { useLobbyPresence, useFriendsOnline } from "@/hooks/usePresence";
 import { useRemoteDiagnostics } from "@/hooks/useRemoteDiagnostics";
 import { normalizeRoomCode, isValidRoomCode, LOBBY_TTL_MS, inviteTimestamps } from "@/lib/rooms";
@@ -417,8 +418,10 @@ function LobbyContent() {
       hostSeenAt: serverTimestamp(),
     }).catch((error) => console.error("Host heartbeat failed", error));
     void beat();
-    const timer = setInterval(beat, 10_000);
-    return () => clearInterval(timer);
+    // Worker-driven: a host who tabs away keeps beating instead of being
+    // throttled to once a minute and read as an abandoned room.
+    const stop = steadyInterval(beat, 10_000);
+    return stop;
   }, [isHost, user, roomId]);
 
   useEffect(() => {

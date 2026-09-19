@@ -1,8 +1,11 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { Activity, AlertTriangle, Bug, Clock, Gauge, Signal, Users, Zap } from "lucide-react";
 import { CLOSED_STATUSES, type BugReport } from "@/lib/bugs";
 import {
+  isRoomLive,
+  seatedCount,
   oldestAgeHours,
   timeAgo,
   workloadScore,
@@ -24,9 +27,11 @@ export default function OverviewPanel({
   users,
   lobbies,
   onlineCount,
+  onlineUids,
   health,
   onJump,
 }: {
+  onlineUids: ReadonlySet<string>;
   reports: BugReport[];
   users: AdminUser[];
   lobbies: LiveLobby[];
@@ -38,8 +43,14 @@ export default function OverviewPanel({
   const critical = open.filter((r) => r.severity === "critical" || r.severity === "high");
   const load = workloadScore(open);
   const oldest = oldestAgeHours(open);
-  const activeRooms = lobbies.filter((l) => l.status === "playing");
-  const playersInRooms = lobbies.reduce((n, l) => n + l.playerCount, 0);
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 5000);
+    return () => clearInterval(t);
+  }, []);
+  const liveRooms = lobbies.filter((l) => isRoomLive(l, now, onlineUids));
+  const activeRooms = liveRooms.filter((l) => l.status === "playing");
+  const playersInRooms = liveRooms.reduce((n, l) => n + seatedCount(l, onlineUids), 0);
 
   const loadTone = load > 40 ? "bad" : load > 15 ? "warn" : "good";
   const rtt = health.firestoreRttMs;

@@ -67,12 +67,28 @@ export interface LiveLobby {
  * that a phone waking from sleep is not declared dead, short enough that a
  * room abandoned a minute ago stops being counted as a live match.
  */
-export const ROOM_STALE_MS = 60_000;
+export const ROOM_STALE_MS = 3 * 60_000;
+
+/**
+ * A quiet heartbeat is forgiven this long if a seated player is still online.
+ * A host who switched tabs gets its timers throttled to one a minute, so the
+ * beat alone called a room in full swing "stale" and the match count flickered.
+ */
+export const ROOM_ONLINE_GRACE_MS = 30 * 60_000;
 
 /** Whether a room's host was heard from recently enough to call it live. */
-export function isRoomLive(lobby: LiveLobby, now = Date.now()): boolean {
+export function isRoomLive(lobby: LiveLobby, now = Date.now(), online?: ReadonlySet<string>): boolean {
   const beat = lobby.hostSeenAt?.toMillis?.() ?? lobby.updatedAt?.toMillis?.() ?? 0;
-  return beat > 0 && now - beat <= ROOM_STALE_MS;
+  if (beat <= 0) return false;
+  const age = now - beat;
+  if (age <= ROOM_STALE_MS) return true;
+  return Boolean(online && age <= ROOM_ONLINE_GRACE_MS && lobby.players.some((p) => online.has(p.uid)));
+}
+
+/** Seats that are really occupied: with a presence set, only players still online. */
+export function seatedCount(lobby: LiveLobby, online?: ReadonlySet<string>): number {
+  if (!online || online.size === 0) return lobby.playerCount;
+  return lobby.players.filter((p) => online.has(p.uid)).length;
 }
 
 export interface AdminUser {

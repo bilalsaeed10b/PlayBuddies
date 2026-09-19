@@ -38,10 +38,12 @@ import { Avatar, Card, Pill } from "./ui";
 export default function ControlPanel({
   users,
   lobbies,
+  onlineUids,
   onChanged,
 }: {
   users: AdminUser[];
   lobbies: LiveLobby[];
+  onlineUids: ReadonlySet<string>;
   onChanged: () => void;
 }) {
   const config = usePlatformConfig(true);
@@ -86,7 +88,7 @@ export default function ControlPanel({
   const [rAmount, setRAmount] = useState(10);
   const [rReason, setRReason] = useState("");
 
-  const stale = lobbies.filter((l) => !isRoomLive(l));
+  const stale = lobbies.filter((l) => !isRoomLive(l, Date.now(), onlineUids));
   const suspendedIds = Object.keys(suspensions);
 
   return (

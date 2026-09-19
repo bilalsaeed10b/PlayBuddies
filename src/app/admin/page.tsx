@@ -210,15 +210,16 @@ function AdminShell() {
                 users={users}
                 lobbies={lobbies}
                 onlineCount={onlineSet.size}
+                onlineUids={onlineSet}
                 health={health}
                 onJump={setTab}
               />
             )}
             {tab === "limits" && (
-              <LimitsPanel users={users} reports={reports} lobbies={lobbies} health={health} />
+              <LimitsPanel users={users} reports={reports} lobbies={lobbies} health={health} onlineUids={onlineSet} />
             )}
             {tab === "control" && (
-              <ControlPanel users={users} lobbies={lobbies} onChanged={() => setRefreshKey((k) => k + 1)} />
+              <ControlPanel users={users} lobbies={lobbies} onlineUids={onlineSet} onChanged={() => setRefreshKey((k) => k + 1)} />
             )}
             {tab === "bugs" && (
               <BugQueuePanel

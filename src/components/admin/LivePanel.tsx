@@ -6,6 +6,7 @@ import { getGame } from "@/lib/games";
 import { closeRoom, purgeRooms } from "@/lib/adminActions";
 import {
   isRoomLive,
+  seatedCount,
   ROOM_STALE_MS,
   timeAgo,
   type LiveLobby,
@@ -63,11 +64,11 @@ export default function LivePanel({
 
   // Recomputed against the same ticking clock the host-quiet badge uses, so a
   // room crosses from live to stale on screen rather than at the next refresh.
-  const live = lobbies.filter((l) => isRoomLive(l, now));
-  const stale = lobbies.filter((l) => !isRoomLive(l, now));
+  const live = lobbies.filter((l) => isRoomLive(l, now, onlineUids));
+  const stale = lobbies.filter((l) => !isRoomLive(l, now, onlineUids));
   const playing = live.filter((l) => l.status === "playing");
   const waiting = live.filter((l) => l.status !== "playing");
-  const seated = live.reduce((n, l) => n + l.playerCount, 0);
+  const seated = live.reduce((n, l) => n + seatedCount(l, onlineUids), 0);
 
   const shown = subTab === "active" ? playing : subTab === "waiting" ? waiting : stale;
   const sorted = [...shown].sort(
@@ -222,7 +223,7 @@ export default function LivePanel({
                       {l.status}
                     </Pill>
                     {l.gameId && <Pill tone="info">{getGame(l.gameId)?.name ?? l.gameId}</Pill>}
-                    <Pill>{l.playerCount} seated</Pill>
+                    <Pill>{seatedCount(l, onlineUids)} online / {l.playerCount} seated</Pill>
                     {/* In the live tabs this is a countdown worth watching; in
                         the abandoned tab every row would carry a meaningless
                         five-figure one, so the age below says it instead. */}
