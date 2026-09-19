@@ -10,6 +10,7 @@ import { audioService } from '../services/audio';
 import ControlsTray from '@shared/controls/ControlsTray';
 import { isStaleChunkError, recoverFromStaleChunk } from '@shared/net/staleChunk';
 import { createLogger } from '@shared/log/logger';
+import { steadyInterval } from '@shared/net/steadyTimer';
 import { ChatLayer } from '@shared/chat/ChatLayer';
 import { useBubbleFeed } from '@shared/chat/useBubbleFeed';
 import { SpeechBubble } from '@shared/ui/SpeechBubble';
@@ -27,18 +28,11 @@ const PLAYER_HZ = 15;
 const ENEMY_HZ = 6;
 
 /**
- * Peer-to-peer is not guaranteed. Signalling can be blocked, and a symmetric
- * NAT or a corporate proxy will defeat STUN with no TURN server to fall back
- * on. When that happens the mesh simply never opens a channel, and the first
- * version of this screen had nothing else , so a guest sat in an empty ocean
- * with no other players, which is exactly what got reported.
- *
- * So there is a slow, billed path underneath: positions through Firestore for
- * any peer we cannot reach directly. 5Hz is deliberately stingy , it is enough
- * to see each other and be eaten, and it costs a fraction of what running the
- * whole game through Firestore would.
+ * Peer-to-peer is not guaranteed, even with TURN. For any pair the mesh cannot
+ * open, it relays everything through Realtime Database instead (see
+ * net/mesh.ts) , positions, the host's reef, bites and chat , so a room that
+ * falls back is still one ocean rather than each guest's own.
  */
-const FALLBACK_HZ = 5;
 /** No AI snapshot for this long means the host is unreachable , grow our own reef. */
 const HOST_TIMEOUT_MS = 4000;
 
@@ -100,7 +94,11 @@ export default function GameView({
   const [progress, setProgress] = useState(0);
   const [ready, setReady] = useState(false);
   const [peerCount, setPeerCount] = useState(0);
-  const [link, setLink] = useState<'direct' | 'relayed' | 'alone'>('alone');
+  /**
+   * The worst link to anybody: every peer direct, some through the relay, or
+   * somebody not reached yet. The last is the one worth the warning icon.
+   */
+  const [link, setLink] = useState<'direct' | 'relayed' | 'connecting' | 'alone'>('alone');
   const [scoreboard, setScoreboard] = useState<
     { id: string; name: string; size: number; score: number; bestSize: number; bestScore: number; local: boolean }[]
   >([]);
@@ -114,8 +112,6 @@ export default function GameView({
   const peerPositions = useRef(new Map<string, { x: number; y: number }>());
   /** When the host's AI snapshot last landed, so we can notice it stopping. */
   const lastHostSnapshot = useRef(0);
-  /** Firestore listeners for peers the mesh could not reach, keyed by uid. */
-  const fallbackReaders = useRef(new Map<string, () => void>());
   // Props the engine and mesh callbacks read, held in a ref so that a changing
   // roster or a host migration never tears down a match in progress.
   const live = useRef({ people, hostId, uid, isHost });
@@ -193,10 +189,12 @@ export default function GameView({
     const settle = setTimeout(resize, 120);
 
     let mesh: Mesh | null = null;
-    let playerTimer = 0;
-    let enemyTimer = 0;
-    let supervisorTimer = 0;
-    let fallbackTimer = 0;
+    // The network runs on steady timers: an ordinary interval in a background
+    // tab slows to once a second, which is a player freezing on everyone
+    // else's screen, and a host freezing the whole reef.
+    let stopPlayerTimer = () => {};
+    let stopEnemyTimer = () => {};
+    let stopSupervisor = () => {};
     /**
      * Set by the cleanup below. The whole networking half of this effect is
      * loaded asynchronously now (see the import comment in App.tsx , the
@@ -212,10 +210,7 @@ export default function GameView({
     // The `online && roomId && uid` check at the call site used to do that job
     // inline; splitting the body out into its own function loses the narrowing.
     const startNetworking = async (roomId: string, uid: string) => {
-      const [{ Mesh }, { db, doc, setDoc, onSnapshot }] = await Promise.all([
-        import('../net/mesh'),
-        import('../firebase'),
-      ]);
+      const { Mesh } = await import('../net/mesh');
       if (disposed) return;
 
       mesh = new Mesh(
@@ -265,90 +260,57 @@ export default function GameView({
         },
       );
       meshRef.current = mesh;
+      // Connect to everyone already in the room, now. This used to wait for
+      // the roster effect below, which only runs when the roster *changes* ,
+      // and a room whose players were all in before the match started never
+      // changed again, so nobody ever connected to anybody.
+      mesh.setPeers(live.current.people.map((p) => p.uid));
 
-      playerTimer = window.setInterval(() => {
+      stopPlayerTimer = steadyInterval(() => {
         const packet = localPackets.current.get(uid);
-        if (packet) mesh?.broadcast({ t: 'p', d: packet, n: Date.now() } satisfies NetMessage);
+        if (packet) mesh?.broadcast({ t: 'p', d: packet, n: Date.now() } satisfies NetMessage, 'p');
       }, 1000 / PLAYER_HZ);
 
-      enemyTimer = window.setInterval(() => {
+      stopEnemyTimer = steadyInterval(() => {
         const e = engineRef.current;
         if (!e || !live.current.isHost || !mesh) return;
         // Culled per recipient: a fish on the far side of the map is invisible
-        // to that player and correcting it costs bandwidth for nothing.
-        for (const peer of mesh.connectedPeers) {
+        // to that player and correcting it costs bandwidth for nothing. Every
+        // peer, not just the directly connected ones , the mesh relays the
+        // snapshot to anyone it has no channel to.
+        for (const peer of mesh.peerIds) {
           const at = peerPositions.current.get(peer) ?? null;
-          mesh.sendTo(peer, { t: 'e', d: e.enemyPacketsFor(at), b: e.bossPacket(), n: Date.now() } satisfies NetMessage);
+          mesh.sendTo(peer, { t: 'e', d: e.enemyPacketsFor(at), b: e.bossPacket(), n: Date.now() } satisfies NetMessage, 'e');
         }
         const kills = e.takePendingKills();
         if (kills.length) mesh.broadcast({ t: 'k', ids: kills } satisfies NetMessage);
       }, 1000 / ENEMY_HZ);
 
       // ── the safety net ───────────────────────────────────────────────────
-      // Once a second, work out who we actually reached and patch the gaps.
-      supervisorTimer = window.setInterval(() => {
+      stopSupervisor = steadyInterval(() => {
         const e = engineRef.current;
         if (!e || !mesh) return;
-        const direct = new Set(mesh.connectedPeers);
-        const others = live.current.people.filter((p) => p.uid !== uid);
-
-        // Open a Firestore listener for anyone the mesh could not reach, and
-        // close it the moment a direct channel comes up.
-        for (const person of others) {
-          const has = fallbackReaders.current.has(person.uid);
-          if (direct.has(person.uid)) {
-            if (has) {
-              fallbackReaders.current.get(person.uid)!();
-              fallbackReaders.current.delete(person.uid);
-            }
-            continue;
-          }
-          if (has) continue;
-          const stop = onSnapshot(
-            doc(db, 'lobbies', roomId, 'updates', person.uid),
-            (snap) => {
-              const data = snap.data() as { p?: PlayerPacket } | undefined;
-              if (!data?.p) return;
-              const who = live.current.people.find((x) => x.uid === person.uid);
-              engineRef.current?.setRemotePlayer(person.uid, data.p, who?.displayName ?? 'Player');
-              peerPositions.current.set(person.uid, { x: data.p[0], y: data.p[1] });
-            },
-            () => {
-              /* permission denied means the rules aren't deployed; nothing to retry */
-            },
-          );
-          fallbackReaders.current.set(person.uid, stop);
-        }
-        for (const [id, stop] of fallbackReaders.current) {
-          if (!others.some((p) => p.uid === id)) {
-            stop();
-            fallbackReaders.current.delete(id);
-          }
-        }
-
-        // A guest with no word from the host grows its own reef rather than
-        // swimming in a void. Not the same ocean as everyone else's, but a
-        // playable one , and it stands down the instant the host is heard from.
+        // A guest that hears nothing from the host, not even through the
+        // relay, grows its own reef rather than swimming in a void. It stands
+        // down the instant the host's reef arrives again.
         if (!live.current.isHost) {
           const stale = Date.now() - lastHostSnapshot.current > HOST_TIMEOUT_MS;
           if (stale && !e.runningAI) e.setSimulateAI(true);
         }
 
-        const nextLink = others.length === 0 ? 'alone' : fallbackReaders.current.size === 0 ? 'direct' : 'relayed';
-        // A room that has quietly fallen back to the slow Firestore path still
-        // plays, so nobody reports it -- but it is exactly the kind of thing
-        // worth finding in a log afterwards.
-        if (nextLink === 'relayed') log.warn('mesh:relayed', { unreachable: fallbackReaders.current.size });
+        const states = Object.values(mesh.linkStates());
+        const nextLink =
+          states.length === 0 ? 'alone'
+            : states.includes('connecting') ? 'connecting'
+              : states.includes('relayed') ? 'relayed'
+                : 'direct';
+        // A room on the relay still plays, so nobody reports it -- but it is
+        // exactly the kind of thing worth finding in a log afterwards.
+        if (nextLink !== 'direct' && nextLink !== 'alone') {
+          log.warn('mesh:' + nextLink, { links: mesh.linkStates() });
+        }
         setLink(nextLink);
       }, 1000);
-
-      // Slow position publish for peers we have no channel to.
-      fallbackTimer = window.setInterval(() => {
-        if (fallbackReaders.current.size === 0) return;
-        const packet = localPackets.current.get(uid);
-        if (!packet) return;
-        setDoc(doc(db, 'lobbies', roomId, 'updates', uid), { p: packet, n: Date.now() }).catch(() => {});
-      }, 1000 / FALLBACK_HZ);
     };
 
     if (online && roomId && uid) {
@@ -381,7 +343,7 @@ export default function GameView({
         scores: rows.map((row) => [row.id, row.score, Math.round(row.size)]),
         host: live.current.hostId,
         runningAI: engineRef.current?.runningAI ?? false,
-        transport: fallbackReaders.current.size > 0 ? 'relayed' : (meshRef.current?.connectedPeers.length ?? 0) > 0 ? 'direct' : 'alone',
+        transport: meshRef.current?.linkStates() ?? {},
         peers: meshRef.current?.connectedPeers.length ?? 0,
         local: localIds,
       });
@@ -390,13 +352,10 @@ export default function GameView({
     return () => {
       disposed = true;
       clearTimeout(settle);
-      window.clearInterval(playerTimer);
-      window.clearInterval(enemyTimer);
-      window.clearInterval(supervisorTimer);
-      window.clearInterval(fallbackTimer);
+      stopPlayerTimer();
+      stopEnemyTimer();
+      stopSupervisor();
       window.clearInterval(board);
-      fallbackReaders.current.forEach((stop) => stop());
-      fallbackReaders.current.clear();
       window.removeEventListener('resize', resize);
       window.removeEventListener('orientationchange', resize);
       mesh?.close();
@@ -533,13 +492,20 @@ export default function GameView({
                       ? 'Nobody else in the room yet'
                       : link === 'direct'
                         ? `Direct connection to ${peerCount} player(s)`
-                        : 'Direct connection failed. Using the slower fallback'
+                        : link === 'relayed'
+                          ? 'In sync through the relay. A little slower than direct'
+                          : 'Still connecting to someone'
                   }
                 >
-                  {link === 'relayed' ? (
-                    <WifiOff size={18} className="text-amber-600" />
+                  {link === 'connecting' ? (
+                    <WifiOff size={18} className="text-rose-600" />
                   ) : (
-                    <Wifi size={18} className={link === 'direct' ? 'text-emerald-600' : 'text-slate-400'} />
+                    <Wifi
+                      size={18}
+                      className={
+                        link === 'direct' ? 'text-emerald-600' : link === 'relayed' ? 'text-amber-600' : 'text-slate-400'
+                      }
+                    />
                   )}
                 </div>
               )

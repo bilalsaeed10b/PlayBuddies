@@ -11,6 +11,7 @@ import {
 
 import { audioService } from '../services/audio';
 import { QualityGovernor } from '../game/quality';
+import { steadyInterval } from '@shared/net/steadyTimer';
 
 /**
  * ONE PLACE TO TUNE THE GAME.
@@ -149,6 +150,29 @@ const CONTROL_SCHEMES = [
   { up: 'ArrowUp', down: 'ArrowDown', left: 'ArrowLeft', right: 'ArrowRight' },
   { up: 'KeyI', down: 'KeyK', left: 'KeyJ', right: 'KeyL' },
 ];
+type Scheme = (typeof CONTROL_SCHEMES)[number];
+
+/**
+ * A player alone at the keyboard steers with WASD *and* the arrows, at once.
+ *
+ * The layout setting exists to share one keyboard between two or three
+ * people; with one person it only ever took a key set away. Online is always
+ * one seat, which is why an online player on the arrows used to get nothing.
+ */
+const SOLO_SCHEMES: Scheme[] = [CONTROL_SCHEMES[0], CONTROL_SCHEMES[1]];
+
+/** Every movement key there is, to tell steering apart from any other key. */
+const MOVE_KEYS = new Set(CONTROL_SCHEMES.flatMap((s) => [s.up, s.down, s.left, s.right]));
+
+/**
+ * How the simulation keeps going while the tab is hidden and frames stop: a
+ * step every 50ms from a timer background tabs do not throttle (see
+ * steadyTimer.ts), taken only once the frame loop has visibly gone quiet.
+ */
+const BACKGROUND_TICK_MS = 50;
+const FRAME_LOOP_QUIET_MS = 120;
+/** Mouse steering eases off inside this many units of the pointer, so the fish settles on it. */
+const MOUSE_EASE_DISTANCE = 160;
 
 export interface EngineConfig {
   canvas: HTMLCanvasElement;
@@ -219,6 +243,11 @@ export class GameEngine {
 
   private keys = new Set<string>();
   private joystick: Vector2D = { x: 0, y: 0 };
+  /** The mouse pointer, in CSS pixels inside the canvas, while it is over the game. */
+  private mouse: Vector2D | null = null;
+  /** Mouse steering is live: the mouse has moved since the last movement key. */
+  private mouseSteering = false;
+  private stopBackground: (() => void) | null = null;
 
   private running = false;
   private raf = 0;
@@ -247,12 +276,45 @@ export class GameEngine {
 
   private onKeyDown = (e: KeyboardEvent) => {
     this.keys.add(e.code);
+    if (MOVE_KEYS.has(e.code)) this.mouseSteering = false;
     // Arrow keys scroll the page inside the platform's iframe otherwise.
     if (e.code.startsWith('Arrow') || e.code === 'Space') e.preventDefault();
     this.rejoinFromKey(e.code);
   };
   private onKeyUp = (e: KeyboardEvent) => this.keys.delete(e.code);
   private onBlur = () => this.keys.clear();
+
+  /**
+   * Window-level rather than on the canvas: the touch joystick lies over the
+   * whole canvas and would swallow every pointer event aimed at it.
+   */
+  private onPointerMove = (e: PointerEvent) => {
+    if (e.pointerType !== 'mouse') return;
+    const rect = this.config.canvas.getBoundingClientRect();
+    this.mouse = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    if (this.settings.mouseFollow) this.mouseSteering = true;
+  };
+  /** The pointer left the game frame: stop chasing the last place it was. */
+  private onPointerLeave = () => {
+    this.mouse = null;
+    this.mouseSteering = false;
+  };
+  /** A click brings a defeated fish back, for a player steering with the mouse. */
+  private onPointerDown = (e: PointerEvent) => {
+    if (e.pointerType === 'mouse' && this.settings.mouseFollow) this.rejoinLocal(this.config.localIds[0]);
+  };
+  /**
+   * Hidden means nobody is at the controls. Held keys never see their keyup
+   * once the tab is in the background, so they are dropped here, or a fish
+   * would swim on into the wall for as long as its player was away.
+   */
+  private onVisibility = () => {
+    if (!document.hidden) return;
+    this.keys.clear();
+    this.joystick = { x: 0, y: 0 };
+    this.mouse = null;
+    this.mouseSteering = false;
+  };
 
   constructor(private config: EngineConfig) {
     this.ctx = config.canvas.getContext('2d', { alpha: false })!;
@@ -291,12 +353,17 @@ export class GameEngine {
     window.addEventListener('keydown', this.onKeyDown);
     window.addEventListener('keyup', this.onKeyUp);
     window.addEventListener('blur', this.onBlur);
+    window.addEventListener('pointermove', this.onPointerMove);
+    window.addEventListener('pointerdown', this.onPointerDown);
+    document.documentElement.addEventListener('pointerleave', this.onPointerLeave);
+    document.addEventListener('visibilitychange', this.onVisibility);
     audioService.playAmbientRumble().then((r) => {
       this.ambient = r;
     });
     this.running = true;
     this.lastTime = performance.now();
     this.raf = requestAnimationFrame(this.loop);
+    this.stopBackground = steadyInterval(this.backgroundTick, BACKGROUND_TICK_MS);
   }
 
   stop() {
@@ -305,6 +372,12 @@ export class GameEngine {
     window.removeEventListener('keydown', this.onKeyDown);
     window.removeEventListener('keyup', this.onKeyUp);
     window.removeEventListener('blur', this.onBlur);
+    window.removeEventListener('pointermove', this.onPointerMove);
+    window.removeEventListener('pointerdown', this.onPointerDown);
+    document.documentElement.removeEventListener('pointerleave', this.onPointerLeave);
+    document.removeEventListener('visibilitychange', this.onVisibility);
+    this.stopBackground?.();
+    this.stopBackground = null;
     this.ambient?.stop();
     this.ambient = null;
   }
@@ -488,12 +561,19 @@ export class GameEngine {
   private rejoinFromKey(code: string) {
     const ids = this.config.localIds;
     for (let index = 0; index < ids.length; index++) {
-      const scheme = CONTROL_SCHEMES[(index + this.settings.controlScheme) % CONTROL_SCHEMES.length];
-      if (code === scheme.up || code === scheme.down || code === scheme.left || code === scheme.right) {
-        this.rejoinLocal(ids[index]);
-        return;
+      for (const scheme of this.schemesFor(index)) {
+        if (code === scheme.up || code === scheme.down || code === scheme.left || code === scheme.right) {
+          this.rejoinLocal(ids[index]);
+          return;
+        }
       }
     }
+  }
+
+  /** The key sets a seat steers with: both main ones alone, its own share on a couch. */
+  private schemesFor(index: number): Scheme[] {
+    if (this.config.localIds.length === 1) return SOLO_SCHEMES;
+    return [CONTROL_SCHEMES[(index + this.settings.controlScheme) % CONTROL_SCHEMES.length]];
   }
 
   private rejoinLocal(id: string | undefined) {
@@ -623,6 +703,20 @@ export class GameEngine {
     };
   }
 
+  /** The inverse of toClient, from CSS pixels inside the canvas, against the camera as it is now. */
+  private screenToWorld(px: number, py: number): Vector2D {
+    const cw = this.ctx.canvas.width;
+    const ch = this.ctx.canvas.height;
+    const scale = Math.min(cw / this.effViewW, ch / this.effViewH);
+    const offX = (cw - this.effViewW * scale) / 2;
+    const offY = (ch - this.effViewH * scale) / 2;
+    const dpr = cw / Math.max(1, this.config.canvas.clientWidth);
+    return {
+      x: (px * dpr - offX) / scale - this.effViewW / 2 + this.cameraX,
+      y: (py * dpr - offY) / scale - this.effViewH / 2 + this.cameraY,
+    };
+  }
+
   private viewRadius() {
     return Math.hypot(this.effViewW, this.effViewH) / 2;
   }
@@ -651,6 +745,31 @@ export class GameEngine {
     this.draw();
 
     this.raf = requestAnimationFrame(this.loop);
+  };
+
+  /**
+   * The simulation without the drawing, for while the tab is hidden.
+   *
+   * The frame loop stops dead in a background tab, and everything that made
+   * this a shared ocean stopped with it: the host's reef froze for the whole
+   * room, and a guest's fish stopped publishing and stopped checking whether
+   * anything had eaten it , so it could still bite a smaller fish that swam
+   * in, but nothing could ever bite it back. Stepping here keeps all of that
+   * running. It does nothing while frames are arriving on their own.
+   */
+  private backgroundTick = () => {
+    if (!this.running) return;
+    const now = performance.now();
+    if (now - this.lastTime < FRAME_LOOP_QUIET_MS) return;
+    // Capped, so a tab the browser froze outright for minutes does not come
+    // back and grind through all of them at once.
+    let left = Math.min(0.5, (now - this.lastTime) / 1000);
+    this.lastTime = now;
+    while (left > 0) {
+      const step = Math.min(0.05, left);
+      this.update(step);
+      left -= step;
+    }
   };
 
   private update(dt: number) {
@@ -683,20 +802,38 @@ export class GameEngine {
       }
 
       const index = ids.indexOf(id);
-      const scheme = CONTROL_SCHEMES[(index + this.settings.controlScheme) % CONTROL_SCHEMES.length];
-
       let ix = 0;
       let iy = 0;
-      if (this.keys.has(scheme.left)) ix -= 1;
-      if (this.keys.has(scheme.right)) ix += 1;
-      if (this.keys.has(scheme.up)) iy -= 1;
-      if (this.keys.has(scheme.down)) iy += 1;
+      for (const scheme of this.schemesFor(index)) {
+        if (this.keys.has(scheme.left)) ix -= 1;
+        if (this.keys.has(scheme.right)) ix += 1;
+        if (this.keys.has(scheme.up)) iy -= 1;
+        if (this.keys.has(scheme.down)) iy += 1;
+      }
+      // W and ArrowUp held together are one "up", not a double-speed one.
+      ix = Math.max(-1, Math.min(1, ix));
+      iy = Math.max(-1, Math.min(1, iy));
 
       // The joystick drives player one; it is analogue, so it wins outright
       // rather than being added to a digital key press.
       if (index === 0 && (this.joystick.x !== 0 || this.joystick.y !== 0)) {
         ix = this.joystick.x;
         iy = this.joystick.y;
+      } else if (index === 0 && ix === 0 && iy === 0 && this.mouseSteering && this.mouse && this.settings.mouseFollow) {
+        // Toward the pointer, full speed from a distance and easing off as it
+        // arrives, so it settles under the cursor instead of orbiting it.
+        // Re-projected every frame: the camera follows the fish, so the water
+        // under a cursor that has not moved is still moving.
+        const target = this.screenToWorld(this.mouse.x, this.mouse.y);
+        const dx = target.x - fish.x;
+        const dy = target.y - fish.y;
+        const dist = Math.hypot(dx, dy);
+        const settle = bodyRadius(fish.size) * 0.5;
+        if (dist > settle) {
+          const push = Math.min(1, (dist - settle) / MOUSE_EASE_DISTANCE);
+          ix = (dx / dist) * push;
+          iy = (dy / dist) * push;
+        }
       }
 
       const maxSpeed = (BALANCE.PLAYER_BASE_SPEED + fish.size * BALANCE.PLAYER_SPEED_PER_SIZE) * fish.pace;

@@ -7,6 +7,8 @@ import {
 import {
   getDatabase, ref as dbRef, set as dbSet, push as dbPush,
   onValue as dbOnValue, onDisconnect as dbOnDisconnect, remove as dbRemove,
+  onChildAdded as dbOnChildAdded, onChildChanged as dbOnChildChanged,
+  query as dbQuery, orderByKey as dbOrderByKey, startAfter as dbStartAfter,
 } from 'firebase/database';
 
 // Same project as the platform, so the lobby this game is launched from is the
@@ -38,4 +40,5 @@ export {
   doc, getDoc, setDoc, onSnapshot, updateDoc, serverTimestamp,
   addDoc, collection, query, orderBy, limit, runTransaction,
   dbRef, dbSet, dbPush, dbOnValue, dbOnDisconnect, dbRemove,
+  dbOnChildAdded, dbOnChildChanged, dbQuery, dbOrderByKey, dbStartAfter,
 };

@@ -45,7 +45,7 @@ function readHandoff(): Handoff {
   return handoff;
 }
 
-const DEFAULT_SETTINGS: GameSettings = { bgmVolume: 0.4, sfxVolume: 0.7, controlScheme: 0, lowPower: false };
+const DEFAULT_SETTINGS: GameSettings = { bgmVolume: 0.4, sfxVolume: 0.7, controlScheme: 0, lowPower: false, mouseFollow: true };
 
 /** Everything before the reef is one of the shared menu stages; see `stage` in App. */
 type View = 'shell' | 'game';
@@ -478,8 +478,8 @@ export default function App() {
         }
         footer={
           <p className="max-w-md text-center text-[11px] leading-relaxed text-slate-600 short:hidden">
-            Steer with {KEY_LAYOUTS[settings.controlScheme] ?? KEY_LAYOUTS[0]} (Game Settings changes it), or drag
-            anywhere on a touchscreen.
+            Steer with WASD or the arrow keys, point with the mouse, or drag anywhere on a touchscreen. Sharing one
+            keyboard? Game Settings picks who gets which keys.
             {!online && ' Playing online? Start a lobby on PlayBuddies and pick this game.'}
           </p>
         }
@@ -680,6 +680,21 @@ function SettingsPanel({
           />
         </label>
 
+        <label className="flex items-center justify-between gap-3">
+          <span className="text-sm font-bold">
+            Follow the mouse
+            <span className="block text-[11px] font-normal text-slate-500">
+              Your fish swims toward the pointer. Any movement key takes over until the mouse moves again.
+            </span>
+          </span>
+          <input
+            type="checkbox"
+            checked={settings.mouseFollow}
+            onChange={(e) => onChange({ ...settings, mouseFollow: e.target.checked })}
+            className="h-6 w-6 shrink-0 accent-emerald-500"
+          />
+        </label>
+
         <div className="space-y-2">
           <span className="text-sm font-bold">Keyboard layout</span>
           <div className="flex gap-1 rounded-xl bg-black/5 p-1">
@@ -696,8 +711,8 @@ function SettingsPanel({
             ))}
           </div>
           <p className="text-[11px] text-slate-500">
-            Player one uses this set; extra players on the same keyboard take the next ones. On a
-            touchscreen, drag anywhere to steer.
+            For sharing one keyboard: player one uses this set, extra players take the next ones. Playing
+            alone or online, WASD and the arrows both work. On a touchscreen, drag anywhere to steer.
           </p>
         </div>
       </div>

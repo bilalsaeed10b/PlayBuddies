@@ -62,6 +62,14 @@ export interface GameSettings {
   lowPower: boolean;
   /** 0 = WASD first, 1 = arrows first, 2 = IJKL first. Only matters for local co-op. */
   controlScheme: number;
+  /**
+   * Player one swims toward the mouse pointer.
+   *
+   * Takes over only once the mouse actually moves, and hands back the moment a
+   * movement key is pressed, so a keyboard player whose pointer happens to be
+   * resting over the reef is never dragged toward it.
+   */
+  mouseFollow: boolean;
 }
 
 /** What a player broadcasts about itself, as a compact array. */
